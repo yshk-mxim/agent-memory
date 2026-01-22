@@ -66,13 +66,13 @@ class APIClients:
                 )
         return self._deepseek
 
-    def get_gemma(self, model_path: str = None, n_ctx: int = 32768):
+    def get_gemma(self, model_path: str = None, n_ctx: int = 8192):
         """
         Get Gemma 3 model instance (lazy initialization).
 
         Args:
             model_path: Path to GGUF model file
-            n_ctx: Context window size (default: 32k, max: 128k)
+            n_ctx: Context window size (default: 8k, max: 128k but may require more VRAM)
 
         Returns:
             Llama instance (llama-cpp-python works with Gemma 3)
@@ -89,7 +89,7 @@ class APIClients:
             if model_path is None:
                 # Default model path for Gemma 3 12B Q4_K_M
                 model_path = str(Path(__file__).parent.parent / "models" /
-                                "gemma-3-12b-instruct-Q4_K_M.gguf")
+                                "gemma-3-12b-it-Q4_K_M.gguf")
 
             if not Path(model_path).exists():
                 raise FileNotFoundError(
