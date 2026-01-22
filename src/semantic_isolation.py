@@ -39,7 +39,9 @@ class SemanticIsolationTester:
         self,
         model_name: str = "google/gemma-2-12b-it",
         load_in_4bit: bool = True,
-        device_map: str = "auto"
+        device_map: str = "auto",
+        random_seed: int = 42,
+        use_neutral_prompts: bool = True
     ):
         """
         Initialize with Gemma 2 12B.
@@ -50,8 +52,17 @@ class SemanticIsolationTester:
             model_name: HuggingFace model identifier
             load_in_4bit: Use 4-bit quantization to fit in 24GB VRAM
             device_map: Device placement strategy
+            random_seed: Random seed for reproducibility
+            use_neutral_prompts: If True, use neutral prompts that don't leak semantic info
         """
         print(f"Loading {model_name} with 4-bit quantization...")
+
+        # Set random seed for reproducibility
+        self.random_seed = random_seed
+        self.use_neutral_prompts = use_neutral_prompts
+        torch.manual_seed(random_seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(random_seed)
 
         # Configure 4-bit quantization
         quantization_config = BitsAndBytesConfig(
@@ -81,14 +92,83 @@ class SemanticIsolationTester:
         print(f"✓ Model loaded successfully")
         print(f"  Device: {self.model.device}")
         print(f"  Memory footprint: ~7GB (4-bit) + KV cache overhead")
+        print(f"  Random seed: {random_seed}")
+        print(f"  Neutral prompts: {use_neutral_prompts}")
+
+    def validate_example(self, example: Dict[str, Any]):
+        """
+        Validate example has required structure for semantic isolation.
+
+        Raises:
+            AssertionError if example is invalid
+        """
+        assert 'turns' in example, "Example missing 'turns' field"
+        assert len(example['turns']) > 0, "Example has no turns"
+
+        # Check all turns have cluster labels
+        for i, turn in enumerate(example['turns']):
+            assert 'cluster' in turn, f"Turn {turn.get('turn_id', i)} missing 'cluster' field"
+
+        # Check cluster distribution
+        clusters = {t['cluster'] for t in example['turns']}
+        assert clusters == {1, 2, 3}, f"Expected clusters {{1,2,3}}, got {clusters}"
+
+        c1_count = sum(1 for t in example['turns'] if t['cluster'] == 1)
+        c2_count = sum(1 for t in example['turns'] if t['cluster'] == 2)
+        c3_count = sum(1 for t in example['turns'] if t['cluster'] == 3)
+
+        assert c1_count >= 3, f"Cluster 1 has only {c1_count} turns (need ≥3)"
+        assert c2_count >= 3, f"Cluster 2 has only {c2_count} turns (need ≥3)"
+        assert c3_count >= 3, f"Cluster 3 has only {c3_count} turns (need ≥3)"
+
+    def get_generation_prompts(self, neutral: bool = None) -> Dict[str, str]:
+        """
+        Get generation prompts for outputs.
+
+        Args:
+            neutral: Override use_neutral_prompts setting
+
+        Returns:
+            Dict with prompts for technical, business, synthesis
+        """
+        if neutral is None:
+            neutral = self.use_neutral_prompts
+
+        if neutral:
+            # Neutral prompts that don't leak semantic information
+            return {
+                'technical': "Generate output A based on the provided context:",
+                'business': "Generate output B based on the provided context:",
+                'synthesis': "Generate output C that integrates outputs A and B:"
+            }
+        else:
+            # Targeted prompts (may help model but confound isolation test)
+            return {
+                'technical': "Based on the technical performance analysis, provide your recommendations:",
+                'business': "Based on the business product strategy, provide your recommendations:",
+                'synthesis': "Provide an executive strategic roadmap combining technical and business priorities:"
+            }
 
     def get_cache_size(self, past_key_values: Optional[Tuple]) -> int:
-        """Get size of KV cache in tokens."""
+        """Get size of KV cache in tokens with validation."""
         if past_key_values is None:
             return 0
-        # past_key_values structure: tuple of (num_layers) tuples of (key, value) tensors
-        # key/value shape: [batch_size, num_heads, seq_len, head_dim]
-        return past_key_values[0][0].shape[2]  # seq_len from first layer's key tensor
+
+        try:
+            # past_key_values structure: tuple of (num_layers) tuples of (key, value) tensors
+            # key/value shape: [batch_size, num_heads, seq_len, head_dim]
+            key_tensor = past_key_values[0][0]
+
+            assert key_tensor.dim() == 4, f"Expected 4D tensor, got {key_tensor.dim()}D"
+            batch_size, num_heads, seq_len, head_dim = key_tensor.shape
+
+            assert batch_size == 1, f"Batch size {batch_size} != 1 (not supported)"
+
+            return seq_len
+
+        except Exception as e:
+            print(f"Warning: Could not get cache size: {e}")
+            return 0
 
     def generate_from_cache(
         self,
@@ -149,13 +229,21 @@ class SemanticIsolationTester:
         import time
         start_time = time.time()
 
+        # Validate example structure
+        self.validate_example(example)
+
+        # Get generation prompts (neutral or targeted)
+        prompts = self.get_generation_prompts()
+
         past_kv = None
         total_tokens = 0
+        skipped_turns = []
 
         # Process all 15 turns in order, accumulating cache
         for turn in example['turns']:
             turn_text = turn.get('instruction', '') or turn.get('content', '') or turn.get('query', '')
             if not turn_text:
+                skipped_turns.append(turn.get('turn_id', '?'))
                 continue
 
             inputs = self.tokenizer(turn_text, return_tensors="pt").to(self.model.device)
@@ -170,24 +258,27 @@ class SemanticIsolationTester:
 
             total_tokens += inputs.input_ids.shape[1]
 
+        if skipped_turns:
+            print(f"  Warning: Skipped {len(skipped_turns)} empty turns: {skipped_turns}")
+
         cache_size = self.get_cache_size(past_kv)
 
         # Generate all three outputs from the SAME mixed cache
         output_technical = self.generate_from_cache(
             past_kv,
-            "Based on the technical performance analysis, provide your recommendations:",
+            prompts['technical'],
             max_new_tokens=300
         )
 
         output_business = self.generate_from_cache(
             past_kv,
-            "Based on the business product strategy, provide your recommendations:",
+            prompts['business'],
             max_new_tokens=300
         )
 
         output_synthesis = self.generate_from_cache(
             past_kv,
-            "Provide an executive strategic roadmap combining technical and business priorities:",
+            prompts['synthesis'],
             max_new_tokens=400
         )
 
@@ -366,10 +457,19 @@ Generate three distinct, focused outputs.
 
         This is TRUE architectural isolation - different caches prevent cross-attention.
 
+        NOTE: Cluster 3 uses "message passing" - sees OUTPUTS (not caches) from c1+c2.
+        This is intentional multi-agent pattern, but creates indirect leakage.
+
         Expected: Best performance - no interference, high quality on each task.
         """
         import time
         start_time = time.time()
+
+        # Validate example structure
+        self.validate_example(example)
+
+        # Get generation prompts
+        prompts = self.get_generation_prompts()
 
         cache_sizes = {}
         outputs = {}
@@ -400,7 +500,7 @@ Generate three distinct, focused outputs.
         # Generate technical output from isolated cache
         outputs['technical'] = self.generate_from_cache(
             past_kv_c1,
-            "Provide your technical performance recommendations:",
+            prompts['technical'],
             max_new_tokens=300
         )
 
@@ -424,20 +524,21 @@ Generate three distinct, focused outputs.
         # Generate business output from isolated cache
         outputs['business'] = self.generate_from_cache(
             past_kv_c2,
-            "Provide your business strategy recommendations:",
+            prompts['business'],
             max_new_tokens=300
         )
 
         # ===== CLUSTER 3: Synthesis (FRESH CACHE + MESSAGE PASSING) =====
         # Key: Cluster 3 sees OUTPUTS (not caches) from clusters 1 & 2
+        # This creates "message passing" - intentional for multi-agent simulation
         synthesis_context = f"""
-Technical Analysis Summary:
+Output A:
 {outputs['technical']}
 
-Business Strategy Summary:
+Output B:
 {outputs['business']}
 
-Now consider the executive synthesis instructions:
+Now consider the integration instructions:
 """
 
         past_kv_c3 = None  # FRESH cache
@@ -468,7 +569,7 @@ Now consider the executive synthesis instructions:
         # Generate synthesis from cluster 3 cache
         outputs['synthesis'] = self.generate_from_cache(
             past_kv_c3,
-            "Provide the executive strategic roadmap:",
+            prompts['synthesis'],
             max_new_tokens=400
         )
 
@@ -484,7 +585,7 @@ Now consider the executive synthesis instructions:
 
     def test_all_conditions(self, example: Dict[str, Any]) -> Dict[str, IsolationResult]:
         """
-        Run all 4 conditions on one example.
+        Run all 4 conditions on one example with memory cleanup.
 
         Args:
             example: 3-cluster conversation example
@@ -492,6 +593,8 @@ Now consider the executive synthesis instructions:
         Returns:
             Dict mapping condition name to IsolationResult
         """
+        import gc
+
         print(f"\nTesting example: {example['id']}")
         print("=" * 60)
 
@@ -503,11 +606,20 @@ Now consider the executive synthesis instructions:
         print(f"  Cache size: {results['sequential'].cache_sizes}")
         print(f"  Time: {results['sequential'].generation_time:.2f}s")
 
+        # Free GPU memory after each condition
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        gc.collect()
+
         # Condition 2: Prompted
         print("\n[2/4] Running Prompted (soft isolation)...")
         results['prompted'] = self.condition_2_prompted(example)
         print(f"  Cache size: {results['prompted'].cache_sizes}")
         print(f"  Time: {results['prompted'].generation_time:.2f}s")
+
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        gc.collect()
 
         # Condition 3: Turn-Based
         print("\n[3/4] Running Turn-Based (naive isolation)...")
@@ -515,14 +627,28 @@ Now consider the executive synthesis instructions:
         print(f"  Cache size: {results['turn_based'].cache_sizes}")
         print(f"  Time: {results['turn_based'].generation_time:.2f}s")
 
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        gc.collect()
+
         # Condition 4: Semantic
         print("\n[4/4] Running Semantic (RDIC - our method)...")
         results['semantic'] = self.condition_4_semantic(example)
         print(f"  Cache sizes: {results['semantic'].cache_sizes}")
         print(f"  Time: {results['semantic'].generation_time:.2f}s")
 
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        gc.collect()
+
         print("\n" + "=" * 60)
         print("✓ All conditions complete")
+
+        # Report memory usage
+        if torch.cuda.is_available():
+            mem_allocated = torch.cuda.memory_allocated() / 1e9
+            mem_reserved = torch.cuda.memory_reserved() / 1e9
+            print(f"GPU Memory: {mem_allocated:.2f}GB allocated, {mem_reserved:.2f}GB reserved")
 
         return results
 
