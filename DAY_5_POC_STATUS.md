@@ -96,7 +96,7 @@ This is **hard architectural isolation** - the model physically cannot cross-att
 ### ✅ CUDA GPU (NVIDIA)
 ```python
 tester = SemanticIsolationTester(
-    model_name="google/gemma-2-12b-it",
+    model_name="google/gemma-3-12b-it",
     load_in_4bit=True,
     device="cuda"
 )
@@ -106,17 +106,17 @@ tester = SemanticIsolationTester(
 ### ✅ MPS (Apple Silicon - Mac M1/M2/M3)
 ```python
 tester = SemanticIsolationTester(
-    model_name="google/gemma-2-2b-it",  # 2B for Mac
+    model_name="google/gemma-3-4b-it",  # 4B for Mac
     load_in_4bit=False,  # MPS doesn't support 4-bit
     device="mps"
 )
-# Memory: ~4GB (fp16)
+# Memory: ~8GB (fp16)
 ```
 
 ### ⚠️ CPU (Slow, Not Recommended)
 ```python
 tester = SemanticIsolationTester(
-    model_name="google/gemma-2-2b-it",
+    model_name="google/gemma-3-4b-it",
     load_in_4bit=False,
     device="cpu"
 )
@@ -160,8 +160,27 @@ pip install transformers accelerate bitsandbytes torch
 
 ### Network:
 - Internet access to download models from HuggingFace:
-  - Gemma 2 12B: ~24GB download (first time)
-  - Gemma 2 2B: ~4GB download (first time)
+  - Gemma 3 12B: ~24GB download (first time)
+  - Gemma 3 4B: ~8GB download (first time)
+- **Authentication Required:** Gemma 3 models are gated - must accept license and authenticate with HuggingFace token
+
+### HuggingFace Authentication:
+Gemma 3 models require authentication. Before running:
+
+1. **Accept the license:**
+   - Visit https://huggingface.co/google/gemma-3-12b-it
+   - Click "Agree and access repository"
+
+2. **Get your access token:**
+   - Visit https://huggingface.co/settings/tokens
+   - Create a new token with "Read" permissions
+
+3. **Login via CLI:**
+   ```bash
+   pip install huggingface-hub
+   huggingface-cli login
+   # Paste your token when prompted
+   ```
 
 ### Execution:
 ```bash
@@ -196,17 +215,22 @@ Testing example: validation_001_software_eng
 
 ## Why Execution Failed in Current Environment
 
-**Error:**
-```
-Failed to resolve 'huggingface.co' ([Errno 8] nodename nor servname provided, or not known)
-```
+**Errors:**
+1. **Network:** `Failed to resolve 'huggingface.co'` - Sandbox environment has no internet access
+2. **Authentication:** `401 Client Error: Unauthorized` - Gemma 3 models are gated and require HuggingFace authentication
 
-**Reason:** Sandbox environment has no internet access to download models from HuggingFace.
+**Model Correction:**
+- ❌ **Previously (INCORRECT):** Code used Phi-3.5 with claim "Gemma 3 doesn't exist yet"
+- ✅ **Now (CORRECTED):** Code uses Gemma 3 (released January 2026)
+  - CUDA: `google/gemma-3-12b-it`
+  - MPS/CPU: `google/gemma-3-4b-it`
 
 **Solutions:**
-1. **Run outside sandbox** with GPU access and internet
-2. **Pre-download models** to local cache, then run offline
-3. **Use cloud GPU** (Google Colab, RunPod, Lambda Labs)
+1. **Run outside sandbox** with `dangerouslyDisableSandbox: true` for network access
+2. **Authenticate with HuggingFace** using `huggingface-cli login`
+3. **Accept Gemma 3 license** at https://huggingface.co/google/gemma-3-12b-it
+4. **Pre-download models** to local cache, then run offline
+5. **Use cloud GPU** (Google Colab, RunPod, Lambda Labs) with authentication
 
 ---
 

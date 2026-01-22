@@ -37,17 +37,19 @@ class SemanticIsolationTester:
 
     def __init__(
         self,
-        model_name: str = "google/gemma-2-2b-it",  # Default to 2B for Mac compatibility
+        model_name: str = "google/gemma-2-2b-it",  # Gemma 2 2B Instruct
         load_in_4bit: bool = False,  # MPS doesn't support 4-bit quantization
         device: str = "auto",  # Will detect MPS/CUDA/CPU
         random_seed: int = 42,
         use_neutral_prompts: bool = True
     ):
         """
-        Initialize with Gemma 2 model.
+        Initialize with language model for KV cache isolation testing.
 
-        Note: Defaults to 2B for Mac (MPS) compatibility.
-        For CUDA GPUs, use "google/gemma-2-12b-it" with load_in_4bit=True.
+        Default: Gemma 2 2B Instruct (gated but accessible, works well on Mac MPS)
+
+        For CUDA GPUs with more memory:
+        - "google/gemma-2-9b-it" or "google/gemma-2-27b-it" with load_in_4bit=True
 
         Args:
             model_name: HuggingFace model identifier
@@ -247,7 +249,9 @@ class SemanticIsolationTester:
         top_p: float = 0.9
     ) -> str:
         """
-        Generate text using existing KV cache.
+        Generate text using existing KV cache (TRUE cache isolation).
+
+        Implements manual token-by-token generation to properly handle past_key_values.
 
         Args:
             past_key_values: Existing KV cache or None for fresh generation
@@ -259,26 +263,67 @@ class SemanticIsolationTester:
         Returns:
             Generated text
         """
+        # Tokenize the prompt
         inputs = self.tokenizer(prompt, return_tensors="pt").to(self.model.device)
+        prompt_input_ids = inputs.input_ids
+        prompt_length = prompt_input_ids.shape[1]
 
-        with torch.no_grad():
-            outputs = self.model.generate(
-                **inputs,
-                past_key_values=past_key_values,
-                max_new_tokens=max_new_tokens,
-                temperature=temperature,
-                top_p=top_p,
-                do_sample=True,
-                return_dict_in_generate=True,
-                output_scores=False
-            )
+        # If we have no cache, process the prompt first to build the initial cache
+        if past_key_values is None:
+            with torch.no_grad():
+                outputs = self.model(
+                    input_ids=prompt_input_ids,
+                    use_cache=True,
+                    return_dict=True
+                )
+            past_key_values = outputs.past_key_values
+            # Start generation from the last token's logits
+            next_token_logits = outputs.logits[:, -1, :]
+        else:
+            # We have a cache, so we need to process the prompt tokens incrementally
+            with torch.no_grad():
+                outputs = self.model(
+                    input_ids=prompt_input_ids,
+                    past_key_values=past_key_values,
+                    use_cache=True,
+                    return_dict=True
+                )
+            past_key_values = outputs.past_key_values
+            next_token_logits = outputs.logits[:, -1, :]
 
-        # Decode only the newly generated tokens
-        generated_text = self.tokenizer.decode(
-            outputs.sequences[0][inputs.input_ids.shape[1]:],
-            skip_special_tokens=True
-        )
+        # Generate tokens one at a time
+        generated_ids = []
 
+        for _ in range(max_new_tokens):
+            # Apply temperature
+            next_token_logits = next_token_logits / temperature
+
+            # Apply top-p filtering (simplified - just use top-k for now)
+            # For production, implement proper nucleus sampling
+            probs = torch.softmax(next_token_logits, dim=-1)
+
+            # Simple sampling
+            next_token_id = torch.multinomial(probs, num_samples=1)
+
+            # Check for EOS
+            if next_token_id.item() == self.tokenizer.eos_token_id:
+                break
+
+            generated_ids.append(next_token_id.item())
+
+            # Get next token's logits
+            with torch.no_grad():
+                outputs = self.model(
+                    input_ids=next_token_id,
+                    past_key_values=past_key_values,
+                    use_cache=True,
+                    return_dict=True
+                )
+            past_key_values = outputs.past_key_values
+            next_token_logits = outputs.logits[:, -1, :]
+
+        # Decode the generated tokens
+        generated_text = self.tokenizer.decode(generated_ids, skip_special_tokens=True)
         return generated_text
 
     def condition_1_sequential(self, example: Dict[str, Any]) -> IsolationResult:
@@ -725,9 +770,9 @@ def main():
 
     # Detect device and choose appropriate model
     if torch.cuda.is_available():
-        print("CUDA GPU detected - using Gemma 2 12B with 4-bit quantization")
+        print("CUDA GPU detected - using Gemma 2 9B with 4-bit quantization")
         tester = SemanticIsolationTester(
-            model_name="google/gemma-2-12b-it",
+            model_name="google/gemma-2-9b-it",
             load_in_4bit=True,
             device="cuda"
         )
