@@ -41,15 +41,24 @@ env.json
 
 # Data and large files
 data/batch_*.json
-data/*.csv
-data/*.xlsx
 data/*.pkl
 data/*.pickle
 models/
-results/
-experiments/
-*.csv
-*.xlsx
+
+# Results - keep scripts and small configs, ignore large outputs
+results/**/*.json
+results/**/*.csv
+results/**/*.png
+results/**/*.pdf
+results/**/*.pkl
+results/**/*.npy
+
+# Experiments - keep scripts, ignore outputs
+experiments/**/*.json
+experiments/**/*.csv
+experiments/**/*.pkl
+
+# General large files
 *.pkl
 *.pickle
 *.h5

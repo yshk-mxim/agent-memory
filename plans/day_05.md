@@ -14,7 +14,7 @@
 | Task | Time | Details |
 |------|------|---------|
 | Implement context compression | 1h | Random truncation, simulating KV eviction |
-| Run full context baseline (50 examples) | 2h | ~2.5 min/example with Llama |
+| Run full context baseline (50 examples) | 2h | ~2.5 min/example with Gemma 3 |
 | Run 50% compressed (50 examples) | 2h | Same examples, compressed context |
 | Evaluate all outputs | 1h | Both evaluators |
 | Analyze results by conflict type | 1h | Breakdown of degradation |

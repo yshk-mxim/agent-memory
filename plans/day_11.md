@@ -18,7 +18,7 @@
 | Implement turn-based baseline | 1h | FlowKV-style isolation |
 | Implement semantic isolation | 2h | Route by R1 clusters |
 | Unit tests for router | 1h | Verify routing accuracy |
-| Integration test | 1h | End-to-end with Llama |
+| Integration test | 1h | End-to-end with Gemma 3 |
 
 **Architecture:**
 ```python
