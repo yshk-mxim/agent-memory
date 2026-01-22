@@ -31,17 +31,24 @@ for idx, example in enumerate(review_examples, 1):
             print(f"  QUERY: {turn['query']}")
         if 'expected_conflict' in turn:
             print(f"  EXPECTED CONFLICT: {turn['expected_conflict']}")
+        if 'expected_behavior' in turn:
+            print(f"  WHAT THIS TESTS: {turn['expected_behavior']}")
+        if 'rdic_value' in turn:
+            print(f"  RDIC VALUE: {turn['rdic_value']}")
         print()
 
     print(f"Ground Truth Clusters: {example['ground_truth_clusters']}")
+    print(f"Purpose: {example.get('purpose', 'N/A')}")
     print()
-    print("Review Checklist:")
-    print("  [ ] 1. Genuine Conflict - Are instructions truly incompatible?")
-    print("  [ ] 2. Realistic Scenario - Could this happen in real life?")
-    print("  [ ] 3. Unavoidable Conflict - Does final query require BOTH constraints?")
-    print("  [ ] 4. Clear Ground Truth - Are semantic clusters well-defined?")
+    print("Review Checklist (Context Isolation Testing):")
+    print("  [ ] 1. Genuine Conflict - Do the two instructions create incompatible semantic contexts?")
+    print("  [ ] 2. Realistic Scenario - Could this context-switching happen in real conversations?")
+    print("  [ ] 3. Tests Context Isolation - Does Turn 3 require maintaining BOTH contexts separately?")
+    print("  [ ] 4. Clear Ground Truth - Are the semantic clusters well-separated?")
+    print("  [ ] 5. RDIC Value - Would isolating KV contexts prevent instruction degradation here?")
     print()
-    print("PASS/FAIL: _______  Notes: _________________________________")
+    print("OVERALL: PASS / FAIL")
+    print("Notes: _________________________________________________________________")
     print()
 
 print("\n" + "="*80)

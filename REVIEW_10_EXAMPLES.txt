@@ -1,0 +1,342 @@
+================================================================================
+DAY 2 MANUAL REVIEW - 10 Examples to Check
+================================================================================
+
+
+================================================================================
+EXAMPLE 1: conflict_001
+================================================================================
+Conflict Type: tone_professional_vs_friendly
+Domain: legal_writing
+
+Turn 1 (user):
+  INSTRUCTION: Use strictly professional legal language with formal terminology, avoiding any conversational elements or casual expressions
+  CONTENT: I need to draft a cease and desist letter to a competitor who's been using our trademarked brand name
+
+Turn 2 (user):
+  INSTRUCTION: Actually, keep the tone warm and friendly throughout, like you're talking to a neighbor you want to maintain good relations with
+  CONTENT: This is for a small local business owner who we might work with in the future, so we don't want to burn bridges
+
+Turn 3 (user):
+  QUERY: Now provide two versions: first using the professional approach from earlier, then using the casual approach. Show me both.
+  WHAT THIS TESTS: System should maintain both Use strictly professional legal language with formal terminology context and Actually context separately. Under KV cache compression, the earlier formal instruction often degrades when casual instruction appears, causing the system to forget the formal constraint. RDIC should isolate these semantic contexts to prevent degradation.
+  RDIC VALUE: Maintains isolated KV contexts for each instruction cluster, preventing compression-based degradation when conflicting instructions appear across turns
+
+Ground Truth Clusters: ['professional_legal_authoritative', 'friendly_approachable_conversational']
+Purpose: context_isolation_test
+
+Review Checklist (Context Isolation Testing):
+  [ ] 1. Genuine Conflict - Do the two instructions create incompatible semantic contexts?
+  [ ] 2. Realistic Scenario - Could this context-switching happen in real conversations?
+  [ ] 3. Tests Context Isolation - Does Turn 3 require maintaining BOTH contexts separately?
+  [ ] 4. Clear Ground Truth - Are the semantic clusters well-separated?
+  [ ] 5. RDIC Value - Would isolating KV contexts prevent instruction degradation here?
+
+OVERALL: PASS / FAIL
+Notes: _________________________________________________________________
+
+
+================================================================================
+EXAMPLE 2: conflict_002
+================================================================================
+Conflict Type: tone_serious_vs_humorous
+Domain: technical_documentation
+
+Turn 1 (user):
+  INSTRUCTION: Write all technical documentation in a strictly serious, professional tone without any humor, jokes, or casual language. This is for enterprise software used in critical healthcare systems.
+  CONTENT: I need you to help me document our new API authentication system for our medical records platform
+
+Turn 2 (user):
+  INSTRUCTION: Actually, make the documentation fun and humorous with jokes, puns, and entertaining examples to keep developers engaged. Use a lighthearted, comedic style throughout.
+  CONTENT: Now document the error handling procedures for when authentication fails
+
+Turn 3 (user):
+  QUERY: Now provide two versions: first using the professional approach from earlier, then using the casual approach. Show me both.
+  WHAT THIS TESTS: System should maintain both Write all technical documentation in a strictly serious context and Actually context separately. Under KV cache compression, the earlier formal instruction often degrades when casual instruction appears, causing the system to forget the formal constraint. RDIC should isolate these semantic contexts to prevent degradation.
+  RDIC VALUE: Maintains isolated KV contexts for each instruction cluster, preventing compression-based degradation when conflicting instructions appear across turns
+
+Ground Truth Clusters: ['serious_professional_critical', 'humorous_entertaining_casual']
+Purpose: context_isolation_test
+
+Review Checklist (Context Isolation Testing):
+  [ ] 1. Genuine Conflict - Do the two instructions create incompatible semantic contexts?
+  [ ] 2. Realistic Scenario - Could this context-switching happen in real conversations?
+  [ ] 3. Tests Context Isolation - Does Turn 3 require maintaining BOTH contexts separately?
+  [ ] 4. Clear Ground Truth - Are the semantic clusters well-separated?
+  [ ] 5. RDIC Value - Would isolating KV contexts prevent instruction degradation here?
+
+OVERALL: PASS / FAIL
+Notes: _________________________________________________________________
+
+
+================================================================================
+EXAMPLE 3: conflict_003
+================================================================================
+Conflict Type: tone_serious_vs_humorous
+Domain: business_email
+
+Turn 1 (user):
+  INSTRUCTION: Maintain a completely serious, grave tone when discussing business matters. Avoid any humor or lightheartedness as it undermines credibility
+  CONTENT: I need to write an email to our team about the recent data breach incident and security protocol violations
+
+Turn 2 (user):
+  INSTRUCTION: Make sure to use humor and jokes throughout to keep things fun and engaging. People respond better when you make them laugh
+  CONTENT: Actually, add some content about mandatory weekend training sessions for the security update
+
+Turn 3 (user):
+  QUERY: Now provide two versions: first using the professional approach from earlier, then using the casual approach. Show me both.
+  WHAT THIS TESTS: System should maintain both Maintain a completely serious context and Make sure to use humor and jokes throughout to keep things fun and engaging. People respond better when you make them laugh context separately. Under KV cache compression, the earlier formal instruction often degrades when casual instruction appears, causing the system to forget the formal constraint. RDIC should isolate these semantic contexts to prevent degradation.
+  RDIC VALUE: Maintains isolated KV contexts for each instruction cluster, preventing compression-based degradation when conflicting instructions appear across turns
+
+Ground Truth Clusters: ['serious_grave_tone', 'humorous_lighthearted_tone']
+Purpose: context_isolation_test
+
+Review Checklist (Context Isolation Testing):
+  [ ] 1. Genuine Conflict - Do the two instructions create incompatible semantic contexts?
+  [ ] 2. Realistic Scenario - Could this context-switching happen in real conversations?
+  [ ] 3. Tests Context Isolation - Does Turn 3 require maintaining BOTH contexts separately?
+  [ ] 4. Clear Ground Truth - Are the semantic clusters well-separated?
+  [ ] 5. RDIC Value - Would isolating KV contexts prevent instruction degradation here?
+
+OVERALL: PASS / FAIL
+Notes: _________________________________________________________________
+
+
+================================================================================
+EXAMPLE 4: conflict_004
+================================================================================
+Conflict Type: tone_formal_vs_casual
+Domain: medical_records
+
+Turn 1 (user):
+  INSTRUCTION: Use strictly formal medical terminology and professional clinical language appropriate for official healthcare documentation
+  CONTENT: I need to document a patient's symptoms and treatment plan for their permanent medical record
+
+Turn 2 (user):
+  INSTRUCTION: Write everything in casual, everyday language like you're explaining to a friend at a coffee shop
+  CONTENT: Actually, make the patient record entry more relatable and easy to understand using simple conversational language
+
+Turn 3 (user):
+  QUERY: Now provide two versions: first using the professional approach from earlier, then using the casual approach. Show me both.
+  WHAT THIS TESTS: System should maintain both Use strictly formal medical terminology and professional clinical language appropriate for official healthcare documentation context and Write everything in casual context separately. Under KV cache compression, the earlier formal instruction often degrades when casual instruction appears, causing the system to forget the formal constraint. RDIC should isolate these semantic contexts to prevent degradation.
+  RDIC VALUE: Maintains isolated KV contexts for each instruction cluster, preventing compression-based degradation when conflicting instructions appear across turns
+
+Ground Truth Clusters: ['formal_clinical_documentation', 'casual_conversational_explanation']
+Purpose: context_isolation_test
+
+Review Checklist (Context Isolation Testing):
+  [ ] 1. Genuine Conflict - Do the two instructions create incompatible semantic contexts?
+  [ ] 2. Realistic Scenario - Could this context-switching happen in real conversations?
+  [ ] 3. Tests Context Isolation - Does Turn 3 require maintaining BOTH contexts separately?
+  [ ] 4. Clear Ground Truth - Are the semantic clusters well-separated?
+  [ ] 5. RDIC Value - Would isolating KV contexts prevent instruction degradation here?
+
+OVERALL: PASS / FAIL
+Notes: _________________________________________________________________
+
+
+================================================================================
+EXAMPLE 5: conflict_005
+================================================================================
+Conflict Type: tone_professional_vs_friendly
+Domain: legal_writing
+
+Turn 1 (user):
+  INSTRUCTION: Use strictly professional legal language with formal terminology, maintaining appropriate distance and objectivity as required in court documents
+  CONTENT: I need to draft a motion to dismiss for a breach of contract case. The opposing party failed to state a valid claim.
+
+Turn 2 (user):
+  INSTRUCTION: Write in a warm, friendly, conversational tone that makes the content approachable and builds rapport with the reader
+  CONTENT: Actually, this motion will be read by Judge Martinez who prefers accessible language. Make it engaging and personable.
+
+Turn 3 (user):
+  QUERY: Now provide two versions: first using the professional approach from earlier, then using the casual approach. Show me both.
+  WHAT THIS TESTS: System should maintain both Use strictly professional legal language with formal terminology context and Write in a warm context separately. Under KV cache compression, the earlier formal instruction often degrades when casual instruction appears, causing the system to forget the formal constraint. RDIC should isolate these semantic contexts to prevent degradation.
+  RDIC VALUE: Maintains isolated KV contexts for each instruction cluster, preventing compression-based degradation when conflicting instructions appear across turns
+
+Ground Truth Clusters: ['professional_legal_formal', 'friendly_conversational_approachable']
+Purpose: context_isolation_test
+
+Review Checklist (Context Isolation Testing):
+  [ ] 1. Genuine Conflict - Do the two instructions create incompatible semantic contexts?
+  [ ] 2. Realistic Scenario - Could this context-switching happen in real conversations?
+  [ ] 3. Tests Context Isolation - Does Turn 3 require maintaining BOTH contexts separately?
+  [ ] 4. Clear Ground Truth - Are the semantic clusters well-separated?
+  [ ] 5. RDIC Value - Would isolating KV contexts prevent instruction degradation here?
+
+OVERALL: PASS / FAIL
+Notes: _________________________________________________________________
+
+
+================================================================================
+EXAMPLE 6: conflict_006
+================================================================================
+Conflict Type: tone_serious_vs_humorous
+Domain: academic_writing
+
+Turn 1 (user):
+  INSTRUCTION: Maintain a serious, scholarly tone appropriate for peer-reviewed academic journals. Use formal language, avoid any humor or levity, and focus on rigorous analytical discourse.
+  CONTENT: I'm writing the discussion section for my research paper on climate change impacts on coastal ecosystems for submission to Nature Climate Change
+
+Turn 2 (user):
+  INSTRUCTION: Actually, make the writing humorous and entertaining with jokes, puns, and witty observations to keep readers engaged and amused throughout
+  CONTENT: I want to revise the section about ocean acidification and coral reef degradation to make it more accessible and fun to read
+
+Turn 3 (user):
+  QUERY: Now provide two versions: first using the professional approach from earlier, then using the casual approach. Show me both.
+  WHAT THIS TESTS: System should maintain both Maintain a serious context and Actually context separately. Under KV cache compression, the earlier formal instruction often degrades when casual instruction appears, causing the system to forget the formal constraint. RDIC should isolate these semantic contexts to prevent degradation.
+  RDIC VALUE: Maintains isolated KV contexts for each instruction cluster, preventing compression-based degradation when conflicting instructions appear across turns
+
+Ground Truth Clusters: ['serious_scholarly_rigorous', 'humorous_entertaining_playful']
+Purpose: context_isolation_test
+
+Review Checklist (Context Isolation Testing):
+  [ ] 1. Genuine Conflict - Do the two instructions create incompatible semantic contexts?
+  [ ] 2. Realistic Scenario - Could this context-switching happen in real conversations?
+  [ ] 3. Tests Context Isolation - Does Turn 3 require maintaining BOTH contexts separately?
+  [ ] 4. Clear Ground Truth - Are the semantic clusters well-separated?
+  [ ] 5. RDIC Value - Would isolating KV contexts prevent instruction degradation here?
+
+OVERALL: PASS / FAIL
+Notes: _________________________________________________________________
+
+
+================================================================================
+EXAMPLE 7: conflict_007
+================================================================================
+Conflict Type: detail_summary_vs_exhaustive
+Domain: customer_support
+
+Turn 1 (user):
+  INSTRUCTION: Keep all responses brief and summarized - customers want quick answers without lengthy explanations
+  CONTENT: I need to create responses for our customer support portal about our return policy
+
+Turn 2 (user):
+  INSTRUCTION: Actually, provide exhaustive, comprehensive responses that cover every possible scenario, exception, and detail to avoid any confusion
+  CONTENT: A customer is asking about returning a defective laptop they bought 25 days ago during our holiday sale
+
+Turn 3 (user):
+  QUERY: Give me both versions we discussed: the brief version first, then the comprehensive version.
+  WHAT THIS TESTS: System should maintain both contexts: the keep constraint and the actually, constraint. KV compression typically causes the earlier brevity instruction to degrade when detailed instruction appears. RDIC isolates these to prevent instruction loss.
+  RDIC VALUE: Maintains isolated KV contexts for each instruction cluster, preventing compression-based degradation when conflicting instructions appear across turns
+
+Ground Truth Clusters: ['brief_summarized_minimal', 'exhaustive_comprehensive_detailed']
+Purpose: context_isolation_test
+
+Review Checklist (Context Isolation Testing):
+  [ ] 1. Genuine Conflict - Do the two instructions create incompatible semantic contexts?
+  [ ] 2. Realistic Scenario - Could this context-switching happen in real conversations?
+  [ ] 3. Tests Context Isolation - Does Turn 3 require maintaining BOTH contexts separately?
+  [ ] 4. Clear Ground Truth - Are the semantic clusters well-separated?
+  [ ] 5. RDIC Value - Would isolating KV contexts prevent instruction degradation here?
+
+OVERALL: PASS / FAIL
+Notes: _________________________________________________________________
+
+
+================================================================================
+EXAMPLE 8: conflict_008
+================================================================================
+Conflict Type: detail_concise_vs_comprehensive
+Domain: legal_writing
+
+Turn 1 (user):
+  INSTRUCTION: Keep all legal documents extremely concise - no more than one paragraph, focusing only on the absolute essentials
+  CONTENT: I need help drafting a liability waiver for our rock climbing gym. We need to process clients quickly, so they should be able to read and sign it in under a minute.
+
+Turn 2 (user):
+  INSTRUCTION: Make sure to include comprehensive coverage of all potential liability scenarios with detailed explanations of each risk category, legal precedents, and explicit acknowledgments for maximum legal protection
+  CONTENT: Actually, our insurance company just told us we need to cover every possible injury scenario in detail - falls, equipment failure, negligence, assumption of risk doctrine, medical emergencies, property damage, and third-party injuries. They want thorough documentation.
+
+Turn 3 (user):
+  QUERY: Give me both versions we discussed: the brief version first, then the comprehensive version.
+  WHAT THIS TESTS: System should maintain both contexts: the keep constraint and the make constraint. KV compression typically causes the earlier brevity instruction to degrade when detailed instruction appears. RDIC isolates these to prevent instruction loss.
+  RDIC VALUE: Maintains isolated KV contexts for each instruction cluster, preventing compression-based degradation when conflicting instructions appear across turns
+
+Ground Truth Clusters: ['concise_minimal_legal_documentation', 'comprehensive_detailed_legal_protection']
+Purpose: context_isolation_test
+
+Review Checklist (Context Isolation Testing):
+  [ ] 1. Genuine Conflict - Do the two instructions create incompatible semantic contexts?
+  [ ] 2. Realistic Scenario - Could this context-switching happen in real conversations?
+  [ ] 3. Tests Context Isolation - Does Turn 3 require maintaining BOTH contexts separately?
+  [ ] 4. Clear Ground Truth - Are the semantic clusters well-separated?
+  [ ] 5. RDIC Value - Would isolating KV contexts prevent instruction degradation here?
+
+OVERALL: PASS / FAIL
+Notes: _________________________________________________________________
+
+
+================================================================================
+EXAMPLE 9: conflict_009
+================================================================================
+Conflict Type: detail_summary_vs_exhaustive
+Domain: social_media
+
+Turn 1 (user):
+  INSTRUCTION: Keep all social media content brief and concise - maximum 2-3 sentences with only the key highlights
+  CONTENT: I need help creating content for our company's Instagram and Twitter accounts about our new product launch
+
+Turn 2 (user):
+  INSTRUCTION: Actually, provide comprehensive, exhaustive details covering all features, specifications, benefits, pricing tiers, use cases, and technical requirements
+  CONTENT: We need to post about our new SaaS analytics platform that just launched today
+
+Turn 3 (user):
+  QUERY: Give me both versions we discussed: the brief version first, then the comprehensive version.
+  WHAT THIS TESTS: System should maintain both contexts: the keep constraint and the actually, constraint. KV compression typically causes the earlier brevity instruction to degrade when detailed instruction appears. RDIC isolates these to prevent instruction loss.
+  RDIC VALUE: Maintains isolated KV contexts for each instruction cluster, preventing compression-based degradation when conflicting instructions appear across turns
+
+Ground Truth Clusters: ['summary_brief_highlights', 'exhaustive_comprehensive_details']
+Purpose: context_isolation_test
+
+Review Checklist (Context Isolation Testing):
+  [ ] 1. Genuine Conflict - Do the two instructions create incompatible semantic contexts?
+  [ ] 2. Realistic Scenario - Could this context-switching happen in real conversations?
+  [ ] 3. Tests Context Isolation - Does Turn 3 require maintaining BOTH contexts separately?
+  [ ] 4. Clear Ground Truth - Are the semantic clusters well-separated?
+  [ ] 5. RDIC Value - Would isolating KV contexts prevent instruction degradation here?
+
+OVERALL: PASS / FAIL
+Notes: _________________________________________________________________
+
+
+================================================================================
+EXAMPLE 10: conflict_010
+================================================================================
+Conflict Type: detail_minimal_vs_verbose
+Domain: academic_writing
+
+Turn 1 (user):
+  INSTRUCTION: Keep all explanations extremely concise - use bullet points and no more than one sentence per concept. Brevity is essential.
+  CONTENT: I'm writing a literature review section for my thesis on machine learning applications in healthcare diagnostics
+
+Turn 2 (user):
+  INSTRUCTION: Provide comprehensive, detailed explanations with full context, multiple examples, thorough background information, and extensive elaboration on each point
+  CONTENT: Actually, I need to expand the methodology section explaining the neural network architecture I used
+
+Turn 3 (user):
+  QUERY: Give me both versions we discussed: the brief version first, then the comprehensive version.
+  WHAT THIS TESTS: System should maintain both contexts: the keep constraint and the provide constraint. KV compression typically causes the earlier brevity instruction to degrade when detailed instruction appears. RDIC isolates these to prevent instruction loss.
+  RDIC VALUE: Maintains isolated KV contexts for each instruction cluster, preventing compression-based degradation when conflicting instructions appear across turns
+
+Ground Truth Clusters: ['minimal_concise_brevity', 'verbose_comprehensive_detailed']
+Purpose: context_isolation_test
+
+Review Checklist (Context Isolation Testing):
+  [ ] 1. Genuine Conflict - Do the two instructions create incompatible semantic contexts?
+  [ ] 2. Realistic Scenario - Could this context-switching happen in real conversations?
+  [ ] 3. Tests Context Isolation - Does Turn 3 require maintaining BOTH contexts separately?
+  [ ] 4. Clear Ground Truth - Are the semantic clusters well-separated?
+  [ ] 5. RDIC Value - Would isolating KV contexts prevent instruction degradation here?
+
+OVERALL: PASS / FAIL
+Notes: _________________________________________________________________
+
+
+================================================================================
+SUMMARY
+================================================================================
+Count how many examples PASS all 5 criteria:
+  - Need ≥7/10 to meet 70% target
+  - Each example must pass ALL 5 criteria to count as PASS
+================================================================================

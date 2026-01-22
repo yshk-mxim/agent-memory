@@ -50,12 +50,17 @@ class ConflictDatasetGenerator:
         """
         conflict_info = self.conflict_types[conflict_type]
 
-        prompt = f"""Generate a realistic multi-turn conversation that demonstrates an instruction conflict.
+        prompt = f"""Generate a realistic multi-turn conversation that tests CONTEXT ISOLATION for RDIC research.
 
 **Conflict Type:** {conflict_info['name']}
 **Specific Conflict:** {conflict_subtype}
 **Domain:** {domain}
 **Description:** {conflict_info['description']}
+
+**IMPORTANT**: This tests whether systems can maintain separate semantic contexts under KV cache compression.
+- Turn 1: Establishes first semantic context with instruction
+- Turn 2: Establishes conflicting semantic context with different instruction
+- Turn 3: Tests if BOTH contexts were preserved (requests both versions separately)
 
 Create a JSON object with the following structure:
 
@@ -63,42 +68,47 @@ Create a JSON object with the following structure:
   "id": "conflict_XXX",
   "conflict_type": "{conflict_type}_{conflict_subtype}",
   "domain": "{domain}",
+  "purpose": "context_isolation_test",
   "turns": [
     {{
       "turn_id": 1,
       "role": "user",
-      "instruction": "<first instruction that sets a constraint>",
+      "instruction": "<first instruction that sets a semantic context/constraint>",
       "content": "<user message establishing context>"
     }},
     {{
       "turn_id": 2,
       "role": "user",
-      "instruction": "<second instruction that conflicts with the first>",
+      "instruction": "<second instruction that creates incompatible semantic context>",
       "content": "<user message with new context or request>"
     }},
     {{
       "turn_id": 3,
       "role": "user",
-      "query": "<final query that requires resolving both conflicting instructions>",
-      "expected_conflict": "<clear description of why these instructions conflict>"
+      "query": "<query requesting BOTH versions: first version using approach 1, then version using approach 2>",
+      "expected_behavior": "<explain what system should maintain and how KV compression causes degradation>",
+      "rdic_value": "Maintains isolated KV contexts for each instruction cluster, preventing compression-based degradation when conflicting instructions appear across turns"
     }}
   ],
   "ground_truth_clusters": ["<semantic cluster 1>", "<semantic cluster 2>"]
 }}
 
 **Requirements:**
-1. The conflict must be GENUINE - the two instructions should be truly incompatible
-2. The conflict should be REALISTIC - something that could happen in real conversations
-3. The final query should make the conflict UNAVOIDABLE - it must require both constraints
-4. Ground truth clusters should represent the incompatible semantic spaces
-5. Make the scenario specific to the {domain} domain
-6. The conflict should specifically demonstrate {conflict_subtype.replace('_', ' ')}
+1. Turn 1 and 2 must create GENUINELY INCOMPATIBLE semantic contexts (not just different preferences)
+2. The scenario must be REALISTIC - could happen in real conversations
+3. Turn 3 must REQUEST BOTH VERSIONS SEPARATELY (e.g., "Give me both: the X version first, then the Y version")
+4. Turn 3 should NOT ask to merge both (that's impossible) - it asks to see both contexts maintained
+5. expected_behavior should explain what contexts must be isolated and why KV compression causes degradation
+6. Ground truth clusters represent the separate semantic spaces that RDIC should isolate
+7. Make the scenario specific to the {domain} domain
+8. The conflict should specifically demonstrate {conflict_subtype.replace('_', ' ')}
 
 **Example for tone conflict (formal_vs_casual) in business_email domain:**
 {{
   "id": "conflict_001",
   "conflict_type": "tone_formal_vs_casual",
   "domain": "business_email",
+  "purpose": "context_isolation_test",
   "turns": [
     {{
       "turn_id": 1,
@@ -115,8 +125,9 @@ Create a JSON object with the following structure:
     {{
       "turn_id": 3,
       "role": "user",
-      "query": "Write the email now, following both the formal professional style and the casual friendly tone",
-      "expected_conflict": "Cannot simultaneously maintain formal business etiquette and casual texting style - they are mutually exclusive communication registers"
+      "query": "Now provide two versions: first using the professional approach from earlier, then using the casual approach. Show me both.",
+      "expected_behavior": "System should maintain both formal professional context and casual friendly context separately. Under KV cache compression, the earlier formal instruction often degrades when casual instruction appears, causing the system to forget the formal constraint. RDIC should isolate these semantic contexts to prevent degradation.",
+      "rdic_value": "Maintains isolated KV contexts for each instruction cluster, preventing compression-based degradation when conflicting instructions appear across turns"
     }}
   ],
   "ground_truth_clusters": ["formal_professional_constrained", "casual_friendly_creative"]

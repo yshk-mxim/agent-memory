@@ -1,10 +1,10 @@
 {
-  "schema_version": "1.0",
-  "description": "Schema for instruction conflict dataset used in RDIC semantic debate framework",
+  "schema_version": "2.0",
+  "description": "Schema for instruction conflict dataset used in RDIC semantic debate framework. Tests context isolation across multi-turn conversations with conflicting semantic constraints.",
   "conflict_types": {
     "tone": {
       "name": "Tone Conflicts",
-      "description": "Conflicts in formality, professionalism, or emotional tone",
+      "description": "Conflicts in formality, professionalism, or emotional tone that create incompatible semantic contexts",
       "subtypes": [
         "formal_vs_casual",
         "professional_vs_friendly",
@@ -14,7 +14,7 @@
     },
     "detail": {
       "name": "Detail Conflicts",
-      "description": "Conflicts in level of detail or comprehensiveness",
+      "description": "Conflicts in level of detail or comprehensiveness that create different information density contexts",
       "subtypes": [
         "brief_vs_detailed",
         "concise_vs_comprehensive",
@@ -24,7 +24,7 @@
     },
     "style": {
       "name": "Style Conflicts",
-      "description": "Conflicts in writing style or audience level",
+      "description": "Conflicts in writing style or audience level that create incompatible presentation contexts",
       "subtypes": [
         "technical_vs_layperson",
         "academic_vs_conversational",
@@ -34,7 +34,7 @@
     },
     "content": {
       "name": "Content Conflicts",
-      "description": "Conflicts in what information to include or exclude",
+      "description": "Conflicts in what information to include or exclude that create different content structure contexts",
       "subtypes": [
         "citations_vs_no_citations",
         "examples_vs_no_examples",
@@ -44,7 +44,7 @@
     },
     "format": {
       "name": "Format Conflicts",
-      "description": "Conflicts in presentation structure or organization",
+      "description": "Conflicts in presentation structure or organization that create incompatible formatting contexts",
       "subtypes": [
         "structured_vs_freeform",
         "bullets_vs_paragraphs",
@@ -57,22 +57,29 @@
     "id": "string (e.g., conflict_001)",
     "conflict_type": "string (e.g., tone_formal_vs_casual)",
     "domain": "string (e.g., business_email, technical_documentation)",
+    "purpose": "string (context_isolation_test - tests RDIC's ability to maintain separate semantic contexts)",
     "turns": [
       {
-        "turn_id": "integer",
+        "turn_id": "integer (1-3)",
         "role": "string (user or assistant)",
-        "instruction": "string (optional, user instruction/constraint)",
-        "content": "string (message content)",
-        "query": "string (optional, final query)",
-        "expected_conflict": "string (description of the conflict)"
+        "instruction": "string (optional, user instruction/constraint that establishes a semantic context)",
+        "content": "string (message content providing scenario context)",
+        "query": "string (optional, final query that requires accessing both semantic contexts)",
+        "expected_behavior": "string (optional, description of how RDIC should handle context isolation)",
+        "rdic_value": "string (optional, explanation of RDIC's value for preventing instruction degradation)"
       }
     ],
-    "ground_truth_clusters": ["array of semantic constraint clusters"],
+    "ground_truth_clusters": [
+      "array of semantic constraint clusters that should remain isolated in separate KV contexts"
+    ],
     "metadata": {
       "generated_at": "ISO timestamp",
       "model": "string (model used for generation)",
       "reviewed": "boolean",
-      "quality_score": "float (0-1, from manual review)"
+      "quality_score": "float (0-1, from manual review)",
+      "restructured_at": "ISO timestamp (if restructured from original format)",
+      "original_structure": "string (original structure type if migrated)",
+      "new_structure": "string (current structure type)"
     }
   },
   "domains": [
@@ -86,5 +93,16 @@
     "legal_writing",
     "medical_records",
     "educational_content"
-  ]
+  ],
+  "dataset_purpose": {
+    "primary_goal": "Test RDIC's context isolation capabilities",
+    "research_question": "Can RDIC prevent instruction degradation by isolating conflicting semantic contexts in separate KV caches?",
+    "baseline_comparison": "Without RDIC, KV compression causes later instructions to degrade earlier instructions. RDIC should maintain both contexts separately.",
+    "success_metric": "System can access both instruction contexts when Turn 3 requests both versions"
+  },
+  "turn_structure_explanation": {
+    "turn_1": "Establishes first semantic context with specific instruction/constraint",
+    "turn_2": "Establishes second, conflicting semantic context with different instruction",
+    "turn_3": "Requests both contexts separately (e.g., 'Show me both versions'), testing if system maintained both contexts under KV compression"
+  }
 }

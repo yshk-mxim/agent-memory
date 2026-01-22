@@ -1,0 +1,802 @@
+[
+  {
+    "id": "conflict_065",
+    "conflict_type": "format_lists_vs_prose",
+    "domain": "social_media",
+    "turns": [
+      {
+        "turn_id": 1,
+        "role": "user",
+        "instruction": "Always format social media content as flowing narrative prose without bullet points or numbered lists",
+        "content": "I'm creating a series of Instagram posts about sustainable fashion tips for my eco-friendly clothing brand"
+      },
+      {
+        "turn_id": 2,
+        "role": "user",
+        "instruction": "Make sure to use clear bulleted or numbered lists for all actionable tips - never use paragraph format",
+        "content": "Actually, I need to make the content more scannable and easier to digest quickly since people scroll fast on social media"
+      },
+      {
+        "turn_id": 3,
+        "role": "user",
+        "query": "Show both formats: the structured version first, then the narrative version.",
+        "expected_behavior": "System should maintain both format contexts: structured and narrative. KV compression causes format instructions to degrade when conflicting formats appear. RDIC isolates format clusters to prevent degradation.",
+        "rdic_value": "Maintains isolated KV contexts for each instruction cluster, preventing compression-based degradation when conflicting instructions appear across turns"
+      }
+    ],
+    "ground_truth_clusters": [
+      "narrative_prose_format",
+      "list_structured_format"
+    ],
+    "metadata": {
+      "generated_at": "2026-01-22T10:13:59.633257",
+      "model": "claude-sonnet-4-5-20250929",
+      "reviewed": false,
+      "quality_score": null,
+      "restructured_at": "2026-01-22T10:20:53.216574",
+      "original_structure": "unresolvable_merge",
+      "new_structure": "context_isolation"
+    },
+    "purpose": "context_isolation_test"
+  },
+  {
+    "id": "conflict_030",
+    "conflict_type": "format_bullets_vs_paragraphs",
+    "domain": "technical_documentation",
+    "turns": [
+      {
+        "turn_id": 1,
+        "role": "user",
+        "instruction": "Format all technical documentation using bullet points for better scannability and quick reference",
+        "content": "I need to create API documentation for our new authentication service. Our team prefers documentation they can scan quickly."
+      },
+      {
+        "turn_id": 2,
+        "role": "user",
+        "instruction": "Actually, write everything in flowing paragraph format without any bullet points or lists, as our legal team requires continuous prose for compliance documentation",
+        "content": "The compliance officer says the authentication documentation needs to be in narrative paragraph form for the security audit report."
+      },
+      {
+        "turn_id": 3,
+        "role": "user",
+        "query": "Show both formats: the structured version first, then the narrative version.",
+        "expected_behavior": "System should maintain both format contexts: structured and narrative. KV compression causes format instructions to degrade when conflicting formats appear. RDIC isolates format clusters to prevent degradation.",
+        "rdic_value": "Maintains isolated KV contexts for each instruction cluster, preventing compression-based degradation when conflicting instructions appear across turns"
+      }
+    ],
+    "ground_truth_clusters": [
+      "bulleted_list_format",
+      "paragraph_prose_format"
+    ],
+    "metadata": {
+      "generated_at": "2026-01-22T09:24:36.081238",
+      "model": "claude-sonnet-4-5-20250929",
+      "reviewed": false,
+      "quality_score": null,
+      "restructured_at": "2026-01-22T09:40:48.527393",
+      "original_structure": "unresolvable_merge",
+      "new_structure": "context_isolation"
+    },
+    "purpose": "context_isolation_test"
+  },
+  {
+    "id": "conflict_028",
+    "conflict_type": "format_sections_vs_continuous",
+    "domain": "social_media",
+    "turns": [
+      {
+        "turn_id": 1,
+        "role": "user",
+        "instruction": "Organize all social media content with clear labeled sections using headers like 'Introduction:', 'Main Content:', 'Call-to-Action:', etc.",
+        "content": "I'm creating Instagram captions for my fitness coaching business and need help structuring them properly"
+      },
+      {
+        "turn_id": 2,
+        "role": "user",
+        "instruction": "Write everything as a continuous flowing narrative without any section breaks, headers, or labels - just smooth storytelling from start to finish",
+        "content": "Actually, I want my captions to feel more natural and engaging, like I'm just talking to my followers"
+      },
+      {
+        "turn_id": 3,
+        "role": "user",
+        "query": "Show both formats: the structured version first, then the narrative version.",
+        "expected_behavior": "System should maintain both format contexts: structured and narrative. KV compression causes format instructions to degrade when conflicting formats appear. RDIC isolates format clusters to prevent degradation.",
+        "rdic_value": "Maintains isolated KV contexts for each instruction cluster, preventing compression-based degradation when conflicting instructions appear across turns"
+      }
+    ],
+    "ground_truth_clusters": [
+      "structured_sectioned_format",
+      "continuous_narrative_flow"
+    ],
+    "metadata": {
+      "generated_at": "2026-01-22T09:24:22.191027",
+      "model": "claude-sonnet-4-5-20250929",
+      "reviewed": false,
+      "quality_score": null,
+      "restructured_at": "2026-01-22T09:40:48.527387",
+      "original_structure": "unresolvable_merge",
+      "new_structure": "context_isolation"
+    },
+    "purpose": "context_isolation_test"
+  },
+  {
+    "id": "conflict_089",
+    "conflict_type": "content_opinions_vs_facts_only",
+    "domain": "code_comments",
+    "turns": [
+      {
+        "turn_id": 1,
+        "role": "user",
+        "instruction": "When writing code comments, include only objective facts about what the code does - no subjective opinions, recommendations, or value judgments",
+        "content": "I'm establishing a documentation standard for our Python codebase. We need comments that are purely factual and descriptive."
+      },
+      {
+        "turn_id": 2,
+        "role": "user",
+        "instruction": "Make sure to include your professional opinions and recommendations in the comments - developers need to know best practices, potential improvements, and what you think about the code quality",
+        "content": "Actually, I want the comments to be more helpful by adding expert insights. Comment on this sorting algorithm implementation and whether it's the right approach."
+      },
+      {
+        "turn_id": 3,
+        "role": "user",
+        "query": "Provide both versions: one following the first approach, one following the second approach.",
+        "expected_behavior": "System should maintain both content instruction contexts separately. Compression causes later content instructions to override earlier ones. RDIC isolates content constraint clusters to preserve both.",
+        "rdic_value": "Maintains isolated KV contexts for each instruction cluster, preventing compression-based degradation when conflicting instructions appear across turns"
+      }
+    ],
+    "ground_truth_clusters": [
+      "objective_factual_descriptive",
+      "subjective_opinionated_evaluative"
+    ],
+    "metadata": {
+      "generated_at": "2026-01-22T10:17:37.559471",
+      "model": "claude-sonnet-4-5-20250929",
+      "reviewed": false,
+      "quality_score": null,
+      "restructured_at": "2026-01-22T10:20:53.217570",
+      "original_structure": "unresolvable_merge",
+      "new_structure": "context_isolation"
+    },
+    "purpose": "context_isolation_test"
+  },
+  {
+    "id": "conflict_098",
+    "conflict_type": "format_structured_vs_freeform",
+    "domain": "legal_writing",
+    "turns": [
+      {
+        "turn_id": 1,
+        "role": "user",
+        "instruction": "Use a strict numbered outline format with hierarchical sections (I., A., 1., a., i.) for all legal arguments, with each point on a separate line",
+        "content": "I need to draft a motion to dismiss based on lack of jurisdiction and failure to state a claim"
+      },
+      {
+        "turn_id": 2,
+        "role": "user",
+        "instruction": "Write in flowing narrative paragraph form without any numbering, bullet points, or structural divisions - just continuous prose",
+        "content": "Actually, make the argument more persuasive by weaving the legal reasoning together in a cohesive narrative style"
+      },
+      {
+        "turn_id": 3,
+        "role": "user",
+        "query": "Show both formats: the structured version first, then the narrative version.",
+        "expected_behavior": "System should maintain both format contexts: structured and narrative. KV compression causes format instructions to degrade when conflicting formats appear. RDIC isolates format clusters to prevent degradation.",
+        "rdic_value": "Maintains isolated KV contexts for each instruction cluster, preventing compression-based degradation when conflicting instructions appear across turns"
+      }
+    ],
+    "ground_truth_clusters": [
+      "structured_hierarchical_outline",
+      "freeform_narrative_prose"
+    ],
+    "metadata": {
+      "generated_at": "2026-01-22T10:18:50.159199",
+      "model": "claude-sonnet-4-5-20250929",
+      "reviewed": false,
+      "quality_score": null,
+      "restructured_at": "2026-01-22T10:20:53.217595",
+      "original_structure": "unresolvable_merge",
+      "new_structure": "context_isolation"
+    },
+    "purpose": "context_isolation_test"
+  },
+  {
+    "id": "conflict_005",
+    "conflict_type": "tone_professional_vs_friendly",
+    "domain": "legal_writing",
+    "turns": [
+      {
+        "turn_id": 1,
+        "role": "user",
+        "instruction": "Use strictly professional legal language with formal terminology, maintaining appropriate distance and objectivity as required in court documents",
+        "content": "I need to draft a motion to dismiss for a breach of contract case. The opposing party failed to state a valid claim."
+      },
+      {
+        "turn_id": 2,
+        "role": "user",
+        "instruction": "Write in a warm, friendly, conversational tone that makes the content approachable and builds rapport with the reader",
+        "content": "Actually, this motion will be read by Judge Martinez who prefers accessible language. Make it engaging and personable."
+      },
+      {
+        "turn_id": 3,
+        "role": "user",
+        "query": "Now provide two versions: first using the professional approach from earlier, then using the casual approach. Show me both.",
+        "expected_behavior": "System should maintain both Use strictly professional legal language with formal terminology context and Write in a warm context separately. Under KV cache compression, the earlier formal instruction often degrades when casual instruction appears, causing the system to forget the formal constraint. RDIC should isolate these semantic contexts to prevent degradation.",
+        "rdic_value": "Maintains isolated KV contexts for each instruction cluster, preventing compression-based degradation when conflicting instructions appear across turns"
+      }
+    ],
+    "ground_truth_clusters": [
+      "professional_legal_formal",
+      "friendly_conversational_approachable"
+    ],
+    "metadata": {
+      "generated_at": "2026-01-22T09:21:21.274287",
+      "model": "claude-sonnet-4-5-20250929",
+      "reviewed": false,
+      "quality_score": null,
+      "restructured_at": "2026-01-22T09:40:48.527302",
+      "original_structure": "unresolvable_merge",
+      "new_structure": "context_isolation"
+    },
+    "purpose": "context_isolation_test"
+  },
+  {
+    "id": "conflict_055",
+    "conflict_type": "content_background_vs_direct_answer",
+    "domain": "customer_support",
+    "turns": [
+      {
+        "turn_id": 1,
+        "role": "user",
+        "instruction": "Always provide comprehensive background information before answering customer questions. Include context about our company policies, the reasoning behind decisions, historical information, and related details to help customers fully understand the situation.",
+        "content": "I need help responding to customer inquiries about our return policy for electronics"
+      },
+      {
+        "turn_id": 2,
+        "role": "user",
+        "instruction": "Give direct, immediate answers to customer questions without any preamble or background information. Customers want quick solutions, so skip all context and get straight to the actionable answer in the first sentence.",
+        "content": "A customer just asked if they can return their laptop purchased 25 days ago"
+      },
+      {
+        "turn_id": 3,
+        "role": "user",
+        "query": "Provide both versions: one following the first approach, one following the second approach.",
+        "expected_behavior": "System should maintain both content instruction contexts separately. Compression causes later content instructions to override earlier ones. RDIC isolates content constraint clusters to preserve both.",
+        "rdic_value": "Maintains isolated KV contexts for each instruction cluster, preventing compression-based degradation when conflicting instructions appear across turns"
+      }
+    ],
+    "ground_truth_clusters": [
+      "comprehensive_background_context_first",
+      "direct_immediate_no_context"
+    ],
+    "metadata": {
+      "generated_at": "2026-01-22T10:12:43.843862",
+      "model": "claude-sonnet-4-5-20250929",
+      "reviewed": false,
+      "quality_score": null,
+      "restructured_at": "2026-01-22T10:20:53.216548",
+      "original_structure": "unresolvable_merge",
+      "new_structure": "context_isolation"
+    },
+    "purpose": "context_isolation_test"
+  },
+  {
+    "id": "conflict_076",
+    "conflict_type": "detail_minimal_vs_verbose",
+    "domain": "social_media",
+    "turns": [
+      {
+        "turn_id": 1,
+        "role": "user",
+        "instruction": "Keep all social media posts extremely brief and minimal - use only essential words, no explanations or context",
+        "content": "I'm launching a new sustainable fashion brand and need help with Instagram posts that grab attention quickly"
+      },
+      {
+        "turn_id": 2,
+        "role": "user",
+        "instruction": "Actually, make the posts comprehensive and verbose - include detailed explanations, backstory, process descriptions, and full context for everything",
+        "content": "Create a post announcing our first collection made from recycled ocean plastic"
+      },
+      {
+        "turn_id": 3,
+        "role": "user",
+        "query": "Give me both versions we discussed: the brief version first, then the comprehensive version.",
+        "expected_behavior": "System should maintain both contexts: the keep constraint and the actually, constraint. KV compression typically causes the earlier brevity instruction to degrade when detailed instruction appears. RDIC isolates these to prevent instruction loss.",
+        "rdic_value": "Maintains isolated KV contexts for each instruction cluster, preventing compression-based degradation when conflicting instructions appear across turns"
+      }
+    ],
+    "ground_truth_clusters": [
+      "minimal_concise_essential",
+      "verbose_comprehensive_detailed"
+    ],
+    "metadata": {
+      "generated_at": "2026-01-22T10:15:52.030631",
+      "model": "claude-sonnet-4-5-20250929",
+      "reviewed": false,
+      "quality_score": null,
+      "restructured_at": "2026-01-22T10:20:53.217534",
+      "original_structure": "unresolvable_merge",
+      "new_structure": "context_isolation"
+    },
+    "purpose": "context_isolation_test"
+  },
+  {
+    "id": "conflict_012",
+    "conflict_type": "detail_minimal_vs_verbose",
+    "domain": "legal_writing",
+    "turns": [
+      {
+        "turn_id": 1,
+        "role": "user",
+        "instruction": "Keep all legal documents extremely concise - use only essential terms, no more than 2-3 sentences per clause, eliminate all explanatory language",
+        "content": "I need to draft a non-disclosure agreement for our startup. Our investors want something streamlined that executives can review quickly."
+      },
+      {
+        "turn_id": 2,
+        "role": "user",
+        "instruction": "Actually, make the legal language comprehensive and verbose - include detailed explanations, multiple examples for each provision, extensive definitions, and thorough elaboration of all terms and conditions",
+        "content": "Our legal counsel just advised that we need much more detailed coverage to protect against potential litigation. They want every clause fully explained with all possible scenarios addressed."
+      },
+      {
+        "turn_id": 3,
+        "role": "user",
+        "query": "Give me both versions we discussed: the brief version first, then the comprehensive version.",
+        "expected_behavior": "System should maintain both contexts: the keep constraint and the actually, constraint. KV compression typically causes the earlier brevity instruction to degrade when detailed instruction appears. RDIC isolates these to prevent instruction loss.",
+        "rdic_value": "Maintains isolated KV contexts for each instruction cluster, preventing compression-based degradation when conflicting instructions appear across turns"
+      }
+    ],
+    "ground_truth_clusters": [
+      "minimal_concise_essential_only",
+      "verbose_comprehensive_fully_detailed"
+    ],
+    "metadata": {
+      "generated_at": "2026-01-22T09:22:21.039284",
+      "model": "claude-sonnet-4-5-20250929",
+      "reviewed": false,
+      "quality_score": null,
+      "restructured_at": "2026-01-22T09:40:48.527329",
+      "original_structure": "unresolvable_merge",
+      "new_structure": "context_isolation"
+    },
+    "purpose": "context_isolation_test"
+  },
+  {
+    "id": "conflict_070",
+    "conflict_type": "tone_formal_vs_casual",
+    "domain": "legal_writing",
+    "turns": [
+      {
+        "turn_id": 1,
+        "role": "user",
+        "instruction": "Write all legal documents using strict formal legal language with traditional legal terminology, Latin phrases, and proper court formatting",
+        "content": "I need to draft a motion to dismiss for our case against the plaintiff's breach of contract claim"
+      },
+      {
+        "turn_id": 2,
+        "role": "user",
+        "instruction": "Actually, use plain language and conversational tone like you're explaining it to a friend at a coffee shop - no legal jargon or fancy words",
+        "content": "The motion needs to explain why the statute of limitations has expired on their claim"
+      },
+      {
+        "turn_id": 3,
+        "role": "user",
+        "query": "Now provide two versions: first using the professional approach from earlier, then using the casual approach. Show me both.",
+        "expected_behavior": "System should maintain both Write all legal documents using strict formal legal language with traditional legal terminology context and Actually context separately. Under KV cache compression, the earlier formal instruction often degrades when casual instruction appears, causing the system to forget the formal constraint. RDIC should isolate these semantic contexts to prevent degradation.",
+        "rdic_value": "Maintains isolated KV contexts for each instruction cluster, preventing compression-based degradation when conflicting instructions appear across turns"
+      }
+    ],
+    "ground_truth_clusters": [
+      "formal_legal_traditional",
+      "casual_conversational_accessible"
+    ],
+    "metadata": {
+      "generated_at": "2026-01-22T10:15:07.050729",
+      "model": "claude-sonnet-4-5-20250929",
+      "reviewed": false,
+      "quality_score": null,
+      "restructured_at": "2026-01-22T10:20:53.217517",
+      "original_structure": "unresolvable_merge",
+      "new_structure": "context_isolation"
+    },
+    "purpose": "context_isolation_test"
+  },
+  {
+    "id": "conflict_087",
+    "conflict_type": "content_citations_vs_no_citations",
+    "domain": "customer_support",
+    "turns": [
+      {
+        "turn_id": 1,
+        "role": "user",
+        "instruction": "When providing technical support information, always include specific citations with article numbers, knowledge base IDs, and policy section references so customers can verify the information themselves",
+        "content": "I need to respond to customers asking about our return policy and warranty coverage for electronic devices"
+      },
+      {
+        "turn_id": 2,
+        "role": "user",
+        "instruction": "Never include any internal references, article numbers, or citation details in customer responses - just provide clean, simple answers without any technical documentation references that might confuse customers",
+        "content": "Actually, our customer experience team says responses should be streamlined without all those reference numbers cluttering the message"
+      },
+      {
+        "turn_id": 3,
+        "role": "user",
+        "query": "Provide both versions: one following the first approach, one following the second approach.",
+        "expected_behavior": "System should maintain both content instruction contexts separately. Compression causes later content instructions to override earlier ones. RDIC isolates content constraint clusters to preserve both.",
+        "rdic_value": "Maintains isolated KV contexts for each instruction cluster, preventing compression-based degradation when conflicting instructions appear across turns"
+      }
+    ],
+    "ground_truth_clusters": [
+      "documented_with_citations",
+      "clean_without_references"
+    ],
+    "metadata": {
+      "generated_at": "2026-01-22T10:17:23.117803",
+      "model": "claude-sonnet-4-5-20250929",
+      "reviewed": false,
+      "quality_score": null,
+      "restructured_at": "2026-01-22T10:20:53.217565",
+      "original_structure": "unresolvable_merge",
+      "new_structure": "context_isolation"
+    },
+    "purpose": "context_isolation_test"
+  },
+  {
+    "id": "conflict_014",
+    "conflict_type": "style_technical_vs_layperson",
+    "domain": "creative_writing",
+    "turns": [
+      {
+        "turn_id": 1,
+        "role": "user",
+        "instruction": "Write using highly technical, discipline-specific terminology with precise scientific language as if for an academic journal",
+        "content": "I'm working on a science fiction story about quantum entanglement and need help describing a scene where scientists discover a breakthrough"
+      },
+      {
+        "turn_id": 2,
+        "role": "user",
+        "instruction": "Actually, make sure to write in simple, accessible language that a middle school student with no science background could easily understand",
+        "content": "The same scene needs to be engaging for young readers who are just getting into sci-fi"
+      },
+      {
+        "turn_id": 3,
+        "role": "user",
+        "query": "Show me both approaches: first the technical version, then the accessible version.",
+        "expected_behavior": "System should maintain separate contexts for technical and accessible writing styles. KV cache compression often causes style instructions to interfere with each other. RDIC prevents this by isolating semantic style clusters.",
+        "rdic_value": "Maintains isolated KV contexts for each instruction cluster, preventing compression-based degradation when conflicting instructions appear across turns"
+      }
+    ],
+    "ground_truth_clusters": [
+      "technical_specialized_academic",
+      "accessible_simplified_layperson"
+    ],
+    "metadata": {
+      "generated_at": "2026-01-22T09:22:37.115918",
+      "model": "claude-sonnet-4-5-20250929",
+      "reviewed": false,
+      "quality_score": null,
+      "restructured_at": "2026-01-22T09:40:48.527336",
+      "original_structure": "unresolvable_merge",
+      "new_structure": "context_isolation"
+    },
+    "purpose": "context_isolation_test"
+  },
+  {
+    "id": "conflict_018",
+    "conflict_type": "style_formal_vs_informal",
+    "domain": "business_email",
+    "turns": [
+      {
+        "turn_id": 1,
+        "role": "user",
+        "instruction": "Use highly formal business language with complex sentence structures, third-person references, and corporate jargon throughout",
+        "content": "I need to write an email to our board of directors about the merger acquisition proposal"
+      },
+      {
+        "turn_id": 2,
+        "role": "user",
+        "instruction": "Keep the language simple and informal with short sentences, contractions, and everyday words that a middle schooler could understand",
+        "content": "Actually, make sure this email is accessible to all stakeholders, including our employee representatives who don't have business backgrounds"
+      },
+      {
+        "turn_id": 3,
+        "role": "user",
+        "query": "Show me both approaches: first the technical version, then the accessible version.",
+        "expected_behavior": "System should maintain separate contexts for technical and accessible writing styles. KV cache compression often causes style instructions to interfere with each other. RDIC prevents this by isolating semantic style clusters.",
+        "rdic_value": "Maintains isolated KV contexts for each instruction cluster, preventing compression-based degradation when conflicting instructions appear across turns"
+      }
+    ],
+    "ground_truth_clusters": [
+      "formal_complex_corporate",
+      "informal_simple_accessible"
+    ],
+    "metadata": {
+      "generated_at": "2026-01-22T09:23:06.213241",
+      "model": "claude-sonnet-4-5-20250929",
+      "reviewed": false,
+      "quality_score": null,
+      "restructured_at": "2026-01-22T09:40:48.527351",
+      "original_structure": "unresolvable_merge",
+      "new_structure": "context_isolation"
+    },
+    "purpose": "context_isolation_test"
+  },
+  {
+    "id": "conflict_029",
+    "conflict_type": "format_structured_vs_freeform",
+    "domain": "creative_writing",
+    "turns": [
+      {
+        "turn_id": 1,
+        "role": "user",
+        "instruction": "Write all creative pieces using the strict haiku format: exactly 3 lines with 5-7-5 syllable structure, no exceptions",
+        "content": "I'm working on a poetry collection about urban life and need help with consistent formatting"
+      },
+      {
+        "turn_id": 2,
+        "role": "user",
+        "instruction": "Actually, use stream-of-consciousness freeform prose with no line breaks, punctuation, or structural constraints - just let the words flow naturally",
+        "content": "I want to capture the chaotic energy of the city in a more raw, unfiltered way"
+      },
+      {
+        "turn_id": 3,
+        "role": "user",
+        "query": "Show both formats: the structured version first, then the narrative version.",
+        "expected_behavior": "System should maintain both format contexts: structured and narrative. KV compression causes format instructions to degrade when conflicting formats appear. RDIC isolates format clusters to prevent degradation.",
+        "rdic_value": "Maintains isolated KV contexts for each instruction cluster, preventing compression-based degradation when conflicting instructions appear across turns"
+      }
+    ],
+    "ground_truth_clusters": [
+      "structured_constrained_poetry",
+      "freeform_unstructured_prose"
+    ],
+    "metadata": {
+      "generated_at": "2026-01-22T09:24:29.141634",
+      "model": "claude-sonnet-4-5-20250929",
+      "reviewed": false,
+      "quality_score": null,
+      "restructured_at": "2026-01-22T09:40:48.527390",
+      "original_structure": "unresolvable_merge",
+      "new_structure": "context_isolation"
+    },
+    "purpose": "context_isolation_test"
+  },
+  {
+    "id": "conflict_032",
+    "conflict_type": "tone_professional_vs_friendly",
+    "domain": "technical_documentation",
+    "turns": [
+      {
+        "turn_id": 1,
+        "role": "user",
+        "instruction": "Write all technical documentation in a strictly professional tone with formal terminology, no colloquialisms, and maintain emotional distance from the reader",
+        "content": "I'm creating API documentation for our enterprise software product that will be used by Fortune 500 companies"
+      },
+      {
+        "turn_id": 2,
+        "role": "user",
+        "instruction": "Actually, make the documentation warm and friendly with a conversational tone, use casual language, jokes, and speak directly to the reader like a helpful friend explaining things",
+        "content": "Now write the error handling section for the authentication endpoint"
+      },
+      {
+        "turn_id": 3,
+        "role": "user",
+        "query": "Now provide two versions: first using the professional approach from earlier, then using the casual approach. Show me both.",
+        "expected_behavior": "System should maintain both Write all technical documentation in a strictly professional tone with formal terminology context and Actually context separately. Under KV cache compression, the earlier formal instruction often degrades when casual instruction appears, causing the system to forget the formal constraint. RDIC should isolate these semantic contexts to prevent degradation.",
+        "rdic_value": "Maintains isolated KV contexts for each instruction cluster, preventing compression-based degradation when conflicting instructions appear across turns"
+      }
+    ],
+    "ground_truth_clusters": [
+      "professional_formal_detached",
+      "friendly_conversational_personable"
+    ],
+    "metadata": {
+      "generated_at": "2026-01-22T10:09:42.314792",
+      "model": "claude-sonnet-4-5-20250929",
+      "reviewed": false,
+      "quality_score": null,
+      "restructured_at": "2026-01-22T10:20:53.216476",
+      "original_structure": "unresolvable_merge",
+      "new_structure": "context_isolation"
+    },
+    "purpose": "context_isolation_test"
+  },
+  {
+    "id": "conflict_036",
+    "conflict_type": "tone_professional_vs_friendly",
+    "domain": "code_comments",
+    "turns": [
+      {
+        "turn_id": 1,
+        "role": "user",
+        "instruction": "Write all code comments in a strictly professional, formal tone suitable for enterprise documentation with technical precision and no colloquialisms",
+        "content": "I'm documenting a new authentication module for our banking software. We need comments that will pass corporate code review standards."
+      },
+      {
+        "turn_id": 2,
+        "role": "user",
+        "instruction": "Actually, make the code comments super friendly and conversational, like you're explaining to a buddy over coffee. Use casual language, humor, and relatable analogies",
+        "content": "The junior developers are finding the codebase intimidating. Can you add comments to this password validation function that feel more approachable?"
+      },
+      {
+        "turn_id": 3,
+        "role": "user",
+        "query": "Now provide two versions: first using the professional approach from earlier, then using the casual approach. Show me both.",
+        "expected_behavior": "System should maintain both Write all code comments in a strictly professional context and Actually context separately. Under KV cache compression, the earlier formal instruction often degrades when casual instruction appears, causing the system to forget the formal constraint. RDIC should isolate these semantic contexts to prevent degradation.",
+        "rdic_value": "Maintains isolated KV contexts for each instruction cluster, preventing compression-based degradation when conflicting instructions appear across turns"
+      }
+    ],
+    "ground_truth_clusters": [
+      "professional_technical_formal",
+      "friendly_casual_approachable"
+    ],
+    "metadata": {
+      "generated_at": "2026-01-22T10:10:13.795103",
+      "model": "claude-sonnet-4-5-20250929",
+      "reviewed": false,
+      "quality_score": null,
+      "restructured_at": "2026-01-22T10:20:53.216493",
+      "original_structure": "unresolvable_merge",
+      "new_structure": "context_isolation"
+    },
+    "purpose": "context_isolation_test"
+  },
+  {
+    "id": "conflict_095",
+    "conflict_type": "format_bullets_vs_paragraphs",
+    "domain": "creative_writing",
+    "turns": [
+      {
+        "turn_id": 1,
+        "role": "user",
+        "instruction": "Format all story descriptions using flowing narrative paragraphs with complete sentences that create an immersive reading experience",
+        "content": "I'm working on a fantasy novel and need help developing character backstories. I want them to read like engaging prose that draws readers in."
+      },
+      {
+        "turn_id": 2,
+        "role": "user",
+        "instruction": "Actually, present all story elements in concise bullet points for quick reference and easy scanning",
+        "content": "I need to create a character profile for my protagonist that I can reference quickly while writing different chapters."
+      },
+      {
+        "turn_id": 3,
+        "role": "user",
+        "query": "Show both formats: the structured version first, then the narrative version.",
+        "expected_behavior": "System should maintain both format contexts: structured and narrative. KV compression causes format instructions to degrade when conflicting formats appear. RDIC isolates format clusters to prevent degradation.",
+        "rdic_value": "Maintains isolated KV contexts for each instruction cluster, preventing compression-based degradation when conflicting instructions appear across turns"
+      }
+    ],
+    "ground_truth_clusters": [
+      "narrative_paragraph_prose",
+      "bullet_point_reference_lists"
+    ],
+    "metadata": {
+      "generated_at": "2026-01-22T10:18:26.531106",
+      "model": "claude-sonnet-4-5-20250929",
+      "reviewed": false,
+      "quality_score": null,
+      "restructured_at": "2026-01-22T10:20:53.217587",
+      "original_structure": "unresolvable_merge",
+      "new_structure": "context_isolation"
+    },
+    "purpose": "context_isolation_test"
+  },
+  {
+    "id": "conflict_004",
+    "conflict_type": "tone_formal_vs_casual",
+    "domain": "medical_records",
+    "turns": [
+      {
+        "turn_id": 1,
+        "role": "user",
+        "instruction": "Use strictly formal medical terminology and professional clinical language appropriate for official healthcare documentation",
+        "content": "I need to document a patient's symptoms and treatment plan for their permanent medical record"
+      },
+      {
+        "turn_id": 2,
+        "role": "user",
+        "instruction": "Write everything in casual, everyday language like you're explaining to a friend at a coffee shop",
+        "content": "Actually, make the patient record entry more relatable and easy to understand using simple conversational language"
+      },
+      {
+        "turn_id": 3,
+        "role": "user",
+        "query": "Now provide two versions: first using the professional approach from earlier, then using the casual approach. Show me both.",
+        "expected_behavior": "System should maintain both Use strictly formal medical terminology and professional clinical language appropriate for official healthcare documentation context and Write everything in casual context separately. Under KV cache compression, the earlier formal instruction often degrades when casual instruction appears, causing the system to forget the formal constraint. RDIC should isolate these semantic contexts to prevent degradation.",
+        "rdic_value": "Maintains isolated KV contexts for each instruction cluster, preventing compression-based degradation when conflicting instructions appear across turns"
+      }
+    ],
+    "ground_truth_clusters": [
+      "formal_clinical_documentation",
+      "casual_conversational_explanation"
+    ],
+    "metadata": {
+      "generated_at": "2026-01-22T09:21:13.711184",
+      "model": "claude-sonnet-4-5-20250929",
+      "reviewed": false,
+      "quality_score": null,
+      "restructured_at": "2026-01-22T09:40:48.527298",
+      "original_structure": "unresolvable_merge",
+      "new_structure": "context_isolation"
+    },
+    "purpose": "context_isolation_test"
+  },
+  {
+    "id": "conflict_015",
+    "conflict_type": "style_jargon_heavy_vs_simple",
+    "domain": "legal_writing",
+    "turns": [
+      {
+        "turn_id": 1,
+        "role": "user",
+        "instruction": "Use sophisticated legal terminology and Latin phrases throughout - write for an audience of experienced attorneys and judges who expect proper legal jargon",
+        "content": "I need to draft a motion to dismiss based on lack of subject matter jurisdiction for a federal case"
+      },
+      {
+        "turn_id": 2,
+        "role": "user",
+        "instruction": "Actually, write in plain language that a high school student could understand - avoid all legal jargon and technical terms, use everyday words only",
+        "content": "This motion needs to be accessible because our client wants to fully understand what we're filing on their behalf"
+      },
+      {
+        "turn_id": 3,
+        "role": "user",
+        "query": "Show me both approaches: first the technical version, then the accessible version.",
+        "expected_behavior": "System should maintain separate contexts for technical and accessible writing styles. KV cache compression often causes style instructions to interfere with each other. RDIC prevents this by isolating semantic style clusters.",
+        "rdic_value": "Maintains isolated KV contexts for each instruction cluster, preventing compression-based degradation when conflicting instructions appear across turns"
+      }
+    ],
+    "ground_truth_clusters": [
+      "legal_jargon_technical_terminology",
+      "plain_language_accessible_writing"
+    ],
+    "metadata": {
+      "generated_at": "2026-01-22T09:22:45.684710",
+      "model": "claude-sonnet-4-5-20250929",
+      "reviewed": false,
+      "quality_score": null,
+      "restructured_at": "2026-01-22T09:40:48.527340",
+      "original_structure": "unresolvable_merge",
+      "new_structure": "context_isolation"
+    },
+    "purpose": "context_isolation_test"
+  },
+  {
+    "id": "conflict_082",
+    "conflict_type": "style_jargon_heavy_vs_simple",
+    "domain": "code_comments",
+    "turns": [
+      {
+        "turn_id": 1,
+        "role": "user",
+        "instruction": "Write all code comments using technical jargon and advanced computer science terminology appropriate for senior engineers",
+        "content": "I'm documenting our authentication middleware for the engineering team's code review"
+      },
+      {
+        "turn_id": 2,
+        "role": "user",
+        "instruction": "Actually, make the comments extremely simple and beginner-friendly, avoiding all technical terms so junior developers and interns can understand",
+        "content": "Add comments to this JWT token validation function that checks signature verification and payload claims"
+      },
+      {
+        "turn_id": 3,
+        "role": "user",
+        "query": "Show me both approaches: first the technical version, then the accessible version.",
+        "expected_behavior": "System should maintain separate contexts for technical and accessible writing styles. KV cache compression often causes style instructions to interfere with each other. RDIC prevents this by isolating semantic style clusters.",
+        "rdic_value": "Maintains isolated KV contexts for each instruction cluster, preventing compression-based degradation when conflicting instructions appear across turns"
+      }
+    ],
+    "ground_truth_clusters": [
+      "technical_jargon_expert_level",
+      "simple_beginner_accessible"
+    ],
+    "metadata": {
+      "generated_at": "2026-01-22T10:16:41.221888",
+      "model": "claude-sonnet-4-5-20250929",
+      "reviewed": false,
+      "quality_score": null,
+      "restructured_at": "2026-01-22T10:20:53.217551",
+      "original_structure": "unresolvable_merge",
+      "new_structure": "context_isolation"
+    },
+    "purpose": "context_isolation_test"
+  }
+]
