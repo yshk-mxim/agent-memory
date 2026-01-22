@@ -299,11 +299,68 @@ Choose the right model for your task:
 | Bulk operations | Haiku 4.5 | Speed and cost efficiency |
 | Final production | Sonnet 4.5 | Best quality for end users |
 
+## Sandbox Environment
+
+### Network Connectivity Resolution
+
+When running in Claude Code CLI sandbox environment, external API calls are blocked by default.
+
+**Symptom**: Connection errors when calling Claude API, even with valid credentials:
+```
+anthropic.APIConnectionError: Connection error
+```
+
+**Root Cause**: Sandbox security restrictions block external network access.
+
+**Solution**: Use `dangerouslyDisableSandbox: true` parameter in Bash commands:
+
+```python
+# When calling API from scripts via Bash tool
+Bash(
+    command="python generate_batch_002.py",
+    description="Generate dataset batch 2",
+    dangerouslyDisableSandbox=true  # Required for API calls
+)
+```
+
+**When to Use**:
+- ✅ Calling external APIs (Claude, DeepSeek, etc.)
+- ✅ Dataset generation scripts
+- ✅ Any script that makes network requests
+- ❌ Local file operations (use normal sandbox mode)
+- ❌ Git operations (use normal sandbox mode)
+
+**Security Note**: Only use sandbox bypass when necessary for external API calls. All other operations should use default sandbox mode.
+
+### Alternative: Claude CLI Integration
+
+For Claude API calls, consider using Claude Code's built-in Task tool with appropriate model:
+
+```python
+# Instead of calling API directly, use Task tool
+Task(
+    subagent_type="general-purpose",
+    prompt="Generate dataset examples...",
+    model="haiku",  # or "sonnet" for complex tasks
+    description="Generate examples via CLI"
+)
+```
+
+**Benefits**:
+- No sandbox bypass required
+- Automatic credential management
+- Better context preservation
+- Built-in error handling
+
 ## Troubleshooting
 
 ### Common Issues
 
-**Issue**: `Connection error`
+**Issue**: `Connection error` in sandbox
+- **Solution**: Use `dangerouslyDisableSandbox: true` for API calls (see Sandbox Environment section)
+- **Alternative**: Use Task tool with Claude CLI integration
+
+**Issue**: `Connection error` outside sandbox
 - **Solution**: Check network, verify API key, check Anthropic status
 
 **Issue**: `Model not found error`

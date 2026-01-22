@@ -56,7 +56,7 @@ Successfully built a comprehensive evaluation framework for measuring instructio
 **Purpose:** Semantic understanding of instruction following using Claude Haiku.
 
 **Features:**
-- Uses Claude 3.5 Haiku (fast, cost-effective)
+- Uses Claude 4.5 Haiku (fast, cost-effective)
 - Returns score (0-1), reasoning, and confidence level
 - Structured prompt for consistent evaluation
 - Optional caching for repeated evaluations
@@ -68,7 +68,7 @@ Successfully built a comprehensive evaluation framework for measuring instructio
 - Cost: ~$0.0001 per evaluation (Haiku pricing)
 
 **API Configuration:**
-- Model: `claude-3-5-haiku-20241022`
+- Model: `claude-haiku-4-5-20251001`
 - Max tokens: 500
 - Structured output format: SCORE/CONFIDENCE/REASONING
 
@@ -288,7 +288,7 @@ tests/
 
 ### API Costs (Estimated)
 
-**Claude 3.5 Haiku Pricing:**
+**Claude 4.5 Haiku Pricing:**
 - Input: $0.80 per million tokens
 - Output: $4.00 per million tokens
 

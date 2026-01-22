@@ -24,12 +24,12 @@ class LLMJudgeResult:
 class LLMJudge:
     """LLM-based instruction following judge using Claude Haiku"""
 
-    def __init__(self, model: str = "claude-3-5-haiku-20241022"):
+    def __init__(self, model: str = "claude-haiku-4-5-20251001"):
         """
         Initialize LLM judge.
 
         Args:
-            model: Model to use (default: claude-3-5-haiku-20241022)
+            model: Model to use (default: claude-haiku-4-5-20251001)
         """
         self.model = model
         config = get_config()
@@ -211,7 +211,7 @@ Evaluate how well the text follows the instruction."""
 class CachedLLMJudge(LLMJudge):
     """LLM Judge with simple caching to avoid redundant API calls"""
 
-    def __init__(self, model: str = "claude-3-5-haiku-20241022"):
+    def __init__(self, model: str = "claude-haiku-4-5-20251001"):
         super().__init__(model)
         self._cache = {}
 
