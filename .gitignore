@@ -40,13 +40,16 @@ Thumbs.db
 env.json
 
 # Data and large files
-data/
+data/batch_*.json
+data/*.csv
+data/*.xlsx
+data/*.pkl
+data/*.pickle
 models/
 results/
 experiments/
 *.csv
 *.xlsx
-*.json
 *.pkl
 *.pickle
 *.h5

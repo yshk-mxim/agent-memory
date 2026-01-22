@@ -1,0 +1,90 @@
+{
+  "schema_version": "1.0",
+  "description": "Schema for instruction conflict dataset used in RDIC semantic debate framework",
+  "conflict_types": {
+    "tone": {
+      "name": "Tone Conflicts",
+      "description": "Conflicts in formality, professionalism, or emotional tone",
+      "subtypes": [
+        "formal_vs_casual",
+        "professional_vs_friendly",
+        "serious_vs_humorous",
+        "empathetic_vs_objective"
+      ]
+    },
+    "detail": {
+      "name": "Detail Conflicts",
+      "description": "Conflicts in level of detail or comprehensiveness",
+      "subtypes": [
+        "brief_vs_detailed",
+        "concise_vs_comprehensive",
+        "summary_vs_exhaustive",
+        "minimal_vs_verbose"
+      ]
+    },
+    "style": {
+      "name": "Style Conflicts",
+      "description": "Conflicts in writing style or audience level",
+      "subtypes": [
+        "technical_vs_layperson",
+        "academic_vs_conversational",
+        "jargon_heavy_vs_simple",
+        "formal_vs_informal"
+      ]
+    },
+    "content": {
+      "name": "Content Conflicts",
+      "description": "Conflicts in what information to include or exclude",
+      "subtypes": [
+        "citations_vs_no_citations",
+        "examples_vs_no_examples",
+        "opinions_vs_facts_only",
+        "background_vs_direct_answer"
+      ]
+    },
+    "format": {
+      "name": "Format Conflicts",
+      "description": "Conflicts in presentation structure or organization",
+      "subtypes": [
+        "structured_vs_freeform",
+        "bullets_vs_paragraphs",
+        "lists_vs_prose",
+        "sections_vs_continuous"
+      ]
+    }
+  },
+  "example_structure": {
+    "id": "string (e.g., conflict_001)",
+    "conflict_type": "string (e.g., tone_formal_vs_casual)",
+    "domain": "string (e.g., business_email, technical_documentation)",
+    "turns": [
+      {
+        "turn_id": "integer",
+        "role": "string (user or assistant)",
+        "instruction": "string (optional, user instruction/constraint)",
+        "content": "string (message content)",
+        "query": "string (optional, final query)",
+        "expected_conflict": "string (description of the conflict)"
+      }
+    ],
+    "ground_truth_clusters": ["array of semantic constraint clusters"],
+    "metadata": {
+      "generated_at": "ISO timestamp",
+      "model": "string (model used for generation)",
+      "reviewed": "boolean",
+      "quality_score": "float (0-1, from manual review)"
+    }
+  },
+  "domains": [
+    "business_email",
+    "technical_documentation",
+    "academic_writing",
+    "customer_support",
+    "creative_writing",
+    "code_comments",
+    "social_media",
+    "legal_writing",
+    "medical_records",
+    "educational_content"
+  ]
+}
