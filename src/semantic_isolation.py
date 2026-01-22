@@ -37,49 +37,85 @@ class SemanticIsolationTester:
 
     def __init__(
         self,
-        model_name: str = "google/gemma-2-12b-it",
-        load_in_4bit: bool = True,
-        device_map: str = "auto",
+        model_name: str = "google/gemma-2-2b-it",  # Default to 2B for Mac compatibility
+        load_in_4bit: bool = False,  # MPS doesn't support 4-bit quantization
+        device: str = "auto",  # Will detect MPS/CUDA/CPU
         random_seed: int = 42,
         use_neutral_prompts: bool = True
     ):
         """
-        Initialize with Gemma 2 12B.
+        Initialize with Gemma 2 model.
 
-        Note: "Gemma 3" doesn't exist yet - using Gemma 2 12B Instruct.
+        Note: Defaults to 2B for Mac (MPS) compatibility.
+        For CUDA GPUs, use "google/gemma-2-12b-it" with load_in_4bit=True.
 
         Args:
             model_name: HuggingFace model identifier
-            load_in_4bit: Use 4-bit quantization to fit in 24GB VRAM
-            device_map: Device placement strategy
+            load_in_4bit: Use 4-bit quantization (CUDA only, not MPS)
+            device: Device to use ("auto", "mps", "cuda", "cpu")
             random_seed: Random seed for reproducibility
             use_neutral_prompts: If True, use neutral prompts that don't leak semantic info
         """
-        print(f"Loading {model_name} with 4-bit quantization...")
+        print(f"Loading {model_name}...")
 
         # Set random seed for reproducibility
         self.random_seed = random_seed
         self.use_neutral_prompts = use_neutral_prompts
         torch.manual_seed(random_seed)
-        if torch.cuda.is_available():
-            torch.cuda.manual_seed_all(random_seed)
 
-        # Configure 4-bit quantization
-        quantization_config = BitsAndBytesConfig(
-            load_in_4bit=load_in_4bit,
-            bnb_4bit_compute_dtype=torch.float16,
-            bnb_4bit_use_double_quant=True,
-            bnb_4bit_quant_type="nf4"
-        )
+        # Detect device
+        if device == "auto":
+            if torch.cuda.is_available():
+                device = "cuda"
+                print("  Detected: CUDA GPU")
+            elif torch.backends.mps.is_available():
+                device = "mps"
+                print("  Detected: Apple Silicon (MPS)")
+            else:
+                device = "cpu"
+                print("  Detected: CPU only")
 
-        # Load model with quantization
+        self.device = device
+        print(f"  Using device: {device}")
+
+        # MPS doesn't support 4-bit quantization
+        if device == "mps" and load_in_4bit:
+            print("  Warning: MPS doesn't support 4-bit quantization, using fp16 instead")
+            load_in_4bit = False
+
+        # Configure quantization (CUDA only)
+        quantization_config = None
+        if load_in_4bit and device == "cuda":
+            print("  Using 4-bit quantization (CUDA)")
+            from transformers import BitsAndBytesConfig
+            quantization_config = BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_compute_dtype=torch.float16,
+                bnb_4bit_use_double_quant=True,
+                bnb_4bit_quant_type="nf4"
+            )
+
+        # Load model
+        load_kwargs = {
+            "torch_dtype": torch.float16,
+            "trust_remote_code": True
+        }
+
+        if quantization_config:
+            load_kwargs["quantization_config"] = quantization_config
+            load_kwargs["device_map"] = "auto"
+        else:
+            # For MPS/CPU, load to specific device
+            load_kwargs["device_map"] = None
+
         self.model = AutoModelForCausalLM.from_pretrained(
             model_name,
-            quantization_config=quantization_config if load_in_4bit else None,
-            device_map=device_map,
-            torch_dtype=torch.float16,
-            trust_remote_code=True
+            **load_kwargs
         )
+
+        # Move to device if not using device_map
+        if load_kwargs["device_map"] is None:
+            self.model = self.model.to(device)
 
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
 
@@ -90,10 +126,42 @@ class SemanticIsolationTester:
         self.model.eval()
 
         print(f"✓ Model loaded successfully")
-        print(f"  Device: {self.model.device}")
-        print(f"  Memory footprint: ~7GB (4-bit) + KV cache overhead")
+        print(f"  Device: {self.model.device if hasattr(self.model, 'device') else device}")
+
+        # Estimate memory
+        if load_in_4bit:
+            mem_est = "~7GB (4-bit)"
+        elif "2b" in model_name.lower():
+            mem_est = "~4GB (fp16)"
+        elif "7b" in model_name.lower():
+            mem_est = "~14GB (fp16)"
+        elif "12b" in model_name.lower():
+            mem_est = "~24GB (fp16)"
+        else:
+            mem_est = "unknown"
+
+        print(f"  Memory estimate: {mem_est} + KV cache overhead")
         print(f"  Random seed: {random_seed}")
         print(f"  Neutral prompts: {use_neutral_prompts}")
+
+    def _cleanup_memory(self):
+        """Clean up GPU/MPS memory."""
+        if self.device == "cuda" and torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        elif self.device == "mps" and torch.backends.mps.is_available():
+            torch.mps.empty_cache()
+
+    def _report_memory(self):
+        """Report current memory usage."""
+        if self.device == "cuda" and torch.cuda.is_available():
+            mem_allocated = torch.cuda.memory_allocated() / 1e9
+            mem_reserved = torch.cuda.memory_reserved() / 1e9
+            print(f"CUDA Memory: {mem_allocated:.2f}GB allocated, {mem_reserved:.2f}GB reserved")
+        elif self.device == "mps":
+            # MPS doesn't have detailed memory reporting like CUDA
+            print(f"MPS Memory: (detailed reporting not available)")
+        else:
+            print(f"CPU Memory: (using system RAM)")
 
     def validate_example(self, example: Dict[str, Any]):
         """
@@ -607,8 +675,7 @@ Now consider the integration instructions:
         print(f"  Time: {results['sequential'].generation_time:.2f}s")
 
         # Free GPU memory after each condition
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
+        self._cleanup_memory()
         gc.collect()
 
         # Condition 2: Prompted
@@ -617,8 +684,7 @@ Now consider the integration instructions:
         print(f"  Cache size: {results['prompted'].cache_sizes}")
         print(f"  Time: {results['prompted'].generation_time:.2f}s")
 
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
+        self._cleanup_memory()
         gc.collect()
 
         # Condition 3: Turn-Based
@@ -627,8 +693,7 @@ Now consider the integration instructions:
         print(f"  Cache size: {results['turn_based'].cache_sizes}")
         print(f"  Time: {results['turn_based'].generation_time:.2f}s")
 
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
+        self._cleanup_memory()
         gc.collect()
 
         # Condition 4: Semantic
@@ -637,18 +702,14 @@ Now consider the integration instructions:
         print(f"  Cache sizes: {results['semantic'].cache_sizes}")
         print(f"  Time: {results['semantic'].generation_time:.2f}s")
 
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
+        self._cleanup_memory()
         gc.collect()
 
         print("\n" + "=" * 60)
         print("✓ All conditions complete")
 
         # Report memory usage
-        if torch.cuda.is_available():
-            mem_allocated = torch.cuda.memory_allocated() / 1e9
-            mem_reserved = torch.cuda.memory_reserved() / 1e9
-            print(f"GPU Memory: {mem_allocated:.2f}GB allocated, {mem_reserved:.2f}GB reserved")
+        self._report_memory()
 
         return results
 
@@ -661,16 +722,42 @@ def main():
         example = json.load(f)
 
     print("Initializing Semantic Isolation Tester...")
-    print("This will load Gemma 2 12B with 4-bit quantization (~7GB)")
 
-    tester = SemanticIsolationTester()
+    # Detect device and choose appropriate model
+    if torch.cuda.is_available():
+        print("CUDA GPU detected - using Gemma 2 12B with 4-bit quantization")
+        tester = SemanticIsolationTester(
+            model_name="google/gemma-2-12b-it",
+            load_in_4bit=True,
+            device="cuda"
+        )
+    elif torch.backends.mps.is_available():
+        print("Apple Silicon (MPS) detected - using Gemma 2 2B with fp16")
+        print("Note: MPS doesn't support 4-bit quantization")
+        tester = SemanticIsolationTester(
+            model_name="google/gemma-2-2b-it",
+            load_in_4bit=False,
+            device="mps"
+        )
+    else:
+        print("No GPU detected - using Gemma 2 2B on CPU (will be slow)")
+        tester = SemanticIsolationTester(
+            model_name="google/gemma-2-2b-it",
+            load_in_4bit=False,
+            device="cpu"
+        )
 
     # Run all conditions
     results = tester.test_all_conditions(example)
 
     # Save results
+    import os
+    os.makedirs('results', exist_ok=True)
+
     output = {
         'example_id': example['id'],
+        'device': tester.device,
+        'model': tester.model.config.name_or_path if hasattr(tester.model.config, 'name_or_path') else 'unknown',
         'results': {
             cond: {
                 'outputs': res.outputs,
