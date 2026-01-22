@@ -2,12 +2,16 @@
 
 ## Executive Summary
 
-This plan provides a detailed 21-day execution strategy for the "Reasoning-Discovered Instruction Contexts (RDIC)" research project. The goal is to publish an Arxiv paper demonstrating that semantic instruction clustering (discovered by reasoning models like DeepSeek R1) improves instruction-following in multi-turn LLM conversations compared to turn-based isolation approaches like FlowKV.
+This plan provides a detailed 21-day execution strategy for the "Reasoning-Discovered Instruction Contexts (RDIC)" research project. The goal is to publish an Arxiv paper demonstrating that semantic instruction clustering (discovered by reasoning models like DeepSeek R1) improves instruction-following in multi-turn LLM conversations under KV cache compression compared to turn-based isolation approaches like FlowKV.
 
 **Hardware:** Mac with 24GB RAM (primary development)
-**Model:** `bartowski/Meta-Llama-3.1-8B-Instruct-GGUF` (Q4_K_M, ~4.9GB)
-**APIs:** Claude (Anthropic), DeepSeek R1 (api.deepseek.com)
+**Model:** `google/gemma-3-12b-it` via HuggingFace Transformers (4-bit quantization, ~7GB)
+**APIs:**
+- Claude 4.5 Sonnet (`claude-sonnet-4-5-20250929`) - Dataset generation
+- Claude 4.5 Haiku (`claude-haiku-4-5-20251001`) - LLM evaluation judge
+- DeepSeek R1 (`deepseek-reasoner`) - Instruction clustering
 **Budget:** $15-25 total API costs
+**Key Innovation:** Real KV cache manipulation via Transformers (not text-level compression)
 
 ---
 
@@ -244,95 +248,177 @@ Output JSON: {{"instruction_1": score, "instruction_2": score, "overall": avg}}"
 
 ---
 
-### Day 5 (Friday): Experiment 1 - Compression Degrades Instruction Following
+### Day 5 (Friday): Experiment 1 - KV Cache Compression Setup & Validation
+
+**CRITICAL UPDATE:** After expert debate, text-level compression does NOT test KV cache compression. This day focuses on setting up REAL KV cache manipulation via HuggingFace Transformers.
 
 **Objectives:**
-- Demonstrate that context compression hurts instruction-following
-- Compare full context vs compressed context performance
+- Set up Gemma 3 12B with 4-bit quantization and direct KV cache access
+- Implement StreamingLLM KV cache compression
+- Validate setup on 2-3 test examples
+- Prepare for full experiment on Day 6
+
+**Tasks:**
+
+| Task | Time | Details |
+|------|------|---------|
+| Install Transformers + 4-bit quantization | 1h | transformers, accelerate, bitsandbytes |
+| Load Gemma 3 12B with 4-bit quant | 1h | Verify fits in 24GB RAM |
+| Implement StreamingLLM KV compression | 1.5h | ~20 lines: keep first N + last M tokens |
+| Implement random eviction baseline | 1h | Control condition |
+| Test on 2-3 examples | 1h | Verify compression works, model generates coherently |
+| Document KV cache structure | 30m | Shape, size, compression effects |
+| Create experiment runner scaffold | 1h | Ready for Day 6 full run |
+
+**KV Cache Compression Method (CORRECT):**
+```python
+def compress_kv_cache_streaming(past_key_values, keep_initial=100, keep_recent=100):
+    """
+    StreamingLLM: Compress KV cache by keeping initial + recent tokens.
+    This is TRUE cache compression, not text compression.
+    """
+    if past_key_values is None:
+        return None
+
+    compressed = []
+    for layer_cache in past_key_values:
+        key, value = layer_cache  # [batch, heads, seq_len, head_dim]
+        seq_len = key.shape[2]
+
+        if seq_len <= keep_initial + keep_recent:
+            compressed.append(layer_cache)  # No compression yet
+        else:
+            # Keep initial tokens + recent tokens, EVICT middle
+            new_key = torch.cat([
+                key[:, :, :keep_initial, :],
+                key[:, :, -keep_recent:, :]
+            ], dim=2)
+            new_value = torch.cat([
+                value[:, :, :keep_initial, :],
+                value[:, :, -keep_recent:, :]
+            ], dim=2)
+            compressed.append((new_key, new_value))
+
+    return tuple(compressed)
+```
+
+**Setup Code:**
+```python
+from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
+import torch
+
+# 4-bit quantization to fit in 24GB RAM
+quantization_config = BitsAndBytesConfig(
+    load_in_4bit=True,
+    bnb_4bit_compute_dtype=torch.float16
+)
+
+model = AutoModelForCausalLM.from_pretrained(
+    "google/gemma-3-12b-it",
+    quantization_config=quantization_config,
+    device_map="auto"
+)
+
+tokenizer = AutoTokenizer.from_pretrained("google/gemma-3-12b-it")
+```
+
+**Files to Create:**
+- `/Users/dev_user/semantic/src/kv_cache_compression.py` - KV cache manipulation
+- `/Users/dev_user/semantic/src/transformers_inference.py` - Gemma 3 inference wrapper
+- `/Users/dev_user/semantic/experiments/exp1_kv_compression.py` - Main experiment
+- `/Users/dev_user/semantic/tests/test_kv_compression.py` - Unit tests
+
+**Success Criteria:**
+- [ ] Gemma 3 12B loads with 4-bit quantization in <24GB RAM
+- [ ] Can access and manipulate `past_key_values` directly
+- [ ] StreamingLLM compression reduces KV cache size correctly
+- [ ] Model generates coherent responses with compressed cache
+- [ ] Validation: 2-3 examples run successfully
+
+**Key Insight:** Text compression tests "instruction-following with incomplete input". KV compression tests "instruction-following with degraded memory". Only the latter is valid for our research question.
+
+---
+
+### Day 6 (Saturday): Experiment 1 - Run KV Cache Compression Tests
+
+**Objectives:**
+- Run full KV cache compression experiment on 20-30 test examples
+- Compare baseline (no compression) vs. StreamingLLM vs. random eviction
 - Generate Figure 1 and Table 1
 
 **Tasks:**
 
 | Task | Time | Details |
 |------|------|---------|
-| Implement context compression | 1h | Random truncation, simulating KV eviction |
-| Run full context baseline (50 examples) | 2h | ~2.5 min/example with Llama |
-| Run 50% compressed (50 examples) | 2h | Same examples, compressed context |
-| Evaluate all outputs | 1h | Both evaluators |
-| Analyze results by conflict type | 1h | Breakdown of degradation |
-| Generate Figure 1 | 30m | Degradation bar chart |
-| Generate Table 1 | 30m | Mean scores with std dev |
+| Prepare 20-30 test examples | 30m | From test.json dataset |
+| Run baseline condition (no KV compression) | 2h | Full KV cache retained |
+| Run StreamingLLM condition (50% compression) | 2h | Keep first 100 + last 100 tokens |
+| Run random eviction condition (50% compression) | 2h | Random KV pair eviction (control) |
+| Evaluate all outputs with hybrid evaluator | 1h | Rule-based + LLM judge |
+| Statistical analysis | 1h | Paired t-tests, effect sizes |
+| Generate Figure 1 | 30m | Degradation by compression method |
+| Generate Table 1 | 30m | Mean scores ± std dev |
 
-**Compression Method:**
+**Execution Pattern:**
 ```python
-def compress_context_random(full_context: str, compression_ratio: float = 0.5) -> str:
-    """Simulate random token eviction (like H2O)"""
-    sentences = full_context.split('. ')
-    keep_count = max(1, int(len(sentences) * compression_ratio))
+for example in test_examples:
+    for condition in ['baseline', 'streaming', 'random']:
+        past_kv = None
+        for turn in example['turns']:
+            # Generate with current KV cache
+            output = model.generate(..., past_key_values=past_kv)
+            past_kv = output.past_key_values
 
-    # Keep first and last sentences (like StreamingLLM)
-    if keep_count >= 2:
-        kept = [sentences[0]]
-        middle = sentences[1:-1]
-        random.shuffle(middle)
-        kept.extend(middle[:keep_count-2])
-        kept.append(sentences[-1])
-    else:
-        kept = sentences[:keep_count]
+            # Apply compression policy
+            if condition == 'streaming':
+                past_kv = compress_kv_cache_streaming(past_kv)
+            elif condition == 'random':
+                past_kv = compress_kv_cache_random(past_kv)
 
-    return '. '.join(kept)
+        # Evaluate final response against both instructions
+        score = evaluator.evaluate(output, instructions)
 ```
 
 **Files to Create:**
-- `/Users/dev_user/semantic/experiments/exp1_compression.py`
-- `/Users/dev_user/semantic/src/compression.py`
-- `/Users/dev_user/semantic/results/exp1_results.json`
-- `/Users/dev_user/semantic/results/figures/fig1_degradation.png`
-- `/Users/dev_user/semantic/results/tables/table1_compression.csv`
+- `/Users/dev_user/semantic/results/exp1_kv_compression_results.json`
+- `/Users/dev_user/semantic/results/figures/fig1_kv_degradation.png`
+- `/Users/dev_user/semantic/results/tables/table1_kv_compression.csv`
 
 **Success Criteria:**
-- [ ] Full context mean score >0.6
-- [ ] Compressed context mean score <0.5
-- [ ] Degradation statistically significant (p<0.05)
-- [ ] Figure and table generated
+- [ ] Baseline (no compression) mean score >0.6
+- [ ] StreamingLLM compression shows measurable degradation
+- [ ] Random eviction shows worse degradation than StreamingLLM (validates compression strategy matters)
+- [ ] Statistical significance (p<0.05)
+- [ ] All visualizations generated
 
-**PIVOT TRIGGER:** If degradation <5%, pivot to "Instruction Conflict Analysis" paper focusing on characterization rather than solution.
+**Expected Finding:** StreamingLLM should outperform random eviction (shows principled compression helps), but both should degrade vs. baseline (shows KV compression hurts instruction-following).
 
 ---
 
-### Day 6 (Saturday): Buffer Day / Catch-up
+### Day 7 (Sunday): Buffer Day / Analysis & Documentation
 
 **Objectives:**
-- Address issues from Days 1-5
-- Re-run failed experiments
-- Document early findings
+- Analyze Day 6 KV compression results in depth
+- Document methodology for reproducibility
+- Address any issues from Days 5-6
+- Prepare R1 clustering prompts for Week 2
 
 **Tasks:**
-- Review all results so far (1h)
-- Fix any bugs discovered (2-3h variable)
-- Re-run problematic experiments if needed (2h)
-- Document methodology (1h)
-- Prepare for Week 2 (1h)
+
+| Task | Time | Details |
+|------|------|---------|
+| Deep dive on compression results | 1.5h | Which conflict types degrade most? Why? |
+| Document KV cache methodology | 1h | Write methods section draft |
+| Create reproducibility guide | 1h | How to replicate KV compression setup |
+| Fix any bugs from Days 5-6 | 1-2h | Re-run if needed |
+| Prepare R1 clustering prompts | 1h | Draft prompts for Day 8 |
+| Organize results folder | 30m | Clean up file structure |
 
 **Success Criteria:**
-- [ ] All Day 1-5 deliverables complete
-- [ ] No blocking bugs remaining
-- [ ] Dataset and Experiment 1 results validated
-
----
-
-### Day 7 (Sunday): Rest / Light Documentation
-
-**Objectives:**
-- Rest day with optional light work
-- Organize notes and results
-- Prepare for R1 experiments
-
-**Tasks:**
-- Organize results folder (30m)
-- Write experiment log (30m)
-- Read FlowKV paper details (1h optional)
-- Prepare R1 prompts (1h)
+- [ ] Clear understanding of which instructions degrade under KV compression
+- [ ] Methods section drafted (KV cache compression protocol)
+- [ ] R1 prompts ready for Monday
+- [ ] All Week 1 deliverables complete and validated
 
 ---
 
