@@ -16,6 +16,159 @@
 2. Reasoning-discovered clusters (DeepSeek R1, not attention-based)
 3. Single-model multi-agent simulation (efficiency breakthrough)
 4. Controlled message passing via coordinator cluster
+5. **Intra-conversation isolation for single-user devices** (distinct from multi-user per-user isolation)
+
+---
+
+## CRITICAL DISTINCTION: Single-User Semantic Isolation vs Multi-User Per-User Isolation
+
+### The Confusion: "Don't Multi-User Systems Already Do This?"
+
+**Short Answer:** No. Multi-user systems solve a **different problem** at a **different isolation level**.
+
+### Multi-User Per-User Isolation (Already Exists in 2025-2026)
+
+**Systems:** vLLM, SafeKV, MIRAGE, TensorRT-LLM ([SafeKV](https://openreview.net/pdf?id=jhDsbd5eXL), [MIRAGE](https://arxiv.org/html/2507.11507v1))
+
+**What It Isolates:** User A's entire conversation from User B's entire conversation
+
+**Why:** Privacy and security - prevent data leakage between different users
+
+> *"Per-user cache isolation ensures that sensitive data is never shared. However, this comes at a significant performance cost: it eliminates cache reuse, leads to redundant computations, increases memory overhead, and degrades inference latency."*
+> — [SafeKV: Safe KV-Cache Sharing in LLM Serving](https://openreview.net/pdf?id=jhDsbd5eXL)
+
+> *"Strict per-user cache isolation protects user data at the cost of reduced performance—adding 8–38.9% overhead in time-to-first-token (TTFT)."*
+> — [Selective KV-Cache Sharing](https://arxiv.org/pdf/2508.08438)
+
+**Cache Structure:**
+```
+Production Multi-User System:
+├── User A Cache (ALL of User A's conversation mixed together)
+├── User B Cache (ALL of User B's conversation mixed together)
+└── User C Cache (ALL of User C's conversation mixed together)
+```
+
+**Problem Solved:** Cross-user data leakage, timing side-channel attacks ([Prompt Leakage via KV-Cache Sharing](https://www.ndss-symposium.org/wp-content/uploads/2025-1772-paper.pdf))
+
+**Problem NOT Solved:** Context pollution within User A's multi-topic conversation
+
+---
+
+### Single-User Semantic Isolation (Our Work - 2026)
+
+**Target Platform:** Local personal AI assistants on single-user devices ([Local AI in Early 2026](https://enclaveai.app/blog/2026/01/15/local-ai-early-2026-ces-highlights-new-models/))
+
+**What It Isolates:** Task A from Task B within ONE user's conversation
+
+**Why:** Quality and coherence - prevent semantic interference between different topics in long conversations
+
+**Cache Structure:**
+```
+Single-User Device (e.g., Local AI Assistant):
+User's Conversation:
+├── Semantic Cluster 1: Technical debugging (isolated cache)
+├── Semantic Cluster 2: Email composition (isolated cache)
+└── Semantic Cluster 3: Data analysis (isolated cache)
+```
+
+**Problem Solved:** Intra-conversation context pollution (technical jargon bleeding into business strategy)
+
+**Problem NOT Addressed:** Cross-user privacy (irrelevant - only one user on local device!)
+
+---
+
+### Two-Level Isolation Hierarchy (When Both Are Needed)
+
+For **multi-user production systems** that also want semantic isolation:
+
+```
+Production System with Both Levels:
+├── User 1 Space (per-user isolation - LEVEL 1: PRIVACY)
+│   ├── Cluster 1A: Debugging (semantic isolation - LEVEL 2: QUALITY)
+│   ├── Cluster 1B: Documentation (semantic isolation)
+│   └── Cluster 1C: Code review (semantic isolation)
+├── User 2 Space (per-user isolation - LEVEL 1: PRIVACY)
+│   ├── Cluster 2A: Research (semantic isolation - LEVEL 2: QUALITY)
+│   ├── Cluster 2B: Writing (semantic isolation)
+│   └── Cluster 2C: Analysis (semantic isolation)
+```
+
+**Key Insight:** These are **complementary**, not competing!
+- **Level 1 (Outer):** Per-user boundaries prevent cross-user leakage
+- **Level 2 (Inner):** Semantic boundaries prevent intra-user pollution
+
+---
+
+### Why Single-User Devices Are Our Primary Focus
+
+**1. Market Trend: On-Device AI Dominance (2026)**
+
+> *"CES 2026 was dominated by on-device AI announcements with major chip makers and device manufacturers betting big on local processing."*
+> — [Local AI in Early 2026](https://enclaveai.app/blog/2026/01/15/local-ai-early-2026-ces-highlights-new-models/)
+
+**Popular Single-User Platforms:**
+- LM Studio, Ollama, Enclave AI ([Local AI Agents in 2026](https://research.aimultiple.com/local-ai-agent/))
+- Apple MLX framework for on-device inference
+- DeepSeek with 93.3% KV cache compression ([LLM VRAM Calculator](https://research.aimultiple.com/self-hosted-llm/))
+
+**2. Per-User Isolation is Trivial (Only One User!)**
+
+In single-user devices:
+- No need for cross-user privacy boundaries
+- Only one person using the device
+- **Primary challenge shifts from privacy to quality**
+
+**3. Long Multi-Topic Conversations Are Common**
+
+Single-user scenarios with semantic interference:
+- **Coding assistant:** Debugging Feature A + implementing Feature B + writing docs for Feature C (100+ turns)
+- **Research assistant:** Literature review + experiment design + paper writing (multiple sessions)
+- **Personal AI:** Email composition + calendar planning + data analysis + creative writing
+
+**4. Memory Constraints on Local Devices**
+
+Typical single-user device: 24GB VRAM
+- Full conversation cache: May exceed memory
+- Flush cache: Loses valuable context
+- **Semantic isolation:** Keep relevant clusters, evict unrelated ones
+
+**5. Performance Is Critical for Responsiveness**
+
+Local inference latency matters:
+- No network overhead (already fast)
+- Cache management becomes the bottleneck
+- Semantic isolation prevents cache bloat from unrelated context
+
+---
+
+### Comparison Table: Multi-User vs Single-User Isolation
+
+| Aspect | Multi-User Per-User Isolation | Single-User Semantic Isolation (Our Work) |
+|--------|-------------------------------|------------------------------------------|
+| **Isolation Boundary** | Between different USERS | Between different TOPICS (within one user) |
+| **Primary Goal** | Privacy & Security | Quality & Coherence |
+| **Cache Structure** | User A \| User B \| User C | Cluster 1 \| Cluster 2 \| Cluster 3 |
+| **Problem Solved** | Cross-user data leakage | Intra-conversation context pollution |
+| **Problem NOT Solved** | Context pollution within user | Cross-user privacy (irrelevant for single-user) |
+| **Attack Vector** | Timing side-channels, prompt leakage | Semantic interference, task confusion |
+| **Performance Trade-off** | Per-user isolation (8-38% overhead) vs shared cache | Semantic isolation vs sequential cache |
+| **Implementations** | vLLM, SafeKV, MIRAGE (2025) | RDIC (our work, 2026) |
+| **Target Platform** | Multi-tenant cloud serving (ChatGPT, Claude API) | Single-user local devices (LM Studio, Ollama) |
+| **When It Matters** | When multiple users share infrastructure | When one user has multi-topic conversations |
+
+---
+
+### Verdict: Orthogonal Contributions
+
+✅ **Multi-user per-user isolation:** Necessary for production serving, prevents cross-user leakage
+
+✅ **Single-user semantic isolation:** Necessary for local assistants, prevents intra-conversation pollution
+
+✅ **Both can coexist:** Production systems can implement BOTH levels of isolation
+
+❌ **NOT redundant:** Address different problems at different granularities
+
+**Our Focus:** Optimizing single-user devices where semantic quality is the bottleneck, not cross-user privacy.
 
 ---
 
@@ -520,6 +673,22 @@ Quality       ↑    │ (960GB, Complex)    │  (320GB, Semantic)
 - Context Engineering for AI Agents Part 2: https://www.philschmid.de/context-engineering-part-2
 - KV Caching Explained (HuggingFace): https://huggingface.co/blog/not-lain/kv-caching
 - KV Caching Comprehensive Review: https://www.rohan-paul.com/p/kv-caching-in-llm-inference-a-comprehensive
+
+### Multi-User Per-User Isolation Research (2025-2026)
+- SafeKV: Safe KV-Cache Sharing in LLM Serving: https://openreview.net/pdf?id=jhDsbd5eXL
+- Selective KV-Cache Sharing to Mitigate Timing Side-Channels: https://arxiv.org/pdf/2508.08438
+- MIRAGE: KV Cache Optimization for Multi-Tenant LLM Serving: https://arxiv.org/html/2507.11507v1
+- Prompt Leakage via KV-Cache Sharing in Multi-Tenant: https://www.ndss-symposium.org/wp-content/uploads/2025-1772-paper.pdf
+- vLLM Automatic Prefix Caching: https://docs.vllm.ai/en/stable/design/prefix_caching/
+- Structuring Applications to Secure the KV Cache (NVIDIA): https://developer.nvidia.com/blog/structuring-applications-to-secure-the-kv-cache/
+
+### Single-User Local AI Systems (2026)
+- Local AI in Early 2026: CES Highlights: https://enclaveai.app/blog/2026/01/15/local-ai-early-2026-ces-highlights-new-models/
+- Local AI Agents: Goose, Observer AI, AnythingLLM: https://research.aimultiple.com/local-ai-agent/
+- LMCache: Enterprise-Scale LLM Inference: https://lmcache.ai/
+- LLM VRAM Calculator for Self-Hosting: https://research.aimultiple.com/self-hosted-llm/
+- Best Local LLMs for Offline Use in 2026: https://iproyal.com/blog/best-local-llms/
+- Master KV Cache Aware Routing with llm-d: https://developers.redhat.com/articles/2025/10/07/master-kv-cache-aware-routing-llm-d-efficient-ai-inference
 
 ### Related Work
 - LLMs and Multi-Agent Systems in 2025: https://www.classicinformatics.com/blog/how-llms-and-multi-agent-systems-work-together-2025
