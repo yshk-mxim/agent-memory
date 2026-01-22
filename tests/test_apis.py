@@ -76,24 +76,24 @@ def test_deepseek_api():
         return False
 
 
-def test_llama_inference(model_path: str = None):
-    """Test local Llama inference"""
-    print_section("Testing Local Llama Inference")
+def test_gemma_inference(model_path: str = None):
+    """Test local Gemma 3 12B inference"""
+    print_section("Testing Local Gemma 3 12B Inference")
 
     try:
         import time
         clients = APIClients()
 
-        print("Testing Llama generation speed...")
+        print("Testing Gemma 3 generation speed...")
         start = time.time()
-        response = clients.call_llama(
+        response = clients.call_gemma(
             "Say 'Hello' in exactly 3 words.",
             model_path=model_path,
             max_tokens=50
         )
         elapsed = time.time() - start
 
-        print(f"✓ Llama inference works!")
+        print(f"✓ Gemma 3 12B inference works!")
         print(f"Response: {response}")
         print(f"Time: {elapsed:.2f}s")
 
@@ -107,22 +107,23 @@ def test_llama_inference(model_path: str = None):
     except FileNotFoundError as e:
         print(f"✗ Model file not found: {e}")
         print("Download model from:")
-        print("  https://huggingface.co/bartowski/Meta-Llama-3.1-8B-Instruct-GGUF")
+        print("  https://huggingface.co/google/gemma-3-12b-it-GGUF")
+        print("  or search for quantized Q4_K_M versions on Hugging Face")
         return False
     except Exception as e:
-        print(f"✗ Llama inference failed: {e}")
+        print(f"✗ Gemma 3 inference failed: {e}")
         return False
 
 
 def main():
     """Run all API tests"""
-    print_section("Day 1 API Verification Tests")
+    print_section("RDIC API Verification Tests")
 
     results = {
         "claude-haiku-4.5": test_claude_api(),
         "claude-sonnet-4.5": test_claude_sonnet_api(),
-        "deepseek": test_deepseek_api(),
-        "llama": test_llama_inference()
+        "deepseek-r1": test_deepseek_api(),
+        "gemma-3-12b": test_gemma_inference()
     }
 
     # Summary
@@ -137,8 +138,8 @@ def main():
     print(f"\nPassed: {passed}/{total}")
 
     if passed == total:
-        print("\n🎉 All Day 1 requirements met!")
-        print("Ready to proceed to Day 2")
+        print("\n🎉 All API requirements met!")
+        print("Ready to proceed with RDIC research")
         return 0
     else:
         print("\n⚠ Some tests failed. Please fix before proceeding.")

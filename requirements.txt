@@ -1,8 +1,8 @@
 # RDIC Research Project Dependencies
-# Day 1 - Environment Setup
+# Updated for Gemma 3 12B
 
 # Core LLM Libraries
-llama-cpp-python>=0.2.0  # Local Llama inference with GGUF support
+llama-cpp-python>=0.2.0  # Local inference with GGUF support (Gemma 3)
 anthropic>=0.25.0  # Claude API
 openai>=1.0.0  # DeepSeek R1 API (OpenAI-compatible)
 

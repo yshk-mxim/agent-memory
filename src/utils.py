@@ -4,7 +4,7 @@ Utility functions and API client wrappers for RDIC project.
 Provides unified interfaces for:
 - Claude (Anthropic) API
 - DeepSeek R1 API (OpenAI-compatible)
-- Local Llama inference via llama-cpp-python
+- Local Gemma 3 inference via llama-cpp-python
 """
 
 import json
@@ -31,7 +31,7 @@ class APIClients:
         self.config = config
         self._claude = None
         self._deepseek = None
-        self._llama = None
+        self._gemma = None
 
     @property
     def claude(self):
@@ -66,18 +66,18 @@ class APIClients:
                 )
         return self._deepseek
 
-    def get_llama(self, model_path: str = None, n_ctx: int = 4096):
+    def get_gemma(self, model_path: str = None, n_ctx: int = 32768):
         """
-        Get Llama model instance (lazy initialization).
+        Get Gemma 3 model instance (lazy initialization).
 
         Args:
             model_path: Path to GGUF model file
-            n_ctx: Context window size
+            n_ctx: Context window size (default: 32k, max: 128k)
 
         Returns:
-            Llama instance
+            Llama instance (llama-cpp-python works with Gemma 3)
         """
-        if self._llama is None:
+        if self._gemma is None:
             try:
                 from llama_cpp import Llama
             except ImportError:
@@ -87,20 +87,21 @@ class APIClients:
                 )
 
             if model_path is None:
-                # Default model path
+                # Default model path for Gemma 3 12B Q4_K_M
                 model_path = str(Path(__file__).parent.parent / "models" /
-                                "Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf")
+                                "gemma-3-12b-instruct-Q4_K_M.gguf")
 
             if not Path(model_path).exists():
                 raise FileNotFoundError(
                     f"Model not found: {model_path}\n"
-                    "Download from: https://huggingface.co/bartowski/Meta-Llama-3.1-8B-Instruct-GGUF"
+                    "Download from: https://huggingface.co/google/gemma-3-12b-it-GGUF\n"
+                    "or search for quantized versions on Hugging Face"
                 )
 
-            print(f"Loading Llama model from: {model_path}")
+            print(f"Loading Gemma 3 12B model from: {model_path}")
             start_time = time.time()
 
-            self._llama = Llama(
+            self._gemma = Llama(
                 model_path=model_path,
                 n_ctx=n_ctx,
                 n_gpu_layers=-1,  # Use Metal on Mac
@@ -110,7 +111,7 @@ class APIClients:
             load_time = time.time() - start_time
             print(f"Model loaded in {load_time:.2f}s")
 
-        return self._llama
+        return self._gemma
 
     def call_claude(
         self,
@@ -183,7 +184,7 @@ class APIClients:
         else:
             return message.content
 
-    def call_llama(
+    def call_gemma(
         self,
         prompt: str,
         model_path: str = None,
@@ -192,7 +193,7 @@ class APIClients:
         system: str = "You are a helpful assistant."
     ) -> str:
         """
-        Call local Llama model.
+        Call local Gemma 3 model.
 
         Args:
             prompt: User prompt
@@ -204,14 +205,14 @@ class APIClients:
         Returns:
             Generated text
         """
-        llama = self.get_llama(model_path)
+        gemma = self.get_gemma(model_path)
 
         messages = [
             {"role": "system", "content": system},
             {"role": "user", "content": prompt}
         ]
 
-        response = llama.create_chat_completion(
+        response = gemma.create_chat_completion(
             messages=messages,
             max_tokens=max_tokens,
             temperature=temperature

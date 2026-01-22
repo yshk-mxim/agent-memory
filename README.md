@@ -251,7 +251,7 @@ If you use this work in your research, please cite:
 
 - Built with [Anthropic Claude API](https://www.anthropic.com/)
 - DeepSeek R1 integration for reasoning experiments
-- Llama.cpp for local inference
+- llama.cpp for local Gemma 3 inference
 
 ---
 
