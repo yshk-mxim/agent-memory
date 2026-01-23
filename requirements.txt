@@ -6,6 +6,11 @@ llama-cpp-python>=0.2.0  # Local inference with GGUF support (Gemma 3)
 anthropic>=0.25.0  # Claude API
 openai>=1.0.0  # DeepSeek R1 API (OpenAI-compatible)
 
+# MLX - Persistent Agent Memory POC
+mlx>=0.30.0  # Apple Silicon ML framework
+mlx-lm>=0.30.0  # MLX language model utilities
+safetensors>=0.7.0  # Secure tensor serialization
+
 # Data Processing
 numpy>=1.24.0
 pandas>=2.0.0
