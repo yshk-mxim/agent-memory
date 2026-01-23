@@ -1,0 +1,13 @@
+{
+  "overall": {
+    "full_mean": 0.60825,
+    "full_std": 0.12203617884614554,
+    "compressed_mean": 0.48766666666666664,
+    "compressed_std": 0.10943288150988055,
+    "mean_degradation": 0.12058333333333335,
+    "mean_degradation_pct": 17.9411859943655
+  },
+  "statistical_test": {
+    "t_statistic": 4.217753297268614,
+    "p_value": 0.00046605541395106147,
+    "significant": 
