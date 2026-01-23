@@ -1,0 +1,105 @@
+# Novelty Analysis: Persistent Multi-Agent Memory on Edge
+
+**Research Direction**: Unified Memory-Aware Persistent Multi-Agent Cache Management for Edge AI on Mac
+
+**Analysis Date**: January 23, 2026
+
+---
+
+## Overview
+
+This directory contains novelty analysis for building a **persistent multi-agent memory system** using KV cache persistence on Mac with MLX, exploiting unified memory architecture.
+
+---
+
+## Key Files
+
+### 1. Academic Research Novelty
+**File**: `EDGE_KV_CACHE_NOVELTY_REVIEW.md` (38KB)
+
+**What it analyzes**: 80+ academic sources on KV cache management, multi-agent systems, edge deployment
+
+**Key findings**:
+- ✅ **Mac prefill claim VALIDATED**: Apple Silicon is compute-bound for prefill (slow), memory-bound for decode
+- ✅ **Core problem well-established**: Multi-agent KV cache management actively researched (2025-2026)
+- ✅ **Research gap identified**: Mac/edge-optimized agentic workflows with unified memory-aware eviction
+- ⚠️ **Non-novel aspects**: Per-agent isolation, LRU policies, cache reuse (extensively covered in literature)
+
+**Conclusion**: Focus on **edge deployment angle** with Mac unified memory optimizations, not the general per-agent cache problem.
+
+---
+
+### 2. Practical Tools Gap Analysis
+**File**: `EXISTING_TOOLS_COMPARISON.md` (32KB)
+
+**What it analyzes**: LM Studio, Ollama, llama.cpp capabilities (multi-agent support, session persistence, KV cache management)
+
+**Critical findings**:
+- ❌ **NONE** provide native multi-agent orchestration (all require external frameworks)
+- ❌ **NONE** provide per-agent KV cache persistence
+- ❌ **LM Studio**: Saves text conversations only, NO KV cache persistence
+- ❌ **Ollama**: NO native session persistence
+- ⚠️ **llama.cpp**: Has Slot Persistence API but NOT exposed in WebUI
+
+**What's missing** (that our POC fills):
+1. Native agent lifecycle management
+2. Isolated KV cache contexts per agent
+3. Persistent agent state across sessions
+4. Agent coordination and orchestration
+5. Cross-session continuity with KV cache reuse
+
+**Conclusion**: "As of January 2026, **none of the three major local LLM tools** provide native multi-agent orchestration or per-agent context isolation... This represents a significant **opportunity for innovation**."
+
+---
+
+## The Gap We're Filling
+
+### What Exists (Well-Established)
+- Academic research on multi-agent KV cache management (KVCOMM, KVFlow, Continuum)
+- Prompt caching in local tools (LM Studio, Ollama, llama.cpp)
+- External multi-agent frameworks (AutoGen, CrewAI, LangGraph)
+
+### What's Missing (Our Opportunity)
+- **Persistent agent KV cache** across sessions on edge devices
+- **Mac unified memory optimization** for zero-copy cache access
+- **Native agent orchestration** without external frameworks
+- **LRU eviction** with agent-aware policies
+- **Practical demonstration** filling gap in popular local LLM tools
+
+---
+
+## Research Statement
+
+**Problem**: Local LLM tools (LM Studio, Ollama, llama.cpp) don't persist agent KV cache across sessions, forcing expensive re-prefill on Mac where compute is slow.
+
+**Solution**: Build persistent multi-agent memory system exploiting Mac's unified memory architecture for efficient cache save/load and cross-session reuse.
+
+**Novelty**: Edge-specific optimization for Mac/MLX combining:
+1. Per-agent KV cache isolation
+2. Disk persistence (safetensors)
+3. LRU eviction for memory management
+4. Zero-copy benefits of unified memory architecture
+
+**Goal**: 2-3 week capability demonstration showing 40-60% speedup on agent session resume.
+
+---
+
+## Archived Materials
+
+Previous research direction (semantic KV cache isolation within single session) archived to:
+- `archive_semantic_isolation/NOVELTY.md` - Original novelty analysis
+- `archive_semantic_isolation/DEBATE_*.md` - Multi-round debates
+
+**Reason for pivot**: Single-turn agents don't benefit from semantic KV cache partitioning. Persistent multi-agent memory fills clearer gap in existing tools.
+
+---
+
+## Related Documentation
+
+- **POC Plan**: `/Users/dev_user/semantic/plans/POC_PLAN.md`
+- **Sprint Plans**: `/Users/dev_user/semantic/plans/SPRINT_*.md`
+- **Code Archive**: `/Users/dev_user/semantic/archive/semantic_isolation/`
+
+---
+
+**Last Updated**: January 23, 2026
