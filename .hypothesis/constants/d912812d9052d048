@@ -1,0 +1,4 @@
+# file: /Users/dev_user/semantic/src/semantic/__init__.py
+# hypothesis_version: 6.150.3
+
+['0.1.0-alpha', '__version__']

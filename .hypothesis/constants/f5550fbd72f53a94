@@ -1,0 +1,4 @@
+# file: /Users/dev_user/semantic/src/semantic/domain/value_objects.py
+# hypothesis_version: 6.150.3
+
+[256, 'ModelCacheSpec', 'gemma3', 'global', 'hidden_size', 'layer_types', 'layers', 'model', 'model_type', 'num_attention_heads', 'num_hidden_layers', 'num_key_value_heads', 'sliding_window', 'text_config', 'unknown', 'use_sliding']
