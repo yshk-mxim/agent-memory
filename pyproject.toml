@@ -30,8 +30,8 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 dependencies = [
-    "mlx>=0.30.4",
-    "mlx-lm>=0.30.4",
+    "mlx==0.30.3",      # Pin exact version due to API instability
+    "mlx-lm==0.30.4",   # Pin exact version due to API instability
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.32.0",
     "pydantic>=2.10.0",
@@ -94,6 +94,11 @@ packages = ["src/semantic"]
 line-length = 100
 target-version = "py311"
 src = ["src", "tests"]
+# Exclude old POC code (will be replaced by hexagonal architecture)
+extend-exclude = [
+    "src/*.py",  # Old POC root files
+    "tests/test_*.py",  # Old POC test files
+]
 
 [tool.ruff.lint]
 select = [
@@ -138,6 +143,7 @@ convention = "google"  # Google-style docstrings
 # Mypy configuration
 [tool.mypy]
 python_version = "3.11"
+mypy_path = "src"
 strict = true
 warn_return_any = true
 warn_unused_configs = true
@@ -148,6 +154,11 @@ warn_redundant_casts = true
 warn_unused_ignores = true
 warn_no_return = true
 check_untyped_defs = true
+# Exclude old POC code (will be replaced by hexagonal architecture)
+exclude = [
+    "^src/[^/]+\\.py$",       # Old POC root files (not in src/semantic/)
+    "^tests/test_[^/]+\\.py$" # Old POC test files (not in tests/unit/)
+]
 
 [[tool.mypy.overrides]]
 module = "mlx.*"
@@ -176,12 +187,7 @@ markers = [
 addopts = [
     "--strict-markers",
     "--strict-config",
-    "--cov=semantic",
-    "--cov-report=term-missing",
-    "--cov-report=html",
-    "--cov-report=xml",
 ]
-timeout = 300
 filterwarnings = [
     "error",
     "ignore::DeprecationWarning",

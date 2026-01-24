@@ -1,3 +1,1 @@
-"""
-Tests for Persistent Multi-Agent Memory System
-"""
+"""Tests for Semantic multi-agent inference server."""

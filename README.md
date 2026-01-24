@@ -1,8 +1,12 @@
-# Persistent Multi-Agent Memory for Mac
+# Semantic — Multi-Agent LLM Inference Server
 
-> **POC**: KV cache persistence for multi-agent systems on Apple Silicon
+> **Production-Quality** multi-agent inference with block-pool memory management for Apple Silicon
 
-A demonstration of persistent agent memory using KV cache persistence on Mac with unified memory architecture. Fills a gap that LM Studio, Ollama, and llama.cpp don't provide: **persistent KV cache across sessions** with **native multi-agent orchestration**.
+**Transitioning from POC to production hexagonal architecture.** See [ADR-001](project/architecture/ADR-001-hexagonal-architecture.md) for design details.
+
+**Current Status**: Sprint 0 complete ✅ | Sprint 1 (Domain Core) starting
+
+A production-quality multi-agent inference server with persistent KV cache, continuous batching, and block-pool memory management. Fills a gap that LM Studio, Ollama, and llama.cpp don't provide: **persistent KV cache across sessions** with **continuous batching** and **native multi-agent orchestration**.
 
 ---
 

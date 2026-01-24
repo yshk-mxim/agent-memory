@@ -21,7 +21,7 @@ format:  ## Format code with ruff
 	ruff check --fix src tests
 
 typecheck:  ## Run mypy type checker
-	mypy src
+	mypy --explicit-package-bases src/semantic tests/unit tests/conftest.py
 
 security:  ## Run security scans (ruff S rules + semgrep)
 	ruff check --select S src
@@ -39,7 +39,7 @@ test:  ## Run all tests (unit + integration + smoke)
 	pytest -v -m "not e2e"
 
 test-unit:  ## Run unit tests only (no MLX dependencies)
-	pytest -v -m unit
+	pytest -v -m unit tests/unit tests/conftest.py
 
 test-integration:  ## Run integration tests (requires Apple Silicon + MLX)
 	pytest -v -m integration
@@ -85,6 +85,6 @@ ci:  ## CI pipeline (lint + typecheck + unit tests)
 	$(MAKE) test-unit
 
 validate:  ## Validate configuration files
-	python -c "import toml; toml.load('pyproject.toml'); print('✓ pyproject.toml valid')"
-	python -c "import toml; toml.load('config/default.toml'); print('✓ config/default.toml valid')" || echo "⚠ config/default.toml not yet created"
+	python -c "import tomllib; f = open('pyproject.toml', 'rb'); tomllib.load(f); f.close(); print('✓ pyproject.toml valid')"
+	python -c "import tomllib; f = open('config/default.toml', 'rb'); tomllib.load(f); f.close(); print('✓ config/default.toml valid')"
 	@echo "✓ Configuration validation complete"
