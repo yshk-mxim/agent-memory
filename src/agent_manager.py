@@ -85,6 +85,11 @@ class PersistentAgentManager:
         self.agents: Dict[str, AgentContext] = {}
         self.max_agents = max_agents
 
+        # Warmup: Process dummy prompt to compile forward pass (avoids 7x slowdown on first agent)
+        logger.info("Running warmup to compile MLX forward pass...")
+        _ = self.cache_extractor.process_prompt("warmup")
+        logger.info("Warmup complete")
+
         logger.info("PersistentAgentManager initialized successfully")
 
     def create_agent(
