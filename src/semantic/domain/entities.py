@@ -138,6 +138,8 @@ class AgentBlocks:
     def add_block(self, block: KVBlock) -> None:
         """Add a block to this agent's collection.
 
+        **Not thread-safe**: Caller must synchronize access if used concurrently.
+
         Args:
             block: The block to add.
 
@@ -155,6 +157,8 @@ class AgentBlocks:
 
     def remove_block(self, block_id: int, layer_id: int) -> KVBlock | None:
         """Remove a block from this agent's collection.
+
+        **Not thread-safe**: Caller must synchronize access if used concurrently.
 
         Args:
             block_id: The block to remove.

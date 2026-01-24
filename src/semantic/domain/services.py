@@ -100,6 +100,9 @@ class BlockPool:
     ) -> list[KVBlock]:
         """Allocate blocks for an agent at a specific layer.
 
+        **Not thread-safe**: Caller must synchronize concurrent allocations
+        using per-agent locks (see application/scheduler.py).
+
         Args:
             n_blocks: Number of blocks to allocate.
             layer_id: Which layer these blocks belong to (0-indexed).
@@ -160,6 +163,8 @@ class BlockPool:
 
     def free(self, blocks: list[KVBlock], agent_id: str) -> None:
         """Return blocks to the free list.
+
+        **Not thread-safe**: Caller must synchronize concurrent free operations.
 
         Args:
             blocks: List of blocks to free.
@@ -303,14 +308,20 @@ class BlockPool:
         This clears all allocations and updates the spec. Used when
         swapping models at runtime.
 
+        **Not thread-safe**: Caller must ensure no concurrent operations
+        during reconfiguration. All agents must be drained before calling.
+
         Args:
             new_spec: New model cache specification.
 
         Raises:
-            RuntimeError: If there are active allocations (must drain first).
+            RuntimeError: If there are active allocations. All agents must call
+                free_agent_blocks() before reconfiguring the pool.
 
         Example:
             >>> pool = BlockPool(spec1, total_blocks=100)
+            >>> # Must drain all agents first
+            >>> pool.free_agent_blocks("agent_1")
             >>> pool.reconfigure(spec2)  # Hot-swap to new model
             >>> pool.spec == spec2
             True

@@ -55,6 +55,14 @@ class ModelCacheSpec:
     layer_types: list[str]
     sliding_window_size: int | None = None
 
+    def __post_init__(self) -> None:
+        """Validate cache spec invariants."""
+        if len(self.layer_types) != self.n_layers:
+            raise ValueError(
+                f"layer_types length ({len(self.layer_types)}) must equal "
+                f"n_layers ({self.n_layers})"
+            )
+
     @classmethod
     def from_model(cls, model: Any) -> "ModelCacheSpec":
         """Extract cache specification from a loaded model.
