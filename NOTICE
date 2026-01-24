@@ -1,0 +1,24 @@
+Semantic Server
+Copyright 2026 Semantic Team
+
+This product includes software developed by third parties under Apache 2.0 license:
+
+- FastAPI (https://github.com/tiangolo/fastapi)
+  Copyright Sebastián Ramírez
+
+- Pydantic (https://github.com/pydantic/pydantic)
+  Copyright Samuel Colvin and other contributors
+
+- Uvicorn (https://github.com/encode/uvicorn)
+  Copyright Tom Christie
+
+- Transformers (https://github.com/huggingface/transformers)
+  Copyright The HuggingFace Team
+
+Additional dependencies are used under their respective licenses (MIT, BSD, etc.).
+Full dependency list with licenses available via:
+  pip-licenses --from=mixed --format=markdown
+
+For MLX framework attribution:
+- MLX (https://github.com/ml-explore/mlx)
+  Copyright Apple Inc.

@@ -1,0 +1,235 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "semantic-server"
+dynamic = ["version"]
+description = "Production-quality multi-agent LLM inference server with block-pool memory management"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.11"
+authors = [
+    { name = "Semantic Team" },
+]
+keywords = [
+    "llm",
+    "inference",
+    "multi-agent",
+    "mlx",
+    "continuous-batching",
+    "kv-cache",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+    "mlx>=0.30.4",
+    "mlx-lm>=0.30.4",
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.32.0",
+    "pydantic>=2.10.0",
+    "pydantic-settings>=2.7.0",
+    "safetensors>=0.4.0",
+    "transformers>=4.47.0",
+    "sse-starlette>=2.2.0",
+    "structlog>=24.4.0",
+    "prometheus-client>=0.21.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3.0",
+    "pytest-asyncio>=0.25.0",
+    "pytest-cov>=6.0.0",
+    "pytest-timeout>=2.3.1",
+    "hypothesis>=6.122.0",
+    "ruff>=0.8.0",
+    "mypy>=1.14.0",
+    "semgrep>=1.98.0",
+    "schemathesis>=3.41.0",
+    "liccheck>=0.9.2",
+    "pre-commit>=4.0.0",
+    "codespell>=2.3.0",
+]
+docs = [
+    "mkdocs-material>=9.5.0",
+    "mkdocs-mermaid2-plugin>=1.2.0",
+    "mkdocstrings[python]>=0.27.0",
+]
+
+[project.scripts]
+semantic = "semantic.entrypoints.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/yshk-mxim/semantic-server"
+Documentation = "https://github.com/yshk-mxim/semantic-server/docs"
+Repository = "https://github.com/yshk-mxim/semantic-server"
+Issues = "https://github.com/yshk-mxim/semantic-server/issues"
+
+[tool.hatch.version]
+path = "src/semantic/__init__.py"
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "/src",
+    "/tests",
+    "/config",
+    "/README.md",
+    "/LICENSE",
+    "/NOTICE",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/semantic"]
+
+# Ruff configuration
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E",      # pycodestyle errors
+    "W",      # pycodestyle warnings
+    "F",      # pyflakes
+    "I",      # isort
+    "N",      # pep8-naming
+    "UP",     # pyupgrade
+    "S",      # bandit security rules
+    "B",      # flake8-bugbear
+    "C90",    # mccabe complexity
+    "PL",     # pylint
+    "RUF",    # ruff-specific rules
+]
+ignore = [
+    "S101",   # Allow assert statements (needed for tests)
+    "PLR0913", # Too many arguments to function (can be necessary)
+]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10  # Domain logic target: 7
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = [
+    "S101",   # Allow assertions in tests
+    "PLR2004", # Allow magic values in tests
+]
+
+[tool.ruff.lint.isort]
+force-single-line = false
+known-first-party = ["semantic"]
+
+# Mypy configuration
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_any_generics = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_no_return = true
+check_untyped_defs = true
+
+[[tool.mypy.overrides]]
+module = "mlx.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "mlx_lm.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "transformers.*"
+ignore_missing_imports = true
+
+# Pytest configuration
+[tool.pytest.ini_options]
+minversion = "8.0"
+pythonpath = ["src"]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+markers = [
+    "unit: Fast unit tests with mocked boundaries",
+    "integration: Tests with real MLX and disk I/O (Apple Silicon only)",
+    "smoke: Basic server lifecycle tests",
+    "e2e: Full-stack multi-agent tests (slow, Apple Silicon only)",
+]
+addopts = [
+    "--strict-markers",
+    "--strict-config",
+    "--cov=semantic",
+    "--cov-report=term-missing",
+    "--cov-report=html",
+    "--cov-report=xml",
+]
+timeout = 300
+filterwarnings = [
+    "error",
+    "ignore::DeprecationWarning",
+]
+
+[tool.coverage.run]
+source = ["src"]
+omit = ["tests/*", "**/__pycache__/*"]
+
+[tool.coverage.report]
+precision = 2
+show_missing = true
+skip_covered = false
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+    "@(abc\\.)?abstractmethod",
+]
+
+[tool.coverage.html]
+directory = "htmlcov"
+
+# Codespell configuration
+[tool.codespell]
+skip = "*.git,*.pyc,*.egg-info,htmlcov,.pytest_cache,.mypy_cache,.ruff_cache"
+ignore-words-list = "fo,nd,te"
+
+# Liccheck configuration
+[tool.liccheck]
+authorized_licenses = [
+    "MIT",
+    "BSD",
+    "BSD License",
+    "BSD-3-Clause",
+    "Apache",
+    "Apache 2.0",
+    "Apache Software License",
+    "ISC",
+    "Python Software Foundation License",
+    "PSF",
+    "Zlib",
+    "MPL-2.0",
+]
+unauthorized_licenses = [
+    "GPL",
+    "GPLv2",
+    "GPLv3",
+    "LGPL",
+    "LGPLv2",
+    "LGPLv3",
+    "AGPL",
+    "AGPLv3",
+    "SSPL",
+    "EUPL",
+]
