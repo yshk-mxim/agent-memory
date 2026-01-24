@@ -1,0 +1,19 @@
+{
+  "mlx_model": "mlx-community/gemma-3-12b-it-4bit",
+  "note": "POC only - no memory competition with LM Studio",
+  "scenarios": {
+    "cold_start": {
+      "creation_time_sec": 0.30423688888549805,
+      "generation_time_sec": 1.523818016052246,
+      "total_time_sec": 1.8280549049377441,
+      "output": "\n\nKV caching is a technique where frequently accessed key-value pairs are stored in a fast, in-memory cache to reduce latency and improve performance by avoiding slower data retrieval from the original data source.\n"
+    },
+    "session_resume": {
+      "num_sessions": 3,
+      "avg_load_time_sec": 0.0011177857716878254,
+      "avg_generation_sec": 1.711223045984904,
+      "total_time_sec": 5.137022495269775,
+      "per_session_sec": 1.7123408317565918
+    }
+  }
+}

@@ -1,45 +1,45 @@
 {
   "mlx_model": "mlx-community/gemma-3-12b-it-4bit",
   "lmstudio_model": "gemma-3-12b-it",
-  "note": "Real measurements - both systems actually run",
+  "note": "Fair comparison - no memory competition, both warmed up, sequential runs",
   "scenarios": {
     "cold_start": {
       "this_poc": {
-        "creation_time_sec": 0.3036818504333496,
-        "generation_time_sec": 1.5405211448669434,
-        "total_time_sec": 1.844202995300293,
+        "creation_time_sec": 0.30423688888549805,
+        "generation_time_sec": 1.523818016052246,
+        "total_time_sec": 1.8280549049377441,
         "output": "\n\nKV caching is a technique where frequently accessed key-value pairs are stored in a fast, in-memory cache to reduce latency and improve performance by avoiding slower data retrieval from the original data source.\n"
       },
       "lmstudio": {
-        "total_time_sec": 11.106499195098877,
+        "total_time_sec": 1.509002923965454,
         "output": "KV (Key-Value) caching stores frequently accessed data as key-value pairs in a fast, readily available memory store to reduce latency and improve application performance by avoiding slower data retrieval processes.",
         "tokens_generated": 39,
-        "tokens_per_sec": 3.511457509240183
+        "tokens_per_sec": 25.84488033827881
       }
     },
     "session_resume": {
       "this_poc": {
         "num_sessions": 3,
-        "avg_load_time_sec": 0.0007661183675130209,
-        "avg_generation_sec": 1.7318256696065266,
-        "total_time_sec": 5.197775363922119,
-        "per_session_sec": 1.7325917879740398
+        "avg_load_time_sec": 0.0011177857716878254,
+        "avg_generation_sec": 1.711223045984904,
+        "total_time_sec": 5.137022495269775,
+        "per_session_sec": 1.7123408317565918
       },
       "lmstudio": {
         "num_sessions": 3,
         "session_times_sec": [
-          3.2395081520080566,
-          1.630631923675537,
-          1.5962262153625488
+          1.6354379653930664,
+          1.5547142028808594,
+          1.5642139911651611
         ],
-        "avg_session_sec": 2.1554554303487143,
-        "total_time_sec": 6.466366291046143,
+        "avg_session_sec": 1.584788719813029,
+        "total_time_sec": 4.754366159439087,
         "note": "No cache persistence - full processing each session"
       }
     }
   },
   "summary": {
-    "cold_start_difference_percent": 83.39528088099884,
-    "session_resume_advantage_percent": 19.61829673769978
+    "cold_start_difference_percent": -21.14323146133242,
+    "session_resume_advantage_percent": -8.04852472439425
   }
 }

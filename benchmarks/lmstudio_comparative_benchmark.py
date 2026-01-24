@@ -208,11 +208,11 @@ class LMStudioComparativeBenchmark:
             "per_session_sec": (sum(load_times) + sum(generation_times)) / num_sessions
         }
 
-    def run_all(self, quick: bool = True) -> Dict[str, Any]:
-        """Run all benchmarks."""
+    def run_lmstudio_only(self, quick: bool = True) -> Dict[str, Any]:
+        """Run LM Studio benchmarks only (without loading our model)."""
         logger.info("\n" + "=" * 70)
-        logger.info("  REAL COMPARATIVE BENCHMARK")
-        logger.info("  This POC vs LM Studio (MLX + llama.cpp)")
+        logger.info("  STEP 1: LM Studio Benchmarks")
+        logger.info("  (Our MLX model NOT loaded - no memory competition)")
         logger.info("=" * 70)
 
         # Check LM Studio
@@ -230,20 +230,23 @@ class LMStudioComparativeBenchmark:
         if model_info:
             logger.info(f"\n✓ LM Studio running with model: {model_info.get('id', 'unknown')}")
 
+        # Warmup LM Studio
+        self.print_section("Warmup: LM Studio")
+        logger.info("Running warmup request to compile/optimize...")
+        warmup_result = self.benchmark_lmstudio(
+            "warmup",
+            "You are a helpful assistant.",
+            max_tokens=10
+        )
+        logger.info(f"✓ Warmup complete ({warmup_result['total_time_sec']:.2f}s)")
+
         results = {
-            "mlx_model": self.mlx_model,
             "lmstudio_model": model_info.get('id') if model_info else "unknown",
-            "note": "Real measurements - both systems actually run",
+            "note": "LM Studio only - no memory competition",
             "scenarios": {}
         }
 
         # Scenario 1: Cold Start
-        self.print_section("Scenario 1: Cold Start Comparison")
-
-        # This POC
-        poc_cold = self.benchmark_poc_cold_start()
-
-        # LM Studio (current backend, either MLX or llama.cpp)
         self.print_section("LM Studio: Cold Start")
         logger.info("Benchmarking LM Studio with current backend...")
         lms_cold = self.benchmark_lmstudio(
@@ -254,20 +257,12 @@ class LMStudioComparativeBenchmark:
         logger.info(f"✓ Generated: {lms_cold['output'][:80]}...")
         logger.info(f"✓ Total time: {lms_cold['total_time_sec']:.2f}s ({lms_cold['tokens_per_sec']:.1f} tok/s)")
 
-        results["scenarios"]["cold_start"] = {
-            "this_poc": poc_cold,
-            "lmstudio": lms_cold
-        }
+        results["scenarios"]["cold_start"] = lms_cold
 
         # Scenario 2: Session Resume
         num_sessions = 3 if quick else 5
-
-        # This POC
-        poc_resume = self.benchmark_poc_session_resume(num_sessions)
-
-        # LM Studio - simulate session resume (no cache persistence)
-        self.print_section(f"LM Studio: {num_sessions}-Session Resume (No Cache Persistence)")
-        logger.info("LM Studio has no cache persistence - re-processing each session...")
+        self.print_section(f"LM Studio: {num_sessions}-Session Resume")
+        logger.info("Testing session resume (no cache persistence)...")
 
         lms_times = []
         for i in range(num_sessions):
@@ -279,7 +274,7 @@ class LMStudioComparativeBenchmark:
             lms_times.append(lms_result['total_time_sec'])
             logger.info(f"  Session {i+1}: {lms_result['total_time_sec']:.2f}s")
 
-        lms_resume = {
+        results["scenarios"]["session_resume"] = {
             "num_sessions": num_sessions,
             "session_times_sec": lms_times,
             "avg_session_sec": sum(lms_times) / len(lms_times),
@@ -287,38 +282,38 @@ class LMStudioComparativeBenchmark:
             "note": "No cache persistence - full processing each session"
         }
 
-        results["scenarios"]["session_resume"] = {
-            "this_poc": poc_resume,
-            "lmstudio": lms_resume
+        logger.info("\n" + "=" * 70)
+        logger.info("  LM Studio benchmarks complete!")
+        logger.info("  Please shut down LM Studio now.")
+        logger.info("=" * 70)
+
+        return results
+
+    def run_poc_only(self, quick: bool = True) -> Dict[str, Any]:
+        """Run POC benchmarks only (LM Studio should be shut down)."""
+        logger.info("\n" + "=" * 70)
+        logger.info("  STEP 2: This POC Benchmarks")
+        logger.info("  (LM Studio should be shut down - no memory competition)")
+        logger.info("=" * 70)
+
+        results = {
+            "mlx_model": self.mlx_model,
+            "note": "POC only - no memory competition",
+            "scenarios": {}
         }
 
-        # Calculate advantages
-        self.print_section("Results Summary")
+        # Scenario 1: Cold Start
+        poc_cold = self.benchmark_poc_cold_start()
+        results["scenarios"]["cold_start"] = poc_cold
 
-        # Cold start
-        poc_cold_time = poc_cold["total_time_sec"]
-        lms_cold_time = lms_cold["total_time_sec"]
-        cold_diff = ((lms_cold_time - poc_cold_time) / lms_cold_time) * 100
+        # Scenario 2: Session Resume
+        num_sessions = 3 if quick else 5
+        poc_resume = self.benchmark_poc_session_resume(num_sessions)
+        results["scenarios"]["session_resume"] = poc_resume
 
-        print(f"\nCold Start:")
-        print(f"  This POC:   {poc_cold_time:.2f}s")
-        print(f"  LM Studio:  {lms_cold_time:.2f}s")
-        print(f"  Difference: {abs(cold_diff):.1f}% {'faster' if cold_diff > 0 else 'slower'} (POC)")
-
-        # Session resume
-        poc_resume_per = poc_resume["per_session_sec"]
-        lms_resume_per = lms_resume["avg_session_sec"]
-        resume_advantage = ((lms_resume_per - poc_resume_per) / lms_resume_per) * 100
-
-        print(f"\n{num_sessions}-Session Resume:")
-        print(f"  This POC:   {poc_resume_per:.2f}s per session (with cache persistence)")
-        print(f"  LM Studio:  {lms_resume_per:.2f}s per session (no cache persistence)")
-        print(f"  Advantage:  {resume_advantage:.1f}% faster with cache persistence")
-
-        results["summary"] = {
-            "cold_start_difference_percent": cold_diff,
-            "session_resume_advantage_percent": resume_advantage
-        }
+        logger.info("\n" + "=" * 70)
+        logger.info("  POC benchmarks complete!")
+        logger.info("=" * 70)
 
         return results
 
@@ -339,10 +334,95 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="LM Studio Comparative Benchmark")
     parser.add_argument("--quick", action="store_true", help="Quick mode (3 sessions)")
+    parser.add_argument("--step", choices=["1", "2", "combine"],
+                       help="Step 1: LM Studio only, Step 2: POC only, combine: merge results")
+    parser.add_argument("--lms-results", help="Path to LM Studio results JSON (for combine step)")
+    parser.add_argument("--poc-results", help="Path to POC results JSON (for combine step)")
 
     args = parser.parse_args()
 
     benchmark = LMStudioComparativeBenchmark()
-    results = benchmark.run_all(quick=args.quick)
-    if results:
-        benchmark.save_results(results)
+
+    if args.step == "1":
+        # Step 1: Benchmark LM Studio only
+        results = benchmark.run_lmstudio_only(quick=args.quick)
+        if results:
+            output_path = benchmark.output_dir / "lmstudio_only_results.json"
+            with open(output_path, 'w') as f:
+                json.dump(results, f, indent=2)
+            logger.info(f"\n✓ LM Studio results saved to: {output_path}")
+            logger.info("\n📋 Next step: Shut down LM Studio, then run:")
+            logger.info(f"    python -m benchmarks.lmstudio_comparative_benchmark --step 2 {'--quick' if args.quick else ''}")
+
+    elif args.step == "2":
+        # Step 2: Benchmark POC only
+        results = benchmark.run_poc_only(quick=args.quick)
+        if results:
+            output_path = benchmark.output_dir / "poc_only_results.json"
+            with open(output_path, 'w') as f:
+                json.dump(results, f, indent=2)
+            logger.info(f"\n✓ POC results saved to: {output_path}")
+            logger.info("\n📋 Next step: Combine results:")
+            logger.info(f"    python -m benchmarks.lmstudio_comparative_benchmark --step combine")
+
+    elif args.step == "combine":
+        # Combine results from both steps
+        lms_path = args.lms_results or benchmark.output_dir / "lmstudio_only_results.json"
+        poc_path = args.poc_results or benchmark.output_dir / "poc_only_results.json"
+
+        with open(lms_path) as f:
+            lms_results = json.load(f)
+        with open(poc_path) as f:
+            poc_results = json.load(f)
+
+        combined = {
+            "mlx_model": poc_results["mlx_model"],
+            "lmstudio_model": lms_results["lmstudio_model"],
+            "note": "Fair comparison - no memory competition, both warmed up",
+            "scenarios": {
+                "cold_start": {
+                    "this_poc": poc_results["scenarios"]["cold_start"],
+                    "lmstudio": lms_results["scenarios"]["cold_start"]
+                },
+                "session_resume": {
+                    "this_poc": poc_results["scenarios"]["session_resume"],
+                    "lmstudio": lms_results["scenarios"]["session_resume"]
+                }
+            }
+        }
+
+        # Calculate advantages
+        poc_cold_time = combined["scenarios"]["cold_start"]["this_poc"]["total_time_sec"]
+        lms_cold_time = combined["scenarios"]["cold_start"]["lmstudio"]["total_time_sec"]
+        cold_diff = ((lms_cold_time - poc_cold_time) / lms_cold_time) * 100
+
+        poc_resume_per = combined["scenarios"]["session_resume"]["this_poc"]["per_session_sec"]
+        lms_resume_per = combined["scenarios"]["session_resume"]["lmstudio"]["avg_session_sec"]
+        resume_advantage = ((lms_resume_per - poc_resume_per) / lms_resume_per) * 100
+
+        combined["summary"] = {
+            "cold_start_difference_percent": cold_diff,
+            "session_resume_advantage_percent": resume_advantage
+        }
+
+        benchmark.save_results(combined)
+
+        # Print summary
+        benchmark.print_section("Final Results Summary")
+        print(f"\nCold Start:")
+        print(f"  This POC:   {poc_cold_time:.2f}s")
+        print(f"  LM Studio:  {lms_cold_time:.2f}s")
+        print(f"  Difference: {abs(cold_diff):.1f}% {'faster' if cold_diff > 0 else 'slower'} (POC)")
+
+        print(f"\nSession Resume:")
+        print(f"  This POC:   {poc_resume_per:.2f}s per session (with cache persistence)")
+        print(f"  LM Studio:  {lms_resume_per:.2f}s per session (no cache persistence)")
+        print(f"  Advantage:  {resume_advantage:.1f}% faster with cache persistence")
+
+    else:
+        logger.error("Please specify --step 1, --step 2, or --step combine")
+        logger.info("\nUsage:")
+        logger.info("  1. Run LM Studio benchmarks: --step 1 [--quick]")
+        logger.info("  2. Shut down LM Studio manually")
+        logger.info("  3. Run POC benchmarks: --step 2 [--quick]")
+        logger.info("  4. Combine results: --step combine")
