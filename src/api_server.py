@@ -22,7 +22,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 import logging
 
-from .agent_manager import PersistentAgentManager
+from .concurrent_manager import ConcurrentAgentManager
 
 logger = logging.getLogger(__name__)
 
@@ -91,7 +91,7 @@ class APIServer:
         logger.info(f"Initializing APIServer with model: {model_name}")
 
         self.model_name = model_name
-        self.manager = PersistentAgentManager(
+        self.manager = ConcurrentAgentManager(
             model_name=model_name,
             max_agents=max_agents,
             cache_dir=cache_dir
@@ -199,10 +199,10 @@ class APIServer:
         # Count input tokens
         input_tokens = self._count_tokens(prompt)
 
-        # Generate response
-        response_text = self.manager.generate(
+        # Generate response (async with concurrent manager)
+        response_text = await self.manager.generate(
             agent_id=agent_id,
-            user_input=prompt,
+            prompt=prompt,
             max_tokens=request.max_tokens,
             temperature=request.temperature
         )
@@ -273,10 +273,10 @@ class APIServer:
             "content_block": {"type": "text", "text": ""}
         })
 
-        # Generate response (non-streaming for now, but we'll chunk it)
-        response_text = self.manager.generate(
+        # Generate response (async with concurrent manager)
+        response_text = await self.manager.generate(
             agent_id=agent_id,
-            user_input=prompt,
+            prompt=prompt,
             max_tokens=request.max_tokens,
             temperature=request.temperature
         )
@@ -353,6 +353,22 @@ app = FastAPI(
     description="Anthropic-compatible Messages API with persistent KV cache",
     version="1.0.0"
 )
+
+
+@app.on_event("startup")
+async def startup_event():
+    """Start the concurrent manager's background worker."""
+    server = get_server()
+    await server.manager.start()
+    logger.info("Concurrent manager worker started")
+
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Stop the concurrent manager's background worker."""
+    server = get_server()
+    await server.manager.stop()
+    logger.info("Concurrent manager worker stopped")
 
 
 @app.post("/v1/messages")

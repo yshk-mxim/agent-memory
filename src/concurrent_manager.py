@@ -88,6 +88,9 @@ class ConcurrentAgentManager:
             maxsize=max_queue_size
         )
 
+        # Per-agent locks for sequential per-agent, cross-agent parallel
+        self._agent_locks: Dict[str, asyncio.Lock] = {}
+
         # Metrics
         self.metrics = UtilizationMetrics()
         self.start_time = time.time()
@@ -191,6 +194,10 @@ class ConcurrentAgentManager:
         """
         Generate response asynchronously (queued).
 
+        Per-agent sequential, cross-agent parallel semantics:
+        - Same agent: requests execute sequentially (via per-agent lock)
+        - Different agents: requests can execute in parallel (different locks)
+
         Args:
             agent_id: Unique identifier
             prompt: User input
@@ -201,27 +208,33 @@ class ConcurrentAgentManager:
         Returns:
             str: Generated response
         """
-        # Create request
-        request = GenerationRequest(
-            agent_id=agent_id,
-            prompt=prompt,
-            max_tokens=max_tokens,
-            temperature=temperature,
-            priority=priority
-        )
+        # Get or create per-agent lock
+        if agent_id not in self._agent_locks:
+            self._agent_locks[agent_id] = asyncio.Lock()
 
-        # Add to queue
-        await self.request_queue.put((priority, request))
-        self.metrics.total_requests += 1
-        self.metrics.queue_depth = self.request_queue.qsize()
+        # Acquire lock for this agent (ensures sequential per-agent)
+        async with self._agent_locks[agent_id]:
+            # Create request
+            request = GenerationRequest(
+                agent_id=agent_id,
+                prompt=prompt,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                priority=priority
+            )
 
-        logger.debug(
-            f"Queued request for {agent_id}, priority={priority}, "
-            f"queue_depth={self.metrics.queue_depth}"
-        )
+            # Add to queue
+            await self.request_queue.put((priority, request))
+            self.metrics.total_requests += 1
+            self.metrics.queue_depth = self.request_queue.qsize()
 
-        # Wait for result
-        return await request.future
+            logger.debug(
+                f"Queued request for {agent_id}, priority={priority}, "
+                f"queue_depth={self.metrics.queue_depth}"
+            )
+
+            # Wait for result (lock held until request completes)
+            return await request.future
 
     async def generate_concurrent(
         self,
@@ -252,6 +265,11 @@ class ConcurrentAgentManager:
         logger.info(f"Completed {len(responses)} concurrent requests")
 
         return responses
+
+    @property
+    def agents(self):
+        """Access to underlying agent registry."""
+        return self.manager.agents
 
     def create_agent(
         self,
