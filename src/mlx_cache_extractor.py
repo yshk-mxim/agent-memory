@@ -8,6 +8,7 @@ Enables cache inspection, reuse, and persistence for multi-agent systems.
 import mlx.core as mx
 from mlx_lm import stream_generate
 from mlx_lm.models.cache import make_prompt_cache
+from mlx_lm.sample_utils import make_sampler
 from typing import Any, Dict, List, Optional, Tuple
 import logging
 
@@ -67,12 +68,14 @@ class MLXCacheExtractor:
 
         # Generate with cache
         text = ""
+        # Create sampler with temperature (MLX requires sampler, not direct temp param)
+        sampler = make_sampler(temperature)
         for response in stream_generate(
             self.model,
             self.tokenizer,
             prompt,
             max_tokens=max_tokens,
-            temp=temperature,
+            sampler=sampler,
             prompt_cache=prompt_cache,
             **kwargs
         ):
@@ -100,11 +103,11 @@ class MLXCacheExtractor:
         Returns:
             cache: List[KVCache] containing the processed prompt
         """
-        # Generate with max_tokens=0 to only process prompt
+        # Generate with max_tokens=1 (MLX has bug with 0, we discard the 1 token output)
         _, cache = self.generate_with_cache(
             prompt,
             existing_cache=existing_cache,
-            max_tokens=0
+            max_tokens=1
         )
 
         logger.debug(f"Processed prompt into cache: {self.get_cache_info(cache)['total_tokens']} tokens")

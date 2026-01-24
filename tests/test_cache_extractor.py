@@ -134,9 +134,9 @@ def test_process_prompt_creates_cache(
 
     # Assertions
     assert cache == sample_cache
-    # Should call stream_generate with max_tokens=0
+    # Should call stream_generate with max_tokens=1 (MLX bug workaround)
     call_args = mock_stream_gen.call_args
-    assert call_args[1]['max_tokens'] == 0
+    assert call_args[1]['max_tokens'] == 1
 
 
 def test_get_cache_info_structure(sample_cache):
