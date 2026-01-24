@@ -106,12 +106,17 @@ select = [
     "S",      # bandit security rules
     "B",      # flake8-bugbear
     "C90",    # mccabe complexity
+    "D",      # pydocstyle (docstring rules)
     "PL",     # pylint
     "RUF",    # ruff-specific rules
 ]
 ignore = [
-    "S101",   # Allow assert statements (needed for tests)
+    "S101",    # Allow assert statements (needed for tests)
     "PLR0913", # Too many arguments to function (can be necessary)
+    "D100",    # Missing module docstring (allow for simple modules)
+    "D104",    # Missing package docstring
+    "D203",    # Conflicts with D211 (blank line before class)
+    "D213",    # Conflicts with D212 (multi-line summary second line)
 ]
 
 [tool.ruff.lint.mccabe]
@@ -126,6 +131,9 @@ max-complexity = 10  # Domain logic target: 7
 [tool.ruff.lint.isort]
 force-single-line = false
 known-first-party = ["semantic"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"  # Google-style docstrings
 
 # Mypy configuration
 [tool.mypy]

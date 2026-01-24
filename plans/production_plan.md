@@ -244,6 +244,323 @@ Rationale: Custom exception hierarchy is more Pythonic than `Result[T]` monads a
 
 ---
 
+## Code Documentation Standards (Production Quality)
+
+All production code must follow these documentation requirements enforced by CI.
+
+### Docstring Requirements (Google Style)
+
+**Required for:**
+- All public classes
+- All public methods/functions
+- All port interfaces (Protocol classes)
+- All domain services
+- Complex private methods (CC > 5)
+
+**Format** (Google-style, enforced by ruff D rules):
+
+```python
+def allocate(self, n_blocks: int, layer_type: str = "global") -> list[KVBlock]:
+    """Allocate blocks from the free pool.
+
+    Args:
+        n_blocks: Number of blocks to allocate.
+        layer_type: Type of layer ("global" or "sliding_window").
+            Sliding window layers have block caps enforced.
+
+    Returns:
+        List of allocated KVBlock instances.
+
+    Raises:
+        PoolExhaustedError: If insufficient blocks available.
+        ValueError: If n_blocks < 1 or layer_type invalid.
+
+    Example:
+        >>> pool = BlockPool(total_blocks=100, spec=spec)
+        >>> blocks = pool.allocate(4, layer_type="sliding_window")
+        >>> len(blocks)
+        4
+    """
+```
+
+**Rationale sections** (for non-obvious design choices):
+
+```python
+class AgentCacheStore:
+    """Manages per-agent KV cache blocks with prefix matching.
+
+    Uses Dict + longest_common_prefix() instead of trie data structure.
+
+    Rationale:
+        For ≤10 concurrent agents, Dict O(n) prefix scan is faster than
+        trie O(m) traversal due to lower constant factors and cache locality.
+        Profiling showed Dict: 0.02ms, Trie: 0.15ms for 10 agents.
+        Upgrade to trie only if profiling shows >50ms with production load.
+    """
+```
+
+### Type Annotations (Always Required)
+
+**Enforced by `mypy --strict`:**
+
+```python
+# ✅ GOOD: Full type annotations
+def process(
+    agent_id: str,
+    cache: list[RotatingKVCache] | None,
+    timeout: float = 30.0
+) -> tuple[str, int]:
+    ...
+
+# ❌ BAD: Missing types (mypy error)
+def process(agent_id, cache=None):  # type: ignore
+    ...
+```
+
+**Generic types:**
+
+```python
+from typing import Protocol, TypeVar
+
+T = TypeVar("T")
+
+class CacheStore(Protocol[T]):
+    """Generic cache store interface."""
+    def get(self, key: str) -> T | None: ...
+    def put(self, key: str, value: T) -> None: ...
+```
+
+### When to Comment (Inline)
+
+**✅ REQUIRED Comments:**
+
+1. **Non-obvious algorithms** (CC > 7):
+   ```python
+   # Use block-aligned hashing to ensure cache key matches block boundaries.
+   # SHA-256 on first 256 tokens per block, then XOR-fold to 64 bits.
+   block_hash = self._hash_prefix(tokens[:self.BLOCK_TOKENS])
+   ```
+
+2. **Performance-critical sections**:
+   ```python
+   # PERF: Batch mx.concatenate to avoid N individual Metal GPU calls.
+   # Reduces overhead from 15ms to 2ms for 8K context (32 blocks).
+   all_keys = mx.concatenate([b.keys for b in blocks], axis=0)
+   ```
+
+3. **Workarounds for upstream bugs**:
+   ```python
+   # WORKAROUND: mlx_lm v0.30.4 BatchGenerator doesn't expose tokenizer.
+   # Must pre-tokenize before insert(). Remove if API fixed in v0.31+.
+   tokens = self.tokenizer.encode(prompt)
+   ```
+
+4. **Security-sensitive code**:
+   ```python
+   # SECURITY: Validate agent_id to prevent path traversal attacks.
+   # Only allow alphanumeric + hyphen to ensure safe filesystem paths.
+   if not re.match(r'^[a-zA-Z0-9-]+$', agent_id):
+       raise InvalidRequestError(f"Invalid agent_id: {agent_id}")
+   ```
+
+5. **Complex business rules** from design docs:
+   ```python
+   # Per anthropic_cli_adapter.md §3.2: System prompt hash determines agent_id.
+   # This enables cache reuse across sessions with identical system prompts.
+   agent_id = hashlib.sha256(canonical_system.encode()).hexdigest()[:16]
+   ```
+
+**❌ AVOID Comments:**
+
+1. **Redundant with code** (let code self-document):
+   ```python
+   # BAD: Comment just repeats code
+   # Increment the counter
+   counter += 1
+
+   # GOOD: Self-documenting with better naming
+   completed_requests_count += 1
+   ```
+
+2. **Obvious operations**:
+   ```python
+   # BAD
+   # Get the agent from the store
+   agent = self.store.get(agent_id)
+
+   # GOOD: No comment needed, operation is clear
+   agent = self.store.get(agent_id)
+   ```
+
+3. **TODO/FIXME in production code** (use issues instead):
+   ```python
+   # ❌ BAD: TODO in production
+   # TODO: optimize this later
+   result = slow_operation()
+
+   # ✅ GOOD: Issue filed, reference in commit/PR
+   # See issue #123 for optimization opportunity
+   ```
+
+### Self-Documenting Code Principles
+
+**Prefer expressive names over comments:**
+
+```python
+# ❌ BAD: Comment explains unclear code
+# Check if we have enough blocks
+if pool.free > req:
+    ...
+
+# ✅ GOOD: Code explains itself
+if pool.has_available_blocks(requested_count):
+    ...
+```
+
+**Extract complex expressions:**
+
+```python
+# ❌ BAD: Complex boolean needs comment
+# Check if cache is valid and not expired and model matches
+if cache and cache.ts > now - 3600 and cache.model == current:
+    ...
+
+# ✅ GOOD: Extracted method with descriptive name
+if self._is_cache_valid_for_model(cache, current_model):
+    ...
+
+def _is_cache_valid_for_model(
+    self,
+    cache: AgentCache | None,
+    model_id: str
+) -> bool:
+    """Check cache is recent, valid, and matches current model."""
+    if cache is None:
+        return False
+    is_recent = cache.timestamp > time.time() - 3600
+    model_matches = cache.model_id == model_id
+    return is_recent and model_matches
+```
+
+### Documentation Coverage Gates
+
+| Layer | Docstring Coverage | Enforced By |
+|-------|-------------------|-------------|
+| Domain core | 100% public APIs | ruff D + CI check |
+| Ports (Protocols) | 100% all methods | ruff D + CI check |
+| Application services | 95% public APIs | ruff D + CI check |
+| Adapters | 80% public APIs | ruff D + CI check |
+| Tests | Examples in docstrings | pytest --doctest-modules |
+
+### Complexity Threshold → Comment Requirement
+
+| Cyclomatic Complexity | Requirement |
+|----------------------|-------------|
+| CC ≤ 5 | No inline comments required (self-documenting) |
+| 5 < CC ≤ 10 | Algorithm explanation comment required |
+| CC > 10 | **Refactor required** (exceeds gate, see Quality Pipeline) |
+
+### API Reference Auto-Generation
+
+All port interfaces and public domain APIs must support mkdocs auto-generation:
+
+```python
+class InferencePort(Protocol):
+    """Port for inference operations.
+
+    This port defines the contract for text generation services.
+    Implementations may use different backends (MLX, vLLM, etc.)
+    but must provide consistent semantics.
+
+    Thread safety: Implementations must be thread-safe for
+    concurrent access from multiple agents.
+    """
+
+    def generate(
+        self,
+        prompt: str,
+        max_tokens: int = 256,
+        temperature: float = 0.7
+    ) -> GenerationResult:
+        """Generate text continuation from prompt.
+
+        Args:
+            prompt: Input text to continue.
+            max_tokens: Maximum tokens to generate.
+            temperature: Sampling temperature (0.0 = greedy).
+
+        Returns:
+            GenerationResult with text, tokens, and cache.
+
+        Raises:
+            ModelNotFoundError: If model not loaded.
+            PoolExhaustedError: If no blocks available.
+        """
+        ...
+```
+
+**mkdocs config** (automatically extracts above into API reference):
+
+```yaml
+# docs/mkdocs.yml
+plugins:
+  - mkdocstrings:
+      handlers:
+        python:
+          options:
+            show_source: true
+            show_root_heading: true
+            heading_level: 3
+```
+
+### Pre-commit Enforcement
+
+```yaml
+# .pre-commit-config.yaml
+- repo: https://github.com/astral-sh/ruff-pre-commit
+  hooks:
+    - id: ruff
+      args: [--select=D]  # Docstring rules
+```
+
+**Ruff D rules enabled** (pyproject.toml):
+
+```toml
+[tool.ruff.lint.pydocstyle]
+convention = "google"  # Google-style docstrings
+
+[tool.ruff.lint]
+select = [
+    "D",      # pydocstyle (docstring rules)
+]
+ignore = [
+    "D100",   # Missing module docstring (allow for simple modules)
+    "D104",   # Missing package docstring
+    "D203",   # Conflicts with D211
+    "D213",   # Conflicts with D212
+]
+```
+
+### Examples Repository
+
+All complex features require working examples in `examples/`:
+
+```
+examples/
+├── basic_inference.py          # Simplest usage
+├── multi_agent_batching.py     # Concurrent agents
+├── cache_persistence.py        # Save/load cycle
+└── custom_model_onboarding.py  # Add new architecture
+```
+
+**Each example includes:**
+- Docstring explaining what it demonstrates
+- Inline comments for non-obvious steps
+- Expected output in comments
+- Link to relevant docs section
+
+---
+
 ## Quality Pipeline
 
 | Tool | Purpose | Config | Gate |
