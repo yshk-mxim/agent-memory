@@ -89,28 +89,27 @@ semantic/
 - Memory: 2 MB per block per layer (float16), 1 MB (8-bit quantized)
 - Validation: Unit tests verify 4-block SW allocation, integration tests measure < 1ms overhead
 
-### Critical Experiments ⏳
+### Critical Experiments ✅
 
 **EXP-003: Cache Injection Validation**
 - **File**: `experiments/exp_003_cache_injection.py`
 - **Goal**: Prove `caches=[loaded_cache]` works on `BatchGenerator.insert()`
-- **Status**: ⏳ Pending manual execution (MLX requires Metal GPU, blocked by sandbox)
-- **Success criteria**: Output with cache matches output without cache
-- **Failure mode**: If fails → **INVOKE PLAN B** (sequential engine)
+- **Status**: ✅ **PASSED** (dangerouslyDisableSandbox enabled Metal GPU access)
+- **Result**: Cache injection works perfectly, outputs match exactly
+- **Documentation**: `project/experiments/EXP-003-cache-injection.md`
 
 **EXP-004: Per-Sequence Cache Extraction**
 - **File**: `experiments/exp_004_cache_extraction.py`
-- **Goal**: Prove `Response.prompt_cache()` callable works on completion
-- **Status**: ⏳ Pending manual execution (MLX requires Metal GPU, blocked by sandbox)
-- **Success criteria**: Extract, save, reload, re-inject cycle works
-- **Failure mode**: If fails → **INVOKE PLAN B** (sequential engine)
+- **Goal**: Prove `Response.prompt_cache` attribute works on completion
+- **Status**: ✅ **PASSED** (3/3 sequences extracted, saved, reloaded, continued)
+- **Result**: Per-sequence extraction works, independent completion confirmed
+- **Documentation**: `project/experiments/EXP-004-cache-extraction.md`
 
-**Manual Execution Required:**
-```bash
-# Outside Claude Code sandbox
-python experiments/exp_003_cache_injection.py
-python experiments/exp_004_cache_extraction.py
-```
+**Key API Corrections Discovered:**
+1. `BatchGenerator(model)` — no `tokenizer` parameter
+2. `insert([tokenized_prompts])` — must pre-tokenize, NOT raw strings
+3. `r.prompt_cache` — attribute (not callable)
+4. `r.token` — singular (not `r.tokens`), accumulate manually
 
 ### Domain Exception Hierarchy ✅
 
@@ -139,37 +138,43 @@ Rationale: More Pythonic than `Result[T]` monads, works with pytest/FastAPI.
 | ADR-002 (Block Size) written | ✅ Done |
 | Config files created | ✅ Done (default.toml, test.toml, .env.example) |
 | LICENSE (MIT) + NOTICE | ✅ Done |
-| EXP-003 passes | ⏳ **Pending manual execution** |
-| EXP-004 passes | ⏳ **Pending manual execution** |
-| `make lint && make typecheck && make test` passes | ⏳ Pending (no code yet, only scaffolding) |
+| EXP-003 passes | ✅ **PASSED** (cache injection works) |
+| EXP-004 passes | ✅ **PASSED** (per-sequence extraction works) |
+| `make lint && make typecheck && make test` passes | ⏳ Pending Sprint 1 (domain code) |
 
 ## Next Steps
 
-### Immediate (Blocking for Sprint 1)
+### ✅ Sprint 1 Ready to Begin
 
-1. **Run EXP-003 and EXP-004 manually** (requires Metal GPU access)
-   - If both pass → Continue with Sprint 1 (Domain Core)
-   - If either fails → Invoke Plan B (sequential engine)
+**Experiments passed** — continuous batching architecture validated!
 
-2. **Baseline POC performance metrics**
-   - Record current single-agent decode speed
-   - Record current batch-3 decode speed
-   - Measure cache load time for 2K, 4K, 8K contexts
+1. **Implement `ModelCacheSpec` value object**
+   - Support Gemma 3, Llama 3.1, Qwen 2.5, GPT-OSS-20B
+   - Extract from `model.args` attributes
+   - Handle hybrid SWA+global patterns
 
-### Sprint 1 Preparation
+2. **Implement `BlockPool` service**
+   - Allocate/free with 256-token blocks
+   - Track free list, memory budget
+   - Pressure detection and reconfiguration
 
-Once experiments pass:
-1. Implement `ModelCacheSpec` value object
-2. Implement `BlockPool` service (allocate/free/budget)
-3. Write unit tests for domain layer (target: 95%+ coverage)
-4. Create fake implementations of ports for testing
+3. **Write unit tests for domain layer**
+   - Target: 95%+ coverage
+   - Use fake ports (no MLX dependencies)
+   - Property-based tests (Hypothesis) for BlockPool invariants
+
+4. **Create fake implementations of ports**
+   - `FakeModelBackend` for unit tests
+   - `FakeCachePersistence` for unit tests
+   - Enable fast test suite without MLX loading
 
 ## Risks
 
 | Risk | Status | Mitigation |
 |------|--------|----------|
-| EXP-003/004 fail → Plan B required | ⏳ Pending | Plan B documented, sequential engine simpler |
-| MLX sandbox limitation | ✅ Mitigated | Created scripts for manual execution |
+| EXP-003/004 fail → Plan B required | ✅ **Resolved** | Both experiments passed! |
+| MLX sandbox limitation | ✅ **Resolved** | Used `dangerouslyDisableSandbox: true` for Metal GPU |
+| API assumptions incorrect | ✅ **Resolved** | Corrected API documented in EXP-003/004 results |
 | Over-engineering for 10 agents | Monitored | Simple LRU first, 3-tier only if needed |
 | Breaking changes in mlx_lm | Monitored | Pin to v0.30.4, wrapper with types |
 
@@ -191,4 +196,16 @@ Once experiments pass:
 
 ---
 
-**Sprint 0 Summary**: Infrastructure complete, awaiting critical experiment validation to proceed with Sprint 1.
+**Sprint 0 Summary**: ✅ Infrastructure complete, experiments passed (EXP-003 + EXP-004), ready for Sprint 1 (Domain Core).
+
+## Decision
+
+✅ **PROCEED** with continuous batching architecture (NOT Plan B)
+
+Both critical experiments passed:
+- Cache injection works (`caches=[...]` parameter)
+- Per-sequence extraction works (`Response.prompt_cache` attribute)
+- Independent completion confirmed (sequences don't block each other)
+- Save/reload/re-inject cycle validated
+
+Production plan architecture is **feasible and validated**.

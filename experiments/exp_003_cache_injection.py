@@ -6,7 +6,9 @@ Success criteria: Output with pre-built cache matches output without cache
 """
 
 import mlx.core as mx
-from mlx_lm import BatchGenerator, load, save_prompt_cache, load_prompt_cache
+from mlx_lm import load
+from mlx_lm.generate import BatchGenerator
+from mlx_lm.models.cache import save_prompt_cache, load_prompt_cache
 import tempfile
 import os
 
@@ -16,18 +18,23 @@ def main():
     print("EXP-003: Cache Injection Validation")
     print("=" * 80)
 
-    # Use SmolLM2-135M for fast testing
-    model_id = "mlx-community/SmolLM2-135M-Instruct-4bit"
+    # Use Gemma 3 12B (already cached, real production model)
+    model_id = "mlx-community/gemma-3-12b-it-4bit"
     print(f"\n1. Loading model: {model_id}")
+    print("   (Loading from cache...)")
     model, tokenizer = load(model_id)
 
     prompt = "The quick brown fox jumps over the lazy"
     print(f"\n2. Test prompt: '{prompt}'")
 
+    # Tokenize prompt
+    prompt_tokens = tokenizer.encode(prompt)
+    print(f"   Tokenized to {len(prompt_tokens)} tokens")
+
     # Generate once to build cache
     print("\n3. First generation (building cache)...")
-    gen1 = BatchGenerator(model, stop_tokens=tokenizer.eos_token_id, max_tokens=10)
-    uids1 = gen1.insert([prompt], max_tokens=10)
+    gen1 = BatchGenerator(model, stop_tokens=set([tokenizer.eos_token_id]), max_tokens=10)
+    uids1 = gen1.insert([prompt_tokens])
 
     tokens1 = []
     cache1 = None
@@ -35,11 +42,12 @@ def main():
     while responses := gen1.next():
         for r in responses:
             if r.finish_reason is not None:
-                cache1 = r.prompt_cache()
-                tokens1 = [t for t in r.tokens]
+                cache1 = r.prompt_cache  # It's an attribute, not a method
                 print(f"   Generated {len(tokens1)} tokens")
                 print(f"   Text: '{tokenizer.decode(tokens1)}'")
-                print(f"   Cache extracted: {cache1 is not None}")
+                print(f"   Cache extracted: {cache1 is not None}, {len(cache1)} layers")
+            else:
+                tokens1.append(r.token)  # Accumulate tokens during generation
 
     # Save and reload cache
     print("\n4. Saving cache to disk...")
@@ -54,20 +62,21 @@ def main():
 
         # Generate with cache injection
         print("\n6. Second generation (with cache injection)...")
-        gen2 = BatchGenerator(model, stop_tokens=tokenizer.eos_token_id, max_tokens=10)
+        gen2 = BatchGenerator(model, stop_tokens=set([tokenizer.eos_token_id]), max_tokens=10)
 
         try:
             # Try cache injection
-            uids2 = gen2.insert([prompt], max_tokens=10, caches=[loaded_cache])
+            uids2 = gen2.insert([prompt_tokens], caches=[loaded_cache])
             print(f"   ✓ Cache injection accepted (caches parameter exists)")
 
             tokens2 = []
             while responses := gen2.next():
                 for r in responses:
                     if r.finish_reason is not None:
-                        tokens2 = [t for t in r.tokens]
                         print(f"   Generated {len(tokens2)} tokens")
                         print(f"   Text: '{tokenizer.decode(tokens2)}'")
+                    else:
+                        tokens2.append(r.token)
 
             # Compare outputs
             print("\n7. Comparing outputs...")
