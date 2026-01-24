@@ -69,37 +69,130 @@ class ModelCacheSpec:
 
         Supports 4 model architectures:
         1. Gemma 3 12B: Hybrid (8 global + 40 sliding window, pattern=6)
-        2. GPT-OSS-20B: MoE alternating (12 global + 12 sliding window)
+        2. Qwen1.5-MoE-A2.7B: Uniform full attention (24 global layers)
         3. Qwen 2.5-14B: Uniform full attention (48 global layers)
         4. Llama 3.1-8B: Uniform full attention (32 global layers)
 
+        Implementation based on EXP-001 findings (project/experiments/EXP-001-model-args.md).
+
         Args:
-            model: Loaded model object with `args` or `config` attribute.
+            model: Loaded MLX model from mlx_lm.load() with `args` attribute.
                 Expected attributes:
-                - num_hidden_layers or n_layers
-                - num_key_value_heads or n_kv_heads
-                - head_dim or (hidden_size / n_heads)
-                - sliding_window_pattern (optional, for hybrid models)
+                - num_hidden_layers (layer count)
+                - num_key_value_heads (KV head count)
+                - hidden_size, num_attention_heads (for computing head_dim)
                 - sliding_window (optional, window size)
+                - text_config (Gemma 3 only, nested config dict)
 
         Returns:
             ModelCacheSpec with extracted geometry.
 
         Raises:
             ValueError: If required attributes are missing or invalid.
-            AttributeError: If model has neither `args` nor `config`.
+            AttributeError: If model lacks `args` attribute.
 
         Note:
-            This method will be implemented by ML engineer after EXP-001
-            validates the actual attribute names across all 4 models.
-            Current implementation is a placeholder.
+            Block size is fixed to 256 tokens per ADR-002.
+            Layer types are detected using a three-tier approach:
+            1. Check layer_types attribute (most reliable)
+            2. Inspect layer objects for use_sliding
+            3. Fallback to model-type heuristics
         """
-        # Placeholder implementation - ML will fill this in after EXP-001
-        raise NotImplementedError(
-            "ModelCacheSpec.from_model() will be implemented after EXP-001 "
-            "validates model.args attributes across all 4 target models. "
-            "See project/experiments/EXP-001-model-args.md for findings."
+        args = model.args
+
+        # Step 1: Extract basic attributes (handle Gemma 3 nested config)
+        if hasattr(args, "text_config"):
+            # Gemma 3: nested config dict
+            config = args.text_config
+            n_layers = config.get("num_hidden_layers")
+            n_kv_heads = config.get("num_key_value_heads")
+            num_attention_heads = config.get("num_attention_heads")
+            hidden_size = config.get("hidden_size")
+            sliding_window = config.get("sliding_window", None)
+            model_type = getattr(args, "model_type", "unknown")
+        else:
+            # Standard models (Qwen, Llama, MoE)
+            n_layers = getattr(args, "num_hidden_layers", None)
+            n_kv_heads = getattr(args, "num_key_value_heads", None)
+            num_attention_heads = getattr(args, "num_attention_heads", None)
+            hidden_size = getattr(args, "hidden_size", None)
+            sliding_window = getattr(args, "sliding_window", None)
+            model_type = getattr(args, "model_type", "unknown")
+
+        # Step 2: Validate required attributes
+        if n_layers is None:
+            raise ValueError("Cannot extract num_hidden_layers from model.args")
+        if n_kv_heads is None:
+            raise ValueError("Cannot extract num_key_value_heads from model.args")
+        if hidden_size is None or num_attention_heads is None:
+            raise ValueError(
+                "Cannot compute head_dim: missing hidden_size or num_attention_heads"
+            )
+
+        # Step 3: Compute head dimension (ALWAYS compute, never rely on attribute)
+        head_dim = hidden_size // num_attention_heads
+
+        # Step 4: Detect layer types (three-tier detection)
+        layer_types = cls._detect_layer_types(model, args, model_type, n_layers)
+
+        return cls(
+            n_layers=n_layers,
+            n_kv_heads=n_kv_heads,
+            head_dim=head_dim,
+            block_tokens=256,  # Fixed per ADR-002
+            layer_types=layer_types,
+            sliding_window_size=sliding_window,
         )
+
+    @staticmethod
+    def _detect_layer_types(
+        model: Any, args: Any, model_type: str, n_layers: int
+    ) -> list[str]:
+        """Detect layer attention types (global vs sliding_window).
+
+        Three-tier detection approach (EXP-001 findings):
+        1. Check layer_types attribute (most reliable)
+        2. Inspect layer objects for use_sliding
+        3. Fallback to model-type heuristics
+
+        Args:
+            model: Loaded MLX model.
+            args: Model args/config.
+            model_type: Model type string (e.g., 'gemma3', 'llama').
+            n_layers: Total number of layers.
+
+        Returns:
+            List of layer type strings, one per layer.
+            Values: "global" or "sliding_window".
+
+        Note:
+            Per EXP-001, Gemma 3 requires heuristic detection as
+            layer_types and use_sliding attributes are not present.
+        """
+        # Tier 1: Check layer_types attribute (e.g., some Llama variants)
+        if hasattr(args, "layer_types") and args.layer_types:
+            return list(args.layer_types)
+
+        # Tier 2: Inspect layer objects for use_sliding attribute
+        if hasattr(model, "model") and hasattr(model.model, "layers"):
+            layers = model.model.layers
+            detected_types: list[str] = []
+
+            for layer in layers:
+                if hasattr(layer, "use_sliding"):
+                    layer_type = "sliding_window" if layer.use_sliding else "global"
+                    detected_types.append(layer_type)
+
+            if len(detected_types) == n_layers:
+                return detected_types
+
+        # Tier 3: Model-type heuristics (for known hybrid models)
+        if model_type == "gemma3":
+            # Gemma 3 12B: 8 global + 40 sliding window (EXP-001)
+            return ["global"] * 8 + ["sliding_window"] * (n_layers - 8)
+
+        # Default: Uniform full attention
+        return ["global"] * n_layers
 
     def bytes_per_block_per_layer(self) -> int:
         """Calculate memory bytes required for one block at one layer.
