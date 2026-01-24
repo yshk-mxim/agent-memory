@@ -341,3 +341,61 @@ class PersistentAgentManager:
             'total_cache_mb': total_cache_mb,
             'total_gb': model_gb + (total_cache_mb / 1024)
         }
+
+    def get_agent_cache(self, agent_id: str) -> Optional[List]:
+        """
+        Get agent's current KV cache (load from disk if needed).
+
+        Used by BatchedGenerationEngine to get cache before submitting request.
+        Ensures the engine always has the latest cache state.
+
+        Args:
+            agent_id: Unique identifier
+
+        Returns:
+            List: Agent's KV cache, or None if agent doesn't exist
+        """
+        # If agent in memory, return its cache
+        if agent_id in self.agents:
+            return self.agents[agent_id].cache
+
+        # Try loading from disk
+        if self.persistence.agent_cache_exists(agent_id):
+            try:
+                self.load_agent(agent_id)
+                return self.agents[agent_id].cache
+            except Exception as e:
+                logger.warning(f"Failed to load agent {agent_id}: {e}")
+                return None
+
+        # Agent doesn't exist
+        return None
+
+    def update_agent_cache(self, agent_id: str, cache: List):
+        """
+        Update agent's KV cache after batch generation.
+
+        Called by ConcurrentAgentManager after batch completes to update
+        the agent's cache with new conversation state.
+
+        Args:
+            agent_id: Unique identifier
+            cache: Updated KV cache from batch engine
+        """
+        if agent_id not in self.agents:
+            logger.warning(f"Cannot update cache for unknown agent: {agent_id}")
+            return
+
+        agent = self.agents[agent_id]
+        agent.cache = cache
+
+        # Update cache token count
+        cache_info = self.cache_extractor.get_cache_info(cache)
+        agent.cache_tokens = cache_info['total_tokens']
+
+        # Update last access
+        agent.update_access()
+
+        logger.debug(
+            f"Updated cache for {agent_id}: {agent.cache_tokens} tokens"
+        )

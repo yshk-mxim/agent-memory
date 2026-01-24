@@ -15,6 +15,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import logging
 
 from .agent_manager import PersistentAgentManager
+from .batched_engine import BatchedGenerationEngine
 
 logger = logging.getLogger(__name__)
 
@@ -63,16 +64,16 @@ class ConcurrentAgentManager:
         model_name: str = "mlx-community/gemma-3-12b-it-4bit",
         max_agents: int = 3,
         cache_dir: str = "~/.agent_caches",
-        max_queue_size: int = 100
+        max_batch_size: int = 5
     ):
         """
-        Initialize concurrent manager.
+        Initialize concurrent manager with batched generation.
 
         Args:
             model_name: HuggingFace model ID or local path
             max_agents: Maximum number of agents in memory
             cache_dir: Directory for cache persistence
-            max_queue_size: Maximum requests in queue
+            max_batch_size: Maximum sequences in a batch
         """
         logger.info(f"Initializing ConcurrentAgentManager: {model_name}")
 
@@ -83,26 +84,38 @@ class ConcurrentAgentManager:
             cache_dir=cache_dir
         )
 
-        # Request queue (priority queue)
-        self.request_queue: asyncio.PriorityQueue = asyncio.PriorityQueue(
-            maxsize=max_queue_size
+        # Batched generation engine
+        self.engine = BatchedGenerationEngine(
+            model=self.manager.model,
+            tokenizer=self.manager.tokenizer,
+            max_batch_size=max_batch_size
         )
 
         # Per-agent locks for sequential per-agent, cross-agent parallel
         self._agent_locks: Dict[str, asyncio.Lock] = {}
+
+        # Tracking for pending futures (uid → future)
+        self._pending_futures: Dict[int, asyncio.Future] = {}
+
+        # Event to signal new work available
+        self._submit_event = asyncio.Event()
 
         # Metrics
         self.metrics = UtilizationMetrics()
         self.start_time = time.time()
         self._worker_task: Optional[asyncio.Task] = None
 
-        logger.info("ConcurrentAgentManager initialized")
+        logger.info(f"ConcurrentAgentManager initialized with batch_size={max_batch_size}")
 
     async def start(self):
-        """Start background worker task for processing queue."""
+        """Start background worker task for batch processing."""
+        # Start the batch engine
+        self.engine.start()
+
+        # Start the batch worker
         if self._worker_task is None or self._worker_task.done():
-            self._worker_task = asyncio.create_task(self._process_queue())
-            logger.info("Started queue worker task")
+            self._worker_task = asyncio.create_task(self._batch_worker())
+            logger.info("Started batch worker task")
 
     async def stop(self):
         """Stop background worker task."""
@@ -114,74 +127,53 @@ class ConcurrentAgentManager:
                 pass
             logger.info("Stopped queue worker task")
 
-    async def _process_queue(self):
+    async def _batch_worker(self):
         """
-        Background worker that processes requests from queue.
+        Background worker that processes batched requests.
 
-        Runs continuously, pulling requests and executing them.
+        Collects pending requests and processes them in batches using the
+        BatchedGenerationEngine. Runs continuously until cancelled.
         """
-        logger.info("Queue worker started")
+        logger.info("Batch worker started")
 
         while True:
             try:
-                # Get request from queue (blocks if empty)
-                priority, request = await self.request_queue.get()
+                # Wait for work
+                await self._submit_event.wait()
+                self._submit_event.clear()
 
-                # Calculate queue wait time
-                wait_time = (datetime.now() - request.created_at).total_seconds() * 1000
+                # Optional: small delay to collect more requests for batching
+                # This allows concurrent requests to "batch up" before processing
+                await asyncio.sleep(0.01)  # 10ms batching window
 
-                logger.debug(
-                    f"Processing request for {request.agent_id}, "
-                    f"waited {wait_time:.1f}ms in queue"
-                )
-
-                # Update metrics
-                self.metrics.active_agents += 1
-                self.metrics.queue_depth = self.request_queue.qsize()
-
-                # Execute request (run_in_executor for sync call)
-                try:
+                # Process all active requests
+                while self.engine.has_active_requests():
+                    # Run one decode step (generates one token per sequence)
                     loop = asyncio.get_running_loop()
-                    start_time = time.time()
-
-                    response = await loop.run_in_executor(
+                    completed = await loop.run_in_executor(
                         None,
-                        self.manager.generate,
-                        request.agent_id,
-                        request.prompt,
-                        request.max_tokens,
-                        request.temperature
+                        self.engine.step
                     )
 
-                    generation_time = time.time() - start_time
+                    # Resolve futures for completed generations
+                    for result in completed:
+                        uid = result.uid
+                        if uid in self._pending_futures:
+                            self._pending_futures[uid].set_result(result)
+                            del self._pending_futures[uid]
 
-                    # Update metrics
-                    self.metrics.completed_requests += 1
-                    self.metrics.total_generation_time_sec += generation_time
+                            # Update metrics
+                            self.metrics.completed_requests += 1
 
-                    # Update average wait time (exponential moving average)
-                    alpha = 0.1
-                    self.metrics.avg_queue_wait_ms = (
-                        alpha * wait_time +
-                        (1 - alpha) * self.metrics.avg_queue_wait_ms
-                    )
-
-                    # Set result
-                    request.future.set_result(response)
-
-                except Exception as e:
-                    logger.error(f"Generation failed: {e}")
-                    request.future.set_exception(e)
-
-                finally:
-                    self.metrics.active_agents -= 1
-                    self.request_queue.task_done()
+                            logger.debug(
+                                f"Request uid={uid} for agent={result.agent_id} completed"
+                            )
 
             except asyncio.CancelledError:
-                logger.info("Queue worker cancelled")
+                logger.info("Batch worker cancelled")
                 break
             except Exception as e:
-                logger.error(f"Queue worker error: {e}")
+                logger.error(f"Batch worker error: {e}")
 
     async def generate(
         self,
@@ -192,18 +184,18 @@ class ConcurrentAgentManager:
         priority: int = 0
     ) -> str:
         """
-        Generate response asynchronously (queued).
+        Generate response asynchronously with batched processing.
 
         Per-agent sequential, cross-agent parallel semantics:
         - Same agent: requests execute sequentially (via per-agent lock)
-        - Different agents: requests can execute in parallel (different locks)
+        - Different agents: requests can execute in parallel (batched together)
 
         Args:
             agent_id: Unique identifier
             prompt: User input
             max_tokens: Maximum tokens to generate
             temperature: Sampling temperature
-            priority: Request priority (lower = higher priority)
+            priority: Request priority (unused with batch engine)
 
         Returns:
             str: Generated response
@@ -214,27 +206,41 @@ class ConcurrentAgentManager:
 
         # Acquire lock for this agent (ensures sequential per-agent)
         async with self._agent_locks[agent_id]:
-            # Create request
-            request = GenerationRequest(
+            # Load agent's current cache (includes updates from previous requests)
+            cache = self.manager.get_agent_cache(agent_id)
+
+            # Submit to batch engine (non-blocking)
+            uid = self.engine.submit(
                 agent_id=agent_id,
                 prompt=prompt,
+                existing_cache=cache,
                 max_tokens=max_tokens,
-                temperature=temperature,
-                priority=priority
+                temperature=temperature
             )
 
-            # Add to queue
-            await self.request_queue.put((priority, request))
+            # Create future for this request
+            future = asyncio.get_event_loop().create_future()
+            self._pending_futures[uid] = future
+
+            # Signal worker that new work is available
+            self._submit_event.set()
+
+            # Update metrics
             self.metrics.total_requests += 1
-            self.metrics.queue_depth = self.request_queue.qsize()
 
             logger.debug(
-                f"Queued request for {agent_id}, priority={priority}, "
-                f"queue_depth={self.metrics.queue_depth}"
+                f"Submitted uid={uid} for agent={agent_id}, "
+                f"active_requests={self.engine.get_active_count()}"
             )
 
-            # Wait for result (lock held until request completes)
-            return await request.future
+            # Wait for this specific generation to complete
+            result = await future
+
+            # Update agent's cache with new state
+            self.manager.update_agent_cache(agent_id, result.cache)
+
+            # Return generated text
+            return result.text
 
     async def generate_concurrent(
         self,
