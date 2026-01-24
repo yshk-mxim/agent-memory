@@ -78,7 +78,10 @@ class APIServer:
         self,
         model_name: str = "mlx-community/gemma-3-12b-it-4bit",
         max_agents: int = 3,
-        cache_dir: str = "~/.agent_caches"
+        cache_dir: str = "~/.agent_caches",
+        max_batch_size: int = 5,
+        kv_bits: Optional[int] = None,
+        kv_group_size: int = 64
     ):
         """
         Initialize API server with agent manager.
@@ -87,14 +90,23 @@ class APIServer:
             model_name: HuggingFace model ID or local path
             max_agents: Maximum number of agents in memory
             cache_dir: Directory for cache persistence
+            max_batch_size: Maximum sequences in a batch
+            kv_bits: Optional KV cache quantization (2-8 bits, None=no quantization)
+            kv_group_size: Group size for quantization (default 64)
         """
-        logger.info(f"Initializing APIServer with model: {model_name}")
+        logger.info(
+            f"Initializing APIServer with model: {model_name}, "
+            f"batch_size={max_batch_size}, kv_bits={kv_bits}"
+        )
 
         self.model_name = model_name
         self.manager = ConcurrentAgentManager(
             model_name=model_name,
             max_agents=max_agents,
-            cache_dir=cache_dir
+            cache_dir=cache_dir,
+            max_batch_size=max_batch_size,
+            kv_bits=kv_bits,
+            kv_group_size=kv_group_size
         )
 
         logger.info("APIServer initialized successfully")
@@ -334,7 +346,10 @@ _server_instance: Optional[APIServer] = None
 def get_server(
     model_name: str = "mlx-community/gemma-3-12b-it-4bit",
     max_agents: int = 3,
-    cache_dir: str = "~/.agent_caches"
+    cache_dir: str = "~/.agent_caches",
+    max_batch_size: int = 5,
+    kv_bits: Optional[int] = None,
+    kv_group_size: int = 64
 ) -> APIServer:
     """Get or create global server instance."""
     global _server_instance
@@ -342,7 +357,10 @@ def get_server(
         _server_instance = APIServer(
             model_name=model_name,
             max_agents=max_agents,
-            cache_dir=cache_dir
+            cache_dir=cache_dir,
+            max_batch_size=max_batch_size,
+            kv_bits=kv_bits,
+            kv_group_size=kv_group_size
         )
     return _server_instance
 

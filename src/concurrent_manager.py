@@ -64,7 +64,9 @@ class ConcurrentAgentManager:
         model_name: str = "mlx-community/gemma-3-12b-it-4bit",
         max_agents: int = 3,
         cache_dir: str = "~/.agent_caches",
-        max_batch_size: int = 5
+        max_batch_size: int = 5,
+        kv_bits: Optional[int] = None,
+        kv_group_size: int = 64
     ):
         """
         Initialize concurrent manager with batched generation.
@@ -74,14 +76,21 @@ class ConcurrentAgentManager:
             max_agents: Maximum number of agents in memory
             cache_dir: Directory for cache persistence
             max_batch_size: Maximum sequences in a batch
+            kv_bits: Optional KV cache quantization (2-8 bits, None=no quantization)
+            kv_group_size: Group size for quantization (default 64)
         """
-        logger.info(f"Initializing ConcurrentAgentManager: {model_name}")
+        logger.info(
+            f"Initializing ConcurrentAgentManager: {model_name}, "
+            f"batch_size={max_batch_size}, kv_bits={kv_bits}"
+        )
 
         # Underlying synchronous manager
         self.manager = PersistentAgentManager(
             model_name=model_name,
             max_agents=max_agents,
-            cache_dir=cache_dir
+            cache_dir=cache_dir,
+            kv_bits=kv_bits,
+            kv_group_size=kv_group_size
         )
 
         # Batched generation engine

@@ -25,17 +25,34 @@ class MLXCacheExtractor:
     - Cache metadata extraction
     """
 
-    def __init__(self, model, tokenizer):
+    def __init__(
+        self,
+        model,
+        tokenizer,
+        kv_bits: Optional[int] = None,
+        kv_group_size: int = 64
+    ):
         """
         Initialize cache extractor with model and tokenizer.
 
         Args:
             model: MLX model instance (from mlx_lm.load)
             tokenizer: Tokenizer instance (from mlx_lm.load)
+            kv_bits: Optional KV cache quantization (2-8 bits, None=no quantization)
+            kv_group_size: Group size for quantization (default 64)
         """
         self.model = model
         self.tokenizer = tokenizer
-        logger.info(f"MLXCacheExtractor initialized for model")
+        self.kv_bits = kv_bits
+        self.kv_group_size = kv_group_size
+
+        if kv_bits:
+            logger.info(
+                f"MLXCacheExtractor initialized with {kv_bits}-bit "
+                f"quantization (group_size={kv_group_size})"
+            )
+        else:
+            logger.info(f"MLXCacheExtractor initialized (no quantization)")
 
     def generate_with_cache(
         self,
@@ -70,6 +87,12 @@ class MLXCacheExtractor:
         text = ""
         # Create sampler with temperature (MLX requires sampler, not direct temp param)
         sampler = make_sampler(temperature)
+
+        # Add quantization parameters if specified
+        if self.kv_bits is not None:
+            kwargs['kv_bits'] = self.kv_bits
+            kwargs['kv_group_size'] = self.kv_group_size
+
         for response in stream_generate(
             self.model,
             self.tokenizer,
@@ -149,9 +172,10 @@ class MLXCacheExtractor:
         Estimate memory usage of the cache in bytes.
 
         Calculates based on tensor shapes and data types.
+        Handles both regular and quantized caches.
 
         Args:
-            cache: List[KVCache] to measure
+            cache: List[KVCache] or List[QuantizedKVCache] to measure
 
         Returns:
             int: Estimated memory usage in bytes
@@ -162,16 +186,42 @@ class MLXCacheExtractor:
         total_bytes = 0
 
         for layer_cache in cache:
-            # Get state (keys, values) trimmed to actual content
+            # Check if this is a quantized cache
+            is_quantized = hasattr(layer_cache, 'bits')
+
             if hasattr(layer_cache, 'state'):
-                keys, values = layer_cache.state
+                state = layer_cache.state
 
-                # Calculate bytes for keys
-                if hasattr(keys, 'nbytes'):
-                    total_bytes += keys.nbytes
+                if is_quantized:
+                    # Quantized cache: state is (keys, values) where each is
+                    # a tuple of (data, scales, biases)
+                    keys, values = state
 
-                # Calculate bytes for values
-                if hasattr(values, 'nbytes'):
-                    total_bytes += values.nbytes
+                    # Keys: (data, scales, biases)
+                    if isinstance(keys, tuple) and len(keys) == 3:
+                        for tensor in keys:
+                            if hasattr(tensor, 'nbytes'):
+                                total_bytes += tensor.nbytes
+                    elif hasattr(keys, 'nbytes'):
+                        total_bytes += keys.nbytes
+
+                    # Values: (data, scales, biases)
+                    if isinstance(values, tuple) and len(values) == 3:
+                        for tensor in values:
+                            if hasattr(tensor, 'nbytes'):
+                                total_bytes += tensor.nbytes
+                    elif hasattr(values, 'nbytes'):
+                        total_bytes += values.nbytes
+                else:
+                    # Regular cache: state is (keys, values) tensors
+                    keys, values = state
+
+                    # Calculate bytes for keys
+                    if hasattr(keys, 'nbytes'):
+                        total_bytes += keys.nbytes
+
+                    # Calculate bytes for values
+                    if hasattr(values, 'nbytes'):
+                        total_bytes += values.nbytes
 
         return total_bytes

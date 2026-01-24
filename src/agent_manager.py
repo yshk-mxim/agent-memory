@@ -61,7 +61,9 @@ class PersistentAgentManager:
         self,
         model_name: str = "mlx-community/gemma-3-12b-it-4bit",
         max_agents: int = 3,
-        cache_dir: str = "~/.agent_caches"
+        cache_dir: str = "~/.agent_caches",
+        kv_bits: Optional[int] = None,
+        kv_group_size: int = 64
     ):
         """
         Initialize persistent agent manager.
@@ -70,15 +72,25 @@ class PersistentAgentManager:
             model_name: HuggingFace model ID or local path
             max_agents: Maximum number of agents to keep in memory
             cache_dir: Directory for cache persistence
+            kv_bits: Optional KV cache quantization (2-8 bits, None=no quantization)
+            kv_group_size: Group size for quantization (default 64)
         """
-        logger.info(f"Initializing PersistentAgentManager: {model_name}, max_agents={max_agents}")
+        logger.info(
+            f"Initializing PersistentAgentManager: {model_name}, "
+            f"max_agents={max_agents}, kv_bits={kv_bits}"
+        )
 
         # Load model and tokenizer
         self.model, self.tokenizer = MLXModelLoader.load_model(model_name)
         self.model_name = model_name
 
         # Initialize components
-        self.cache_extractor = MLXCacheExtractor(self.model, self.tokenizer)
+        self.cache_extractor = MLXCacheExtractor(
+            self.model,
+            self.tokenizer,
+            kv_bits=kv_bits,
+            kv_group_size=kv_group_size
+        )
         self.persistence = CachePersistence(cache_dir)
 
         # Agent tracking
