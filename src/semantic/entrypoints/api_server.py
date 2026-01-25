@@ -218,9 +218,17 @@ def create_app() -> FastAPI:
     async def validation_error_handler(request: Request, exc: RequestValidationError):
         """Handle request validation errors."""
         logger.warning(f"Validation error: {exc}")
+        # Convert errors to JSON-serializable format
+        errors = []
+        for error in exc.errors():
+            errors.append({
+                "loc": error["loc"],
+                "msg": error["msg"],
+                "type": error["type"],
+            })
         return JSONResponse(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            content={"error": "ValidationError", "details": exc.errors()},
+            content={"error": "ValidationError", "details": errors},
         )
 
     @app.exception_handler(Exception)
@@ -232,8 +240,13 @@ def create_app() -> FastAPI:
             content={"error": "InternalServerError", "message": "An unexpected error occurred"},
         )
 
-    # TODO: Register route handlers (Day 3+)
-    # - Anthropic adapter: /v1/messages
+    # Register route handlers
+    from semantic.adapters.inbound.anthropic_adapter import router as anthropic_router
+
+    app.include_router(anthropic_router)
+    logger.info("Registered Anthropic Messages API routes (/v1/messages)")
+
+    # TODO (Day 6): Register remaining adapters
     # - OpenAI adapter: /v1/chat/completions
     # - Direct adapter: /v1/agents/*
 
