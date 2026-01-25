@@ -164,6 +164,24 @@ class TestAnthropicMessagesAPI:
         )
         assert response.status_code == 422
 
+    def test_request_with_stream_true(self):
+        """Request with stream=true should be accepted."""
+        app = create_app()
+        client = TestClient(app, raise_server_exceptions=False)
+
+        response = client.post(
+            "/v1/messages",
+            json={
+                "model": "test-model",
+                "max_tokens": 10,
+                "messages": [{"role": "user", "content": "Hello"}],
+                "stream": True,
+            },
+        )
+
+        # Validation passes (may fail without model, but validation is OK)
+        assert response.status_code != 422
+
 
 @pytest.mark.integration
 @pytest.mark.skip(reason="Requires model loading - run manually with real server")

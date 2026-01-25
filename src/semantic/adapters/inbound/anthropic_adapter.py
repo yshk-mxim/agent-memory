@@ -2,21 +2,29 @@
 
 Implements the Anthropic Messages API with:
 - Non-streaming generation
-- SSE streaming (Day 4)
+- SSE streaming
 - Tool use support
 - Extended thinking
 - Prompt caching
 """
 
 import hashlib
+import json
 import logging
 import uuid
-from typing import Any
+from typing import Any, AsyncIterator
 
 from fastapi import APIRouter, HTTPException, Request, status
+from sse_starlette.sse import EventSourceResponse
 
 from semantic.adapters.inbound.request_models import (
+    ContentBlockDeltaEvent,
+    ContentBlockStartEvent,
+    ContentBlockStopEvent,
     Message,
+    MessageDeltaEvent,
+    MessageStartEvent,
+    MessageStopEvent,
     MessagesRequest,
     MessagesResponse,
     TextContentBlock,
@@ -87,18 +95,141 @@ def messages_to_prompt(messages: list[Message], system: str | list[Any] = "") ->
     return "\n".join(lines)
 
 
+async def stream_generation(
+    request_body: MessagesRequest,
+    batch_engine: Any,
+    cache_store: Any,
+    tokens: list[int],
+    agent_id: str,
+    cached_blocks: Any,
+) -> AsyncIterator[dict[str, Any]]:
+    """Stream generation results as SSE events.
+
+    Yields:
+        SSE events in Anthropic Messages API format
+    """
+    try:
+        # Submit to batch engine
+        uid = batch_engine.submit(
+            agent_id=agent_id,
+            prompt=messages_to_prompt(request_body.messages, request_body.system),
+            cache=cached_blocks,
+            max_tokens=request_body.max_tokens,
+        )
+        logger.debug(f"Submitted streaming generation: uid={uid}")
+
+        # Yield message_start event
+        message_id = f"msg_{uuid.uuid4().hex[:24]}"
+        yield {
+            "event": "message_start",
+            "data": json.dumps(
+                MessageStartEvent(
+                    message=MessagesResponse(
+                        id=message_id,
+                        content=[],
+                        model=request_body.model,
+                        stop_reason=None,
+                        usage=Usage(
+                            input_tokens=len(tokens),
+                            output_tokens=0,
+                            cache_creation_input_tokens=0 if cached_blocks else len(tokens),
+                            cache_read_input_tokens=len(tokens) if cached_blocks else 0,
+                        ),
+                    )
+                ).model_dump()
+            ),
+        }
+
+        # Yield content_block_start event
+        yield {
+            "event": "content_block_start",
+            "data": json.dumps(
+                ContentBlockStartEvent(
+                    index=0, content_block=TextContentBlock(text="")
+                ).model_dump()
+            ),
+        }
+
+        # Stream token deltas
+        completion = None
+        accumulated_text = ""
+        for result in batch_engine.step():
+            if result.uid == uid:
+                completion = result
+                # Yield text delta
+                if result.text:
+                    # Incremental text (only new text since last yield)
+                    new_text = result.text[len(accumulated_text) :]
+                    accumulated_text = result.text
+
+                    if new_text:
+                        yield {
+                            "event": "content_block_delta",
+                            "data": json.dumps(
+                                ContentBlockDeltaEvent(
+                                    index=0, delta={"type": "text_delta", "text": new_text}
+                                ).model_dump()
+                            ),
+                        }
+                break
+
+        if completion is None:
+            logger.error("Streaming generation failed - no completion")
+            return
+
+        # Yield content_block_stop event
+        yield {
+            "event": "content_block_stop",
+            "data": json.dumps(ContentBlockStopEvent(index=0).model_dump()),
+        }
+
+        # Save updated cache
+        if agent_id in batch_engine._agent_blocks:
+            updated_blocks = batch_engine._agent_blocks[agent_id]
+            cache_store.save(agent_id, updated_blocks)
+
+        # Yield message_delta event
+        stop_reason = "end_turn" if completion.finish_reason == "stop" else "max_tokens"
+        yield {
+            "event": "message_delta",
+            "data": json.dumps(
+                MessageDeltaEvent(
+                    delta={"stop_reason": stop_reason},
+                    usage=Usage(
+                        input_tokens=0,
+                        output_tokens=completion.token_count,
+                    ),
+                ).model_dump()
+            ),
+        }
+
+        # Yield message_stop event
+        yield {
+            "event": "message_stop",
+            "data": json.dumps(MessageStopEvent().model_dump()),
+        }
+
+    except Exception as e:
+        logger.error(f"Streaming error: {e}", exc_info=True)
+        # Yield error event
+        yield {
+            "event": "error",
+            "data": json.dumps({"error": {"type": "internal_error", "message": str(e)}}),
+        }
+
+
 @router.post("/messages", status_code=status.HTTP_200_OK)
-async def create_message(request_body: MessagesRequest, request: Request) -> MessagesResponse:
+async def create_message(request_body: MessagesRequest, request: Request):
     """Create a message (POST /v1/messages).
 
-    Non-streaming endpoint that generates a complete response.
+    Supports both streaming and non-streaming generation.
 
     Args:
         request_body: Validated MessagesRequest
         request: FastAPI request (for accessing app state)
 
     Returns:
-        MessagesResponse with generated content
+        EventSourceResponse (streaming) or MessagesResponse (non-streaming)
 
     Raises:
         HTTPException: On generation errors
@@ -126,6 +257,16 @@ async def create_message(request_body: MessagesRequest, request: Request) -> Mes
             logger.info(f"Cache hit: {agent_id} ({cached_blocks.total_tokens} tokens)")
         else:
             logger.info(f"Cache miss: {agent_id}")
+
+        # 4. Handle streaming vs non-streaming
+        if request_body.stream:
+            # Return SSE stream
+            logger.info("Returning SSE stream")
+            return EventSourceResponse(
+                stream_generation(
+                    request_body, batch_engine, cache_store, tokens, agent_id, cached_blocks
+                )
+            )
 
         # 4. Submit to batch engine
         uid = batch_engine.submit(
