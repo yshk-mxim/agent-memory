@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from mlx_lm import BatchGenerator  # type: ignore[attr-defined]
 
-from semantic.domain.entities import AgentBlocks
+from semantic.domain.entities import AgentBlocks, KVBlock
 from semantic.domain.errors import InvalidRequestError, ModelNotFoundError, PoolExhaustedError
 from semantic.domain.services import BlockPool
 from semantic.domain.value_objects import CompletedGeneration, ModelCacheSpec
@@ -257,17 +257,18 @@ class BlockPoolBatchEngine:
 
             agent_id = self._active_requests[uid]
 
-            # Extract cache and convert to blocks (Day 8 implementation)
-            # For now, use existing blocks or create empty AgentBlocks
+            # Extract cache and convert to blocks
+            blocks = self._extract_cache(uid)
+
+            # Free old prefill blocks (if any)
             if agent_id in self._agent_blocks:
-                blocks = self._agent_blocks[agent_id]
-            else:
-                # Create empty AgentBlocks as placeholder
-                blocks = AgentBlocks(
-                    agent_id=agent_id,
-                    blocks={},
-                    total_tokens=finished.token_count,
-                )
+                old_blocks = self._agent_blocks[agent_id]
+                # Free all blocks from all layers
+                for layer_blocks in old_blocks.blocks.values():
+                    self._pool.free(layer_blocks, agent_id)
+
+            # Store new blocks
+            self._agent_blocks[agent_id] = blocks
 
             # Create CompletedGeneration
             completion = CompletedGeneration(
@@ -359,22 +360,89 @@ class BlockPoolBatchEngine:
             uid: Request UID for the finished sequence.
 
         Returns:
-            AgentBlocks with updated cache data.
+            AgentBlocks with updated cache data (KV cache split into 256-token blocks).
+
+        Raises:
+            PoolExhaustedError: If not enough blocks available for extraction.
+            ValueError: If cache format invalid.
 
         Notes:
             - Called after sequence completes
             - Converts KVCache → blocks for persistence
             - Handles partial blocks (last block may not be full)
+            - Inverse of _reconstruct_cache()
         """
-        # TODO: Day 8 implementation
-        # Algorithm (6 steps from design doc):
-        # 1. Call batch_gen.extract_cache(uid)
-        # 2. Create AgentBlocks container
-        # 3. For each layer in cache:
-        #    - Get K and V tensors
-        #    - Split into chunks (block_tokens size)
-        #    - For each chunk:
-        #      - Create KVBlock
-        #      - Add to AgentBlocks
-        # 4. Return AgentBlocks
-        raise NotImplementedError("_extract_cache() not yet implemented (Day 8)")
+        # 1. Get agent_id from UID tracking
+        if uid not in self._active_requests:
+            raise ValueError(f"UID {uid} not found in active requests")
+        agent_id = self._active_requests[uid]
+
+        # 2. Extract cache from BatchGenerator
+        if self._batch_gen is None:
+            raise ValueError("No active batch generator")
+        cache = self._batch_gen.extract_cache(uid)
+
+        # 3. Handle empty cache (before importing MLX to avoid crash in tests)
+        if not cache or len(cache) == 0 or cache[0][0] is None:
+            # Empty cache - return empty AgentBlocks
+            return AgentBlocks(agent_id=agent_id, blocks={}, total_tokens=0)
+
+        # Import MLX at runtime (after empty check to avoid crash in tests)
+        import mlx.core as mx  # noqa: PLC0415, F401
+
+        # 4. Get total tokens from first layer K tensor shape
+        first_k = cache[0][0]  # Shape: [n_kv_heads, head_dim, total_seq_len]
+        total_tokens = first_k.shape[2]
+
+        # 5. Calculate blocks needed
+        n_blocks = (total_tokens + self._spec.block_tokens - 1) // self._spec.block_tokens
+
+        # Check pool availability before allocating
+        total_blocks_needed = n_blocks * self._spec.n_layers
+        if self._pool.available_blocks() < total_blocks_needed:
+            raise PoolExhaustedError(
+                f"Need {total_blocks_needed} blocks for extraction, "
+                f"only {self._pool.available_blocks()} available"
+            )
+
+        # 6. Create blocks dictionary
+        blocks_dict: dict[int, list[KVBlock]] = {}
+
+        # 7. For each layer, split cache into blocks
+        for layer_id, (k, v) in enumerate(cache):
+            if k is None:
+                continue  # Skip empty layers (sliding window)
+
+            layer_blocks = []
+
+            # Split K, V into 256-token chunks
+            for block_idx in range(n_blocks):
+                start_token = block_idx * self._spec.block_tokens
+                end_token = min(start_token + self._spec.block_tokens, total_tokens)
+
+                # Slice tensors [start:end] along seq_len axis (axis=2)
+                k_chunk = k[:, :, start_token:end_token]
+                v_chunk = v[:, :, start_token:end_token]
+
+                # Allocate block from pool
+                allocated_blocks = self._pool.allocate(1, layer_id, agent_id)
+                block_id = allocated_blocks[0].block_id
+
+                # Create KVBlock with cache data
+                block = KVBlock(
+                    block_id=block_id,
+                    layer_id=layer_id,
+                    token_count=end_token - start_token,
+                    layer_data={"k": k_chunk, "v": v_chunk},
+                )
+
+                layer_blocks.append(block)
+
+            blocks_dict[layer_id] = layer_blocks
+
+        # 8. Return AgentBlocks with total_tokens
+        return AgentBlocks(
+            agent_id=agent_id,
+            blocks=blocks_dict,
+            total_tokens=total_tokens,
+        )
