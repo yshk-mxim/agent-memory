@@ -41,9 +41,6 @@ class IncompatibleCacheError(SemanticError):
     """Cache model tag does not match current model."""
 
 
-# NEW-5: Domain validation errors (Sprint 3.5)
-
-
 class BlockValidationError(SemanticError):
     """Block entity validation failed (block_id, layer_id, token_count out of range)."""
 
@@ -57,7 +54,7 @@ class ModelSpecValidationError(SemanticError):
 
 
 class PoolConfigurationError(SemanticError):
-    """BlockPool configuration error (invalid total_blocks, invalid spec, reconfiguration failed)."""
+    """BlockPool configuration error."""
 
 
 class BlockOperationError(SemanticError):

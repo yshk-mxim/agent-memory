@@ -180,38 +180,14 @@ class TokenizerPort(Protocol):
 
 
 class CacheOperationsPort(Protocol):
-    """Port for tensor operations on KV cache.
-
-    This port abstracts backend-specific tensor operations (concatenation,
-    evaluation, slicing) needed for block-pool cache management.
-    Implementations wrap specific backends (MLX, PyTorch, etc.).
-
-    CRITICAL-1 (Sprint 3.5): Created to remove MLX dependency from application layer.
-    """
+    """Port for tensor operations on KV cache."""
 
     def concatenate_cache_blocks(
         self,
         k_tensors: list[Any],
         v_tensors: list[Any],
     ) -> tuple[Any, Any]:
-        """Concatenate K/V tensors from multiple blocks along sequence axis.
-
-        Args:
-            k_tensors: List of K tensors from blocks (each shape: [n_kv_heads, head_dim, block_tokens])
-            v_tensors: List of V tensors from blocks (each shape: [n_kv_heads, head_dim, block_tokens])
-
-        Returns:
-            Tuple of (k_full, v_full) concatenated tensors.
-            Shape: [n_kv_heads, head_dim, total_seq_len]
-
-        Raises:
-            GenerationError: If tensor shapes are incompatible.
-
-        Notes:
-            - Concatenates along axis=2 (sequence length)
-            - Forces evaluation for backends with lazy execution
-            - Validates shape compatibility before concatenation
-        """
+        """Concatenate K/V tensors from multiple blocks along sequence axis."""
         ...
 
     def get_sequence_length(self, k_tensor: Any) -> int:
@@ -245,25 +221,7 @@ class CacheOperationsPort(Protocol):
 
 
 class CacheStorePort(Protocol):
-    """Port for in-memory cache management.
-
-    This port defines the contract for cache storage with prefix matching,
-    LRU eviction, and tier management (hot/warm/cold). Distinct from
-    CachePersistencePort which handles disk I/O.
-
-    Implemented by AgentCacheStore (Sprint 3).
-
-    Responsibilities:
-    - In-memory cache storage (hot tier)
-    - Trie-based prefix matching
-    - LRU eviction policy
-    - Coordination with disk persistence (warm/cold tiers)
-
-    Notes:
-        - Hot tier = in-memory (fastest access)
-        - Warm tier = on disk but recently used (load on demand)
-        - Cold tier = on disk, LRU candidates (evict permanently)
-    """
+    """Port for in-memory cache management."""
 
     def get(self, cache_key: CacheKey) -> Any | None:
         """Retrieve cache for agent, with prefix matching.

@@ -106,11 +106,6 @@ packages = ["src/semantic"]
 line-length = 100
 target-version = "py311"
 src = ["src", "tests"]
-# Exclude old POC code (will be replaced by hexagonal architecture)
-extend-exclude = [
-    "src/*.py",  # Old POC root files
-    "tests/test_*.py",  # Old POC test files
-]
 
 [tool.ruff.lint]
 select = [
@@ -146,14 +141,14 @@ ignore = [
 ]
 
 [tool.ruff.lint.mccabe]
-max-complexity = 15  # Portfolio quality: strict but reasonable
+max-complexity = 10  # Sprint 4 quality standard: CC ≤ 10
 
 [tool.ruff.lint.pylint]
 max-args = 7            # Enforce reasonable function signatures
-max-branches = 12       # Detect complex switch/if-elif chains
+max-branches = 10       # Sprint 4: max nesting depth
 max-returns = 6         # Encourage simple control flow
-max-statements = 50     # Detect long methods (code smell #1)
-max-public-methods = 20 # Detect large classes (code smell #17)
+max-statements = 50     # Detect long methods
+max-public-methods = 20 # Detect large classes
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**/*.py" = [
@@ -162,6 +157,34 @@ max-public-methods = 20 # Detect large classes (code smell #17)
     "ERA001",  # Allow commented-out code in tests (TODO placeholders)
     "ARG001",  # Allow unused fixture arguments (pytest fixtures)
     "ARG002",  # Allow unused method arguments (pytest fixtures)
+]
+# MLX adapters use runtime imports to avoid ImportError when MLX not installed
+"src/semantic/adapters/outbound/mlx_*.py" = [
+    "PLC0415", # Runtime imports are intentional for optional dependencies
+]
+# Settings module uses singleton pattern
+"src/semantic/adapters/config/settings.py" = [
+    "PLW0603", # Global statement for singleton pattern
+    "S104",    # Binding to 0.0.0.0 is intentional for server
+]
+# Spec extractor uses singleton pattern
+"src/semantic/adapters/outbound/mlx_spec_extractor.py" = [
+    "PLW0603", # Global statement for singleton pattern
+]
+# Agent cache store uses lazy imports for backward compatibility
+"src/semantic/application/agent_cache_store.py" = [
+    "PLC0415", # Lazy imports for backward compatibility
+]
+# Batch engine complexity is acceptable for core inference logic
+"src/semantic/application/batch_engine.py" = [
+    "C901",    # Complex methods acceptable in core engine
+    "PLR0912", # Many branches acceptable for cache handling
+    "PLR0915", # Many statements acceptable for comprehensive logic
+]
+# Safetensors adapter has some intentional patterns
+"src/semantic/adapters/outbound/safetensors_cache_adapter.py" = [
+    "S112",    # try-except-continue for robust deserialization
+    "PLR2004", # Magic values for safetensors format constants
 ]
 
 [tool.ruff.lint.isort]
@@ -185,11 +208,6 @@ warn_redundant_casts = true
 warn_unused_ignores = true
 warn_no_return = true
 check_untyped_defs = true
-# Exclude old POC code (will be replaced by hexagonal architecture)
-exclude = [
-    "^src/[^/]+\\.py$",       # Old POC root files (not in src/semantic/)
-    "^tests/test_[^/]+\\.py$" # Old POC test files (not in tests/unit/)
-]
 
 [[tool.mypy.overrides]]
 module = "mlx.*"

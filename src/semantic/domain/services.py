@@ -9,9 +9,8 @@ but has no identity - there is only one pool per server instance.
 """
 
 import threading
-from typing import Any
 
-from semantic.domain.entities import AgentBlocks, KVBlock
+from semantic.domain.entities import KVBlock
 from semantic.domain.errors import (
     BlockOperationError,
     PoolConfigurationError,
@@ -35,7 +34,7 @@ class BlockPool:
     - Model hot-swap support (reconfigure without restart)
 
     Thread safety:
-    - THREAD-SAFE: All operations protected by internal lock (Sprint 2.5 fix).
+    - THREAD-SAFE: All operations protected by internal lock.
     - Multiple threads can safely call allocate/free concurrently.
     - Lock is acquired for the duration of each operation.
 
@@ -89,7 +88,6 @@ class BlockPool:
         self.total_blocks = total_blocks
         self.block_tokens = spec.block_tokens
 
-        # Thread safety: lock protects all shared state (Sprint 2.5 fix)
         self._lock = threading.Lock()
 
         # Free list: stack of available block IDs (LIFO for cache locality)
@@ -109,7 +107,7 @@ class BlockPool:
     ) -> list[KVBlock]:
         """Allocate blocks for an agent at a specific layer.
 
-        Thread-safe: Multiple threads can call concurrently (Sprint 2.5 fix).
+        Thread-safe: Multiple threads can call concurrently.
 
         Args:
             n_blocks: Number of blocks to allocate.
@@ -173,7 +171,7 @@ class BlockPool:
     def free(self, blocks: list[KVBlock], agent_id: str) -> None:
         """Return blocks to the free list.
 
-        Thread-safe: Multiple threads can call concurrently (Sprint 2.5 fix).
+        Thread-safe: Multiple threads can call concurrently.
 
         Args:
             blocks: List of blocks to free.
@@ -208,7 +206,7 @@ class BlockPool:
                         f"Block {block.block_id} does not belong to agent {agent_id}"
                     )
 
-                # Sprint 2.5 fix: Clear layer_data to free memory immediately
+                # Clear layer_data to free memory
                 if hasattr(block, 'layer_data'):
                     block.layer_data = None
 
@@ -224,7 +222,7 @@ class BlockPool:
     def free_agent_blocks(self, agent_id: str) -> int:
         """Free all blocks belonging to an agent.
 
-        Thread-safe: Multiple threads can call concurrently (Sprint 2.5 fix).
+        Thread-safe: Multiple threads can call concurrently.
 
         Args:
             agent_id: Agent whose blocks should be freed.
@@ -252,7 +250,7 @@ class BlockPool:
             for block_id in block_ids:
                 if block_id in self.allocated_blocks:
                     block = self.allocated_blocks[block_id]
-                    # Sprint 2.5 fix: Clear layer_data to free memory
+                    # Clear layer_data to free memory
                     if hasattr(block, 'layer_data'):
                         block.layer_data = None
                     self.free_list.append(block_id)
@@ -265,7 +263,7 @@ class BlockPool:
     def used_memory(self) -> int:
         """Calculate total memory used by allocated blocks (bytes).
 
-        Thread-safe: Acquires lock to ensure consistent read (NEW-2 fix).
+        Thread-safe: Acquires lock to ensure consistent read.
 
         Returns:
             Memory in bytes.
@@ -282,7 +280,7 @@ class BlockPool:
             >>> pool.allocate(n_blocks=10, layer_id=0, agent_id="agent_1")
             [...]
             >>> pool.used_memory()
-            20971520  # 10 blocks × 2 MB/block
+            20971520  # 10 blocks x 2 MB/block
         """
         with self._lock:
             bytes_per_block = self.spec.bytes_per_block_per_layer()
@@ -291,7 +289,7 @@ class BlockPool:
     def available_memory(self) -> int:
         """Calculate total memory available (bytes).
 
-        Thread-safe: Acquires lock to ensure consistent read (NEW-2 fix).
+        Thread-safe: Acquires lock to ensure consistent read.
 
         Returns:
             Memory in bytes.
@@ -341,7 +339,7 @@ class BlockPool:
         swapping models at runtime.
 
         Thread-safe: Caller must ensure no concurrent operations during
-        reconfiguration. All agents must be drained before calling (Sprint 2.5 fix).
+        reconfiguration. All agents must be drained before calling.
 
         Args:
             new_spec: New model cache specification.

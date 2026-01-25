@@ -35,9 +35,9 @@ def run_experiment():
     print("=== EXP-007: Cache Extraction End-to-End ===\n")
 
     # Import after path setup
+    from semantic.adapters.outbound.mlx_spec_extractor import get_extractor
     from semantic.application.batch_engine import BlockPoolBatchEngine
     from semantic.domain.services import BlockPool
-    from semantic.domain.value_objects import ModelCacheSpec
 
     # 1. Load model and tokenizer
     print("Step 1: Loading model (mlx-community/SmolLM2-135M-Instruct)...")
@@ -55,7 +55,7 @@ def run_experiment():
     print("\nStep 2: Extracting ModelCacheSpec...")
 
     try:
-        spec = ModelCacheSpec.from_model(model)
+        spec = get_extractor().extract_spec(model)
         print(f"✅ Spec extracted: {spec.n_layers} layers, {spec.n_kv_heads} KV heads")
     except Exception as e:
         print(f"❌ Spec extraction failed: {e}")

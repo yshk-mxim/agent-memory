@@ -12,8 +12,7 @@ from typing import Any
 
 from semantic.domain.errors import AgentBlocksValidationError, BlockValidationError
 
-# MAJOR-1 Issue #13 fix (Sprint 3.5): Universal block size constant (ADR-002)
-BLOCK_SIZE_TOKENS = 256  # All models use 256-token blocks per ADR-002
+BLOCK_SIZE_TOKENS = 256
 
 
 @dataclass
@@ -87,7 +86,7 @@ class AgentBlocks:
     Each layer may have multiple blocks if the agent's context exceeds 256 tokens.
 
     **Immutability**: After construction, AgentBlocks should be treated as immutable.
-    To update an agent's blocks, create a new AgentBlocks instance (Sprint 2.5 fix).
+    To update an agent's blocks, create a new AgentBlocks instance.
 
     Attributes:
         agent_id: Unique identifier for the agent owning these blocks.

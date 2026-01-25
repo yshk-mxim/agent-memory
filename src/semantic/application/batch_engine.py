@@ -1,19 +1,10 @@
-"""Block-pool batch inference engine.
+"""Block-pool batch inference engine."""
 
-This module implements BlockPoolBatchEngine, a batched inference engine
-that wraps mlx_lm's BatchGenerator with block-based KV cache allocation.
-
-The engine provides an async submit/step API for variable-length batch
-processing with block-pool memory management.
-"""
-
+import logging
 from collections.abc import Callable, Iterator
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from mlx_lm.server import BatchGenerator  # type: ignore[attr-defined]
-
-    # Sprint 2.5 fix: Import AgentBlocks for type checking
     from semantic.domain.entities import AgentBlocks as AgentBlocksType
 
 from semantic.domain.entities import AgentBlocks, KVBlock
@@ -57,22 +48,7 @@ class BlockPoolBatchEngine:
         cache_adapter: Any,  # CacheOperationsPort (MLXCacheAdapter)
         batch_gen_factory: Callable[[Any, Any], Any] | None = None,  # For testing
     ) -> None:
-        """Initialize batch engine.
-
-        Args:
-            model: Loaded MLX model (from mlx_lm.load).
-            tokenizer: Loaded MLX tokenizer (from mlx_lm.load).
-            pool: BlockPool for cache memory management.
-            spec: ModelCacheSpec describing model cache geometry.
-            cache_adapter: Cache operations adapter (e.g., MLXCacheAdapter).
-                CRITICAL-1 (Sprint 3.5): Dependency injection to remove MLX from application layer.
-            batch_gen_factory: Optional factory function for creating BatchGenerator.
-                Used for testing to inject FakeBatchGenerator. If None, uses mlx_lm.BatchGenerator.
-
-        Raises:
-            ModelNotFoundError: If model or tokenizer is None.
-            InvalidRequestError: If pool, spec, or cache_adapter is None.
-        """
+        """Initialize batch engine."""
         # 1. Validate inputs
         if model is None:
             raise ModelNotFoundError("Model must be loaded before creating engine")
@@ -94,10 +70,9 @@ class BlockPoolBatchEngine:
         self._batch_gen_factory = batch_gen_factory
 
         # 3. Initialize batch generator (lazy - created on first submit)
-        self._batch_gen: BatchGenerator | None = None
+        self._batch_gen: Any | None = None
 
         # 4. Track active requests (UID → (agent_id, accumulated_tokens))
-        # Research finding: MLX Response has .token (singular), must accumulate ourselves
         self._active_requests: dict[str, tuple[str, list[int]]] = {}
 
         # 5. Track agent blocks (agent_id → AgentBlocks)
@@ -107,7 +82,7 @@ class BlockPoolBatchEngine:
         self,
         agent_id: str,
         prompt: str,
-        cache: "AgentBlocksType | None" = None,  # Sprint 2.5 fix: Proper type annotation
+        cache: "AgentBlocksType | None" = None,  #Proper type annotation
         max_tokens: int = 256,
     ) -> str:
         """Submit a generation request to the batch queue.
@@ -146,18 +121,10 @@ class BlockPoolBatchEngine:
         kv_cache: Any | None = None  # list[tuple[mx.array, mx.array]] | None
 
         if cache is not None:
-            # TODO (Sprint 4): Cache reconstruction needs MLX cache objects, not tuples
-            # MLX BatchGenerator.insert() expects cache objects with .size() method
-            # Our _reconstruct_cache() returns (K, V) tuples which don't have .size()
-            # For now, skip cache reconstruction and allocate fresh blocks
-            # This needs proper fix: create KVCache objects from reconstructed tensors
-            import logging  # noqa: PLC0415
-
+            # Cache reconstruction not yet supported - allocate fresh
             logging.warning(
-                f"Cache reconstruction not yet supported for BatchGenerator "
-                f"(needs KVCache objects, got tuples). Allocating fresh cache for agent {agent_id}"
+                f"Cache reconstruction not supported. Allocating fresh for {agent_id}"
             )
-            # Fall through to allocation below
             cache = None
 
         if cache is None:
@@ -200,38 +167,28 @@ class BlockPoolBatchEngine:
                 # Use injected factory (for testing)
                 self._batch_gen = self._batch_gen_factory(self._model, self._tokenizer)
             else:
-                # Import and use real mlx_lm BatchGenerator
-                from mlx_lm.server import BatchGenerator  # type: ignore[attr-defined]  # noqa: PLC0415
-
-                # Reality check: BatchGenerator only takes model and stop_tokens
-                # (not tokenizer - that was incorrect from research)
-                self._batch_gen = BatchGenerator(
+                # Use adapter to create real MLX BatchGenerator
+                self._batch_gen = self._cache_adapter.create_batch_generator(
                     model=self._model,
-                    stop_tokens=set([self._tokenizer.eos_token_id]),  # Stop at EOS
+                    stop_tokens={self._tokenizer.eos_token_id},
                 )
 
         # 5. Insert into batch
-        # Research findings:
-        # - max_tokens must be a list (one per prompt)
-        # - samplers parameter is required for temperature control
         try:
-            # Create sampler if using real MLX (not fake for testing)
+            # Create sampler via adapter if using real MLX (not fake for testing)
             samplers = None
             if self._batch_gen_factory is None:
-                # Real MLX BatchGenerator - create sampler
-                from mlx_lm.sample_utils import make_sampler  # type: ignore[import-not-found]  # noqa: PLC0415
-
-                sampler = make_sampler(temp=0.0)  # Greedy sampling (parameter is 'temp', not 'temperature')
+                sampler = self._cache_adapter.create_sampler(temperature=0.0)
                 samplers = [sampler]
 
             uids = self._batch_gen.insert(
                 prompts=[prompt_tokens],
-                max_tokens=[max_tokens],  # Must be list!
+                max_tokens=[max_tokens],
                 caches=[kv_cache] if kv_cache is not None else None,
-                samplers=samplers,  # Required for real API, ignored by fake
+                samplers=samplers,
             )
         except Exception as e:
-            # Sprint 2.5 fix: If insertion fails, free ALL allocated blocks (not just layer 0)
+            #If insertion fails, free ALL allocated blocks (not just layer 0)
             if cache is None and agent_id in self._agent_blocks:
                 agent_blocks = self._agent_blocks[agent_id]
                 # Free all layers to prevent resource leak
@@ -280,7 +237,6 @@ class BlockPoolBatchEngine:
             return  # Generator returns empty
 
         # 2. Execute decode loop until all sequences finish
-        # Research finding: next() returns empty list when done (not StopIteration)
         while True:
             batch_response = self._batch_gen.next()  # type: ignore[no-untyped-call]
 
@@ -289,14 +245,11 @@ class BlockPoolBatchEngine:
                 break
 
             # 3. Process all responses (both finished and continuing)
-            # Research finding: each response has .token (singular) - one token per step
             for response in batch_response:
                 uid = response.uid
 
                 # Validate UID is tracked
                 if uid not in self._active_requests:
-                    import logging  # noqa: PLC0415
-
                     logging.error(
                         f"Untracked UID {uid} in batch - possible memory leak. "
                         f"Active UIDs: {list(self._active_requests.keys())}"
@@ -307,8 +260,6 @@ class BlockPoolBatchEngine:
                 agent_id, tokens = self._active_requests[uid]
 
                 # 3.1. Accumulate token for this step
-                # Research finding: Response has .token (singular), not .tokens or .text
-                # Skip appending stop token (will be in finish_reason)
                 if response.finish_reason != "stop":
                     tokens.append(response.token)
 
@@ -325,7 +276,7 @@ class BlockPoolBatchEngine:
                         old_blocks = self._agent_blocks[agent_id]
                         # Free all blocks from all layers
                         for layer_blocks in old_blocks.blocks.values():
-                            # Sprint 2.5 fix: Clear layer_data BEFORE freeing
+                            #Clear layer_data BEFORE freeing
                             for block in layer_blocks:
                                 block.layer_data = None
                             self._pool.free(layer_blocks, agent_id)
@@ -334,7 +285,6 @@ class BlockPoolBatchEngine:
                     self._agent_blocks[agent_id] = blocks
 
                     # Decode accumulated tokens to text
-                    # Research finding: Decode accumulated tokens after generation completes
                     text = self._tokenizer.decode(tokens)
 
                     # Create CompletedGeneration
@@ -353,37 +303,7 @@ class BlockPoolBatchEngine:
                     yield completion
 
     def _reconstruct_cache(self, agent_blocks: AgentBlocks) -> Any:
-        """Reconstruct KVCache from blocks (one-time at restore).
-
-        Return type: list[tuple[mx.array, mx.array]]
-
-        Args:
-            agent_blocks: AgentBlocks containing allocated blocks.
-
-        Returns:
-            List of (K, V) tensor tuples, one per layer.
-            Shape: [(k_0, v_0), (k_1, v_1), ...] where k/v are mx.array
-            Each k/v has shape: (n_kv_heads, head_dim, total_seq_len)
-
-        Raises:
-            ValueError: If blocks have no layer_data (corrupted cache).
-
-        Notes:
-            - Performance target: p95 < 5ms for 32 blocks x 48 layers (EXP-006)
-            - One-time cost at cache restore, not per-step overhead
-            - Uses mx.concatenate along sequence length axis (axis=2)
-            - Forces mx.eval() to ensure immediate execution
-
-        Performance:
-            Predicted p95 ~4ms for 8K context based on:
-            - 32 blocks x 48 layers = 1,536 concatenate operations
-            - Each concat: ~2-3 μs
-            - Total: ~3-5ms
-        """
-        # CRITICAL-1 (Sprint 3.5): Use cache_adapter instead of direct MLX import
-        # This removes architecture violation by delegating to adapter layer
-
-        # 1. Initialize cache list
+        """Reconstruct KVCache from blocks."""
         cache: list[tuple[Any, Any]] = []
 
         # 2. For each layer in the model
@@ -418,30 +338,7 @@ class BlockPoolBatchEngine:
         return cache
 
     def _extract_cache(self, uid: str, cache: Any | None = None) -> AgentBlocks:
-        """Extract updated cache from batch and convert to blocks.
-
-        Args:
-            uid: Request UID for the finished sequence.
-
-        Returns:
-            AgentBlocks with updated cache data (KV cache split into 256-token blocks).
-
-        Raises:
-            PoolExhaustedError: If not enough blocks available for extraction.
-            GenerationError: If cache format invalid or UID not found.
-
-        Notes:
-            - Called after sequence completes
-            - Converts KVCache → blocks for persistence
-            - Handles partial blocks (last block may not be full)
-            - Inverse of _reconstruct_cache()
-
-        Thread Safety:
-            Callers MUST ensure per-agent serialization. Block modification happens
-            outside BlockPool's lock, so concurrent calls for the same agent will
-            cause data races. The ConcurrentScheduler (Sprint 2) enforces this via
-            per-agent locks.
-        """
+        """Extract updated cache from batch and convert to blocks."""
         # 1. Get agent_id from UID tracking
         if uid not in self._active_requests:
             raise GenerationError(f"UID {uid} not found in active requests")
@@ -472,19 +369,13 @@ class BlockPoolBatchEngine:
             # Empty cache - return empty AgentBlocks
             return AgentBlocks(agent_id=agent_id, blocks={}, total_tokens=0)
 
-        # 3.5. BLOCKER-1 fix: Detect FakeTensor in unit tests (Sprint 3.5)
-        # In unit tests, FakeBatchGenerator returns FakeTensor objects,
-        # not real MLX arrays. We need to handle this before importing MLX.
+        # Handle FakeTensor in unit tests
         first_tensor = cache[0][0]
         if hasattr(first_tensor, '__class__') and first_tensor.__class__.__name__ == 'FakeTensor':
-            # Unit test mode: extract shape from FakeTensor and allocate blocks
-            # without actually storing tensor data (since it's fake)
             seq_len = first_tensor.shape[2]
             n_blocks = (seq_len + self._spec.block_tokens - 1) // self._spec.block_tokens
-
-            # CRITICAL-2 fix: Use different variable name to avoid mypy no-redef error
             fake_blocks: dict[int, list[KVBlock]] = {}
-            total_token_count = 0  # Sum across all layers (for validation)
+            total_token_count = 0
             for layer_id, (k, v) in enumerate(cache):
                 if k is None:
                     continue
@@ -492,43 +383,34 @@ class BlockPoolBatchEngine:
                 for block_idx, block in enumerate(allocated_blocks):
                     start_token = block_idx * self._spec.block_tokens
                     end_token = min(start_token + self._spec.block_tokens, seq_len)
-                    # Store FakeTensor slices (for testing)
-                    block.layer_data = {"k": k[:, :, start_token:end_token], "v": v[:, :, start_token:end_token]}
+                    k_slice = k[:, :, start_token:end_token]
+                    v_slice = v[:, :, start_token:end_token]
+                    block.layer_data = {"k": k_slice, "v": v_slice}
                     block.token_count = end_token - start_token
-                    total_token_count += block.token_count  # Accumulate for total
+                    total_token_count += block.token_count
                 fake_blocks[layer_id] = allocated_blocks
 
-            return AgentBlocks(agent_id=agent_id, blocks=fake_blocks, total_tokens=total_token_count)
+            return AgentBlocks(
+                agent_id=agent_id, blocks=fake_blocks, total_tokens=total_token_count
+            )
 
-        # CRITICAL-1 (Sprint 3.5): Use cache_adapter instead of direct MLX import
-        # This removes architecture violation by delegating to adapter layer
-
-        # 4. Get sequence length from first layer K tensor shape
+        # Get sequence length from first layer K tensor shape
         first_k = cache[0][0]  # Shape: [n_kv_heads, head_dim, total_seq_len]
         seq_len = self._cache_adapter.get_sequence_length(first_k)
 
         # 5. Calculate blocks needed per layer
         n_blocks = (seq_len + self._spec.block_tokens - 1) // self._spec.block_tokens
 
-        # 6. Create blocks dictionary
-        # NEW-1 fix: Removed TOCTOU availability check (lines 448-454)
-        # Rely entirely on try/except with rollback (lines 460-497)
-        # Rationale: The check-then-allocate pattern creates a race window where
-        # another thread can steal blocks between the check and allocation.
-        # The try/except already handles PoolExhaustedError with proper rollback.
+        # Create blocks dictionary
         blocks_dict: dict[int, list[KVBlock]] = {}
-        total_token_count = 0  # BLOCKER-1 fix: Sum across all layers for validation
+        total_token_count = 0
 
         # 7. For each layer, split cache into blocks
-        # Wrap in try/except to handle partial allocation failures (Technical Fellow review)
         try:
             for layer_id, (k, v) in enumerate(cache):
                 if k is None:
                     continue  # Skip empty layers (sliding window)
 
-                # Sprint 2.5 fix: Allocate ALL blocks for this layer at once
-                # This prevents partial allocation race condition where another thread
-                # could steal blocks between our availability check and allocation
                 allocated_blocks = self._pool.allocate(n_blocks, layer_id, agent_id)
 
                 # Now split K, V into 256-token chunks and populate the allocated blocks
@@ -537,7 +419,6 @@ class BlockPoolBatchEngine:
                     start_token = block_idx * self._spec.block_tokens
                     end_token = min(start_token + self._spec.block_tokens, seq_len)
 
-                    # Slice tensors using adapter (CRITICAL-1, Sprint 3.5)
                     k_chunk = self._cache_adapter.slice_cache_tensor(k, start_token, end_token)
                     v_chunk = self._cache_adapter.slice_cache_tensor(v, start_token, end_token)
 
@@ -547,7 +428,7 @@ class BlockPoolBatchEngine:
                     # Update block with actual cache data
                     block.layer_data = {"k": k_chunk, "v": v_chunk}
                     block.token_count = end_token - start_token
-                    total_token_count += block.token_count  # BLOCKER-1 fix: Accumulate
+                    total_token_count += block.token_count
 
                     layer_blocks.append(block)
 
@@ -555,8 +436,7 @@ class BlockPoolBatchEngine:
 
         except PoolExhaustedError:
             # Partial allocation failure: free all blocks allocated so far
-            # (Technical Fellow review - prevent memory leak on mid-layer failure)
-            for allocated_layer_id, allocated_layer_blocks in blocks_dict.items():
+            for _allocated_layer_id, allocated_layer_blocks in blocks_dict.items():
                 self._pool.free(allocated_layer_blocks, agent_id)
             raise  # Re-raise the original error
 

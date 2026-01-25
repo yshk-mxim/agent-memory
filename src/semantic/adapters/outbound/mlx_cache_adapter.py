@@ -1,12 +1,4 @@
-"""MLX cache operations adapter (CRITICAL-1, Sprint 3.5).
-
-Implements CacheOperationsPort for MLX backend, providing tensor
-operations (concatenation, slicing, evaluation) needed for block-pool
-cache management.
-
-This adapter removes the architecture violation by moving all MLX-specific
-code out of the application layer (batch_engine.py) into the adapters layer.
-"""
+"""MLX cache operations adapter."""
 
 from typing import Any
 
@@ -30,19 +22,7 @@ class MLXCacheAdapter:
         k_tensors: list[Any],
         v_tensors: list[Any],
     ) -> tuple[Any, Any]:
-        """Concatenate K/V tensors from multiple blocks along sequence axis.
-
-        Args:
-            k_tensors: List of K tensors from blocks (each shape: [n_kv_heads, head_dim, block_tokens])
-            v_tensors: List of V tensors from blocks (each shape: [n_kv_heads, head_dim, block_tokens])
-
-        Returns:
-            Tuple of (k_full, v_full) concatenated tensors.
-            Shape: [n_kv_heads, head_dim, total_seq_len]
-
-        Raises:
-            GenerationError: If tensor shapes are incompatible.
-        """
+        """Concatenate K/V tensors from multiple blocks along sequence axis."""
         import mlx.core as mx  # Import at runtime to avoid issues in non-MLX environments
 
         # Validate tensor shapes before concatenation
@@ -50,7 +30,7 @@ class MLXCacheAdapter:
             expected_k_shape = k_tensors[0].shape[:2]
             expected_v_shape = v_tensors[0].shape[:2]
 
-            for i, (k_t, v_t) in enumerate(zip(k_tensors, v_tensors)):
+            for i, (k_t, v_t) in enumerate(zip(k_tensors, v_tensors, strict=True)):
                 if k_t.shape[:2] != expected_k_shape:
                     raise GenerationError(
                         f"K tensor shape mismatch in block {i}: "
@@ -67,8 +47,7 @@ class MLXCacheAdapter:
                         f"K={k_t.shape[:2]}, V={v_t.shape[:2]}"
                     )
 
-        # Concatenate K and V tensors along sequence length axis (axis=2)
-        # Shape: (n_kv_heads, head_dim, total_seq_len)
+        # Concatenate along sequence axis to form shape [n_kv_heads, head_dim, total_seq_len]
         k_full = mx.concatenate(k_tensors, axis=2)
         v_full = mx.concatenate(v_tensors, axis=2)
 
@@ -94,17 +73,21 @@ class MLXCacheAdapter:
         start_token: int,
         end_token: int,
     ) -> Any:
-        """Slice cache tensor along sequence axis.
-
-        Args:
-            tensor: Cache tensor (K or V) with shape [n_kv_heads, head_dim, seq_len]
-            start_token: Start index for slicing (inclusive)
-            end_token: End index for slicing (exclusive)
-
-        Returns:
-            Sliced tensor with shape [n_kv_heads, head_dim, end_token - start_token]
-
-        Notes:
-            Slicing syntax [:, :, start:end] works on MLX arrays natively.
-        """
+        """Slice cache tensor along sequence axis."""
         return tensor[:, :, start_token:end_token]
+
+    def create_batch_generator(
+        self,
+        model: Any,
+        stop_tokens: set[int],
+    ) -> Any:
+        """Create an MLX BatchGenerator for batched inference."""
+        from mlx_lm.server import BatchGenerator  # type: ignore[attr-defined]
+
+        return BatchGenerator(model=model, stop_tokens=stop_tokens)
+
+    def create_sampler(self, temperature: float = 0.0) -> Any:
+        """Create an MLX sampler for token sampling."""
+        from mlx_lm.sample_utils import make_sampler  # type: ignore[import-not-found]
+
+        return make_sampler(temp=temperature)

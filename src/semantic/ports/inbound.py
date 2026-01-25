@@ -8,7 +8,8 @@ All interfaces use Protocol (PEP 544) for structural typing, allowing
 implicit implementation without inheritance.
 """
 
-from typing import Any, Iterator, Protocol
+from collections.abc import Iterator
+from typing import Any, Protocol
 
 from semantic.domain.value_objects import CompletedGeneration, GenerationResult
 

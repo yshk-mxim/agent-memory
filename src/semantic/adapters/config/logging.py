@@ -1,29 +1,16 @@
-"""Structured logging configuration (NEW-6).
-
-Replaces print statements with JSON-formatted structured logs.
-"""
+"""Structured logging configuration."""
 
 import logging
 import sys
-from typing import Any, Callable, Sequence, cast
+from collections.abc import Callable, Sequence
+from typing import Any, cast
 
 import structlog
 from structlog.typing import EventDict, WrappedLogger
 
 
 def configure_logging(log_level: str = "INFO", json_output: bool = True) -> None:
-    """Configure structured logging with JSON output (NEW-6).
-
-    Args:
-        log_level: Log level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
-        json_output: If True, output JSON format; if False, console format
-
-    Example:
-        >>> configure_logging("INFO", json_output=True)
-        >>> logger = structlog.get_logger()
-        >>> logger.info("model_loaded", model_id="gemma-3-12b", size_mb=4096)
-        {"event": "model_loaded", "model_id": "gemma-3-12b", "size_mb": 4096, "timestamp": "2026-01-29T10:30:00Z"}
-    """
+    """Configure structured logging."""
     # Configure stdlib logging
     logging.basicConfig(
         format="%(message)s",
@@ -32,7 +19,6 @@ def configure_logging(log_level: str = "INFO", json_output: bool = True) -> None
     )
 
     # Configure structlog
-    # Type annotation for processors (CRITICAL-2 fix: Sprint 3.5)
     processors: Sequence[Callable[[WrappedLogger, str, EventDict], Any]]
     if json_output:
         # Production: JSON output
@@ -65,43 +51,7 @@ def configure_logging(log_level: str = "INFO", json_output: bool = True) -> None
 
 
 def get_logger(name: str | None = None) -> structlog.BoundLogger:
-    """Get a structured logger instance.
-
-    Args:
-        name: Optional logger name (e.g., __name__)
-
-    Returns:
-        Structured logger with context binding
-
-    Example:
-        >>> logger = get_logger(__name__)
-        >>> logger.info("cache_hit", agent_id="agent_1", tokens=1024)
-        {"event": "cache_hit", "agent_id": "agent_1", "tokens": 1024, "logger": "semantic.application"}
-    """
-    # CRITICAL-2 fix (Sprint 3.5): Use cast() to satisfy mypy strict mode
-    # structlog.get_logger() returns Any, but we know it's a BoundLogger
+    """Get a structured logger instance."""
     if name:
         return cast(structlog.BoundLogger, structlog.get_logger(name))
     return cast(structlog.BoundLogger, structlog.get_logger())
-
-
-# Example usage patterns for replacing print statements:
-#
-# Before (print):
-#   print(f"Loading model {model_id}...")
-#
-# After (structlog):
-#   logger.info("model_loading", model_id=model_id)
-#
-# Before (print):
-#   print(f"Cache hit: {agent_id} ({tokens} tokens)")
-#
-# After (structlog):
-#   logger.info("cache_hit", agent_id=agent_id, tokens=tokens)
-#
-# Before (print debug):
-#   if debug:
-#       print(f"Block allocation: {n_blocks} blocks for layer {layer_id}")
-#
-# After (structlog):
-#   logger.debug("block_allocation", n_blocks=n_blocks, layer_id=layer_id)

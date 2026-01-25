@@ -1,24 +1,5 @@
-"""Configuration management using Pydantic Settings (NEW-4).
+"""Configuration management using Pydantic Settings."""
 
-Provides type-safe configuration loading from environment variables,
-.env files, and TOML config files with validation.
-
-Configuration Precedence (highest to lowest):
-1. Environment variables (SEMANTIC_*)
-2. .env file
-3. config/{environment}.toml
-4. config/default.toml
-5. Pydantic defaults
-
-Example:
-    >>> from semantic.adapters.config.settings import get_settings
-    >>> settings = get_settings()
-    >>> print(settings.mlx.model_id)
-    'mlx-community/gemma-3-12b-it-4bit'
-"""
-
-from pathlib import Path
-from typing import Optional
 
 from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -59,7 +40,7 @@ class MLXSettings(BaseSettings):
         description="Tokens per prefill step (larger = faster prefill, more memory)",
     )
 
-    kv_bits: Optional[int] = Field(
+    kv_bits: int | None = Field(
         default=None,
         ge=4,
         le=8,
@@ -226,7 +207,7 @@ class Settings(BaseSettings):
 
 
 # Singleton instance
-_settings: Optional[Settings] = None
+_settings: Settings | None = None
 
 
 def get_settings() -> Settings:

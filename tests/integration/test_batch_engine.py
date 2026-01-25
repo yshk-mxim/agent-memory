@@ -26,9 +26,9 @@ def model_and_tokenizer():
 @pytest.fixture
 def spec(model_and_tokenizer):
     """Extract ModelCacheSpec from loaded model."""
-    from semantic.domain.value_objects import ModelCacheSpec
+    from semantic.adapters.outbound.mlx_spec_extractor import get_extractor
     model, _ = model_and_tokenizer
-    return ModelCacheSpec.from_model(model)
+    return get_extractor().extract_spec(model)
 
 
 @pytest.fixture

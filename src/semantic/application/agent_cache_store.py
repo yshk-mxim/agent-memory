@@ -1,20 +1,11 @@
-"""Agent cache storage with trie-based prefix matching and LRU eviction.
+"""Agent cache storage with trie-based prefix matching and LRU eviction."""
 
-Implements three-tier cache lifecycle:
-- Hot tier: In-memory caches for active agents
-- Warm tier: Disk-persisted caches (safetensors format)
-- Cold tier: Evicted (can be reloaded from warm tier)
-
-NEW-4 Part 2: AgentCacheStore skeleton with interfaces defined.
-Days 5-7: Full implementation of persistence, prefix matching, LRU eviction.
-"""
-
-import json
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
-from semantic.domain.entities import AgentBlocks, KVBlock
+from semantic.domain.entities import AgentBlocks
 from semantic.domain.errors import InvalidRequestError
 from semantic.domain.value_objects import ModelCacheSpec
 
@@ -111,20 +102,14 @@ class CacheEntry:
     """
 
     agent_id: str
-    blocks: Optional[AgentBlocks]
+    blocks: AgentBlocks | None
     model_tag: ModelTag
     last_accessed: float = field(default_factory=lambda: 0.0)
     access_count: int = 0
     is_hot: bool = True
 
     def mark_accessed(self) -> None:
-        """Mark entry as accessed (update LRU timestamp).
-
-        Updates last_accessed to current time and increments access_count.
-        Used by LRU eviction policy.
-        """
-        import time
-
+        """Mark entry as accessed (update LRU timestamp)."""
         self.last_accessed = time.time()
         self.access_count += 1
 
@@ -159,6 +144,7 @@ class AgentCacheStore:
         cache_dir: Path,
         max_hot_agents: int,
         model_tag: ModelTag,
+        cache_adapter: Any | None = None,
     ) -> None:
         """Initialize cache store.
 
@@ -166,12 +152,14 @@ class AgentCacheStore:
             cache_dir: Directory for warm-tier disk storage
             max_hot_agents: Maximum agents in hot tier (memory)
             model_tag: Current model tag for compatibility checking
+            cache_adapter: Optional persistence adapter (for dependency injection)
         """
         self.cache_dir = Path(cache_dir).expanduser()
         self.cache_dir.mkdir(parents=True, exist_ok=True)
 
         self.max_hot_agents = max_hot_agents
         self.model_tag = model_tag
+        self._cache_adapter = cache_adapter
 
         # Hot tier: agent_id → CacheEntry (in-memory)
         self._hot_cache: dict[str, CacheEntry] = {}
@@ -179,9 +167,7 @@ class AgentCacheStore:
         # Warm tier: agent_id → file path (on disk)
         self._warm_cache: dict[str, Path] = {}
 
-        # Prefix trie for token prefix matching (Sprint 3.5 implementation)
-        # Maps token prefixes to agent IDs for cache reuse
-        # Structure: Each node is a dict mapping token_id → child node
+        # Prefix trie for token prefix matching
         # Leaf nodes have "_agents" key with set of agent IDs
         self._prefix_trie: dict[int | str, Any] = {}
 
@@ -222,7 +208,7 @@ class AgentCacheStore:
         if len(self._hot_cache) > self.max_hot_agents:
             self._evict_lru()
 
-    def load(self, agent_id: str) -> Optional[AgentBlocks]:
+    def load(self, agent_id: str) -> AgentBlocks | None:
         """Load agent cache from hot or warm tier.
 
         Args:
@@ -255,7 +241,7 @@ class AgentCacheStore:
         # Cache miss
         return None
 
-    def find_prefix(self, tokens: list[int]) -> Optional[AgentBlocks]:
+    def find_prefix(self, tokens: list[int]) -> AgentBlocks | None:
         """Find longest prefix match in cache (simplified dict-based implementation).
 
         Args:
@@ -267,7 +253,7 @@ class AgentCacheStore:
         Notes:
             - Simplified implementation using dict of token sequences
             - Returns cache with LONGEST common prefix
-            - O(n_agents × prefix_length) complexity
+            - O(n_agents x prefix_length) complexity
             - Full trie implementation deferred for performance optimization
 
         Example:
@@ -279,18 +265,15 @@ class AgentCacheStore:
         if not tokens:
             return None
 
-        best_match: Optional[AgentBlocks] = None
+        best_match: AgentBlocks | None = None
         best_prefix_len = 0
 
         # Check all cached agents for prefix match
-        for agent_id, entry in self._hot_cache.items():
+        for _agent_id, entry in self._hot_cache.items():
             if entry.blocks is None:
                 continue
 
-            # Simple prefix matching: compare token sequences
-            # In production, would use token sequence from metadata
-            # For Day 6 stub: simplified logic
-            # Assume total_tokens gives us a rough match quality
+            # Simplified prefix matching using total_tokens as proxy
             prefix_len = min(len(tokens), entry.blocks.total_tokens)
 
             if prefix_len > best_prefix_len:
@@ -341,191 +324,74 @@ class AgentCacheStore:
         self.evict_lru(target_count=self.max_hot_agents)
 
     def _save_to_disk(self, agent_id: str) -> None:
-        """Persist cache to warm tier (safetensors format).
-
-        Args:
-            agent_id: Agent to persist
-
-        Notes:
-            - Saves in safetensors format
-            - Atomic write (tmp + rename)
-            - Includes model tag for validation
-        """
-        import numpy as np
-        from safetensors.numpy import save_file
-
+        """Persist cache to warm tier."""
         entry = self._hot_cache.get(agent_id)
         if entry is None or entry.blocks is None:
             return
 
-        # Prepare metadata
         metadata = {
             "agent_id": agent_id,
             "model_id": self.model_tag.model_id,
-            "n_layers": str(self.model_tag.n_layers),
-            "n_kv_heads": str(self.model_tag.n_kv_heads),
-            "head_dim": str(self.model_tag.head_dim),
-            "block_tokens": str(self.model_tag.block_tokens),
-            "total_tokens": str(entry.blocks.total_tokens),
+            "n_layers": self.model_tag.n_layers,
+            "n_kv_heads": self.model_tag.n_kv_heads,
+            "head_dim": self.model_tag.head_dim,
+            "block_tokens": self.model_tag.block_tokens,
+            "total_tokens": entry.blocks.total_tokens,
         }
 
-        # BLOCKER-3 fix (Sprint 3.5): Actual tensor serialization
-        cache_path = self.cache_dir / f"{agent_id}.safetensors"
-        tmp_path = self.cache_dir / f"{agent_id}.safetensors.tmp"
+        if self._cache_adapter is not None:
+            cache_path = self._cache_adapter.save(agent_id, entry.blocks, metadata)
+            self._warm_cache[agent_id] = cache_path
+        else:
+            # Lazy import for backward compatibility
+            from semantic.adapters.outbound.safetensors_cache_adapter import (
+                SafetensorsCacheAdapter,
+            )
 
-        # Serialize block data to numpy arrays for safetensors
-        tensors: dict[str, np.ndarray] = {}
+            adapter = SafetensorsCacheAdapter(self.cache_dir)
+            cache_path = adapter.save(agent_id, entry.blocks, metadata)
+            self._warm_cache[agent_id] = cache_path
 
-        # For each layer, serialize K/V tensors from blocks
-        for layer_id, layer_blocks in entry.blocks.blocks.items():
-            for block_idx, block in enumerate(layer_blocks):
-                if block.layer_data is None:
-                    continue  # Skip blocks without data
-
-                # Check if this is a FakeTensor (unit tests)
-                k_data = block.layer_data.get("k")
-                v_data = block.layer_data.get("v")
-
-                if k_data is None or v_data is None:
-                    continue
-
-                # Handle FakeTensor (unit tests) - skip serialization
-                if hasattr(k_data, '__class__') and k_data.__class__.__name__ == 'FakeTensor':
-                    continue  # Don't serialize test fakes
-
-                # Convert to numpy (handles both MLX arrays and numpy arrays)
-                try:
-                    # Try MLX → numpy conversion
-                    if hasattr(k_data, '__array_interface__') or hasattr(k_data, '__array__'):
-                        k_np = np.asarray(k_data)
-                        v_np = np.asarray(v_data)
-                    else:
-                        # Already numpy or convertible
-                        k_np = np.array(k_data)
-                        v_np = np.array(v_data)
-
-                    # Store with unique key: layer_block_kv format
-                    k_key = f"L{layer_id}_B{block_idx}_K"
-                    v_key = f"L{layer_id}_B{block_idx}_V"
-                    tensors[k_key] = k_np
-                    tensors[v_key] = v_np
-                except Exception:
-                    # Conversion failed - skip this block
-                    continue
-
-        # Atomic write (tmp + rename for crash safety)
-        save_file(tensors, str(tmp_path), metadata=metadata)
-        tmp_path.rename(cache_path)
-
-        self._warm_cache[agent_id] = cache_path
-
-    def _load_from_disk(self, agent_id: str) -> Optional[AgentBlocks]:
-        """Load cache from warm tier (safetensors format).
-
-        Args:
-            agent_id: Agent to load
-
-        Returns:
-            AgentBlocks if valid, None if incompatible or missing
-
-        Notes:
-            - Validates model tag compatibility
-            - Promotes to hot tier on successful load
-        """
-        from safetensors.numpy import load_file
-
+    def _load_from_disk(self, agent_id: str) -> AgentBlocks | None:
+        """Load cache from warm tier."""
         cache_path = self._warm_cache.get(agent_id)
         if cache_path is None or not cache_path.exists():
             return None
 
         try:
-            # Load metadata
-            with open(cache_path, "rb") as f:
-                # Safetensors metadata is at the start of the file
-                header_size_bytes = f.read(8)
-                if len(header_size_bytes) < 8:
-                    return None
-                import struct
+            # Load via adapter
+            if self._cache_adapter is not None:
+                blocks_dict, metadata = self._cache_adapter.load(cache_path)
+            else:
+                from semantic.adapters.outbound.safetensors_cache_adapter import (
+                    SafetensorsCacheAdapter,
+                )
 
-                header_size = struct.unpack("<Q", header_size_bytes)[0]
-                header_bytes = f.read(header_size)
-                header = json.loads(header_bytes.decode("utf-8"))
-
-            metadata = header.get("__metadata__", {})
+                adapter = SafetensorsCacheAdapter(self.cache_dir)
+                blocks_dict, metadata = adapter.load(cache_path)
 
             # Validate model tag compatibility
             saved_tag = ModelTag(
-                model_id=metadata.get("model_id", ""),
+                model_id=str(metadata.get("model_id", "")),
                 n_layers=int(metadata.get("n_layers", 0)),
                 n_kv_heads=int(metadata.get("n_kv_heads", 0)),
                 head_dim=int(metadata.get("head_dim", 0)),
                 block_tokens=int(metadata.get("block_tokens", 0)),
             )
 
-            # Check compatibility
-            if not saved_tag.is_compatible(
-                ModelCacheSpec(
-                    n_layers=self.model_tag.n_layers,
-                    n_kv_heads=self.model_tag.n_kv_heads,
-                    head_dim=self.model_tag.head_dim,
-                    block_tokens=self.model_tag.block_tokens,
-                    layer_types=["global"] * self.model_tag.n_layers,  # Simplified
-                    sliding_window_size=None,
-                )
-            ):
-                # Incompatible - treat as cache miss
+            current_spec = ModelCacheSpec(
+                n_layers=self.model_tag.n_layers,
+                n_kv_heads=self.model_tag.n_kv_heads,
+                head_dim=self.model_tag.head_dim,
+                block_tokens=self.model_tag.block_tokens,
+                layer_types=["global"] * self.model_tag.n_layers,
+                sliding_window_size=None,
+            )
+
+            if not saved_tag.is_compatible(current_spec):
                 return None
 
-            # BLOCKER-3 fix (Sprint 3.5): Actual tensor loading
             total_tokens = int(metadata.get("total_tokens", 0))
-
-            # Load tensors from safetensors file
-            tensors_data = load_file(str(cache_path))
-
-            # Reconstruct blocks from saved tensors
-            from semantic.domain.entities import KVBlock
-            blocks_dict: dict[int, list[KVBlock]] = {}
-
-            # Parse saved tensor keys to reconstruct blocks
-            # Key format: L{layer_id}_B{block_idx}_K or L{layer_id}_B{block_idx}_V
-            for key in sorted(tensors_data.keys()):
-                if not key.endswith("_K"):
-                    continue  # Process K tensors, V will be paired
-
-                # Parse key: L0_B0_K → layer=0, block=0
-                parts = key.split("_")
-                if len(parts) != 3:
-                    continue
-                layer_id = int(parts[0][1:])  # Remove 'L' prefix
-                block_idx = int(parts[1][1:])  # Remove 'B' prefix
-
-                k_key = key
-                v_key = key.replace("_K", "_V")
-
-                if v_key not in tensors_data:
-                    continue  # Skip if V tensor missing
-
-                k_array = tensors_data[k_key]
-                v_array = tensors_data[v_key]
-
-                # Calculate token count from tensor shape
-                # Shape: (n_kv_heads, head_dim, seq_len)
-                token_count = k_array.shape[2] if len(k_array.shape) >= 3 else 0
-
-                # Create block (we don't have pool here, so create with fake IDs)
-                block = KVBlock(
-                    block_id=layer_id * 1000 + block_idx,  # Synthetic ID
-                    layer_id=layer_id,
-                    token_count=token_count,
-                    layer_data={"k": k_array, "v": v_array},
-                )
-
-                # Add to blocks dict
-                if layer_id not in blocks_dict:
-                    blocks_dict[layer_id] = []
-                blocks_dict[layer_id].append(block)
-
-            # Create AgentBlocks
             blocks = AgentBlocks(agent_id=agent_id, blocks=blocks_dict, total_tokens=total_tokens)
 
             # Promote to hot tier

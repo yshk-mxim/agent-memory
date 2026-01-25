@@ -1,48 +1,31 @@
-"""Timeout mechanisms for model and cache operations (NEW-3).
-
-Prevents hangs in model loading, cache loading, and extraction.
-"""
+"""Timeout mechanisms for model and cache operations."""
 
 import functools
 import signal
-from typing import Any, Callable, TypeVar
+from collections.abc import Callable
+from typing import Any, TypeVar
 
 F = TypeVar("F", bound=Callable[..., Any])
 
 
-class TimeoutError(Exception):
+class OperationTimeoutError(Exception):
     """Raised when an operation exceeds its timeout."""
 
 
 def timeout(seconds: int) -> Callable[[F], F]:
-    """Decorator to add timeout to a function (NEW-3).
+    """Decorator to add timeout to a function.
 
-    Args:
-        seconds: Timeout in seconds
-
-    Returns:
-        Decorated function that raises TimeoutError if exceeded
-
-    Example:
-        >>> @timeout(30)
-        ... def load_model(path):
-        ...     # Long operation
-        ...     ...
-
-    Notes:
-        - Uses SIGALRM signal (Unix/macOS only)
-        - Not thread-safe (signal handlers are process-global)
-        - For production, consider using multiprocessing.Pool with timeout
+    Uses SIGALRM signal (Unix/macOS only, not thread-safe).
 
     Raises:
-        TimeoutError: If function exceeds timeout
+        OperationTimeoutError: If function exceeds timeout
     """
 
     def decorator(func: F) -> F:
         @functools.wraps(func)
         def wrapper(*args: Any, **kwargs: Any) -> Any:
-            def _timeout_handler(signum: int, frame: Any) -> None:
-                raise TimeoutError(
+            def _timeout_handler(_signum: int, _frame: Any) -> None:
+                raise OperationTimeoutError(
                     f"{func.__name__}() exceeded timeout of {seconds}s"
                 )
 
