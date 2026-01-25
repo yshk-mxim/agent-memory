@@ -433,9 +433,13 @@ class BlockPoolBatchEngine:
             if k is None:
                 continue  # Skip empty layers (sliding window)
 
-            layer_blocks = []
+            # Sprint 2.5 fix: Allocate ALL blocks for this layer at once
+            # This prevents partial allocation race condition where another thread
+            # could steal blocks between our availability check and allocation
+            allocated_blocks = self._pool.allocate(n_blocks, layer_id, agent_id)
 
-            # Split K, V into 256-token chunks
+            # Now split K, V into 256-token chunks and populate the allocated blocks
+            layer_blocks = []
             for block_idx in range(n_blocks):
                 start_token = block_idx * self._spec.block_tokens
                 end_token = min(start_token + self._spec.block_tokens, total_tokens)
@@ -444,17 +448,12 @@ class BlockPoolBatchEngine:
                 k_chunk = k[:, :, start_token:end_token]
                 v_chunk = v[:, :, start_token:end_token]
 
-                # Allocate block from pool
-                allocated_blocks = self._pool.allocate(1, layer_id, agent_id)
-                block_id = allocated_blocks[0].block_id
+                # Use the pre-allocated block
+                block = allocated_blocks[block_idx]
 
-                # Create KVBlock with cache data
-                block = KVBlock(
-                    block_id=block_id,
-                    layer_id=layer_id,
-                    token_count=end_token - start_token,
-                    layer_data={"k": k_chunk, "v": v_chunk},
-                )
+                # Update block with actual cache data
+                block.layer_data = {"k": k_chunk, "v": v_chunk}
+                block.token_count = end_token - start_token
 
                 layer_blocks.append(block)
 

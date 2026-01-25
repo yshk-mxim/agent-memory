@@ -72,13 +72,13 @@ class TestConcurrentBlockPool:
         successes = [r for r in results if r[0] == "success"]
         errors = [r for r in results if r[0] == "error"]
 
-        # Should all succeed (10 threads × 10 blocks = 100 blocks < 1000 available)
+        # Should all succeed (10 threads x 10 blocks = 100 blocks < 1000 available)
         assert len(successes) == 10, f"All should succeed, got {len(errors)} errors"
         assert len(errors) == 0, f"No errors expected, got {errors}"
 
         # Verify all block IDs are unique (no double-allocation)
         all_block_ids = set()
-        for status, blocks in successes:
+        for _status, blocks in successes:
             for block in blocks:
                 assert (
                     block.block_id not in all_block_ids
@@ -134,7 +134,7 @@ class TestConcurrentBlockPool:
             try:
                 barrier.wait()
                 time.sleep(0.001 * thread_id)  # Stagger slightly
-                blocks = pool.allocate(n_blocks=5, layer_id=0, agent_id=f"alloc_{thread_id}")
+                _blocks = pool.allocate(n_blocks=5, layer_id=0, agent_id=f"alloc_{thread_id}")
                 results.append(("alloc_success", f"alloc_{thread_id}"))
             except Exception as e:
                 results.append(("alloc_error", str(e)))
@@ -166,12 +166,12 @@ class TestConcurrentBlockPool:
         alloc_successes = [r for r in results if r[0] == "alloc_success"]
         free_successes = [r for r in results if r[0] == "free_success"]
 
-        # All allocations should succeed (10 × 5 = 50 blocks)
+        # All allocations should succeed (10 x 5 = 50 blocks)
         assert len(alloc_successes) == 10, "All allocations should succeed"
         # All frees should succeed (allocate then free)
         assert len(free_successes) == 10, "All frees should succeed"
 
-        # Final pool state: 950 blocks allocated (10 agents × 5 blocks)
+        # Final pool state: 950 blocks allocated (10 agents x 5 blocks)
         assert pool.available_blocks() == 950
 
     def test_pool_exhaustion_concurrent(self, pool: BlockPool) -> None:
@@ -183,7 +183,7 @@ class TestConcurrentBlockPool:
         def allocate_worker(thread_id: int) -> None:
             try:
                 barrier.wait()
-                blocks = pool.allocate(n_blocks=10, layer_id=0, agent_id=f"thread_{thread_id}")
+                _blocks = pool.allocate(n_blocks=10, layer_id=0, agent_id=f"thread_{thread_id}")
                 results.append(("success", f"thread_{thread_id}"))
             except PoolExhaustedError as e:
                 results.append(("exhausted", str(e)))
@@ -209,7 +209,7 @@ class TestConcurrentBlockPool:
         assert len(errors) == 0, f"No other errors expected, got {errors}"
 
         # Exact number depends on timing, but should be around 100 successes
-        # (100 threads × 10 blocks = 1000 blocks)
+        # (100 threads x 10 blocks = 1000 blocks)
         assert 90 <= len(successes) <= 110, f"Expected ~100 successes, got {len(successes)}"
 
         # Pool should be exhausted

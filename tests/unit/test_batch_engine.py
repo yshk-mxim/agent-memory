@@ -17,7 +17,6 @@ from semantic.domain.value_objects import ModelCacheSpec
 class FakeModel:
     """Fake MLX model for testing."""
 
-    pass
 
 
 class FakeTokenizer:
@@ -317,7 +316,6 @@ class TestBlockPoolBatchEngineSubmit:
     def test_submit_with_cache_reconstructs(self, engine) -> None:
         """Should reconstruct cache from blocks when cache provided."""
         # Will be implemented after _reconstruct_cache() is done
-        pass
 
 
 class TestBlockPoolBatchEngineStep:
@@ -401,14 +399,12 @@ class TestBlockPoolBatchEngineCacheReconstruction:
         """Should reconstruct cache from single block."""
         # Requires real mlx.array objects with proper KV cache format
         # Will be implemented in integration tests (Day 9)
-        pass
 
     @pytest.mark.skip(reason="Requires MLX arrays - deferred to integration tests (Day 9)")
     def test_reconstruct_cache_from_multiple_blocks(self, engine) -> None:
         """Should reconstruct cache from multiple blocks."""
         # Requires real mlx.array objects with proper KV cache format
         # Will be implemented in integration tests (Day 9)
-        pass
 
 
 class TestBlockPoolBatchEngineCacheExtraction:
@@ -429,4 +425,3 @@ class TestBlockPoolBatchEngineCacheExtraction:
     def test_extract_cache_converts_to_blocks(self, engine) -> None:
         """Should convert KVCache back to blocks."""
         # Will be implemented on Day 8
-        pass
