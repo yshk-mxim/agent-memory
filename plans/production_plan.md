@@ -962,6 +962,8 @@ def fake_hybrid_cache_spec() -> ModelCacheSpec:
 | **DEFERRED from Sprint 2.5: Refactor ModelCacheSpec.from_model() (Issue #9)** | SE, ML |
 | **DEFERRED from Sprint 2.5: Strategy pattern for model extractors (Issue #10)** | SE, ML |
 | **DEFERRED from Sprint 2.5: Replace magic number 256 with block_tokens (Issue #13)** | SE |
+| **NEW-1: Fix TOCTOU race in _extract_cache() (Second Technical Fellow Review)** | SE |
+| **NEW-2: Add locks to used_memory() and available_memory() (Second Review)** | SE |
 
 **Deferred Issues from Sprint 2.5 Critical Review**:
 - **Issue #9** (MEDIUM, 4h): Refactor `ModelCacheSpec.from_model()` (94 lines, CC=8)
@@ -975,6 +977,237 @@ def fake_hybrid_cache_spec() -> ModelCacheSpec:
 - **Issue #13** (LOW, 1h): Replace magic number 256
   - Find all hardcoded `256` and replace with `self._spec.block_tokens`
   - Improves maintainability
+
+**NEW Issues from Second Independent Technical Fellow Review (2026-01-24)**:
+
+**Goal**: Achieve A to A+ grade (currently B+ after first review fixes)
+
+- **NEW-1** (HIGH, 3h): Fix TOCTOU race in `_extract_cache()` availability check
+  - **Location**: `src/semantic/application/batch_engine.py:450`
+  - **Problem**: Checks `available_blocks()` then allocates in loop, creating race:
+    ```python
+    # Line 450: Check (with lock)
+    if self._pool.available_blocks() < total_blocks_needed:
+        raise PoolExhaustedError(...)
+
+    # Line 469: Allocate (with lock, but separate call)
+    for layer_id, (k, v) in enumerate(cache):
+        allocated_blocks = self._pool.allocate(n_blocks, layer_id, agent_id)
+        # Another thread could steal blocks between check and this allocation!
+    ```
+  - **Risk**: Check passes but allocation fails due to race condition
+  - **Fix**: Remove availability check and rely on allocation try/except
+    ```python
+    # Don't check availability - just try to allocate and handle error
+    try:
+        for layer_id, (k, v) in enumerate(cache):
+            allocated_blocks = self._pool.allocate(n_blocks, layer_id, agent_id)
+            # ... populate blocks ...
+    except PoolExhaustedError:
+        # Rollback already allocated blocks (already implemented in HIGH-4)
+        for allocated_layer_id, allocated_layer_blocks in blocks_dict.items():
+            self._pool.free(allocated_layer_blocks, agent_id)
+        raise
+    ```
+  - **Why First Review Missed**: Focused on Sprint 2.5 fixes, didn't re-examine _extract_cache() logic flow
+  - **Impact on Grade**: B+ → A- (removes last TOCTOU race)
+
+- **NEW-2** (MEDIUM, 2h): Add locks to `used_memory()` and `available_memory()`
+  - **Location**: `src/semantic/domain/services.py:282, 291`
+  - **Problem**: Same issue as `available_blocks()` - read shared state without lock:
+    ```python
+    def used_memory(self) -> int:
+        return len(self.allocated_blocks) * bytes_per_block  # NO LOCK!
+
+    def available_memory(self) -> int:
+        return len(self.free_list) * bytes_per_block  # NO LOCK!
+    ```
+  - **Risk**: Inconsistent memory accounting under concurrent access
+  - **Fix**: Wrap with `with self._lock:` like `available_blocks()`
+    ```python
+    def used_memory(self) -> int:
+        with self._lock:
+            bytes_per_block = self.spec.bytes_per_block_per_layer()
+            return len(self.allocated_blocks) * bytes_per_block
+
+    def available_memory(self) -> int:
+        with self._lock:
+            bytes_per_block = self.spec.bytes_per_block_per_layer()
+            return len(self.free_list) * bytes_per_block
+    ```
+  - **Why First Review Missed**: Fixed `available_blocks()` but didn't check other read methods
+  - **Impact on Grade**: Completes thread-safety (concurrency score 85 → 95)
+
+- **NEW-3** (MEDIUM, 4h): Add timeout mechanisms to prevent indefinite blocking
+  - **Location**: `src/semantic/application/batch_engine.py:191` (insert), line 241 (step)
+  - **Problem**: No timeouts anywhere - operations can block forever:
+    ```python
+    uids = self._batch_gen.insert(...)  # No timeout!
+    response = self._batch_gen.next()   # No timeout!
+    ```
+  - **Risk**: If MLX hangs, entire engine blocks indefinitely
+  - **Fix**: Add timeout wrapper using signals or asyncio
+    ```python
+    import signal
+    from contextlib import contextmanager
+
+    @contextmanager
+    def timeout(seconds: int):
+        def timeout_handler(signum, frame):
+            raise TimeoutError(f"Operation timed out after {seconds}s")
+
+        old_handler = signal.signal(signal.SIGALRM, timeout_handler)
+        signal.alarm(seconds)
+        try:
+            yield
+        finally:
+            signal.alarm(0)
+            signal.signal(signal.SIGALRM, old_handler)
+
+    # Usage:
+    try:
+        with timeout(30):  # 30s timeout
+            uids = self._batch_gen.insert(...)
+    except TimeoutError:
+        raise InvalidRequestError("Model insert timed out")
+    ```
+  - **Configuration**: Default 30s, configurable via settings
+  - **Why First Review Missed**: Focused on correctness, not reliability features
+  - **Impact on Grade**: Improves reliability score (prevents hangs)
+
+- **NEW-4** (MEDIUM, 6h): Implement configuration management (Settings classes)
+  - **Location**: `src/semantic/adapters/config/settings.py` (doesn't exist yet)
+  - **Problem**: All values hardcoded, no config file support:
+    - `max_tokens=256` in multiple places
+    - No way to change batch size, timeouts, pool size without code changes
+    - Empty `adapters/config/` directory
+  - **Risk**: Can't tune for different hardware or use cases
+  - **Fix**: Create Pydantic Settings classes (per production plan):
+    ```python
+    # src/semantic/adapters/config/settings.py
+    from pydantic import Field
+    from pydantic_settings import BaseSettings, SettingsConfigDict
+
+    class MLXSettings(BaseSettings):
+        model_id: str = "mlx-community/gemma-3-12b-it-4bit"
+        max_batch_size: int = Field(5, ge=1, le=20)
+        prefill_step_size: int = 512
+        kv_bits: int | None = None
+        block_tokens: int = 256
+        cache_budget_mb: int = 4096
+
+    class AgentSettings(BaseSettings):
+        max_agents_in_memory: int = Field(5, ge=1)
+        cache_dir: str = "~/.semantic/caches"
+        batch_window_ms: int = Field(10, ge=1, le=1000)
+
+    class OperationSettings(BaseSettings):
+        insert_timeout_s: int = Field(30, ge=1, le=300)
+        generate_timeout_s: int = Field(60, ge=1, le=600)
+        default_max_tokens: int = Field(256, ge=1, le=8192)
+
+    class Settings(BaseSettings):
+        model_config = SettingsConfigDict(
+            env_prefix="SEMANTIC_",
+            env_file=".env",
+            env_file_encoding="utf-8"
+        )
+
+        mlx: MLXSettings = Field(default_factory=MLXSettings)
+        agent: AgentSettings = Field(default_factory=AgentSettings)
+        operation: OperationSettings = Field(default_factory=OperationSettings)
+    ```
+  - **Precedence**: ENV vars > `.env` > `config/{environment}.toml` > defaults
+  - **Why First Review Missed**: Focused on current code, not missing infrastructure
+  - **Impact on Grade**: Enables production deployment (no hardcoded values)
+
+- **NEW-5** (LOW, 3h): Replace ValueError/RuntimeError with domain errors
+  - **Location**: Throughout codebase (21 occurrences of ValueError, 1 RuntimeError)
+  - **Problem**: Using generic exceptions instead of domain errors:
+    ```python
+    # Current:
+    raise ValueError(f"UID {uid} not found in active requests")
+
+    # Should be:
+    raise AgentNotFoundError(f"UID {uid} not found in active requests")
+    ```
+  - **Risk**: Violates hexagonal architecture (leaks implementation details)
+  - **Fix**: Map generic exceptions to domain errors:
+    - `ValueError` for validation → `InvalidRequestError`
+    - `RuntimeError` for state issues → appropriate domain error
+    - `KeyError` for missing items → `AgentNotFoundError`
+  - **Example**:
+    ```python
+    # Before:
+    if uid not in self._active_requests:
+        raise ValueError(f"UID {uid} not found")
+
+    # After:
+    if uid not in self._active_requests:
+        raise AgentNotFoundError(
+            f"UID {uid} not found in active requests. "
+            f"Active UIDs: {list(self._active_requests.keys())}"
+        )
+    ```
+  - **Why First Review Missed**: Architecture layer was correct, implementation details not scrutinized
+  - **Impact on Grade**: Improves architecture adherence (85 → 90)
+
+- **NEW-6** (MEDIUM, 5h): Implement structured logging throughout
+  - **Location**: Entire codebase (only 1 logging statement exists)
+  - **Problem**: Minimal logging - only one `logging.error()` call:
+    ```python
+    # Line 261 in batch_engine.py:
+    import logging  # noqa: PLC0415
+    logging.error(f"Untracked UID {uid} in batch - possible memory leak.")
+    ```
+  - **Risk**: Can't debug production issues, no observability
+  - **Fix**: Add structured logging using structlog:
+    ```python
+    # src/semantic/adapters/outbound/logger.py
+    import structlog
+
+    def configure_logging():
+        structlog.configure(
+            processors=[
+                structlog.stdlib.add_log_level,
+                structlog.stdlib.add_logger_name,
+                structlog.processors.TimeStamper(fmt="iso"),
+                structlog.processors.StackInfoRenderer(),
+                structlog.processors.format_exc_info,
+                structlog.processors.JSONRenderer()
+            ],
+            wrapper_class=structlog.stdlib.BoundLogger,
+            logger_factory=structlog.stdlib.LoggerFactory(),
+        )
+
+    logger = structlog.get_logger()
+
+    # Usage throughout codebase:
+    logger.info("block_allocated",
+                agent_id=agent_id,
+                layer_id=layer_id,
+                n_blocks=n_blocks,
+                pool_available=self._pool.available_blocks())
+
+    logger.warning("pool_pressure_high",
+                   utilization=utilization_ratio,
+                   available_blocks=available,
+                   threshold=0.9)
+
+    logger.error("allocation_failed",
+                 agent_id=agent_id,
+                 requested_blocks=n_blocks,
+                 available_blocks=available,
+                 exc_info=True)
+    ```
+  - **Key Logging Points**:
+    - Block allocation/free operations
+    - Pool pressure warnings (>80% utilization)
+    - Cache eviction events
+    - Model swap lifecycle
+    - Request completion metrics
+  - **Why First Review Missed**: Focused on correctness, observability deferred to Sprint 7
+  - **Impact on Grade**: Essential for production debugging (reliability score +10)
 
 **Additional Issues from Technical Fellow Review (2026-01-24)**:
 - **EXP-007a** (CRITICAL): Measure safetensors I/O latency with async I/O threshold determination
@@ -990,6 +1223,26 @@ def fake_hybrid_cache_spec() -> ModelCacheSpec:
   - Run EXP-010 (Claude Code CLI) before Sprint 4 starts
   - These validate critical assumptions for Sprint 4
 
+**Second Technical Fellow Review - Grade Improvement Path**:
+
+Current Grade: **B+** (after first review fixes)
+Target Grade: **A to A+** (portfolio-quality)
+
+| Issue | Priority | Effort | Grade Impact |
+|-------|----------|--------|--------------|
+| NEW-1 (TOCTOU race) | HIGH | 3h | B+ → A- (removes last race) |
+| NEW-2 (Memory locks) | MEDIUM | 2h | Concurrency 85→95 |
+| NEW-3 (Timeouts) | MEDIUM | 4h | Reliability +10 |
+| NEW-4 (Config mgmt) | MEDIUM | 6h | Production-ready |
+| NEW-5 (Domain errors) | LOW | 3h | Architecture 85→90 |
+| NEW-6 (Logging) | MEDIUM | 5h | Observability +10 |
+| **Total** | — | **23h** | **B+ → A/A+** |
+
+**Sprint 3 Integration Strategy**:
+- **Week 1**: Fix NEW-1 (critical race), NEW-2 (complete thread-safety), NEW-4 (config)
+- **Week 2**: Implement AgentCacheStore, NEW-3 (timeouts), NEW-6 (logging)
+- **Deferred**: NEW-5 (domain errors) to Sprint 4 cleanup
+
 **Experiments**:
 - EXP-007: Verify RotatingKVCache serialization works via safetensors
 - EXP-007a: Safetensors I/O latency + async threshold (NEW - Technical Fellow)
@@ -998,7 +1251,7 @@ def fake_hybrid_cache_spec() -> ModelCacheSpec:
 - EXP-009: SSE format compliance (MOVED from Sprint 4 - blocking gate)
 - EXP-010: Claude Code CLI compatibility (MOVED from Sprint 4 - blocking gate)
 
-**Exit Gate**: Roundtrip byte-identical; model-tag validated; async I/O for caches > 100MB; deferred issues resolved; **EXP-007a, EXP-latency, EXP-009, EXP-010 passing**
+**Exit Gate**: Roundtrip byte-identical; model-tag validated; async I/O for caches > 100MB; deferred issues resolved; **EXP-007a, EXP-latency, EXP-009, EXP-010 passing**; **NEW-1, NEW-2, NEW-3, NEW-4, NEW-6 implemented (Grade A)**
 
 ---
 
@@ -1039,6 +1292,7 @@ If ANY gate fails: evaluate scope reduction, simpler eviction, or Plan B.
 | ADR-006: Multi-Protocol Agent Identification | SE |
 | **DEFERRED from Sprint 2.5: MLXCacheAdapter to wrap mx operations (Issue #1)** | SE, ML |
 | **DEFERRED from Sprint 2.5: Add comprehensive error specs to ports (Issue #11)** | SE |
+| **DEFERRED from Sprint 3: Replace ValueError/RuntimeError with domain errors (NEW-5)** | SE |
 
 **Deferred Issues from Sprint 2.5 Critical Review**:
 - **Issue #1** (MEDIUM, 3h): Create MLXCacheAdapter outbound adapter
@@ -1050,6 +1304,12 @@ If ANY gate fails: evaluate scope reduction, simpler eviction, or Plan B.
   - Document all possible exceptions for each port method
   - Include: InvalidRequestError, PoolExhaustedError, CacheCorruptionError, etc.
   - Improves API contract clarity for implementers
+- **NEW-5** (LOW, 3h): Replace ValueError/RuntimeError with domain errors (Second Technical Fellow Review)
+  - **Location**: Throughout codebase (21 occurrences of ValueError, 1 RuntimeError)
+  - **Problem**: Using generic exceptions instead of domain errors violates hexagonal architecture
+  - **Mapping**: ValueError → InvalidRequestError, RuntimeError → domain-specific, KeyError → AgentNotFoundError
+  - **Benefit**: Improves architecture adherence score (85 → 90)
+  - Integrate during API adapter error handling implementation
 
 **Additional Issues from Technical Fellow Review (2026-01-24)**:
 - **MED-4** (MEDIUM, 2h): Add timeout on BatchGenerator.insert()
