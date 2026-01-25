@@ -40,12 +40,12 @@ class ModelCacheSpec:
         sliding_window_size: Window size for sliding window layers (e.g., 1024).
 
     Example:
-        >>> # Gemma 3 12B: 8 global + 40 sliding window layers
-        >>> spec = ModelCacheSpec.from_model(model)  # type: ignore[arg-type]
-        >>> spec.n_layers
-        48
-        >>> spec.layer_types[:10]
-        ['global', 'global', ..., 'sliding_window', ...]
+        Gemma 3 12B has 8 global layers followed by 40 sliding window layers::
+
+            spec = ModelCacheSpec.from_model(model)
+            assert spec.n_layers == 48
+            assert spec.layer_types[0] == "global"
+            assert spec.layer_types[8] == "sliding_window"
     """
 
     n_layers: int

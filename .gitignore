@@ -89,3 +89,16 @@ htmlcov/
 .mypy_cache/
 .dmypy.json
 dmypy.json
+
+# Ruff
+.ruff_cache/
+
+# Hypothesis
+.hypothesis/
+
+# MkDocs
+site/
+
+# Agent caches (semantic-specific)
+.semantic/
+~/.semantic/
