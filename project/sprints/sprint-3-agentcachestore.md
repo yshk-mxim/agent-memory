@@ -85,6 +85,23 @@
 
 ---
 
+### Day 3 Progress
+**Status**: 🟢 COMPLETE
+**Goal**: NEW-4 Config Part 1 (Pydantic Settings foundation)
+**Tasks Completed**:
+- ✅ Verified pydantic-settings installed (v2.12.0)
+- ✅ Created src/semantic/adapters/config/settings.py
+- ✅ Implemented MLXSettings, AgentSettings, ServerSettings, SecretsSettings
+- ✅ Implemented Settings root container with subsettings
+- ✅ Added get_settings() singleton and reload_settings() for testing
+- ✅ Wrote 20 comprehensive unit tests (all passing)
+- ✅ Tested ENV vars, .env files, defaults, validation, precedence
+- ✅ Verified 132/132 unit tests pass, mypy clean, ruff clean
+**Blockers**: None
+**Tomorrow**: NEW-4 Config Part 2 + AgentCacheStore skeleton (Day 4)
+
+---
+
 ### Day 3 (Tuesday, 2026-01-28): NEW-4 Config Part 1
 
 **Goal**: Pydantic Settings foundation
