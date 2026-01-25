@@ -976,11 +976,29 @@ def fake_hybrid_cache_spec() -> ModelCacheSpec:
   - Find all hardcoded `256` and replace with `self._spec.block_tokens`
   - Improves maintainability
 
+**Additional Issues from Technical Fellow Review (2026-01-24)**:
+- **EXP-007a** (CRITICAL): Measure safetensors I/O latency with async I/O threshold determination
+  - Test realistic cache sizes: 4K, 8K, 12K, 16K token caches
+  - Determine async I/O threshold (expected ~100MB based on 8K = ~400MB)
+  - Validate tmp + rename atomic write doesn't add overhead
+- **EXP-latency** (HIGH): Measure actual batch window timing with MLX operations
+  - Validate 10ms batch window assumption (currently unvalidated)
+  - Measure prefill + decode latency at 1, 3, 5, 7 agents
+  - Determine realistic batch window target (10ms may be optimistic)
+- **Move EXP-009/010 to Sprint 3 End** (BLOCKING): SSE format compliance tests
+  - Run EXP-009 (Anthropic SSE format) before Sprint 4 starts
+  - Run EXP-010 (Claude Code CLI) before Sprint 4 starts
+  - These validate critical assumptions for Sprint 4
+
 **Experiments**:
 - EXP-007: Verify RotatingKVCache serialization works via safetensors
+- EXP-007a: Safetensors I/O latency + async threshold (NEW - Technical Fellow)
 - EXP-008: Disk I/O time for 2K, 4K, 8K, 16K token caches (expect 60-80ms for 8K → async required)
+- EXP-latency: Batch window timing validation (NEW - Technical Fellow)
+- EXP-009: SSE format compliance (MOVED from Sprint 4 - blocking gate)
+- EXP-010: Claude Code CLI compatibility (MOVED from Sprint 4 - blocking gate)
 
-**Exit Gate**: Roundtrip byte-identical; model-tag validated; async I/O for caches > 100MB; deferred issues resolved
+**Exit Gate**: Roundtrip byte-identical; model-tag validated; async I/O for caches > 100MB; deferred issues resolved; **EXP-007a, EXP-latency, EXP-009, EXP-010 passing**
 
 ---
 
@@ -1033,11 +1051,29 @@ If ANY gate fails: evaluate scope reduction, simpler eviction, or Plan B.
   - Include: InvalidRequestError, PoolExhaustedError, CacheCorruptionError, etc.
   - Improves API contract clarity for implementers
 
-**Experiments**:
-- EXP-009: Record real Anthropic API SSE responses, replay-test against our format
-- EXP-010: Claude Code CLI end-to-end with local server
+**Additional Issues from Technical Fellow Review (2026-01-24)**:
+- **MED-4** (MEDIUM, 2h): Add timeout on BatchGenerator.insert()
+  - Prevent indefinite blocking if mlx_lm hangs
+  - Add timeout wrapper or async with cancellation
+  - Default timeout: 30s for insert, configurable via settings
+- **Hash Collision Strategy** (HIGH, 3h): Document and implement collision handling for prefix matching
+  - SHA-256 prefix hashing has 1 in 2^96 collision probability
+  - Add collision detection and fallback strategy
+  - Document in ADR-006
+- **Rate Limiting** (MEDIUM, 4h): Implement request rate limiting
+  - Mentioned in risk register but not in sprint tasks
+  - Add per-agent and global rate limits
+  - Return 429 when limits exceeded
+- **Request Authentication** (HIGH, 3h): Add ANTHROPIC_API_KEY validation
+  - Validate API keys for production security
+  - Support both environment variable and header-based auth
+  - Return 401 for invalid/missing keys
 
-**Exit Gate**: SSE format matches Anthropic spec exactly; session_id persistence works; Schemathesis passes; deferred issues resolved
+**Experiments**:
+- EXP-009: Record real Anthropic API SSE responses, replay-test against our format (MOVED to Sprint 3 end)
+- EXP-010: Claude Code CLI end-to-end with local server (MOVED to Sprint 3 end)
+
+**Exit Gate**: SSE format matches Anthropic spec exactly; session_id persistence works; Schemathesis passes; deferred issues resolved; **authentication working; rate limiting functional**
 
 ---
 
@@ -1059,11 +1095,17 @@ If ANY gate fails: evaluate scope reduction, simpler eviction, or Plan B.
 | Integration test: swap back, Gemma 3 caches reload | QE |
 | ADR-007: One Model At A Time (24GB Constraint) | HW |
 
+**Technical Fellow Review Note (2026-01-24)**:
+- **EXP-011 is CRITICAL and BLOCKING**: This experiment validates the core assumption of model hot-swap
+- **Recommendation**: Run EXP-011 in Sprint 3 or earlier (not Sprint 5)
+- **Risk**: If EXP-011 fails (memory not reclaimed), entire hot-swap architecture needs redesign
+- **Fallback**: Process isolation (subprocess) or process restart (defeats hot-swap benefit)
+
 **Experiments**:
-- EXP-011: Does `del model` + `gc.collect()` + `mx.clear_cache()` actually reclaim memory? Monitor `mx.get_active_memory()` before/after.
+- **EXP-011** (CRITICAL - SHOULD RUN EARLY): Does `del model` + `gc.collect()` + `mx.clear_cache()` actually reclaim memory? Monitor `mx.get_active_memory()` before/after.
 - EXP-012: Measure total swap latency (drain + unload + load + reconfigure). Target < 30s.
 
-**Exit Gate**: Swap < 30s; memory within 5% of cold-start; no orphaned blocks
+**Exit Gate**: Swap < 30s; memory within 5% of cold-start; no orphaned blocks; **EXP-011 passing**
 
 ---
 
@@ -1083,8 +1125,25 @@ If ANY gate fails: evaluate scope reduction, simpler eviction, or Plan B.
 | Benchmark: memory utilization vs padding approach | HW |
 | Fix all integration issues | SE, ML |
 | Create benchmark report | DE |
+| **Load test: realistic conversation patterns (Technical Fellow)** | QE |
+| **Memory profiling: sustained load 1-hour methodology (Technical Fellow)** | QE, HW |
+| **Graceful degradation: 80%, 90%, 100% pool utilization (Technical Fellow)** | QE |
 
-**Exit Gate**: All E2E pass on 2+ models; no leaks in 1-hour stress; benchmark documented
+**Additional Testing from Technical Fellow Review (2026-01-24)**:
+- **Load Testing with Realistic Patterns**: Not just rapid requests, but realistic multi-turn conversations
+  - Claude Code CLI typical usage: 5-10 turn conversations
+  - Variable request timing (not uniform)
+  - Mix of short and long responses
+- **Memory Profiling Methodology**: Document approach for 1-hour stress test
+  - Measure memory at 1min, 5min, 15min, 30min, 60min intervals
+  - Detect memory growth (leak detection)
+  - Profile peak memory vs steady-state
+- **Graceful Degradation Testing**: Validate behavior under high utilization
+  - 80% pool utilization: Should still accept requests
+  - 90% pool utilization: May queue or throttle
+  - 100% pool utilization: Return 429, maintain stability
+
+**Exit Gate**: All E2E pass on 2+ models; no leaks in 1-hour stress; benchmark documented; **graceful degradation validated**
 
 ---
 
@@ -1105,6 +1164,24 @@ If ANY gate fails: evaluate scope reduction, simpler eviction, or Plan B.
 | CHANGELOG, LICENSE, NOTICE, release notes | OSS, PM |
 | License compliance check (liccheck) | OSS |
 | SBOM generation (syft + CycloneDX 1.6) | OSS |
+| **OpenTelemetry tracing (Technical Fellow)** | SysE |
+| **Alerting thresholds for metrics (Technical Fellow)** | SysE |
+| **Log retention and rotation policy (Technical Fellow)** | SysE |
+
+**Additional Observability from Technical Fellow Review (2026-01-24)**:
+- **OpenTelemetry Tracing**: Mentioned in plan line 45 but not in Sprint 7 tasks
+  - Add distributed tracing for request flows
+  - Trace spans for: request → batch → inference → response
+  - Export to Jaeger or Tempo for visualization
+- **Alerting Thresholds**: Define alert rules for Prometheus metrics
+  - Pool utilization > 90% for 5 minutes
+  - Cache eviction rate > X/minute
+  - Model swap failures
+  - 5xx error rate > threshold
+- **Log Management**: Production log retention and rotation
+  - Rotation policy: daily or 100MB, whichever first
+  - Retention: 7 days local, 30 days remote
+  - Compression for archived logs
 
 **Prometheus Metrics Catalog:**
 

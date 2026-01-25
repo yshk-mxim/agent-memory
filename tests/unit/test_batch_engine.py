@@ -14,6 +14,31 @@ from semantic.domain.services import BlockPool
 from semantic.domain.value_objects import ModelCacheSpec
 
 
+class FakeTensor:
+    """Fake tensor for testing (mimics MLX tensor behavior).
+
+    Supports shape attribute and slicing operations needed for cache extraction.
+    """
+
+    def __init__(self, shape: tuple[int, ...], data: Any = None) -> None:
+        """Initialize fake tensor with shape."""
+        self.shape = shape
+        self._data = data or [[[0.0] * shape[2]] * shape[1]] * shape[0]
+
+    def __getitem__(self, key: Any) -> "FakeTensor":
+        """Support slicing (returns new FakeTensor with adjusted shape)."""
+        # Simplified slicing - just adjust sequence length (axis=2)
+        if isinstance(key, tuple) and len(key) == 3:
+            # Extract slice for axis 2 (sequence length)
+            slice_obj = key[2]
+            if isinstance(slice_obj, slice):
+                start = slice_obj.start or 0
+                stop = slice_obj.stop or self.shape[2]
+                new_seq_len = stop - start
+                return FakeTensor((self.shape[0], self.shape[1], new_seq_len))
+        return self
+
+
 class FakeModel:
     """Fake MLX model for testing."""
 
@@ -118,13 +143,28 @@ class FakeBatchGenerator:
             uid: Sequence UID.
 
         Returns:
-            Fake cache (empty list for now).
+            Fake cache with realistic structure for testing block extraction.
         """
         if uid not in self._sequences:
             raise KeyError(f"UID {uid} not found in batch")
 
-        # Return fake cache (empty for now - Day 8 will implement properly)
-        return []
+        # Generate realistic fake cache (Technical Fellow review fix)
+        # Cache format: list of (k, v) tuples, one per layer
+        # k, v shapes: (n_kv_heads, head_dim, seq_len)
+        seq = self._sequences[uid]
+        seq_len = len(seq["prompt_tokens"]) + seq["generated_tokens"]
+
+        # Use realistic dimensions (matching typical test spec)
+        n_kv_heads, head_dim = 4, 64
+        n_layers = 12
+
+        cache = []
+        for _ in range(n_layers):
+            k = FakeTensor((n_kv_heads, head_dim, seq_len))
+            v = FakeTensor((n_kv_heads, head_dim, seq_len))
+            cache.append((k, v))
+
+        return cache
 
     def remove(self, uid: str) -> None:
         """Remove sequence from batch (fake implementation).

@@ -360,6 +360,28 @@ class BlockPoolBatchEngine:
                 k_tensors.append(block.layer_data["k"])
                 v_tensors.append(block.layer_data["v"])
 
+            # Validate tensor shapes before concatenation (Sprint 2.5 hotfix)
+            # All tensors must have matching (n_kv_heads, head_dim) for axes 0-1
+            if k_tensors:
+                expected_k_shape = k_tensors[0].shape[:2]
+                expected_v_shape = v_tensors[0].shape[:2]
+                for i, (k_t, v_t) in enumerate(zip(k_tensors, v_tensors)):
+                    if k_t.shape[:2] != expected_k_shape:
+                        raise ValueError(
+                            f"K tensor shape mismatch in layer {layer_id}, block {i}: "
+                            f"expected {expected_k_shape}, got {k_t.shape[:2]}"
+                        )
+                    if v_t.shape[:2] != expected_v_shape:
+                        raise ValueError(
+                            f"V tensor shape mismatch in layer {layer_id}, block {i}: "
+                            f"expected {expected_v_shape}, got {v_t.shape[:2]}"
+                        )
+                    if k_t.shape[:2] != v_t.shape[:2]:
+                        raise ValueError(
+                            f"K/V shape mismatch in layer {layer_id}, block {i}: "
+                            f"K={k_t.shape[:2]}, V={v_t.shape[:2]}"
+                        )
+
             # Concatenate K and V tensors along sequence length axis (axis=2)
             # Shape: (n_kv_heads, head_dim, total_seq_len)
             k_full = mx.concatenate(k_tensors, axis=2)
@@ -391,6 +413,12 @@ class BlockPoolBatchEngine:
             - Converts KVCache → blocks for persistence
             - Handles partial blocks (last block may not be full)
             - Inverse of _reconstruct_cache()
+
+        Thread Safety:
+            Callers MUST ensure per-agent serialization. Block modification happens
+            outside BlockPool's lock, so concurrent calls for the same agent will
+            cause data races. The ConcurrentScheduler (Sprint 2) enforces this via
+            per-agent locks.
         """
         # 1. Get agent_id from UID tracking
         if uid not in self._active_requests:
@@ -429,35 +457,44 @@ class BlockPoolBatchEngine:
         blocks_dict: dict[int, list[KVBlock]] = {}
 
         # 7. For each layer, split cache into blocks
-        for layer_id, (k, v) in enumerate(cache):
-            if k is None:
-                continue  # Skip empty layers (sliding window)
+        # Wrap in try/except to handle partial allocation failures (Technical Fellow review)
+        try:
+            for layer_id, (k, v) in enumerate(cache):
+                if k is None:
+                    continue  # Skip empty layers (sliding window)
 
-            # Sprint 2.5 fix: Allocate ALL blocks for this layer at once
-            # This prevents partial allocation race condition where another thread
-            # could steal blocks between our availability check and allocation
-            allocated_blocks = self._pool.allocate(n_blocks, layer_id, agent_id)
+                # Sprint 2.5 fix: Allocate ALL blocks for this layer at once
+                # This prevents partial allocation race condition where another thread
+                # could steal blocks between our availability check and allocation
+                allocated_blocks = self._pool.allocate(n_blocks, layer_id, agent_id)
 
-            # Now split K, V into 256-token chunks and populate the allocated blocks
-            layer_blocks = []
-            for block_idx in range(n_blocks):
-                start_token = block_idx * self._spec.block_tokens
-                end_token = min(start_token + self._spec.block_tokens, total_tokens)
+                # Now split K, V into 256-token chunks and populate the allocated blocks
+                layer_blocks = []
+                for block_idx in range(n_blocks):
+                    start_token = block_idx * self._spec.block_tokens
+                    end_token = min(start_token + self._spec.block_tokens, total_tokens)
 
-                # Slice tensors [start:end] along seq_len axis (axis=2)
-                k_chunk = k[:, :, start_token:end_token]
-                v_chunk = v[:, :, start_token:end_token]
+                    # Slice tensors [start:end] along seq_len axis (axis=2)
+                    k_chunk = k[:, :, start_token:end_token]
+                    v_chunk = v[:, :, start_token:end_token]
 
-                # Use the pre-allocated block
-                block = allocated_blocks[block_idx]
+                    # Use the pre-allocated block
+                    block = allocated_blocks[block_idx]
 
-                # Update block with actual cache data
-                block.layer_data = {"k": k_chunk, "v": v_chunk}
-                block.token_count = end_token - start_token
+                    # Update block with actual cache data
+                    block.layer_data = {"k": k_chunk, "v": v_chunk}
+                    block.token_count = end_token - start_token
 
-                layer_blocks.append(block)
+                    layer_blocks.append(block)
 
-            blocks_dict[layer_id] = layer_blocks
+                blocks_dict[layer_id] = layer_blocks
+
+        except PoolExhaustedError:
+            # Partial allocation failure: free all blocks allocated so far
+            # (Technical Fellow review - prevent memory leak on mid-layer failure)
+            for allocated_layer_id, allocated_layer_blocks in blocks_dict.items():
+                self._pool.free(allocated_layer_blocks, agent_id)
+            raise  # Re-raise the original error
 
         # 8. Return AgentBlocks with total_tokens
         return AgentBlocks(

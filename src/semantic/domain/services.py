@@ -305,18 +305,24 @@ class BlockPool:
     def available_blocks(self) -> int:
         """Get count of available blocks.
 
+        Thread-safe: Acquires lock to ensure consistent read.
+
         Returns:
             Number of blocks in free list.
         """
-        return len(self.free_list)
+        with self._lock:
+            return len(self.free_list)
 
     def allocated_block_count(self) -> int:
         """Get count of allocated blocks.
 
+        Thread-safe: Acquires lock to ensure consistent read.
+
         Returns:
             Number of blocks currently in use.
         """
-        return len(self.allocated_blocks)
+        with self._lock:
+            return len(self.allocated_blocks)
 
     def reconfigure(self, new_spec: ModelCacheSpec) -> None:
         """Reconfigure pool for a different model (hot-swap support).
