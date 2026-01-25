@@ -171,6 +171,12 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
+    # Authentication middleware
+    from semantic.adapters.inbound.auth_middleware import AuthenticationMiddleware
+
+    app.add_middleware(AuthenticationMiddleware)
+    logger.info("Authentication middleware enabled")
+
     # Health check endpoint
     @app.get("/health", status_code=status.HTTP_200_OK)
     async def health_check():
