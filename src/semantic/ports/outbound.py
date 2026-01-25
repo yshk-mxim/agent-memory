@@ -10,7 +10,7 @@ implicit implementation without inheritance.
 
 from typing import Any, Protocol
 
-from semantic.domain.value_objects import GenerationResult, ModelCacheSpec
+from semantic.domain.value_objects import CacheKey, GenerationResult, ModelCacheSpec
 
 
 class ModelBackendPort(Protocol):
@@ -175,5 +175,109 @@ class TokenizerPort(Protocol):
 
         Returns:
             Number of tokens in vocabulary.
+        """
+        ...
+
+
+class CacheStorePort(Protocol):
+    """Port for in-memory cache management.
+
+    This port defines the contract for cache storage with prefix matching,
+    LRU eviction, and tier management (hot/warm/cold). Distinct from
+    CachePersistencePort which handles disk I/O.
+
+    Implemented by AgentCacheStore (Sprint 3).
+
+    Responsibilities:
+    - In-memory cache storage (hot tier)
+    - Trie-based prefix matching
+    - LRU eviction policy
+    - Coordination with disk persistence (warm/cold tiers)
+
+    Notes:
+        - Hot tier = in-memory (fastest access)
+        - Warm tier = on disk but recently used (load on demand)
+        - Cold tier = on disk, LRU candidates (evict permanently)
+    """
+
+    def get(self, cache_key: CacheKey) -> Any | None:
+        """Retrieve cache for agent, with prefix matching.
+
+        Args:
+            cache_key: Key containing agent_id + token prefix hash.
+
+        Returns:
+            AgentBlocks if cache exists (exact or prefix match), None otherwise.
+
+        Notes:
+            - Performs trie-based prefix matching
+            - Loads from disk if in warm/cold tier (cache miss)
+            - Updates LRU on access (move to hot tier)
+            - Returns None if agent has no cache
+
+        Example:
+            >>> key = CacheKey(agent_id="a1", model_id="gemma-3", prefix_hash="abc123")
+            >>> blocks = store.get(key)
+            >>> if blocks:
+            ...     print(f"Cache hit: {blocks.total_tokens} tokens")
+        """
+        ...
+
+    def put(self, cache_key: CacheKey, blocks: Any) -> None:
+        """Store cache for agent in memory (hot tier).
+
+        Args:
+            cache_key: Key containing agent_id + token prefix hash.
+            blocks: AgentBlocks to store.
+
+        Raises:
+            PoolExhaustedError: If no space for new cache entry.
+
+        Notes:
+            - Stores in hot tier (in-memory)
+            - Triggers LRU eviction if memory pressure detected
+            - Evicted caches move to warm tier (disk)
+            - Existing cache for same agent is replaced
+
+        Example:
+            >>> key = CacheKey(agent_id="a1", model_id="gemma-3", prefix_hash="abc123")
+            >>> store.put(key, agent_blocks)
+        """
+        ...
+
+    def evict(self, agent_id: str) -> None:
+        """Manually evict agent cache from memory to disk.
+
+        Args:
+            agent_id: Unique identifier for the agent.
+
+        Notes:
+            - Moves from hot tier (memory) to warm tier (disk)
+            - Frees blocks via BlockPool.free()
+            - Writes cache to disk via CachePersistencePort
+            - No-op if agent not in hot tier
+
+        Example:
+            >>> store.evict("agent_1")  # Free memory for other agents
+        """
+        ...
+
+    def delete(self, agent_id: str) -> None:
+        """Permanently delete agent cache (memory + disk).
+
+        Args:
+            agent_id: Unique identifier for the agent.
+
+        Raises:
+            AgentNotFoundError: If agent does not exist.
+
+        Notes:
+            - Removes from hot tier (if present)
+            - Deletes from disk (warm/cold tiers)
+            - Frees all blocks associated with agent
+            - Use when agent context is no longer needed
+
+        Example:
+            >>> store.delete("agent_1")  # Permanent deletion
         """
         ...

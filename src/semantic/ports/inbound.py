@@ -8,9 +8,9 @@ All interfaces use Protocol (PEP 544) for structural typing, allowing
 implicit implementation without inheritance.
 """
 
-from typing import Any, Protocol
+from typing import Any, Iterator, Protocol
 
-from semantic.domain.value_objects import GenerationResult
+from semantic.domain.value_objects import CompletedGeneration, GenerationResult
 
 
 class InferencePort(Protocol):
@@ -144,5 +144,77 @@ class ModelManagementPort(Protocol):
 
         Returns:
             List of model IDs.
+        """
+        ...
+
+
+class GenerationEnginePort(Protocol):
+    """Port for async batching inference engine.
+
+    This port defines the contract for batch-based text generation
+    where requests are submitted to a queue and processed in batches.
+    Distinct from InferencePort which is synchronous request-response.
+
+    Used by application services that need batching semantics
+    (e.g., ConcurrentScheduler wrapping BlockPoolBatchEngine).
+
+    Thread safety: Implementations must handle concurrent submit() calls
+    but step() is single-threaded (only one caller should call step()).
+    """
+
+    def submit(
+        self,
+        agent_id: str,
+        prompt: str,
+        cache: Any | None = None,
+        max_tokens: int = 256,
+    ) -> str:
+        """Submit a generation request to the batch queue.
+
+        Args:
+            agent_id: Unique identifier for the agent.
+            prompt: Input text to continue.
+            cache: Optional pre-built cache (AgentBlocks from previous generation).
+            max_tokens: Maximum tokens to generate.
+
+        Returns:
+            Request UID for tracking this generation.
+
+        Raises:
+            PoolExhaustedError: If no blocks available for allocation.
+            InvalidRequestError: If prompt is empty or parameters invalid.
+            ModelNotFoundError: If no model is loaded.
+
+        Notes:
+            - Non-blocking: returns immediately with UID
+            - Actual generation happens during step() calls
+            - Multiple submit() calls can be batched together
+        """
+        ...
+
+    def step(self) -> Iterator[CompletedGeneration]:
+        """Execute one batch decode step and yield completed generations.
+
+        Yields:
+            CompletedGeneration for each sequence that finished this step.
+            Sequences finish when:
+            - EOS token generated (finish_reason="stop")
+            - max_tokens limit reached (finish_reason="length")
+            - Error occurred (finish_reason="error")
+
+        Notes:
+            - Call repeatedly until all in-flight requests complete
+            - Non-blocking: returns empty iterator if no completions this step
+            - Single-threaded: only one caller should invoke step()
+            - Batching window: Waits briefly to collect concurrent submits
+
+        Example:
+            >>> engine = BlockPoolBatchEngine(...)
+            >>> uid1 = engine.submit("agent_a", "Hello", max_tokens=50)
+            >>> uid2 = engine.submit("agent_b", "World", max_tokens=50)
+            >>> for completion in engine.step():
+            ...     print(f"{completion.uid}: {completion.text[:20]}...")
+            ...     if completion.finish_reason == "stop":
+            ...         print(f"Completed with {completion.token_count} tokens")
         """
         ...

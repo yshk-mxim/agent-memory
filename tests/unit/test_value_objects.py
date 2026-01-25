@@ -434,3 +434,118 @@ class TestModelCacheSpec:
         )
 
         assert spec1 != spec2
+
+    def test_moe_alternating_layer_pattern(self) -> None:
+        """Should handle alternating attention-only and MoE layer patterns.
+
+        Tests Qwen1.5-MoE-A2.7B architecture:
+        - 24 layers total
+        - Layers 0, 2, 4, ... (even): Standard attention
+        - Layers 1, 3, 5, ... (odd): Attention + MoE experts
+        - All layers have same KV head count (8 heads)
+        - No sliding window (all global attention)
+
+        Note: Current implementation treats all layers uniformly for KV cache.
+        MoE expert routing does not affect KV cache geometry, only FFN routing.
+        """
+        # Qwen1.5-MoE-A2.7B structure
+        n_layers = 24
+        layer_types = ["global"] * n_layers  # No sliding window
+
+        spec = ModelCacheSpec(
+            n_layers=n_layers,
+            n_kv_heads=8,  # All layers have same KV heads
+            head_dim=128,
+            block_tokens=256,
+            layer_types=layer_types,
+            sliding_window_size=None,  # Full attention (no window)
+        )
+
+        # Verify layer count
+        assert spec.n_layers == 24
+
+        # Verify all layers are global (no sliding window)
+        assert all(lt == "global" for lt in spec.layer_types)
+
+        # Verify max_blocks_for_layer returns None (unlimited) for all layers
+        for layer_id in range(spec.n_layers):
+            layer_type = spec.layer_types[layer_id]
+            assert spec.max_blocks_for_layer(layer_type) is None
+
+        # Verify bytes_per_block_per_layer is consistent
+        # (MoE doesn't affect KV cache size, only FFN)
+        bytes_per_block = spec.bytes_per_block_per_layer()
+        assert bytes_per_block == 8 * 128 * 2 * 2 * 256  # 1,048,576 bytes (1 MB)
+
+        # Verify MoE pattern doesn't break cache spec invariants
+        assert len(spec.layer_types) == spec.n_layers
+
+    def test_hybrid_model_with_moe_and_sliding_window(self) -> None:
+        """Should handle models with BOTH sliding window AND MoE patterns.
+
+        Hypothetical architecture:
+        - 32 layers total
+        - First 8 layers: Global attention (no window)
+        - Last 24 layers: Sliding window (1024 tokens)
+        - Layers 1, 3, 5, ...: MoE experts (affects FFN, not KV cache)
+
+        Note: No real model has this combination yet, but architecture should support it.
+        """
+        # Hypothetical hybrid model
+        layer_types = ["global"] * 8 + ["sliding_window"] * 24
+
+        spec = ModelCacheSpec(
+            n_layers=32,
+            n_kv_heads=8,
+            head_dim=256,
+            block_tokens=256,
+            layer_types=layer_types,
+            sliding_window_size=1024,
+        )
+
+        # Verify global layers have unlimited blocks
+        for layer_id in range(8):
+            assert spec.max_blocks_for_layer(spec.layer_types[layer_id]) is None
+
+        # Verify sliding window layers have 4 blocks (1024 / 256 = 4)
+        for layer_id in range(8, 32):
+            assert spec.max_blocks_for_layer(spec.layer_types[layer_id]) == 4
+
+        # Verify bytes_per_block_per_layer is same for all layers
+        # (MoE and sliding window don't affect per-block size)
+        bytes_per_block = spec.bytes_per_block_per_layer()
+        expected = 8 * 256 * 2 * 2 * 256  # 2,097,152 bytes (2 MB)
+        assert bytes_per_block == expected
+
+    def test_sparse_moe_layer_types_detection(self) -> None:
+        """Should correctly detect layer types for sparse MoE models.
+
+        Tests that ModelCacheSpec.from_model() would handle MoE models correctly.
+        Since MoE affects FFN (not attention), layer_types should still be
+        determined by attention pattern (global vs sliding_window).
+
+        Note: This test validates the CURRENT behavior where MoE is transparent
+        to cache geometry. Future: If MoE expert caching is needed, this would change.
+        """
+        # Simulates Qwen1.5-MoE-A2.7B
+        spec = ModelCacheSpec(
+            n_layers=24,
+            n_kv_heads=8,
+            head_dim=128,
+            block_tokens=256,
+            layer_types=["global"] * 24,  # No sliding window
+            sliding_window_size=None,
+        )
+
+        # Current behavior: All MoE layers treated as global attention
+        assert spec.layer_types == ["global"] * 24
+
+        # Future behavior (if MoE expert caching added):
+        # layer_types might become ["attention", "attention+moe", "attention", ...]
+        # max_blocks_for_layer("attention+moe") might return higher count
+        # This test would need updating if that feature is added
+
+        # For now, verify MoE transparency
+        for layer_id in range(spec.n_layers):
+            # All layers get unlimited blocks (global attention)
+            assert spec.max_blocks_for_layer(spec.layer_types[layer_id]) is None

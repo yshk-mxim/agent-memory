@@ -1,8 +1,9 @@
 # ADR-001: Hexagonal Architecture (Ports & Adapters)
 
 **Date**: 2026-01-24
-**Status**: Accepted
+**Status**: ✅ ACCEPTED (Sprint 2, Day 1)
 **Deciders**: SE, PM, QE, ML
+**Author**: SE (Software Engineer)
 
 ## Context
 

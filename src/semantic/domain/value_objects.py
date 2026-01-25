@@ -272,3 +272,30 @@ class CacheKey:
     agent_id: str
     model_id: str
     prefix_hash: str
+
+
+@dataclass(frozen=True)
+class CompletedGeneration:
+    """Result of a completed async generation request.
+
+    This value object represents the outcome of a batch generation
+    that has finished (either completed naturally or hit a limit).
+    Used by GenerationEnginePort.step() to yield completed sequences.
+
+    Attributes:
+        uid: Unique identifier for this generation request.
+        text: Generated text string.
+        blocks: AgentBlocks containing updated cache after generation.
+        finish_reason: Reason generation stopped ("stop", "length", "error").
+        token_count: Total tokens generated.
+
+    Note:
+        Distinct from GenerationResult which is synchronous. CompletedGeneration
+        is for async/batching scenarios where requests are submitted and polled.
+    """
+
+    uid: str
+    text: str
+    blocks: Any  # AgentBlocks (avoid circular import)
+    finish_reason: str
+    token_count: int
