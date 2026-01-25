@@ -7,8 +7,8 @@ The engine provides an async submit/step API for variable-length batch
 processing with block-pool memory management.
 """
 
-from typing import TYPE_CHECKING, Any, Iterator
-from uuid import uuid4
+from collections.abc import Callable, Iterator
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     import mlx.core as mx
@@ -47,6 +47,7 @@ class BlockPoolBatchEngine:
         tokenizer: Any,  # MLX tokenizer
         pool: BlockPool,
         spec: ModelCacheSpec,
+        batch_gen_factory: Callable[[Any, Any], Any] | None = None,  # For testing
     ) -> None:
         """Initialize batch engine.
 
@@ -55,6 +56,8 @@ class BlockPoolBatchEngine:
             tokenizer: Loaded MLX tokenizer (from mlx_lm.load).
             pool: BlockPool for cache memory management.
             spec: ModelCacheSpec describing model cache geometry.
+            batch_gen_factory: Optional factory function for creating BatchGenerator.
+                Used for testing to inject FakeBatchGenerator. If None, uses mlx_lm.BatchGenerator.
 
         Raises:
             ModelNotFoundError: If model or tokenizer is None.
@@ -75,9 +78,10 @@ class BlockPoolBatchEngine:
         self._tokenizer = tokenizer
         self._pool = pool
         self._spec = spec
+        self._batch_gen_factory = batch_gen_factory
 
         # 3. Initialize batch generator (lazy - created on first submit)
-        self._batch_gen: "BatchGenerator | None" = None
+        self._batch_gen: BatchGenerator | None = None  # type: ignore[name-defined]
 
         # 4. Track active requests (UID → agent_id)
         self._active_requests: dict[str, str] = {}
@@ -125,7 +129,7 @@ class BlockPoolBatchEngine:
         prompt_tokens = self._tokenizer.encode(prompt)
 
         # 3. Handle cache (reconstruct or allocate)
-        kv_cache: "list[tuple[mx.array, mx.array]] | None" = None
+        kv_cache: Any | None = None  # list[tuple[mx.array, mx.array]] | None
 
         if cache is not None:
             # Cache provided - reconstruct from blocks (Day 7 implementation)
@@ -137,7 +141,9 @@ class BlockPoolBatchEngine:
         else:
             # No cache - allocate blocks for prompt
             # Calculate blocks needed for prompt
-            n_blocks_needed = (len(prompt_tokens) + self._spec.block_tokens - 1) // self._spec.block_tokens
+            n_blocks_needed = (
+                (len(prompt_tokens) + self._spec.block_tokens - 1) // self._spec.block_tokens
+            )
 
             # Allocate blocks for first layer (global layer - layer 0)
             # Note: We allocate for layer 0 as placeholder; actual layer-specific
@@ -154,31 +160,33 @@ class BlockPoolBatchEngine:
                 ) from e
 
             # Create AgentBlocks to track allocation
+            # Pre-populate blocks dict to satisfy validation
+            # Note: blocks start with token_count=0 (empty), will be filled during generation
+            blocks_dict = {0: blocks}  # layer_id 0 (will expand for all layers later)
             agent_blocks = AgentBlocks(
                 agent_id=agent_id,
-                blocks={},  # Will be populated as blocks are added
-                total_tokens=len(prompt_tokens),
+                blocks=blocks_dict,
+                total_tokens=0,  # Blocks are empty initially; will update during generation
             )
-            for block in blocks:
-                agent_blocks.add_block(block)
 
             # Store agent blocks
             self._agent_blocks[agent_id] = agent_blocks
 
         # 4. Create BatchGenerator lazily
         if self._batch_gen is None:
-            # Import at runtime (avoid import error in unit tests)
-            from mlx_lm import BatchGenerator  # type: ignore[attr-defined]
+            if self._batch_gen_factory is not None:
+                # Use injected factory (for testing)
+                self._batch_gen = self._batch_gen_factory(self._model, self._tokenizer)
+            else:
+                # Import and use real mlx_lm BatchGenerator
+                from mlx_lm import BatchGenerator  # type: ignore[attr-defined]  # noqa: PLC0415
 
-            self._batch_gen = BatchGenerator(
-                model=self._model,
-                tokenizer=self._tokenizer,
-            )
+                self._batch_gen = BatchGenerator(
+                    model=self._model,
+                    tokenizer=self._tokenizer,
+                )
 
         # 5. Insert into batch
-        # Generate unique UID for this request
-        uid = str(uuid4())
-
         # Insert prompt into batch
         # Note: If kv_cache is None, batch will create fresh KV cache
         try:
@@ -231,16 +239,55 @@ class BlockPoolBatchEngine:
         """
         # 1. Guard: if no active batch, return immediately
         if self._batch_gen is None:
-            return iter([])  # Return empty iterator
+            return  # Generator returns empty
 
         # 2. Execute one decode step
-        # TODO: Day 8 implementation
-        # - Call batch_gen.next() or equivalent
-        # - Check for finished sequences
-        # - Extract cache and blocks for finished sequences
-        # - Yield CompletedGeneration objects
-        # - Clean up tracking
-        raise NotImplementedError("step() not yet implemented (Day 8)")
+        try:
+            batch_response = self._batch_gen.next()
+        except StopIteration:
+            # No more sequences in batch
+            return  # Generator returns empty
+
+        # 3. Process finished sequences
+        finished_sequences = batch_response.finished
+
+        # 4. Yield CompletedGeneration for each finished sequence
+        for finished in finished_sequences:
+            uid = finished.uid
+
+            # Get agent_id from tracking
+            if uid not in self._active_requests:
+                # Sequence not tracked (shouldn't happen, but handle gracefully)
+                continue
+
+            agent_id = self._active_requests[uid]
+
+            # Extract cache and convert to blocks (Day 8 implementation)
+            # For now, use existing blocks or create empty AgentBlocks
+            if agent_id in self._agent_blocks:
+                blocks = self._agent_blocks[agent_id]
+            else:
+                # Create empty AgentBlocks as placeholder
+                blocks = AgentBlocks(
+                    agent_id=agent_id,
+                    blocks={},
+                    total_tokens=finished.token_count,
+                )
+
+            # Create CompletedGeneration
+            completion = CompletedGeneration(
+                uid=uid,
+                text=finished.text,
+                blocks=blocks,
+                finish_reason=finished.finish_reason,
+                token_count=finished.token_count,
+            )
+
+            # Clean up tracking
+            del self._active_requests[uid]
+
+            # Yield completion
+            yield completion
 
     def _reconstruct_cache(self, agent_blocks: AgentBlocks) -> "list[tuple[mx.array, mx.array]]":
         """Reconstruct KVCache from blocks (one-time at restore).
@@ -252,14 +299,14 @@ class BlockPoolBatchEngine:
             List of (K, V) tensor tuples, one per layer.
 
         Notes:
-            - Performance target: p95 < 5ms for 32 blocks × 48 layers (EXP-006)
+            - Performance target: p95 < 5ms for 32 blocks x 48 layers (EXP-006)
             - One-time cost at cache restore, not per-step overhead
             - Uses mx.concatenate along sequence length axis (axis=2)
             - Forces mx.eval() to ensure immediate execution
 
         Performance:
             Predicted p95 ~4ms for 8K context based on:
-            - 32 blocks × 48 layers = 1,536 concatenate operations
+            - 32 blocks x 48 layers = 1,536 concatenate operations
             - Each concat: ~2-3 μs
             - Total: ~3-5ms
         """
