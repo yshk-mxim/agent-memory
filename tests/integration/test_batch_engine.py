@@ -58,32 +58,119 @@ class TestBlockPoolBatchEngineIntegration:
 
     def test_single_agent_fresh_generation(self, engine) -> None:
         """Should generate text for single agent with no cache."""
-        # TODO: Day 9 implementation
-        pytest.skip("Implement after BlockPoolBatchEngine.step() is done (Day 8)")
+        # Submit generation request
+        uid = engine.submit(
+            agent_id="test_agent",
+            prompt="Hello",
+            max_tokens=20,
+        )
+
+        # Execute generation
+        completions = list(engine.step())
+
+        # Verify completion
+        assert len(completions) == 1, "Should yield exactly one completion"
+        completion = completions[0]
+
+        assert completion.uid == uid, "UID should match"
+        assert len(completion.text) > 0, "Should generate non-empty text"
+        assert completion.finish_reason in ["stop", "length"], "Should finish normally"
+        assert completion.token_count > 0, "Should have tokens"
+        assert completion.blocks.total_tokens > 0, "Should have blocks"
 
     def test_single_agent_with_cache_resume(self, engine, pool) -> None:
         """Should resume generation from cached state."""
-        # TODO: Day 9 implementation
-        pytest.skip("Implement after cache reconstruction is done (Day 7)")
+        # First generation
+        uid1 = engine.submit(agent_id="test_agent", prompt="Hello", max_tokens=10)
+        completions1 = list(engine.step())
+        cached_blocks = completions1[0].blocks
+
+        # Record initial token count
+        initial_tokens = cached_blocks.total_tokens
+
+        # Resume with cache
+        uid2 = engine.submit(
+            agent_id="test_agent",
+            prompt=" world",
+            cache=cached_blocks,
+            max_tokens=10,
+        )
+        completions2 = list(engine.step())
+
+        # Verify cache was used (blocks exist, generation continues)
+        assert len(completions2) == 1, "Should complete second generation"
+        assert completions2[0].blocks.total_tokens > initial_tokens, "Should add more tokens"
 
     def test_multi_agent_variable_lengths(self, engine) -> None:
         """Should handle 3 agents with different prompt lengths."""
-        # TODO: Day 9 implementation
-        pytest.skip("Implement after BlockPoolBatchEngine.step() is done (Day 8)")
+        # Submit 3 requests with different lengths
+        uid1 = engine.submit(agent_id="agent_1", prompt="Hi", max_tokens=10)
+        uid2 = engine.submit(agent_id="agent_2", prompt="Hello world", max_tokens=10)
+        uid3 = engine.submit(
+            agent_id="agent_3",
+            prompt="This is a longer prompt with more tokens",
+            max_tokens=10,
+        )
+
+        # Execute all generations
+        completions = list(engine.step())
+
+        # Verify all completed
+        assert len(completions) == 3, "Should complete all 3 agents"
+
+        # Verify UIDs match
+        completion_uids = {c.uid for c in completions}
+        expected_uids = {uid1, uid2, uid3}
+        assert completion_uids == expected_uids, "All UIDs should match"
+
+        # Verify all have text
+        for completion in completions:
+            assert len(completion.text) > 0, f"Agent {completion.uid} should generate text"
+            assert completion.blocks.total_tokens > 0, f"Agent {completion.uid} should have blocks"
 
     def test_no_memory_leaks(self, engine, pool) -> None:
         """Should not leak blocks across multiple generations."""
-        # TODO: Day 9 implementation
-        # Run 10 generations, verify pool size stable
-        pytest.skip("Implement after full engine is complete (Day 9)")
+        initial_available = pool.available_blocks()
+
+        # Run 10 generations
+        for i in range(10):
+            uid = engine.submit(agent_id=f"agent_{i}", prompt=f"Test {i}", max_tokens=10)
+            completions = list(engine.step())
+            assert len(completions) == 1, f"Generation {i} should complete"
+
+            # Free blocks after each generation
+            for completion in completions:
+                for layer_blocks in completion.blocks.blocks.values():
+                    pool.free(layer_blocks, completion.blocks.agent_id)
+
+        # Verify no memory leak
+        final_available = pool.available_blocks()
+        assert (
+            final_available == initial_available
+        ), f"Memory leak detected: started with {initial_available}, ended with {final_available}"
 
     def test_pool_exhaustion_error(self, engine, pool) -> None:
         """Should raise PoolExhaustedError when no blocks available."""
-        # TODO: Day 9 implementation
-        pytest.skip("Implement after BlockPoolBatchEngine.submit() handles exhaustion (Day 6)")
+        from semantic.domain.errors import PoolExhaustedError
+
+        # Exhaust the pool by not freeing blocks
+        allocated_agents = []
+        try:
+            # Keep allocating until pool exhausted
+            for i in range(200):  # More than pool capacity
+                uid = engine.submit(agent_id=f"agent_{i}", prompt="Test", max_tokens=10)
+                allocated_agents.append(uid)
+        except PoolExhaustedError:
+            # Expected - pool exhausted
+            assert len(allocated_agents) > 0, "Should allocate some before exhaustion"
+            return
+
+        # If we get here, pool wasn't exhausted
+        pytest.fail("Pool should have been exhausted")
 
     def test_empty_prompt_rejection(self, engine) -> None:
         """Should reject empty prompt with InvalidRequestError."""
-        # TODO: Day 9 implementation
-        # This test can actually run now (validation is implemented)
-        pytest.skip("Can implement immediately - validation already works")
+        from semantic.domain.errors import InvalidRequestError
+
+        with pytest.raises(InvalidRequestError, match="Prompt cannot be empty"):
+            engine.submit(agent_id="test", prompt="", max_tokens=10)
