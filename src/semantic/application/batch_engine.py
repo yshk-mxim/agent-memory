@@ -11,7 +11,7 @@ from collections.abc import Callable, Iterator
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from mlx_lm import BatchGenerator  # type: ignore[attr-defined]
+    from mlx_lm.server import BatchGenerator  # type: ignore[attr-defined]
 
     # Sprint 2.5 fix: Import AgentBlocks for type checking
     from semantic.domain.entities import AgentBlocks as AgentBlocksType
@@ -177,11 +177,10 @@ class BlockPoolBatchEngine:
                 self._batch_gen = self._batch_gen_factory(self._model, self._tokenizer)
             else:
                 # Import and use real mlx_lm BatchGenerator
-                from mlx_lm import BatchGenerator  # type: ignore[attr-defined]  # noqa: PLC0415
+                from mlx_lm.server import BatchGenerator  # type: ignore[attr-defined]  # noqa: PLC0415
 
                 self._batch_gen = BatchGenerator(
                     model=self._model,
-                    tokenizer=self._tokenizer,
                 )
 
         # 5. Insert into batch
@@ -445,15 +444,12 @@ class BlockPoolBatchEngine:
         # 5. Calculate blocks needed
         n_blocks = (total_tokens + self._spec.block_tokens - 1) // self._spec.block_tokens
 
-        # Check pool availability before allocating
-        total_blocks_needed = n_blocks * self._spec.n_layers
-        if self._pool.available_blocks() < total_blocks_needed:
-            raise PoolExhaustedError(
-                f"Need {total_blocks_needed} blocks for extraction, "
-                f"only {self._pool.available_blocks()} available"
-            )
-
         # 6. Create blocks dictionary
+        # NEW-1 fix: Removed TOCTOU availability check (lines 448-454)
+        # Rely entirely on try/except with rollback (lines 460-497)
+        # Rationale: The check-then-allocate pattern creates a race window where
+        # another thread can steal blocks between the check and allocation.
+        # The try/except already handles PoolExhaustedError with proper rollback.
         blocks_dict: dict[int, list[KVBlock]] = {}
 
         # 7. For each layer, split cache into blocks
