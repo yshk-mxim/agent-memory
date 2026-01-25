@@ -195,7 +195,11 @@ filterwarnings = [
 
 [tool.coverage.run]
 source = ["src"]
-omit = ["tests/*", "**/__pycache__/*"]
+omit = [
+    "tests/*",
+    "**/__pycache__/*",
+    "src/semantic/ports/*.py",  # Protocol definitions (not executable code)
+]
 
 [tool.coverage.report]
 precision = 2
