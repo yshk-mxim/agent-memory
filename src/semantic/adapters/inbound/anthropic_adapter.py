@@ -21,6 +21,8 @@ from semantic.adapters.inbound.request_models import (
     ContentBlockDeltaEvent,
     ContentBlockStartEvent,
     ContentBlockStopEvent,
+    CountTokensRequest,
+    CountTokensResponse,
     Message,
     MessageDeltaEvent,
     MessageStartEvent,
@@ -338,4 +340,49 @@ async def create_message(request_body: MessagesRequest, request: Request):
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Internal server error",
+        )
+
+
+@router.post("/messages/count_tokens", status_code=status.HTTP_200_OK)
+async def count_tokens(request_body: CountTokensRequest, request: Request) -> CountTokensResponse:
+    """Count tokens for a request (POST /v1/messages/count_tokens).
+
+    Args:
+        request_body: Validated CountTokensRequest
+        request: FastAPI request (for accessing app state)
+
+    Returns:
+        CountTokensResponse with token count
+
+    Raises:
+        HTTPException: On tokenization errors
+    """
+    logger.info(f"POST /v1/messages/count_tokens: model={request_body.model}")
+
+    # Get batch engine for tokenizer access
+    batch_engine: BlockPoolBatchEngine = request.app.state.semantic.batch_engine
+
+    try:
+        # Convert messages to prompt
+        prompt = messages_to_prompt(request_body.messages, request_body.system)
+
+        # Add tool descriptions if present
+        if request_body.tools:
+            tool_descriptions = "\n".join(
+                f"Tool: {tool.name} - {tool.description}" for tool in request_body.tools
+            )
+            prompt = f"{tool_descriptions}\n\n{prompt}"
+
+        # Tokenize
+        tokenizer = batch_engine._tokenizer
+        tokens = tokenizer.encode(prompt)
+
+        logger.info(f"Token count: {len(tokens)}")
+        return CountTokensResponse(input_tokens=len(tokens))
+
+    except Exception as e:
+        logger.error(f"Token counting error: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to count tokens: {str(e)}",
         )

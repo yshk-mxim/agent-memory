@@ -182,6 +182,22 @@ class TestAnthropicMessagesAPI:
         # Validation passes (may fail without model, but validation is OK)
         assert response.status_code != 422
 
+    def test_count_tokens_endpoint_exists(self):
+        """POST /v1/messages/count_tokens endpoint should be registered."""
+        app = create_app()
+        client = TestClient(app, raise_server_exceptions=False)
+
+        response = client.post(
+            "/v1/messages/count_tokens",
+            json={
+                "model": "test-model",
+                "messages": [{"role": "user", "content": "Hello"}],
+            },
+        )
+
+        # Endpoint exists (may fail for other reasons without model loaded)
+        assert response.status_code != 404
+
 
 @pytest.mark.integration
 @pytest.mark.skip(reason="Requires model loading - run manually with real server")
