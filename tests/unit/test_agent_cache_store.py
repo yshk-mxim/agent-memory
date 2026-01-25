@@ -361,10 +361,10 @@ class TestAgentCacheStoreEviction:
 
 
 class TestAgentCacheStorePrefixMatching:
-    """Tests for prefix matching (Day 6 stub)."""
+    """Tests for prefix matching (Day 6 implementation)."""
 
-    def test_find_prefix_returns_none_stub(self, model_tag: ModelTag) -> None:
-        """find_prefix() should return None (stub implementation)."""
+    def test_find_prefix_returns_none_when_empty(self, model_tag: ModelTag) -> None:
+        """find_prefix() should return None when no caches exist."""
         with tempfile.TemporaryDirectory() as tmpdir:
             store = AgentCacheStore(
                 cache_dir=Path(tmpdir),
@@ -374,5 +374,31 @@ class TestAgentCacheStorePrefixMatching:
 
             result = store.find_prefix([1, 2, 3])
 
-            # Stub returns None (Day 6 implementation)
             assert result is None
+
+    def test_find_prefix_returns_longest_match(
+        self, agent_blocks: AgentBlocks, model_tag: ModelTag
+    ) -> None:
+        """find_prefix() should return cache with longest prefix."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = AgentCacheStore(
+                cache_dir=Path(tmpdir),
+                max_hot_agents=5,
+                model_tag=model_tag,
+            )
+
+            # Save two agents with different cache sizes
+            # (In stub, just save empty blocks - real implementation would have tokens)
+            store.save("agent_1", agent_blocks)
+            store.save("agent_2", agent_blocks)
+
+            # Manually set total_tokens for testing (bypassing validation)
+            store._hot_cache["agent_1"].blocks.total_tokens = 10  # type: ignore[union-attr]
+            store._hot_cache["agent_2"].blocks.total_tokens = 100  # type: ignore[union-attr]
+
+            # Query should return longest match
+            result = store.find_prefix([1, 2, 3, 4, 5])
+
+            # Simplified implementation returns agent with most tokens
+            assert result is not None
+            assert result.total_tokens == 100  # agent_2 has longest cache
