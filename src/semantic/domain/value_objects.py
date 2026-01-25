@@ -6,7 +6,10 @@ the same values are considered equal.
 """
 
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from semantic.domain.entities import AgentBlocks
 
 
 @dataclass(frozen=True)
@@ -17,11 +20,12 @@ class GenerationResult:
         text: Generated text string.
         tokens: List of generated token IDs.
         cache: Updated KV cache after generation (per-layer).
+            Sprint 2.5 fix: Each layer has (K, V) tensor tuple.
     """
 
     text: str
     tokens: list[int]
-    cache: list[Any]
+    cache: list[tuple[Any, Any]]  # Sprint 2.5 fix: More specific than list[Any]
 
 
 @dataclass(frozen=True)
@@ -296,6 +300,6 @@ class CompletedGeneration:
 
     uid: str
     text: str
-    blocks: Any  # AgentBlocks (avoid circular import)
+    blocks: "AgentBlocks"  # Sprint 2.5 fix: Use string annotation for forward reference
     finish_reason: str
     token_count: int

@@ -8,6 +8,7 @@ BlockPool is an exception: it maintains state (the pool of free blocks)
 but has no identity - there is only one pool per server instance.
 """
 
+import threading
 from typing import Any
 
 from semantic.domain.entities import AgentBlocks, KVBlock
@@ -30,8 +31,9 @@ class BlockPool:
     - Model hot-swap support (reconfigure without restart)
 
     Thread safety:
-    - NOT thread-safe. Caller must synchronize access (per-agent locks).
-    - See application/scheduler.py for concurrent request handling.
+    - THREAD-SAFE: All operations protected by internal lock (Sprint 2.5 fix).
+    - Multiple threads can safely call allocate/free concurrently.
+    - Lock is acquired for the duration of each operation.
 
     Attributes:
         spec: Model cache specification (defines layer types, dimensions).
@@ -83,6 +85,9 @@ class BlockPool:
         self.total_blocks = total_blocks
         self.block_tokens = spec.block_tokens
 
+        # Thread safety: lock protects all shared state (Sprint 2.5 fix)
+        self._lock = threading.Lock()
+
         # Free list: stack of available block IDs (LIFO for cache locality)
         self.free_list: list[int] = list(range(total_blocks))
 
@@ -100,8 +105,7 @@ class BlockPool:
     ) -> list[KVBlock]:
         """Allocate blocks for an agent at a specific layer.
 
-        **Not thread-safe**: Caller must synchronize concurrent allocations
-        using per-agent locks (see application/scheduler.py).
+        Thread-safe: Multiple threads can call concurrently (Sprint 2.5 fix).
 
         Args:
             n_blocks: Number of blocks to allocate.
@@ -125,46 +129,47 @@ class BlockPool:
             >>> blocks[0].token_count
             0
         """
-        if n_blocks <= 0:
-            raise ValueError(f"n_blocks must be > 0, got {n_blocks}")
+        with self._lock:
+            if n_blocks <= 0:
+                raise ValueError(f"n_blocks must be > 0, got {n_blocks}")
 
-        if layer_id < 0 or layer_id >= self.spec.n_layers:
-            raise ValueError(
-                f"layer_id must be 0-{self.spec.n_layers - 1}, got {layer_id}"
-            )
+            if layer_id < 0 or layer_id >= self.spec.n_layers:
+                raise ValueError(
+                    f"layer_id must be 0-{self.spec.n_layers - 1}, got {layer_id}"
+                )
 
-        if len(self.free_list) < n_blocks:
-            raise PoolExhaustedError(
-                f"Requested {n_blocks} blocks but only {len(self.free_list)} available. "
-                f"Total pool size: {self.total_blocks}, "
-                f"allocated: {len(self.allocated_blocks)}"
-            )
+            if len(self.free_list) < n_blocks:
+                raise PoolExhaustedError(
+                    f"Requested {n_blocks} blocks but only {len(self.free_list)} available. "
+                    f"Total pool size: {self.total_blocks}, "
+                    f"allocated: {len(self.allocated_blocks)}"
+                )
 
-        # Allocate from free list
-        allocated: list[KVBlock] = []
-        for _ in range(n_blocks):
-            block_id = self.free_list.pop()
-            block = KVBlock(
-                block_id=block_id,
-                layer_id=layer_id,
-                token_count=0,  # Empty block
-                layer_data=None,  # Will be filled by adapter
-                metadata={"agent_id": agent_id},
-            )
-            allocated.append(block)
-            self.allocated_blocks[block_id] = block
+            # Allocate from free list
+            allocated: list[KVBlock] = []
+            for _ in range(n_blocks):
+                block_id = self.free_list.pop()
+                block = KVBlock(
+                    block_id=block_id,
+                    layer_id=layer_id,
+                    token_count=0,  # Empty block
+                    layer_data=None,  # Will be filled by adapter
+                    metadata={"agent_id": agent_id},
+                )
+                allocated.append(block)
+                self.allocated_blocks[block_id] = block
 
-        # Track agent allocation
-        if agent_id not in self.agent_allocations:
-            self.agent_allocations[agent_id] = set()
-        self.agent_allocations[agent_id].update(block.block_id for block in allocated)
+            # Track agent allocation
+            if agent_id not in self.agent_allocations:
+                self.agent_allocations[agent_id] = set()
+            self.agent_allocations[agent_id].update(block.block_id for block in allocated)
 
-        return allocated
+            return allocated
 
     def free(self, blocks: list[KVBlock], agent_id: str) -> None:
         """Return blocks to the free list.
 
-        **Not thread-safe**: Caller must synchronize concurrent free operations.
+        Thread-safe: Multiple threads can call concurrently (Sprint 2.5 fix).
 
         Args:
             blocks: List of blocks to free.
@@ -182,33 +187,40 @@ class BlockPool:
             >>> pool.available_blocks()
             100
         """
-        for block in blocks:
-            # Validate block is allocated
-            if block.block_id not in self.allocated_blocks:
-                raise ValueError(
-                    f"Block {block.block_id} is not allocated (double-free?)"
-                )
+        with self._lock:
+            for block in blocks:
+                # Validate block is allocated
+                if block.block_id not in self.allocated_blocks:
+                    raise ValueError(
+                        f"Block {block.block_id} is not allocated (double-free?)"
+                    )
 
-            # Validate block belongs to agent
-            if (
-                agent_id not in self.agent_allocations
-                or block.block_id not in self.agent_allocations[agent_id]
-            ):
-                raise ValueError(
-                    f"Block {block.block_id} does not belong to agent {agent_id}"
-                )
+                # Validate block belongs to agent
+                if (
+                    agent_id not in self.agent_allocations
+                    or block.block_id not in self.agent_allocations[agent_id]
+                ):
+                    raise ValueError(
+                        f"Block {block.block_id} does not belong to agent {agent_id}"
+                    )
 
-            # Return to free list
-            self.free_list.append(block.block_id)
-            del self.allocated_blocks[block.block_id]
-            self.agent_allocations[agent_id].discard(block.block_id)
+                # Sprint 2.5 fix: Clear layer_data to free memory immediately
+                if hasattr(block, 'layer_data'):
+                    block.layer_data = None
 
-        # Clean up empty agent entries
-        if agent_id in self.agent_allocations and not self.agent_allocations[agent_id]:
-            del self.agent_allocations[agent_id]
+                # Return to free list
+                self.free_list.append(block.block_id)
+                del self.allocated_blocks[block.block_id]
+                self.agent_allocations[agent_id].discard(block.block_id)
+
+            # Clean up empty agent entries
+            if agent_id in self.agent_allocations and not self.agent_allocations[agent_id]:
+                del self.agent_allocations[agent_id]
 
     def free_agent_blocks(self, agent_id: str) -> int:
         """Free all blocks belonging to an agent.
+
+        Thread-safe: Multiple threads can call concurrently (Sprint 2.5 fix).
 
         Args:
             agent_id: Agent whose blocks should be freed.
@@ -226,21 +238,25 @@ class BlockPool:
             >>> pool.available_blocks()
             100
         """
-        if agent_id not in self.agent_allocations:
-            return 0
+        with self._lock:
+            if agent_id not in self.agent_allocations:
+                return 0
 
-        block_ids = list(self.agent_allocations[agent_id])
-        freed_count = 0
+            block_ids = list(self.agent_allocations[agent_id])
+            freed_count = 0
 
-        for block_id in block_ids:
-            if block_id in self.allocated_blocks:
-                block = self.allocated_blocks[block_id]
-                self.free_list.append(block_id)
-                del self.allocated_blocks[block_id]
-                freed_count += 1
+            for block_id in block_ids:
+                if block_id in self.allocated_blocks:
+                    block = self.allocated_blocks[block_id]
+                    # Sprint 2.5 fix: Clear layer_data to free memory
+                    if hasattr(block, 'layer_data'):
+                        block.layer_data = None
+                    self.free_list.append(block_id)
+                    del self.allocated_blocks[block_id]
+                    freed_count += 1
 
-        del self.agent_allocations[agent_id]
-        return freed_count
+            del self.agent_allocations[agent_id]
+            return freed_count
 
     def used_memory(self) -> int:
         """Calculate total memory used by allocated blocks (bytes).
@@ -308,8 +324,8 @@ class BlockPool:
         This clears all allocations and updates the spec. Used when
         swapping models at runtime.
 
-        **Not thread-safe**: Caller must ensure no concurrent operations
-        during reconfiguration. All agents must be drained before calling.
+        Thread-safe: Caller must ensure no concurrent operations during
+        reconfiguration. All agents must be drained before calling (Sprint 2.5 fix).
 
         Args:
             new_spec: New model cache specification.
@@ -328,22 +344,23 @@ class BlockPool:
             >>> pool.available_blocks()
             100
         """
-        if self.allocated_blocks:
-            raise RuntimeError(
-                f"Cannot reconfigure pool with {len(self.allocated_blocks)} "
-                "active allocations. Drain all agents first."
-            )
+        with self._lock:
+            if self.allocated_blocks:
+                raise RuntimeError(
+                    f"Cannot reconfigure pool with {len(self.allocated_blocks)} "
+                    "active allocations. Drain all agents first."
+                )
 
-        # Update spec
-        self.spec = new_spec
-        self.block_tokens = new_spec.block_tokens
+            # Update spec
+            self.spec = new_spec
+            self.block_tokens = new_spec.block_tokens
 
-        # Reset free list (all blocks available)
-        self.free_list = list(range(self.total_blocks))
+            # Reset free list (all blocks available)
+            self.free_list = list(range(self.total_blocks))
 
-        # Clear tracking structures
-        self.allocated_blocks.clear()
-        self.agent_allocations.clear()
+            # Clear tracking structures
+            self.allocated_blocks.clear()
+            self.agent_allocations.clear()
 
     def max_batch_size(self, tokens_per_agent: int = 256) -> int:
         """Calculate maximum number of agents that can fit in the pool.

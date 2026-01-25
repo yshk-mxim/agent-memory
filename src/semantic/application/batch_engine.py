@@ -13,6 +13,9 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from mlx_lm import BatchGenerator  # type: ignore[attr-defined]
 
+    # Sprint 2.5 fix: Import AgentBlocks for type checking
+    from semantic.domain.entities import AgentBlocks as AgentBlocksType
+
 from semantic.domain.entities import AgentBlocks, KVBlock
 from semantic.domain.errors import InvalidRequestError, ModelNotFoundError, PoolExhaustedError
 from semantic.domain.services import BlockPool
@@ -92,7 +95,7 @@ class BlockPoolBatchEngine:
         self,
         agent_id: str,
         prompt: str,
-        cache: Any | None = None,  # AgentBlocks (avoid circular import)
+        cache: "AgentBlocksType | None" = None,  # Sprint 2.5 fix: Proper type annotation
         max_tokens: int = 256,
     ) -> str:
         """Submit a generation request to the batch queue.
@@ -191,10 +194,12 @@ class BlockPoolBatchEngine:
                 caches=[kv_cache] if kv_cache is not None else None,
             )
         except Exception as e:
-            # If insertion fails, free allocated blocks
+            # Sprint 2.5 fix: If insertion fails, free ALL allocated blocks (not just layer 0)
             if cache is None and agent_id in self._agent_blocks:
-                blocks = self._agent_blocks[agent_id].blocks_for_layer(0)
-                self._pool.free(blocks, agent_id)
+                agent_blocks = self._agent_blocks[agent_id]
+                # Free all layers to prevent resource leak
+                for layer_blocks in agent_blocks.blocks.values():
+                    self._pool.free(layer_blocks, agent_id)
                 del self._agent_blocks[agent_id]
             raise InvalidRequestError(f"Failed to insert into batch: {e}") from e
 
@@ -252,7 +257,19 @@ class BlockPoolBatchEngine:
 
             # Get agent_id from tracking
             if uid not in self._active_requests:
-                # Sequence not tracked (shouldn't happen, but handle gracefully)
+                # Sprint 2.5 fix: Log error and attempt cleanup to prevent memory leak
+                import logging  # noqa: PLC0415
+
+                logging.error(
+                    f"Untracked UID {uid} in batch - possible memory leak. "
+                    f"Active UIDs: {list(self._active_requests.keys())}"
+                )
+                # Try to extract cache anyway to prevent leak in BatchGenerator
+                try:
+                    if self._batch_gen is not None:
+                        self._batch_gen.extract_cache(uid)
+                except Exception as e:
+                    logging.warning(f"Failed to clean up untracked UID {uid}: {e}")
                 continue
 
             agent_id = self._active_requests[uid]
@@ -265,6 +282,9 @@ class BlockPoolBatchEngine:
                 old_blocks = self._agent_blocks[agent_id]
                 # Free all blocks from all layers
                 for layer_blocks in old_blocks.blocks.values():
+                    # Sprint 2.5 fix: Clear layer_data BEFORE freeing to prevent memory leak
+                    for block in layer_blocks:
+                        block.layer_data = None  # Force immediate tensor release
                     self._pool.free(layer_blocks, agent_id)
 
             # Store new blocks

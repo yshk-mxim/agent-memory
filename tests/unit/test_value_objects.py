@@ -30,12 +30,12 @@ class TestGenerationResult:
         result = GenerationResult(
             text="Hello, world!",
             tokens=[1, 2, 3, 4, 5],
-            cache=[{"layer_0": "data"}],
+            cache=[("k_tensor", "v_tensor")],
         )
 
         assert result.text == "Hello, world!"
         assert result.tokens == [1, 2, 3, 4, 5]
-        assert result.cache == [{"layer_0": "data"}]
+        assert result.cache == [("k_tensor", "v_tensor")]
 
     def test_is_immutable(self) -> None:
         """Should be immutable (frozen dataclass)."""

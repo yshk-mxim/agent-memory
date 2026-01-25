@@ -81,6 +81,9 @@ class AgentBlocks:
     An agent may have blocks across multiple layers (e.g., 48 layers for Gemma 3).
     Each layer may have multiple blocks if the agent's context exceeds 256 tokens.
 
+    **Immutability**: After construction, AgentBlocks should be treated as immutable.
+    To update an agent's blocks, create a new AgentBlocks instance (Sprint 2.5 fix).
+
     Attributes:
         agent_id: Unique identifier for the agent owning these blocks.
         blocks: List of blocks allocated to this agent, organized by layer.
@@ -134,49 +137,6 @@ class AgentBlocks:
             List of blocks for this layer (empty list if none allocated).
         """
         return self.blocks.get(layer_id, [])
-
-    def add_block(self, block: KVBlock) -> None:
-        """Add a block to this agent's collection.
-
-        **Not thread-safe**: Caller must synchronize access if used concurrently.
-
-        Args:
-            block: The block to add.
-
-        Raises:
-            ValueError: If block's layer_id is negative.
-        """
-        if block.layer_id < 0:
-            raise ValueError(f"Invalid layer_id: {block.layer_id}")
-
-        if block.layer_id not in self.blocks:
-            self.blocks[block.layer_id] = []
-
-        self.blocks[block.layer_id].append(block)
-        self.total_tokens += block.token_count
-
-    def remove_block(self, block_id: int, layer_id: int) -> KVBlock | None:
-        """Remove a block from this agent's collection.
-
-        **Not thread-safe**: Caller must synchronize access if used concurrently.
-
-        Args:
-            block_id: The block to remove.
-            layer_id: The layer the block belongs to.
-
-        Returns:
-            The removed block, or None if not found.
-        """
-        layer_blocks = self.blocks.get(layer_id, [])
-        for i, block in enumerate(layer_blocks):
-            if block.block_id == block_id:
-                removed = layer_blocks.pop(i)
-                self.total_tokens -= removed.token_count
-                # Clean up empty layer entries
-                if not layer_blocks:
-                    del self.blocks[layer_id]
-                return removed
-        return None
 
     def __post_init__(self) -> None:
         """Validate agent blocks invariants after construction."""
