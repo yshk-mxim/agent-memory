@@ -241,6 +241,42 @@ class AgentCacheStore:
         # Cache miss
         return None
 
+    def delete(self, agent_id: str) -> bool:
+        """Delete agent cache from all tiers.
+
+        Args:
+            agent_id: Unique agent identifier
+
+        Returns:
+            True if agent was found and deleted, False if not found
+
+        Notes:
+            - Removes from hot tier (memory)
+            - Removes from warm tier (disk)
+            - Deletes safetensors file if exists
+
+        Example:
+            >>> deleted = store.delete("agent_1")
+            >>> if deleted:
+            ...     print("Agent cache deleted successfully")
+        """
+        found = False
+
+        # Remove from hot tier
+        if agent_id in self._hot_cache:
+            del self._hot_cache[agent_id]
+            found = True
+
+        # Remove from warm tier and delete disk file
+        if agent_id in self._warm_cache:
+            cache_path = self._warm_cache[agent_id]
+            if cache_path.exists():
+                cache_path.unlink()
+            del self._warm_cache[agent_id]
+            found = True
+
+        return found
+
     def find_prefix(self, tokens: list[int]) -> AgentBlocks | None:
         """Find longest prefix match in cache (simplified dict-based implementation).
 

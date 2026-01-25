@@ -336,15 +336,24 @@ class GenerateRequest(BaseModel):
 
 
 class GenerateResponse(BaseModel):
-    """Response from generation."""
+    """Response from Direct Agent generation."""
 
     text: str
-    tokens: list[int]
-    usage: Usage
+    tokens_generated: int
+    finish_reason: str
+    cache_size_tokens: int
+
+
+class AgentResponse(BaseModel):
+    """Response for agent CRUD operations."""
+
+    agent_id: str
+    status: str
+    cache_size_tokens: int
 
 
 class AgentInfoResponse(BaseModel):
-    """Information about an agent."""
+    """Detailed information about an agent."""
 
     agent_id: str
     total_tokens: int
