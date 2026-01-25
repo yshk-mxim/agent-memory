@@ -911,6 +911,38 @@ def fake_hybrid_cache_spec() -> ModelCacheSpec:
 
 ---
 
+### Sprint 2.5: Critical Hotfix (1 week) ✅ COMPLETED
+
+**Deliverable**: Fix all critical/high severity issues from Sprint 0-2 code review. Portfolio-quality codebase.
+
+**Status**: ✅ **COMPLETE** (2026-01-24)
+
+| Issue | Severity | Fix | Status |
+|-------|----------|-----|--------|
+| #1-3: Thread-safety violations (7 data races) | CRITICAL | Added threading.Lock to BlockPool, removed unsafe AgentBlocks methods | ✅ FIXED |
+| #4: Opaque Any types (8 instances) | HIGH | TYPE_CHECKING guards, proper annotations | ✅ FIXED |
+| #5-7: Memory leaks (3 scenarios) | CRITICAL/HIGH | Explicit layer_data cleanup in free() and step() | ✅ FIXED |
+| #8: Partial allocation race in _extract_cache() | CRITICAL | Pre-allocate all blocks atomically per layer | ✅ FIXED |
+
+**Quality Enhancements**:
+- Enhanced ruff with 18 rule sets (ERA, SIM, PIE, RET, ARG, PTH, etc.)
+- Configured complexity limits (max-args=7, max-branches=12, max-statements=50)
+- Added quality pipeline: lint + typecheck + security + vulnerabilities + complexity
+- Streamlined dependencies (removed overlapping tools, ruff covers all)
+
+**Test Results**: 108/108 unit tests + 7/7 concurrent tests passing, mypy --strict clean, ruff clean
+
+**Documentation**:
+- `project/reviews/sprint-0-2-critical-review.md` (comprehensive review, 1475 lines)
+- `project/reviews/sprint-2.5-review.md` (sign-off document)
+- `project/reviews/sprint-2.5-complete-fixes.md` (detailed fix summary)
+
+**Commits**: b2a2651, 855b93b
+
+**Exit Gate**: ✅ All critical issues resolved, production-ready
+
+---
+
 ### Sprint 3: AgentCacheStore (2 weeks)
 
 **Deliverable**: Cache store with prefix matching, LRU eviction, model-tagged persistence.
@@ -927,12 +959,28 @@ def fake_hybrid_cache_spec() -> ModelCacheSpec:
 | Integration test: prefix matching across turns | QE |
 | Integration test: model-tag invalidation | QE |
 | **Failure-mode tests: cache corruption, disk full, reload exceeds pool** | QE |
+| **DEFERRED from Sprint 2.5: Refactor ModelCacheSpec.from_model() (Issue #9)** | SE, ML |
+| **DEFERRED from Sprint 2.5: Strategy pattern for model extractors (Issue #10)** | SE, ML |
+| **DEFERRED from Sprint 2.5: Replace magic number 256 with block_tokens (Issue #13)** | SE |
+
+**Deferred Issues from Sprint 2.5 Critical Review**:
+- **Issue #9** (MEDIUM, 4h): Refactor `ModelCacheSpec.from_model()` (94 lines, CC=8)
+  - Extract `_extract_config()`, `_validate_config()`, `_build_spec()` helper methods
+  - Reduce complexity, improve readability
+  - Integrate during model onboarding work in Sprint 3
+- **Issue #10** (MEDIUM, 6h): Remove Gemma 3 hardcoded special case
+  - Create Strategy pattern for model config extraction
+  - Add GemmaConfigExtractor, StandardConfigExtractor classes
+  - Makes adding new models easier (model onboarding)
+- **Issue #13** (LOW, 1h): Replace magic number 256
+  - Find all hardcoded `256` and replace with `self._spec.block_tokens`
+  - Improves maintainability
 
 **Experiments**:
 - EXP-007: Verify RotatingKVCache serialization works via safetensors
 - EXP-008: Disk I/O time for 2K, 4K, 8K, 16K token caches (expect 60-80ms for 8K → async required)
 
-**Exit Gate**: Roundtrip byte-identical; model-tag validated; async I/O for caches > 100MB
+**Exit Gate**: Roundtrip byte-identical; model-tag validated; async I/O for caches > 100MB; deferred issues resolved
 
 ---
 
@@ -971,12 +1019,25 @@ If ANY gate fails: evaluate scope reduction, simpler eviction, or Plan B.
 | Integration test: OpenAI client with session_id | QE |
 | **Failure-mode tests: malformed requests, invalid model field** | QE |
 | ADR-006: Multi-Protocol Agent Identification | SE |
+| **DEFERRED from Sprint 2.5: MLXCacheAdapter to wrap mx operations (Issue #1)** | SE, ML |
+| **DEFERRED from Sprint 2.5: Add comprehensive error specs to ports (Issue #11)** | SE |
+
+**Deferred Issues from Sprint 2.5 Critical Review**:
+- **Issue #1** (MEDIUM, 3h): Create MLXCacheAdapter outbound adapter
+  - Move `import mlx.core as mx` from batch_engine to dedicated adapter
+  - Fixes architecture violation (application importing infrastructure)
+  - Wrap mx.concatenate and cache operations behind port interface
+  - Integrate when building outbound adapters in Sprint 4
+- **Issue #11** (MEDIUM, 2h): Add comprehensive error specifications to all port interfaces
+  - Document all possible exceptions for each port method
+  - Include: InvalidRequestError, PoolExhaustedError, CacheCorruptionError, etc.
+  - Improves API contract clarity for implementers
 
 **Experiments**:
 - EXP-009: Record real Anthropic API SSE responses, replay-test against our format
 - EXP-010: Claude Code CLI end-to-end with local server
 
-**Exit Gate**: SSE format matches Anthropic spec exactly; session_id persistence works; Schemathesis passes
+**Exit Gate**: SSE format matches Anthropic spec exactly; session_id persistence works; Schemathesis passes; deferred issues resolved
 
 ---
 
