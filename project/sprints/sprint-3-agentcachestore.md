@@ -356,11 +356,16 @@ If behind schedule, defer in this order:
 **Tomorrow**: NEW-2 memory locks (Day 2)
 
 ### Day 2 Progress
-**Status**: ⚪ NOT STARTED
+**Status**: 🟢 COMPLETE
 **Goal**: NEW-2 memory locks
-**Tasks Completed**: —
-**Blockers**: —
-**Tomorrow**: —
+**Tasks Completed**:
+- ✅ Added locks to `used_memory()` in services.py
+- ✅ Added locks to `available_memory()` in services.py
+- ✅ Wrote 4 concurrency tests (all passing)
+- ✅ Benchmarked lock overhead: 0.17 µs << 1ms requirement (PASS)
+- ✅ Verified 112/112 unit tests pass, mypy clean, ruff clean
+**Blockers**: None
+**Tomorrow**: NEW-4 Config Part 1 (Day 3)
 
 (Days 3-10 sections added as sprint progresses)
 

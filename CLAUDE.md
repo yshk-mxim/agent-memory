@@ -1,5 +1,7 @@
 # Claude API Integration Guide
 
+**IMPORTANT**: Current year is 2026. When searching for documentation, use 2026 or 2025-2026 in search queries to get the most recent information.
+
 This document details the Claude API usage, model specifications, and best practices for the RDIC project.
 
 ## Models Used

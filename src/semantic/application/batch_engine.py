@@ -242,7 +242,7 @@ class BlockPoolBatchEngine:
 
         # 2. Execute one decode step
         try:
-            batch_response = self._batch_gen.next()
+            batch_response = self._batch_gen.next()  # type: ignore[no-untyped-call]
         except StopIteration:
             # No more sequences in batch
             return  # Generator returns empty
@@ -266,7 +266,7 @@ class BlockPoolBatchEngine:
                 # Try to extract cache anyway to prevent leak in BatchGenerator
                 try:
                     if self._batch_gen is not None:
-                        self._batch_gen.extract_cache(uid)
+                        self._batch_gen.extract_cache(uid)  # type: ignore[attr-defined]
                 except Exception as e:
                     logging.warning(f"Failed to clean up untracked UID {uid}: {e}")
                 continue
@@ -427,7 +427,7 @@ class BlockPoolBatchEngine:
         # 2. Extract cache from BatchGenerator
         if self._batch_gen is None:
             raise ValueError("No active batch generator")
-        cache = self._batch_gen.extract_cache(uid)
+        cache = self._batch_gen.extract_cache(uid)  # type: ignore[attr-defined]
 
         # 3. Handle empty cache (before importing MLX to avoid crash in tests)
         if not cache or len(cache) == 0 or cache[0][0] is None:

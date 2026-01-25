@@ -261,6 +261,8 @@ class BlockPool:
     def used_memory(self) -> int:
         """Calculate total memory used by allocated blocks (bytes).
 
+        Thread-safe: Acquires lock to ensure consistent read (NEW-2 fix).
+
         Returns:
             Memory in bytes.
 
@@ -278,17 +280,21 @@ class BlockPool:
             >>> pool.used_memory()
             20971520  # 10 blocks × 2 MB/block
         """
-        bytes_per_block = self.spec.bytes_per_block_per_layer()
-        return len(self.allocated_blocks) * bytes_per_block
+        with self._lock:
+            bytes_per_block = self.spec.bytes_per_block_per_layer()
+            return len(self.allocated_blocks) * bytes_per_block
 
     def available_memory(self) -> int:
         """Calculate total memory available (bytes).
 
+        Thread-safe: Acquires lock to ensure consistent read (NEW-2 fix).
+
         Returns:
             Memory in bytes.
         """
-        bytes_per_block = self.spec.bytes_per_block_per_layer()
-        return len(self.free_list) * bytes_per_block
+        with self._lock:
+            bytes_per_block = self.spec.bytes_per_block_per_layer()
+            return len(self.free_list) * bytes_per_block
 
     def total_memory(self) -> int:
         """Calculate total pool memory capacity (bytes).
