@@ -11,7 +11,6 @@ from collections.abc import Callable, Iterator
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    import mlx.core as mx
     from mlx_lm import BatchGenerator  # type: ignore[attr-defined]
 
 from semantic.domain.entities import AgentBlocks
@@ -81,7 +80,7 @@ class BlockPoolBatchEngine:
         self._batch_gen_factory = batch_gen_factory
 
         # 3. Initialize batch generator (lazy - created on first submit)
-        self._batch_gen: BatchGenerator | None = None  # type: ignore[name-defined]
+        self._batch_gen: BatchGenerator | None = None
 
         # 4. Track active requests (UID → agent_id)
         self._active_requests: dict[str, str] = {}
@@ -132,12 +131,8 @@ class BlockPoolBatchEngine:
         kv_cache: Any | None = None  # list[tuple[mx.array, mx.array]] | None
 
         if cache is not None:
-            # Cache provided - reconstruct from blocks (Day 7 implementation)
-            # TODO: Implement _reconstruct_cache()
-            # kv_cache = self._reconstruct_cache(cache)
-            raise NotImplementedError(
-                "Cache reconstruction not yet implemented (Day 7)"
-            )
+            # Cache provided - reconstruct from blocks
+            kv_cache = self._reconstruct_cache(cache)
         else:
             # No cache - allocate blocks for prompt
             # Calculate blocks needed for prompt
@@ -289,14 +284,21 @@ class BlockPoolBatchEngine:
             # Yield completion
             yield completion
 
-    def _reconstruct_cache(self, agent_blocks: AgentBlocks) -> "list[tuple[mx.array, mx.array]]":
+    def _reconstruct_cache(self, agent_blocks: AgentBlocks) -> Any:
         """Reconstruct KVCache from blocks (one-time at restore).
+
+        Return type: list[tuple[mx.array, mx.array]]
 
         Args:
             agent_blocks: AgentBlocks containing allocated blocks.
 
         Returns:
             List of (K, V) tensor tuples, one per layer.
+            Shape: [(k_0, v_0), (k_1, v_1), ...] where k/v are mx.array
+            Each k/v has shape: (n_kv_heads, head_dim, total_seq_len)
+
+        Raises:
+            ValueError: If blocks have no layer_data (corrupted cache).
 
         Notes:
             - Performance target: p95 < 5ms for 32 blocks x 48 layers (EXP-006)
@@ -310,19 +312,45 @@ class BlockPoolBatchEngine:
             - Each concat: ~2-3 μs
             - Total: ~3-5ms
         """
-        # TODO: Day 7 implementation
-        # Algorithm (7 steps from design doc):
+        # Import MLX at runtime (avoid import error in unit tests)
+        import mlx.core as mx  # noqa: PLC0415
+
         # 1. Initialize cache list
-        # 2. For each layer_id in range(n_layers):
-        #    - Get layer blocks
-        #    - Extract K tensors
-        #    - Extract V tensors
-        #    - Concatenate K (axis=2)
-        #    - Concatenate V (axis=2)
-        #    - Force mx.eval()
-        #    - Append to cache
-        # 3. Return cache
-        raise NotImplementedError("_reconstruct_cache() not yet implemented (Day 7)")
+        cache: list[tuple[Any, Any]] = []
+
+        # 2. For each layer in the model
+        for layer_id in range(self._spec.n_layers):
+            # Get all blocks for this layer
+            layer_blocks = agent_blocks.blocks_for_layer(layer_id)
+
+            # Handle empty layers (shouldn't happen, but be defensive)
+            if not layer_blocks:
+                cache.append((None, None))
+                continue
+
+            # Extract K and V tensors from all blocks
+            k_tensors = []
+            v_tensors = []
+            for block in layer_blocks:
+                if block.layer_data is None or "k" not in block.layer_data:
+                    raise ValueError(
+                        f"Block {block.block_id} for layer {layer_id} has no K/V data"
+                    )
+                k_tensors.append(block.layer_data["k"])
+                v_tensors.append(block.layer_data["v"])
+
+            # Concatenate K and V tensors along sequence length axis (axis=2)
+            # Shape: (n_kv_heads, head_dim, total_seq_len)
+            k_full = mx.concatenate(k_tensors, axis=2)
+            v_full = mx.concatenate(v_tensors, axis=2)
+
+            # Force evaluation (MLX lazy evaluation)
+            mx.eval(k_full, v_full)
+
+            # Append to cache
+            cache.append((k_full, v_full))
+
+        return cache
 
     def _extract_cache(self, uid: str) -> AgentBlocks:
         """Extract updated cache from batch and convert to blocks.

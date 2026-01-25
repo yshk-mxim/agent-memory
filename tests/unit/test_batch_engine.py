@@ -396,16 +396,18 @@ class TestBlockPoolBatchEngineCacheReconstruction:
             batch_gen_factory=FakeBatchGenerator,  # Inject fake for testing
         )
 
-    @pytest.mark.skip(reason="_reconstruct_cache() not implemented (Day 7)")
+    @pytest.mark.skip(reason="Requires MLX arrays - deferred to integration tests (Day 9)")
     def test_reconstruct_cache_from_single_block(self, engine) -> None:
         """Should reconstruct cache from single block."""
-        # Will be implemented on Day 7
+        # Requires real mlx.array objects with proper KV cache format
+        # Will be implemented in integration tests (Day 9)
         pass
 
-    @pytest.mark.skip(reason="_reconstruct_cache() not implemented (Day 7)")
+    @pytest.mark.skip(reason="Requires MLX arrays - deferred to integration tests (Day 9)")
     def test_reconstruct_cache_from_multiple_blocks(self, engine) -> None:
         """Should reconstruct cache from multiple blocks."""
-        # Will be implemented on Day 7
+        # Requires real mlx.array objects with proper KV cache format
+        # Will be implemented in integration tests (Day 9)
         pass
 
 
