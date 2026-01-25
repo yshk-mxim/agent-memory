@@ -21,7 +21,11 @@ from hypothesis import assume, given
 from hypothesis import strategies as st
 
 from semantic.domain.entities import KVBlock
-from semantic.domain.errors import PoolExhaustedError
+from semantic.domain.errors import (
+    BlockOperationError,
+    PoolConfigurationError,
+    PoolExhaustedError,
+)
 from semantic.domain.services import BlockPool
 from semantic.domain.value_objects import ModelCacheSpec
 
@@ -246,12 +250,12 @@ class TestBlockPoolInitialization:
 
     def test_reject_zero_blocks(self, gemma_spec: ModelCacheSpec) -> None:
         """Should raise ValueError for total_blocks <= 0."""
-        with pytest.raises(ValueError, match="total_blocks must be > 0"):
+        with pytest.raises(PoolConfigurationError, match="total_blocks must be > 0"):
             BlockPool(spec=gemma_spec, total_blocks=0)
 
     def test_reject_negative_blocks(self, gemma_spec: ModelCacheSpec) -> None:
         """Should raise ValueError for negative total_blocks."""
-        with pytest.raises(ValueError, match="total_blocks must be > 0"):
+        with pytest.raises(PoolConfigurationError, match="total_blocks must be > 0"):
             BlockPool(spec=gemma_spec, total_blocks=-100)
 
     def test_reject_invalid_spec(self) -> None:
@@ -264,7 +268,7 @@ class TestBlockPoolInitialization:
             layer_types=[],
         )
 
-        with pytest.raises(ValueError, match="n_layers must be > 0"):
+        with pytest.raises(PoolConfigurationError, match="n_layers must be > 0"):
             BlockPool(spec=invalid_spec, total_blocks=100)
 
 
@@ -357,7 +361,7 @@ class TestBlockPoolAllocationErrors:
         """Should raise ValueError for n_blocks <= 0."""
         pool = BlockPool(spec=gemma_spec, total_blocks=100)
 
-        with pytest.raises(ValueError, match="n_blocks must be > 0"):
+        with pytest.raises(BlockOperationError, match="n_blocks must be > 0"):
             pool.allocate(n_blocks=0, layer_id=0, agent_id="agent_1")
 
     def test_reject_negative_block_allocation(
@@ -366,7 +370,7 @@ class TestBlockPoolAllocationErrors:
         """Should raise ValueError for negative n_blocks."""
         pool = BlockPool(spec=gemma_spec, total_blocks=100)
 
-        with pytest.raises(ValueError, match="n_blocks must be > 0"):
+        with pytest.raises(BlockOperationError, match="n_blocks must be > 0"):
             pool.allocate(n_blocks=-5, layer_id=0, agent_id="agent_1")
 
     def test_reject_invalid_layer_id(self, gemma_spec: ModelCacheSpec) -> None:
@@ -374,14 +378,14 @@ class TestBlockPoolAllocationErrors:
         pool = BlockPool(spec=gemma_spec, total_blocks=100)
 
         # Gemma has 48 layers (0-47)
-        with pytest.raises(ValueError, match=r"layer_id must be 0-47"):
+        with pytest.raises(BlockOperationError, match=r"layer_id must be 0-47"):
             pool.allocate(n_blocks=1, layer_id=48, agent_id="agent_1")
 
     def test_reject_negative_layer_id(self, gemma_spec: ModelCacheSpec) -> None:
         """Should raise ValueError for negative layer_id."""
         pool = BlockPool(spec=gemma_spec, total_blocks=100)
 
-        with pytest.raises(ValueError, match=r"layer_id must be 0-47"):
+        with pytest.raises(BlockOperationError, match=r"layer_id must be 0-47"):
             pool.allocate(n_blocks=1, layer_id=-1, agent_id="agent_1")
 
     def test_raise_pool_exhausted_error(self, llama_spec: ModelCacheSpec) -> None:
@@ -459,7 +463,7 @@ class TestBlockPoolDeallocation:
             block_id=999, layer_id=0, token_count=0, layer_data=None
         )
 
-        with pytest.raises(ValueError, match=r"Block 999 is not allocated"):
+        with pytest.raises(BlockOperationError, match=r"Block 999 is not allocated"):
             pool.free([fake_block], agent_id="agent_1")
 
     def test_reject_double_free(self, gemma_spec: ModelCacheSpec) -> None:
@@ -470,7 +474,7 @@ class TestBlockPoolDeallocation:
         pool.free(blocks, agent_id="agent_1")
 
         # Try to free again - should fail
-        with pytest.raises(ValueError, match=r"is not allocated"):
+        with pytest.raises(BlockOperationError, match=r"is not allocated"):
             pool.free(blocks, agent_id="agent_1")
 
     def test_reject_freeing_other_agents_blocks(
@@ -482,7 +486,7 @@ class TestBlockPoolDeallocation:
 
         # Agent 2 tries to free agent 1's blocks
         with pytest.raises(
-            ValueError,
+            BlockOperationError,
             match=r"does not belong to agent agent_2",
         ):
             pool.free(blocks, agent_id="agent_2")
@@ -642,7 +646,7 @@ class TestBlockPoolReconfiguration:
         pool.allocate(n_blocks=5, layer_id=0, agent_id="agent_1")
 
         with pytest.raises(
-            RuntimeError,
+            PoolConfigurationError,
             match=r"Cannot reconfigure pool with 5 active allocations",
         ):
             pool.reconfigure(llama_spec)

@@ -39,3 +39,30 @@ class ModelNotFoundError(SemanticError):
 
 class IncompatibleCacheError(SemanticError):
     """Cache model tag does not match current model."""
+
+
+# NEW-5: Domain validation errors (Sprint 3.5)
+
+
+class BlockValidationError(SemanticError):
+    """Block entity validation failed (block_id, layer_id, token_count out of range)."""
+
+
+class AgentBlocksValidationError(SemanticError):
+    """AgentBlocks validation failed (total_tokens mismatch, invalid structure)."""
+
+
+class ModelSpecValidationError(SemanticError):
+    """ModelCacheSpec validation failed (missing attributes, invalid configuration)."""
+
+
+class PoolConfigurationError(SemanticError):
+    """BlockPool configuration error (invalid total_blocks, invalid spec, reconfiguration failed)."""
+
+
+class BlockOperationError(SemanticError):
+    """Block operation failed (block not found, double free, invalid layer_id, wrong owner)."""
+
+
+class GenerationError(SemanticError):
+    """Generation operation failed (prefill failed, no active generator, request not found)."""

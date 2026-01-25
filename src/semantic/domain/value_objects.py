@@ -6,10 +6,94 @@ the same values are considered equal.
 """
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Protocol
+
+from semantic.domain.entities import BLOCK_SIZE_TOKENS
+from semantic.domain.errors import ModelSpecValidationError
 
 if TYPE_CHECKING:
     from semantic.domain.entities import AgentBlocks
+
+
+# Layer Type Detection Strategy Protocol (Issue #10, Sprint 3.5)
+
+
+class LayerTypeDetectionStrategy(Protocol):
+    """Strategy for detecting layer attention types for a specific model architecture.
+
+    This protocol defines the interface for model-specific layer type detection
+    strategies. Each concrete strategy implements detection logic for a specific
+    model family (Gemma, Llama, Qwen, etc.).
+
+    Created to remove hardcoded model-type conditionals (Issue #10, Sprint 3.5).
+    """
+
+    def detect_layer_types(
+        self, model: Any, args: Any, n_layers: int
+    ) -> list[str] | None:
+        """Detect layer types for this model architecture.
+
+        Args:
+            model: Loaded MLX model.
+            args: Model args/config.
+            n_layers: Total number of layers.
+
+        Returns:
+            List of layer type strings ("global" or "sliding_window"),
+            or None if this strategy cannot detect for this model.
+        """
+        ...
+
+
+class Gemma3DetectionStrategy:
+    """Layer type detection strategy for Gemma 3 models.
+
+    Gemma 3 12B uses hybrid attention: 8 global + 40 sliding window layers.
+    Per EXP-001, layer_types attribute is not present, requiring heuristic.
+    """
+
+    def detect_layer_types(
+        self, _model: Any, args: Any, n_layers: int
+    ) -> list[str] | None:
+        """Detect Gemma 3 hybrid layer pattern (8 global + 40 sliding window).
+
+        Args:
+            _model: Loaded MLX model (unused, but required by protocol).
+            args: Model args/config.
+            n_layers: Total number of layers.
+
+        Returns:
+            Hybrid layer type list, or None if not Gemma 3.
+        """
+        model_type = getattr(args, "model_type", "unknown")
+        if model_type == "gemma3":
+            # Gemma 3 12B: 8 global + 40 sliding window (EXP-001)
+            return ["global"] * 8 + ["sliding_window"] * (n_layers - 8)
+        return None
+
+
+class UniformAttentionDetectionStrategy:
+    """Layer type detection strategy for models with uniform attention.
+
+    Applies to: Llama, Qwen, and most standard transformer models.
+    All layers use global (full) attention.
+    """
+
+    def detect_layer_types(
+        self, _model: Any, _args: Any, n_layers: int
+    ) -> list[str] | None:
+        """Detect uniform global attention (default for most models).
+
+        Args:
+            _model: Loaded MLX model (unused, but required by protocol).
+            _args: Model args/config (unused, but required by protocol).
+            n_layers: Total number of layers.
+
+        Returns:
+            List of all "global" layer types.
+        """
+        # Default strategy: all layers use global attention
+        return ["global"] * n_layers
 
 
 @dataclass(frozen=True)
@@ -62,7 +146,7 @@ class ModelCacheSpec:
     def __post_init__(self) -> None:
         """Validate cache spec invariants."""
         if len(self.layer_types) != self.n_layers:
-            raise ValueError(
+            raise ModelSpecValidationError(
                 f"layer_types length ({len(self.layer_types)}) must equal "
                 f"n_layers ({self.n_layers})"
             )
@@ -92,7 +176,7 @@ class ModelCacheSpec:
             ModelCacheSpec with extracted geometry.
 
         Raises:
-            ValueError: If required attributes are missing or invalid.
+            ModelSpecValidationError: If required attributes are missing or invalid.
             AttributeError: If model lacks `args` attribute.
 
         Note:
@@ -104,65 +188,117 @@ class ModelCacheSpec:
         """
         args = model.args
 
-        # Step 1: Extract basic attributes (handle Gemma 3 nested config)
-        if hasattr(args, "text_config"):
-            # Gemma 3: nested config dict
-            config = args.text_config
-            n_layers = config.get("num_hidden_layers")
-            n_kv_heads = config.get("num_key_value_heads")
-            num_attention_heads = config.get("num_attention_heads")
-            hidden_size = config.get("hidden_size")
-            sliding_window = config.get("sliding_window", None)
-            model_type = getattr(args, "model_type", "unknown")
-        else:
-            # Standard models (Qwen, Llama, MoE)
-            n_layers = getattr(args, "num_hidden_layers", None)
-            n_kv_heads = getattr(args, "num_key_value_heads", None)
-            num_attention_heads = getattr(args, "num_attention_heads", None)
-            hidden_size = getattr(args, "hidden_size", None)
-            sliding_window = getattr(args, "sliding_window", None)
-            model_type = getattr(args, "model_type", "unknown")
+        # Extract attributes (handles Gemma 3 nested config vs standard models)
+        attrs = cls._extract_model_attributes(args)
 
-        # Step 2: Validate required attributes
-        if n_layers is None:
-            raise ValueError("Cannot extract num_hidden_layers from model.args")
-        if n_kv_heads is None:
-            raise ValueError("Cannot extract num_key_value_heads from model.args")
-        if hidden_size is None or num_attention_heads is None:
-            raise ValueError(
-                "Cannot compute head_dim: missing hidden_size or num_attention_heads"
-            )
+        # Validate all required attributes are present
+        cls._validate_model_attributes(attrs)
 
-        # Step 3: Compute head dimension (ALWAYS compute, never rely on attribute)
-        head_dim = hidden_size // num_attention_heads
+        # Compute head dimension from attention parameters
+        head_dim = cls._compute_head_dim(attrs["hidden_size"], attrs["num_attention_heads"])
 
-        # Step 4: Detect layer types (three-tier detection)
-        layer_types = cls._detect_layer_types(model, args, model_type, n_layers)
+        # Detect layer types using three-tier approach
+        layer_types = cls._detect_layer_types(model, args, attrs["n_layers"])
 
         return cls(
-            n_layers=n_layers,
-            n_kv_heads=n_kv_heads,
+            n_layers=attrs["n_layers"],
+            n_kv_heads=attrs["n_kv_heads"],
             head_dim=head_dim,
-            block_tokens=256,  # Fixed per ADR-002
+            block_tokens=BLOCK_SIZE_TOKENS,  # Universal constant per ADR-002
             layer_types=layer_types,
-            sliding_window_size=sliding_window,
+            sliding_window_size=attrs["sliding_window"],
         )
 
     @staticmethod
-    def _detect_layer_types(
-        model: Any, args: Any, model_type: str, n_layers: int
-    ) -> list[str]:
+    def _extract_model_attributes(args: Any) -> dict[str, Any]:
+        """Extract model attributes, handling Gemma 3 nested config.
+
+        Args:
+            args: Model args/config object.
+
+        Returns:
+            Dictionary with extracted attributes:
+            - n_layers: Number of hidden layers
+            - n_kv_heads: Number of KV attention heads
+            - num_attention_heads: Total attention heads
+            - hidden_size: Hidden layer dimension
+            - sliding_window: Sliding window size (optional)
+            - model_type: Model type string
+
+        Note:
+            Gemma 3 uses nested text_config dict, while standard models
+            (Llama, Qwen) use flat args structure.
+        """
+        if hasattr(args, "text_config"):
+            # Gemma 3: nested config dict
+            config = args.text_config
+            return {
+                "n_layers": config.get("num_hidden_layers"),
+                "n_kv_heads": config.get("num_key_value_heads"),
+                "num_attention_heads": config.get("num_attention_heads"),
+                "hidden_size": config.get("hidden_size"),
+                "sliding_window": config.get("sliding_window", None),
+                "model_type": getattr(args, "model_type", "unknown"),
+            }
+
+        # Standard models (Qwen, Llama, MoE)
+        return {
+            "n_layers": getattr(args, "num_hidden_layers", None),
+            "n_kv_heads": getattr(args, "num_key_value_heads", None),
+            "num_attention_heads": getattr(args, "num_attention_heads", None),
+            "hidden_size": getattr(args, "hidden_size", None),
+            "sliding_window": getattr(args, "sliding_window", None),
+            "model_type": getattr(args, "model_type", "unknown"),
+        }
+
+    @staticmethod
+    def _validate_model_attributes(attrs: dict[str, Any]) -> None:
+        """Validate that all required model attributes are present.
+
+        Args:
+            attrs: Extracted attribute dictionary from _extract_model_attributes.
+
+        Raises:
+            ModelSpecValidationError: If any required attribute is missing.
+        """
+        if attrs["n_layers"] is None:
+            raise ModelSpecValidationError("Cannot extract num_hidden_layers from model.args")
+        if attrs["n_kv_heads"] is None:
+            raise ModelSpecValidationError("Cannot extract num_key_value_heads from model.args")
+        if attrs["hidden_size"] is None or attrs["num_attention_heads"] is None:
+            raise ModelSpecValidationError(
+                "Cannot compute head_dim: missing hidden_size or num_attention_heads"
+            )
+
+    @staticmethod
+    def _compute_head_dim(hidden_size: int, num_attention_heads: int) -> int:
+        """Compute attention head dimension.
+
+        Args:
+            hidden_size: Model hidden layer dimension.
+            num_attention_heads: Total number of attention heads.
+
+        Returns:
+            Head dimension (hidden_size // num_attention_heads).
+
+        Note:
+            Always compute head_dim rather than relying on model attribute,
+            as not all models expose head_dim directly.
+        """
+        return hidden_size // num_attention_heads
+
+    @staticmethod
+    def _detect_layer_types(model: Any, args: Any, n_layers: int) -> list[str]:
         """Detect layer attention types (global vs sliding_window).
 
         Three-tier detection approach (EXP-001 findings):
         1. Check layer_types attribute (most reliable)
-        2. Inspect layer objects for use_sliding
-        3. Fallback to model-type heuristics
+        2. Inspect layer objects for use_sliding attribute
+        3. Delegate to model-specific detection strategies
 
         Args:
             model: Loaded MLX model.
             args: Model args/config.
-            model_type: Model type string (e.g., 'gemma3', 'llama').
             n_layers: Total number of layers.
 
         Returns:
@@ -170,8 +306,8 @@ class ModelCacheSpec:
             Values: "global" or "sliding_window".
 
         Note:
-            Per EXP-001, Gemma 3 requires heuristic detection as
-            layer_types and use_sliding attributes are not present.
+            Uses Strategy pattern (Issue #10, Sprint 3.5) to support
+            model-specific detection without hardcoded conditionals.
         """
         # Tier 1: Check layer_types attribute (e.g., some Llama variants)
         if hasattr(args, "layer_types") and args.layer_types:
@@ -190,12 +326,19 @@ class ModelCacheSpec:
             if len(detected_types) == n_layers:
                 return detected_types
 
-        # Tier 3: Model-type heuristics (for known hybrid models)
-        if model_type == "gemma3":
-            # Gemma 3 12B: 8 global + 40 sliding window (EXP-001)
-            return ["global"] * 8 + ["sliding_window"] * (n_layers - 8)
+        # Tier 3: Model-specific detection strategies (Issue #10 fix)
+        # Try each strategy in priority order (most specific first)
+        strategies: list[LayerTypeDetectionStrategy] = [
+            Gemma3DetectionStrategy(),  # Hybrid models (Gemma 3)
+            UniformAttentionDetectionStrategy(),  # Default fallback
+        ]
 
-        # Default: Uniform full attention
+        for strategy in strategies:
+            result = strategy.detect_layer_types(model, args, n_layers)
+            if result is not None:
+                return result
+
+        # Should never reach here (UniformAttentionDetectionStrategy always returns)
         return ["global"] * n_layers
 
     def bytes_per_block_per_layer(self) -> int:

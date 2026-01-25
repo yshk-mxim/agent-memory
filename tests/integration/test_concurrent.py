@@ -217,11 +217,13 @@ class TestConcurrentBlockPool:
 
     def test_reconfigure_blocks_thread_safety(self, pool: BlockPool, spec: ModelCacheSpec) -> None:
         """Reconfigure should safely fail if allocations exist."""
+        from semantic.domain.errors import PoolConfigurationError
+
         # Allocate blocks
         blocks = pool.allocate(n_blocks=10, layer_id=0, agent_id="test_agent")
 
         # Try to reconfigure (should fail due to active allocations)
-        with pytest.raises(RuntimeError, match="active allocations"):
+        with pytest.raises(PoolConfigurationError, match="active allocations"):
             pool.reconfigure(spec)
 
         # Free blocks

@@ -13,6 +13,7 @@ from unittest.mock import Mock
 
 import pytest
 
+from semantic.domain.errors import ModelSpecValidationError
 from semantic.domain.value_objects import (
     CacheKey,
     GenerationResult,
@@ -166,7 +167,7 @@ class TestModelCacheSpec:
     def test_reject_layer_types_length_mismatch(self) -> None:
         """Should raise ValueError when len(layer_types) != n_layers."""
         with pytest.raises(
-            ValueError, match=r"layer_types length .* must equal n_layers"
+            ModelSpecValidationError, match=r"layer_types length .* must equal n_layers"
         ):
             ModelCacheSpec(
                 n_layers=48,
@@ -324,7 +325,7 @@ class TestModelCacheSpec:
         mock_model.args = mock_args
 
         with pytest.raises(
-            ValueError, match="Cannot extract num_hidden_layers"
+            ModelSpecValidationError, match="Cannot extract num_hidden_layers"
         ):
             ModelCacheSpec.from_model(mock_model)
 
@@ -343,7 +344,7 @@ class TestModelCacheSpec:
         mock_model.args = mock_args
 
         with pytest.raises(
-            ValueError, match="Cannot extract num_key_value_heads"
+            ModelSpecValidationError, match="Cannot extract num_key_value_heads"
         ):
             ModelCacheSpec.from_model(mock_model)
 
@@ -360,7 +361,7 @@ class TestModelCacheSpec:
         mock_model.args = mock_args
 
         with pytest.raises(
-            ValueError, match="Cannot compute head_dim"
+            ModelSpecValidationError, match="Cannot compute head_dim"
         ):
             ModelCacheSpec.from_model(mock_model)
 

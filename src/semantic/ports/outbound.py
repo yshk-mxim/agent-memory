@@ -179,6 +179,71 @@ class TokenizerPort(Protocol):
         ...
 
 
+class CacheOperationsPort(Protocol):
+    """Port for tensor operations on KV cache.
+
+    This port abstracts backend-specific tensor operations (concatenation,
+    evaluation, slicing) needed for block-pool cache management.
+    Implementations wrap specific backends (MLX, PyTorch, etc.).
+
+    CRITICAL-1 (Sprint 3.5): Created to remove MLX dependency from application layer.
+    """
+
+    def concatenate_cache_blocks(
+        self,
+        k_tensors: list[Any],
+        v_tensors: list[Any],
+    ) -> tuple[Any, Any]:
+        """Concatenate K/V tensors from multiple blocks along sequence axis.
+
+        Args:
+            k_tensors: List of K tensors from blocks (each shape: [n_kv_heads, head_dim, block_tokens])
+            v_tensors: List of V tensors from blocks (each shape: [n_kv_heads, head_dim, block_tokens])
+
+        Returns:
+            Tuple of (k_full, v_full) concatenated tensors.
+            Shape: [n_kv_heads, head_dim, total_seq_len]
+
+        Raises:
+            GenerationError: If tensor shapes are incompatible.
+
+        Notes:
+            - Concatenates along axis=2 (sequence length)
+            - Forces evaluation for backends with lazy execution
+            - Validates shape compatibility before concatenation
+        """
+        ...
+
+    def get_sequence_length(self, k_tensor: Any) -> int:
+        """Extract sequence length from K tensor.
+
+        Args:
+            k_tensor: K tensor with shape [n_kv_heads, head_dim, seq_len]
+
+        Returns:
+            Sequence length (axis=2 dimension).
+        """
+        ...
+
+    def slice_cache_tensor(
+        self,
+        tensor: Any,
+        start_token: int,
+        end_token: int,
+    ) -> Any:
+        """Slice cache tensor along sequence axis.
+
+        Args:
+            tensor: Cache tensor (K or V) with shape [n_kv_heads, head_dim, seq_len]
+            start_token: Start index for slicing (inclusive)
+            end_token: End index for slicing (exclusive)
+
+        Returns:
+            Sliced tensor with shape [n_kv_heads, head_dim, end_token - start_token]
+        """
+        ...
+
+
 class CacheStorePort(Protocol):
     """Port for in-memory cache management.
 

@@ -52,42 +52,65 @@ class FakeTokenizer:
         # Simple: 1 token per character (for testing block allocation)
         return list(range(len(text)))
 
+    def decode(self, tokens: list[int]) -> str:
+        """Fake detokenization - returns string from token IDs."""
+        # Simple: return string representation of tokens
+        return f"Generated text with {len(tokens)} tokens"
+
+    @property
+    def eos_token_id(self) -> int:
+        """Return fake EOS token ID (singular)."""
+        return 2  # Common EOS token ID
+
     @property
     def eos_token_ids(self) -> list[int]:
-        """Return fake EOS token IDs."""
-        return [2]  # Common EOS token ID
+        """Return fake EOS token IDs (plural for backward compatibility)."""
+        return [self.eos_token_id]
 
 
 class FakeBatchGenerator:
     """Fake BatchGenerator for testing (mimics mlx_lm.BatchGenerator).
 
     Simulates batch inference without requiring MLX/GPU.
-    Tracks inserted sequences and simulates completion.
+    Research finding: Real MLX API generates 1 token per next() call.
     """
 
-    def __init__(self, model: Any, tokenizer: Any) -> None:
-        """Initialize fake batch generator."""
+    def __init__(self, model: Any, tokenizer: Any, stop_tokens: set[int] | None = None) -> None:
+        """Initialize fake batch generator.
+
+        Args:
+            model: Fake model (ignored).
+            tokenizer: Fake tokenizer.
+            stop_tokens: Set of token IDs that stop generation (default: {tokenizer.eos_token_id}).
+        """
         self._model = model
         self._tokenizer = tokenizer
+        self._stop_tokens = stop_tokens or {tokenizer.eos_token_id}
         self._sequences: dict[str, dict[str, Any]] = {}  # uid → sequence data
         self._next_uid = 0
 
     def insert(
         self,
         prompts: list[list[int]],
-        max_tokens: int = 256,
+        max_tokens: list[int] | None = None,
         caches: list[Any] | None = None,
+        samplers: list[Any] | None = None,
     ) -> list[str]:
         """Insert sequences into batch (fake implementation).
 
         Args:
             prompts: List of tokenized prompts (list of token IDs).
-            max_tokens: Maximum tokens to generate per sequence.
+            max_tokens: List of max tokens per sequence (research finding: must be list!).
             caches: Optional list of KV caches (one per prompt).
+            samplers: Optional list of samplers (required by real API).
 
         Returns:
             List of UIDs (one per prompt).
         """
+        # Default max_tokens if not provided
+        if max_tokens is None:
+            max_tokens = [256] * len(prompts)
+
         uids = []
         for i, prompt_tokens in enumerate(prompts):
             # Generate fake UID
@@ -97,44 +120,74 @@ class FakeBatchGenerator:
             # Store sequence data
             self._sequences[uid] = {
                 "prompt_tokens": prompt_tokens,
-                "max_tokens": max_tokens,
+                "max_tokens": max_tokens[i] if isinstance(max_tokens, list) else max_tokens,
                 "cache": caches[i] if caches else None,
                 "generated_tokens": 0,
                 "finished": False,
                 "finish_reason": None,
-                "text": f"Generated text for prompt {i}",  # Fake output
             }
 
             uids.append(uid)
 
         return uids
 
-    def next(self) -> Any:
-        """Execute one decode step (fake implementation).
+    def next(self) -> list[Any]:
+        """Execute one decode step - generates 1 token per sequence (fake implementation).
+
+        Research finding: Real API returns list[Response], generates 1 token per call.
 
         Returns:
-            Fake BatchResponse with finished sequences.
+            List of FakeResponse objects (one per active sequence).
+            Returns empty list [] when all sequences complete.
         """
-        # Simulate: mark all sequences as finished after first next() call
-        finished = []
+        # Research finding: Return empty list when no active sequences
+        if not any(not seq["finished"] for seq in self._sequences.values()):
+            return []
+
+        responses = []
 
         for uid, seq in self._sequences.items():
             if not seq["finished"]:
-                # Simulate generation complete
-                seq["finished"] = True
-                seq["finish_reason"] = "stop"  # Simulate EOS token
-                seq["generated_tokens"] = 10  # Fake token count
+                # Generate one token
+                seq["generated_tokens"] += 1
 
-                # Create fake finished sequence
-                finished.append({
-                    "uid": uid,
-                    "text": seq["text"],
-                    "finish_reason": seq["finish_reason"],
-                    "token_count": len(seq["prompt_tokens"]) + seq["generated_tokens"],
-                })
+                # Determine token ID (simple: sequential IDs)
+                token_id = 100 + seq["generated_tokens"]
 
-        # Return fake BatchResponse
-        return FakeBatchResponse(finished=finished)
+                # Check if should finish
+                finish_reason = None
+                if token_id in self._stop_tokens:
+                    finish_reason = "stop"
+                    seq["finished"] = True
+                    seq["finish_reason"] = "stop"
+                elif seq["generated_tokens"] >= seq["max_tokens"]:
+                    finish_reason = "length"
+                    seq["finished"] = True
+                    seq["finish_reason"] = "length"
+
+                # Create response with prompt_cache only if finished
+                prompt_cache = None
+                if finish_reason is not None:
+                    # Generate fake cache (list of (K, V) tuples)
+                    seq_len = len(seq["prompt_tokens"]) + seq["generated_tokens"]
+                    n_kv_heads, head_dim = 4, 64
+                    n_layers = 12
+                    prompt_cache = []
+                    for _ in range(n_layers):
+                        k = FakeTensor((n_kv_heads, head_dim, seq_len))
+                        v = FakeTensor((n_kv_heads, head_dim, seq_len))
+                        prompt_cache.append((k, v))
+
+                # Create Response object (research finding: has .token, not .text)
+                response = FakeResponse(
+                    uid=uid,
+                    token=token_id,
+                    finish_reason=finish_reason,
+                    prompt_cache=prompt_cache,
+                )
+                responses.append(response)
+
+        return responses
 
     def extract_cache(self, uid: str) -> list[tuple[Any, Any]]:
         """Extract cache for a sequence (fake implementation).
@@ -176,32 +229,80 @@ class FakeBatchGenerator:
             del self._sequences[uid]
 
 
-class FakeBatchResponse:
-    """Fake BatchResponse (mimics mlx_lm BatchResponse)."""
+class FakeResponse:
+    """Fake Response (mimics mlx_lm BatchGenerator.Response).
 
-    def __init__(self, finished: list[dict[str, Any]]) -> None:
-        """Initialize fake batch response.
+    Research findings:
+    - Response has .token (singular), not .text or .tokens
+    - Response has .finish_reason (None, "stop", or "length")
+    - Response has .prompt_cache (only populated when finished)
+    """
+
+    def __init__(
+        self,
+        uid: str,
+        token: int,
+        finish_reason: str | None,
+        prompt_cache: list[tuple[Any, Any]] | None,
+    ) -> None:
+        """Initialize fake response.
 
         Args:
-            finished: List of finished sequence data.
+            uid: Sequence unique identifier.
+            token: Single generated token ID.
+            finish_reason: None (continuing), "stop" (EOS), or "length" (max tokens).
+            prompt_cache: KV cache (only when finished).
         """
-        self._finished = finished
-
-    @property
-    def finished(self) -> list[Any]:
-        """Return list of finished sequences."""
-        return [FakeGenerationResponse(**seq) for seq in self._finished]
-
-
-class FakeGenerationResponse:
-    """Fake GenerationResponse (mimics mlx_lm GenerationResponse)."""
-
-    def __init__(self, uid: str, text: str, finish_reason: str, token_count: int) -> None:
-        """Initialize fake generation response."""
         self.uid = uid
-        self.text = text
+        self.token = token
         self.finish_reason = finish_reason
-        self.token_count = token_count
+        self.prompt_cache = prompt_cache
+
+
+class FakeCacheAdapter:
+    """Fake cache adapter for testing (CRITICAL-1, Sprint 3.5).
+
+    Mimics MLXCacheAdapter behavior without requiring MLX.
+    Works with FakeTensor objects.
+    """
+
+    def concatenate_cache_blocks(
+        self,
+        k_tensors: list[Any],
+        v_tensors: list[Any],
+    ) -> tuple[Any, Any]:
+        """Concatenate K/V tensors (fake implementation)."""
+        # For FakeTensors, just return the first one (simplified)
+        # Real implementation would concatenate along axis=2
+        if k_tensors and v_tensors:
+            # Calculate total sequence length
+            total_seq_len = sum(t.shape[2] for t in k_tensors)
+            # Return new FakeTensor with combined sequence length
+            return (
+                FakeTensor((k_tensors[0].shape[0], k_tensors[0].shape[1], total_seq_len)),
+                FakeTensor((v_tensors[0].shape[0], v_tensors[0].shape[1], total_seq_len)),
+            )
+        return FakeTensor((0, 0, 0)), FakeTensor((0, 0, 0))
+
+    def get_sequence_length(self, k_tensor: Any) -> int:
+        """Extract sequence length from K tensor."""
+        return int(k_tensor.shape[2])  # Cast to int for type safety
+
+    def slice_cache_tensor(
+        self,
+        tensor: Any,
+        start_token: int,
+        end_token: int,
+    ) -> Any:
+        """Slice cache tensor along sequence axis."""
+        # FakeTensor already supports slicing via __getitem__
+        return tensor[:, :, start_token:end_token]
+
+
+@pytest.fixture
+def cache_adapter() -> FakeCacheAdapter:
+    """Create fake cache adapter."""
+    return FakeCacheAdapter()
 
 
 @pytest.fixture
@@ -239,7 +340,12 @@ class TestBlockPoolBatchEngineInit:
     """Tests for BlockPoolBatchEngine.__init__()."""
 
     def test_create_engine_with_valid_inputs(
-        self, model: FakeModel, tokenizer: FakeTokenizer, pool: BlockPool, spec: ModelCacheSpec
+        self,
+        model: FakeModel,
+        tokenizer: FakeTokenizer,
+        pool: BlockPool,
+        spec: ModelCacheSpec,
+        cache_adapter: FakeCacheAdapter,
     ) -> None:
         """Should create engine with valid inputs."""
         engine = BlockPoolBatchEngine(
@@ -247,6 +353,7 @@ class TestBlockPoolBatchEngineInit:
             tokenizer=tokenizer,
             pool=pool,
             spec=spec,
+            cache_adapter=cache_adapter,
         )
 
         assert engine._model is model
@@ -257,44 +364,48 @@ class TestBlockPoolBatchEngineInit:
         assert engine._active_requests == {}
         assert engine._agent_blocks == {}
 
-    def test_reject_none_model(self, tokenizer, pool, spec) -> None:
+    def test_reject_none_model(self, tokenizer, pool, spec, cache_adapter) -> None:
         """Should raise ModelNotFoundError if model is None."""
         with pytest.raises(
             ModelNotFoundError, match="Model must be loaded before creating engine"
         ):
             BlockPoolBatchEngine(
+            cache_adapter=cache_adapter,
                 model=None,
                 tokenizer=tokenizer,
                 pool=pool,
                 spec=spec,
             )
 
-    def test_reject_none_tokenizer(self, model, pool, spec) -> None:
+    def test_reject_none_tokenizer(self, model, pool, spec, cache_adapter) -> None:
         """Should raise ModelNotFoundError if tokenizer is None."""
         with pytest.raises(
             ModelNotFoundError, match="Tokenizer must be loaded before creating engine"
         ):
             BlockPoolBatchEngine(
+            cache_adapter=cache_adapter,
                 model=model,
                 tokenizer=None,
                 pool=pool,
                 spec=spec,
             )
 
-    def test_reject_none_pool(self, model, tokenizer, spec) -> None:
+    def test_reject_none_pool(self, model, tokenizer, spec, cache_adapter) -> None:
         """Should raise InvalidRequestError if pool is None."""
         with pytest.raises(InvalidRequestError, match="BlockPool is required"):
             BlockPoolBatchEngine(
+            cache_adapter=cache_adapter,
                 model=model,
                 tokenizer=tokenizer,
                 pool=None,  # type: ignore[arg-type]
                 spec=spec,
             )
 
-    def test_reject_none_spec(self, model, tokenizer, pool) -> None:
+    def test_reject_none_spec(self, model, tokenizer, pool, cache_adapter) -> None:
         """Should raise InvalidRequestError if spec is None."""
         with pytest.raises(InvalidRequestError, match="ModelCacheSpec is required"):
             BlockPoolBatchEngine(
+            cache_adapter=cache_adapter,
                 model=model,
                 tokenizer=tokenizer,
                 pool=pool,
@@ -306,9 +417,10 @@ class TestBlockPoolBatchEngineSubmit:
     """Tests for BlockPoolBatchEngine.submit()."""
 
     @pytest.fixture
-    def engine(self, model, tokenizer, pool, spec):
+    def engine(self, model, tokenizer, pool, spec, cache_adapter):
         """Create engine for testing."""
         return BlockPoolBatchEngine(
+            cache_adapter=cache_adapter,
             model=model,
             tokenizer=tokenizer,
             pool=pool,
@@ -362,9 +474,10 @@ class TestBlockPoolBatchEngineStep:
     """Tests for BlockPoolBatchEngine.step()."""
 
     @pytest.fixture
-    def engine(self, model, tokenizer, pool, spec):
+    def engine(self, model, tokenizer, pool, spec, cache_adapter):
         """Create engine for testing."""
         return BlockPoolBatchEngine(
+            cache_adapter=cache_adapter,
             model=model,
             tokenizer=tokenizer,
             pool=pool,
@@ -383,15 +496,17 @@ class TestBlockPoolBatchEngineStep:
         uid = engine.submit(agent_id="test_agent", prompt="Hello", max_tokens=50)
 
         # Execute step (should yield completion)
+        # Research finding: FakeBatchGenerator now generates 1 token per step
         completions = list(engine.step())
 
-        # Verify we got one completion
+        # Verify we got one completion (FakeBatchGenerator generates 1 token per step)
         assert len(completions) == 1
 
         completion = completions[0]
         assert completion.uid == uid
-        assert completion.text == "Generated text for prompt 0"  # From FakeBatchGenerator
-        assert completion.finish_reason == "stop"
+        # Research finding: Text is decoded from accumulated tokens
+        assert completion.text.startswith("Generated text with")
+        assert completion.finish_reason in ["stop", "length"]
         assert completion.token_count > 0
 
         # Verify tracking cleaned up
@@ -424,9 +539,10 @@ class TestBlockPoolBatchEngineCacheReconstruction:
     """Tests for BlockPoolBatchEngine._reconstruct_cache()."""
 
     @pytest.fixture
-    def engine(self, model, tokenizer, pool, spec):
+    def engine(self, model, tokenizer, pool, spec, cache_adapter):
         """Create engine for testing."""
         return BlockPoolBatchEngine(
+            cache_adapter=cache_adapter,
             model=model,
             tokenizer=tokenizer,
             pool=pool,
@@ -451,9 +567,10 @@ class TestBlockPoolBatchEngineCacheExtraction:
     """Tests for BlockPoolBatchEngine._extract_cache()."""
 
     @pytest.fixture
-    def engine(self, model, tokenizer, pool, spec):
+    def engine(self, model, tokenizer, pool, spec, cache_adapter):
         """Create engine for testing."""
         return BlockPoolBatchEngine(
+            cache_adapter=cache_adapter,
             model=model,
             tokenizer=tokenizer,
             pool=pool,

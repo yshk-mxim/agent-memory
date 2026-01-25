@@ -12,7 +12,11 @@ import threading
 from typing import Any
 
 from semantic.domain.entities import AgentBlocks, KVBlock
-from semantic.domain.errors import PoolExhaustedError
+from semantic.domain.errors import (
+    BlockOperationError,
+    PoolConfigurationError,
+    PoolExhaustedError,
+)
 from semantic.domain.value_objects import ModelCacheSpec
 
 
@@ -73,13 +77,13 @@ class BlockPool:
             total_blocks: Total number of blocks to pre-allocate.
 
         Raises:
-            ValueError: If total_blocks <= 0 or spec is invalid.
+            PoolConfigurationError: If total_blocks <= 0 or spec is invalid.
         """
         if total_blocks <= 0:
-            raise ValueError(f"total_blocks must be > 0, got {total_blocks}")
+            raise PoolConfigurationError(f"total_blocks must be > 0, got {total_blocks}")
 
         if spec.n_layers <= 0:
-            raise ValueError(f"spec.n_layers must be > 0, got {spec.n_layers}")
+            raise PoolConfigurationError(f"spec.n_layers must be > 0, got {spec.n_layers}")
 
         self.spec = spec
         self.total_blocks = total_blocks
@@ -131,10 +135,10 @@ class BlockPool:
         """
         with self._lock:
             if n_blocks <= 0:
-                raise ValueError(f"n_blocks must be > 0, got {n_blocks}")
+                raise BlockOperationError(f"n_blocks must be > 0, got {n_blocks}")
 
             if layer_id < 0 or layer_id >= self.spec.n_layers:
-                raise ValueError(
+                raise BlockOperationError(
                     f"layer_id must be 0-{self.spec.n_layers - 1}, got {layer_id}"
                 )
 
@@ -176,7 +180,7 @@ class BlockPool:
             agent_id: Agent that owns these blocks.
 
         Raises:
-            ValueError: If block is not allocated or doesn't belong to agent.
+            BlockOperationError: If block is not allocated or doesn't belong to agent.
 
         Example:
             >>> pool = BlockPool(spec, total_blocks=100)
@@ -191,7 +195,7 @@ class BlockPool:
             for block in blocks:
                 # Validate block is allocated
                 if block.block_id not in self.allocated_blocks:
-                    raise ValueError(
+                    raise BlockOperationError(
                         f"Block {block.block_id} is not allocated (double-free?)"
                     )
 
@@ -200,7 +204,7 @@ class BlockPool:
                     agent_id not in self.agent_allocations
                     or block.block_id not in self.agent_allocations[agent_id]
                 ):
-                    raise ValueError(
+                    raise BlockOperationError(
                         f"Block {block.block_id} does not belong to agent {agent_id}"
                     )
 
@@ -358,7 +362,7 @@ class BlockPool:
         """
         with self._lock:
             if self.allocated_blocks:
-                raise RuntimeError(
+                raise PoolConfigurationError(
                     f"Cannot reconfigure pool with {len(self.allocated_blocks)} "
                     "active allocations. Drain all agents first."
                 )

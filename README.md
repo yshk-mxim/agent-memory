@@ -1,7 +1,7 @@
 # Semantic — Multi-Agent LLM Inference Server
 
 [![CI](https://github.com/yshk-mxim/rdic/workflows/CI/badge.svg)](https://github.com/yshk-mxim/rdic/actions)
-[![Coverage](https://img.shields.io/badge/coverage-95.07%25-brightgreen)](https://github.com/yshk-mxim/rdic)
+[![Coverage](https://img.shields.io/badge/coverage-68.66%25-yellow)](https://github.com/yshk-mxim/rdic)
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/downloads/)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Code style: ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg)](https://github.com/astral-sh/ruff)
@@ -10,7 +10,9 @@
 > Block-pool memory management for multi-agent LLM inference on Apple Silicon
 
 **Architecture**: Hexagonal (Ports & Adapters) with domain-driven design
-**Status**: Sprint 1 (Domain Core) — 95.07% coverage, 112 tests passing
+**Status**: Sprint 3.5 (Quality & Cleanup) — 68.66% coverage, 170 tests (166 passed, 4 skipped)
+
+**⚠️ Note**: This README describes an earlier POC phase. Full documentation rewrite scheduled for Sprint 7. See `docs/` directory for current architecture.
 
 A production-quality multi-agent inference server with persistent KV cache, continuous batching, and block-pool memory management. Fills a gap that LM Studio, Ollama, and llama.cpp don't provide: **persistent KV cache across sessions** with **continuous batching** and **native multi-agent orchestration**.
 

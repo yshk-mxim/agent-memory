@@ -10,6 +10,11 @@ stdlib and typing imports.
 from dataclasses import dataclass, field
 from typing import Any
 
+from semantic.domain.errors import AgentBlocksValidationError, BlockValidationError
+
+# MAJOR-1 Issue #13 fix (Sprint 3.5): Universal block size constant (ADR-002)
+BLOCK_SIZE_TOKENS = 256  # All models use 256-token blocks per ADR-002
+
 
 @dataclass
 class KVBlock:
@@ -47,12 +52,12 @@ class KVBlock:
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def is_full(self) -> bool:
-        """Check if block is at maximum capacity (256 tokens).
+        """Check if block is at maximum capacity.
 
         Returns:
-            True if block contains 256 tokens, False otherwise.
+            True if block contains BLOCK_SIZE_TOKENS, False otherwise.
         """
-        return self.token_count == 256
+        return self.token_count == BLOCK_SIZE_TOKENS
 
     def is_empty(self) -> bool:
         """Check if block contains no tokens.
@@ -65,12 +70,12 @@ class KVBlock:
     def __post_init__(self) -> None:
         """Validate block invariants after construction."""
         if self.block_id < 0:
-            raise ValueError(f"block_id must be >= 0, got {self.block_id}")
+            raise BlockValidationError(f"block_id must be >= 0, got {self.block_id}")
         if self.layer_id < 0:
-            raise ValueError(f"layer_id must be >= 0, got {self.layer_id}")
-        if not 0 <= self.token_count <= 256:
-            raise ValueError(
-                f"token_count must be 0-256, got {self.token_count}"
+            raise BlockValidationError(f"layer_id must be >= 0, got {self.layer_id}")
+        if not 0 <= self.token_count <= BLOCK_SIZE_TOKENS:
+            raise BlockValidationError(
+                f"token_count must be 0-{BLOCK_SIZE_TOKENS}, got {self.token_count}"
             )
 
 
@@ -141,9 +146,9 @@ class AgentBlocks:
     def __post_init__(self) -> None:
         """Validate agent blocks invariants after construction."""
         if not self.agent_id:
-            raise ValueError("agent_id cannot be empty")
+            raise AgentBlocksValidationError("agent_id cannot be empty")
         if self.total_tokens < 0:
-            raise ValueError(f"total_tokens must be >= 0, got {self.total_tokens}")
+            raise AgentBlocksValidationError(f"total_tokens must be >= 0, got {self.total_tokens}")
 
         # Validate that total_tokens matches sum of block token counts
         computed_total = sum(
@@ -152,7 +157,7 @@ class AgentBlocks:
             for block in layer_blocks
         )
         if self.total_tokens != computed_total:
-            raise ValueError(
+            raise AgentBlocksValidationError(
                 f"total_tokens ({self.total_tokens}) doesn't match "
                 f"sum of block tokens ({computed_total})"
             )

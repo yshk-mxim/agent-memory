@@ -376,6 +376,112 @@ async def stream_from_engine(self, agent_id, prompt, max_tokens):
         })
 ```
 
+### 4.5 Real MLX Token Generation Pattern (Sprint 3.5 Validated)
+
+**CRITICAL**: Sprint 3.5 validated the actual MLX BatchGenerator token generation behavior with real models. The streaming implementation must follow this pattern:
+
+#### Token-by-Token Generation (Production Validated)
+
+MLX BatchGenerator generates **1 token per sequence per next() call**. The adapter must accumulate tokens and stream them:
+
+```python
+class AnthropicAdapter:
+    async def stream_from_engine(self, agent_id, prompt, max_tokens):
+        """Real streaming pattern from Sprint 3.5."""
+        # Submit to batch engine
+        uid = self.engine.submit(agent_id, prompt, cache, max_tokens)
+
+        # Track tokens for this stream
+        tokens = []
+
+        # Send message_start event
+        yield self._sse_event("message_start", {
+            "type": "message_start",
+            "message": {"id": f"msg_{uid}", "role": "assistant", ...}
+        })
+
+        # Send content_block_start event
+        yield self._sse_event("content_block_start", {
+            "type": "content_block_start",
+            "index": 0,
+            "content_block": {"type": "text", "text": ""}
+        })
+
+        # Generation loop - engine.step() yields 1 token per call
+        for completion in self.engine.step():
+            if completion.uid == uid:
+                # Get the single token generated this step
+                # (Engine already decoded accumulated tokens to text)
+                new_text = completion.text
+
+                # Send delta event with new text
+                yield self._sse_event("content_block_delta", {
+                    "type": "content_block_delta",
+                    "index": 0,
+                    "delta": {"type": "text_delta", "text": new_text}
+                })
+
+                # Check if complete
+                if completion.finish_reason is not None:
+                    # Send message_delta with stop_reason
+                    yield self._sse_event("message_delta", {
+                        "type": "message_delta",
+                        "delta": {"stop_reason": "end_turn"},
+                        "usage": {"output_tokens": completion.token_count}
+                    })
+
+                    # Send message_stop
+                    yield self._sse_event("message_stop", {
+                        "type": "message_stop"
+                    })
+                    break
+```
+
+#### Key Streaming Patterns
+
+**Pattern 1: Accumulate in Engine, Stream Deltas in Adapter**
+
+```python
+# In BlockPoolBatchEngine.step():
+tokens_by_uid[r.uid].append(r.token)  # Accumulate
+
+if r.finish_reason is not None:
+    # Decode full text on completion
+    text = tokenizer.decode(tokens_by_uid[r.uid])
+    yield CompletedGeneration(text=text, ...)
+
+# In adapter:
+for completion in engine.step():
+    # Stream the decoded text chunk
+    yield sse_event("content_block_delta", {"text": completion.text})
+```
+
+**Pattern 2: Token-Level Streaming (If Engine Yields Per-Token)**
+
+```python
+# Alternative: If we modify engine to yield per-token
+async for token_id in engine.stream_tokens(uid):
+    # Decode single token
+    token_text = tokenizer.decode([token_id])
+
+    # Stream immediately
+    yield sse_event("content_block_delta", {"text": token_text})
+```
+
+#### Sprint 3.5 Implementation Status
+
+✅ **Validated**:
+- Token accumulation pattern in BlockPoolBatchEngine
+- CompletedGeneration with full decoded text
+- Multi-agent batching with variable completion times
+
+⏳ **TODO (Sprint 4)**:
+- Modify engine.step() to yield per-token instead of on-completion
+- Implement true token-level streaming to adapter
+- Handle partial UTF-8 sequences in tokenizer.decode()
+
+**Reference**: See `src/semantic/application/batch_engine.py` lines 260-330 for validated implementation.
+
 ---
 
 ## 5. Additional Endpoints

@@ -16,6 +16,7 @@ from semantic.application.agent_cache_store import (
     ModelTag,
 )
 from semantic.domain.entities import AgentBlocks
+from semantic.domain.errors import InvalidRequestError
 from semantic.domain.value_objects import ModelCacheSpec
 
 
@@ -235,7 +236,7 @@ class TestAgentCacheStoreSave:
                 model_tag=model_tag,
             )
 
-            with pytest.raises(ValueError, match="agent_id cannot be empty"):
+            with pytest.raises(InvalidRequestError, match="agent_id cannot be empty"):
                 store.save("", agent_blocks)
 
     def test_save_triggers_eviction_when_full(

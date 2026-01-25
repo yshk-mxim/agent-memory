@@ -12,6 +12,7 @@ Per production_plan.md: 95%+ coverage, mypy --strict compliant.
 import pytest
 
 from semantic.domain.entities import AgentBlocks, KVBlock
+from semantic.domain.errors import AgentBlocksValidationError, BlockValidationError
 
 pytestmark = pytest.mark.unit
 
@@ -77,22 +78,22 @@ class TestKVBlock:
 
     def test_reject_negative_block_id(self) -> None:
         """Should raise ValueError for negative block_id."""
-        with pytest.raises(ValueError, match="block_id must be >= 0"):
+        with pytest.raises(BlockValidationError, match="block_id must be >= 0"):
             KVBlock(block_id=-1, layer_id=0, token_count=0, layer_data=None)
 
     def test_reject_negative_layer_id(self) -> None:
         """Should raise ValueError for negative layer_id."""
-        with pytest.raises(ValueError, match="layer_id must be >= 0"):
+        with pytest.raises(BlockValidationError, match="layer_id must be >= 0"):
             KVBlock(block_id=0, layer_id=-1, token_count=0, layer_data=None)
 
     def test_reject_negative_token_count(self) -> None:
         """Should raise ValueError for negative token_count."""
-        with pytest.raises(ValueError, match="token_count must be 0-256"):
+        with pytest.raises(BlockValidationError, match="token_count must be 0-256"):
             KVBlock(block_id=0, layer_id=0, token_count=-1, layer_data=None)
 
     def test_reject_token_count_exceeds_256(self) -> None:
         """Should raise ValueError when token_count > 256."""
-        with pytest.raises(ValueError, match="token_count must be 0-256"):
+        with pytest.raises(BlockValidationError, match="token_count must be 0-256"):
             KVBlock(block_id=0, layer_id=0, token_count=257, layer_data=None)
 
     def test_accept_boundary_values(self) -> None:
@@ -203,12 +204,12 @@ class TestAgentBlocks:
 
     def test_reject_empty_agent_id(self) -> None:
         """Should raise ValueError for empty agent_id."""
-        with pytest.raises(ValueError, match="agent_id cannot be empty"):
+        with pytest.raises(AgentBlocksValidationError, match="agent_id cannot be empty"):
             AgentBlocks(agent_id="", blocks={}, total_tokens=0)
 
     def test_reject_negative_total_tokens(self) -> None:
         """Should raise ValueError for negative total_tokens."""
-        with pytest.raises(ValueError, match="total_tokens must be >= 0"):
+        with pytest.raises(AgentBlocksValidationError, match="total_tokens must be >= 0"):
             AgentBlocks(agent_id="agent_1", blocks={}, total_tokens=-1)
 
     def test_reject_mismatched_total_tokens(self) -> None:
@@ -218,7 +219,7 @@ class TestAgentBlocks:
         )
 
         with pytest.raises(
-            ValueError, match=r"total_tokens .* doesn't match sum"
+            AgentBlocksValidationError, match=r"total_tokens .* doesn't match sum"
         ):
             AgentBlocks(
                 agent_id="agent_1",

@@ -23,6 +23,8 @@ from typing import Optional
 from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from semantic.domain.entities import BLOCK_SIZE_TOKENS
+
 
 class MLXSettings(BaseSettings):
     """MLX inference engine configuration.
@@ -65,7 +67,7 @@ class MLXSettings(BaseSettings):
     )
 
     block_tokens: int = Field(
-        default=256,
+        default=BLOCK_SIZE_TOKENS,
         ge=64,
         le=512,
         description="Tokens per cache block (must match BlockPool)",

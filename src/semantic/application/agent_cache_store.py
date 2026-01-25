@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from semantic.domain.entities import AgentBlocks, KVBlock
+from semantic.domain.errors import InvalidRequestError
 from semantic.domain.value_objects import ModelCacheSpec
 
 
@@ -178,9 +179,11 @@ class AgentCacheStore:
         # Warm tier: agent_id → file path (on disk)
         self._warm_cache: dict[str, Path] = {}
 
-        # Prefix trie (Day 6 implementation)
+        # Prefix trie for token prefix matching (Sprint 3.5 implementation)
         # Maps token prefixes to agent IDs for cache reuse
-        self._prefix_trie: dict[Any, Any] = {}  # TODO: Implement trie structure
+        # Structure: Each node is a dict mapping token_id → child node
+        # Leaf nodes have "_agents" key with set of agent IDs
+        self._prefix_trie: dict[int | str, Any] = {}
 
     def save(self, agent_id: str, blocks: AgentBlocks) -> None:
         """Save agent cache to hot tier (and optionally warm tier).
@@ -202,7 +205,7 @@ class AgentCacheStore:
             >>> # Cache now in hot tier, accessible via load()
         """
         if not agent_id:
-            raise ValueError("agent_id cannot be empty")
+            raise InvalidRequestError("agent_id cannot be empty")
 
         # Create entry
         entry = CacheEntry(
