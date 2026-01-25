@@ -7,8 +7,8 @@ Requires Apple Silicon (M1/M2/M3/M4) and mlx/mlx_lm installed.
 import pytest
 
 from semantic.application.batch_engine import BlockPoolBatchEngine
+from semantic.domain.errors import InvalidRequestError, PoolExhaustedError
 from semantic.domain.services import BlockPool
-from semantic.domain.value_objects import ModelCacheSpec
 
 
 @pytest.fixture(scope="module")
@@ -81,7 +81,7 @@ class TestBlockPoolBatchEngineIntegration:
     def test_single_agent_with_cache_resume(self, engine, pool) -> None:
         """Should resume generation from cached state."""
         # First generation
-        uid1 = engine.submit(agent_id="test_agent", prompt="Hello", max_tokens=10)
+        engine.submit(agent_id="test_agent", prompt="Hello", max_tokens=10)
         completions1 = list(engine.step())
         cached_blocks = completions1[0].blocks
 
@@ -89,7 +89,7 @@ class TestBlockPoolBatchEngineIntegration:
         initial_tokens = cached_blocks.total_tokens
 
         # Resume with cache
-        uid2 = engine.submit(
+        engine.submit(
             agent_id="test_agent",
             prompt=" world",
             cache=cached_blocks,
@@ -134,7 +134,7 @@ class TestBlockPoolBatchEngineIntegration:
 
         # Run 10 generations
         for i in range(10):
-            uid = engine.submit(agent_id=f"agent_{i}", prompt=f"Test {i}", max_tokens=10)
+            engine.submit(agent_id=f"agent_{i}", prompt=f"Test {i}", max_tokens=10)
             completions = list(engine.step())
             assert len(completions) == 1, f"Generation {i} should complete"
 
@@ -151,8 +151,6 @@ class TestBlockPoolBatchEngineIntegration:
 
     def test_pool_exhaustion_error(self, engine, pool) -> None:
         """Should raise PoolExhaustedError when no blocks available."""
-        from semantic.domain.errors import PoolExhaustedError
-
         # Exhaust the pool by not freeing blocks
         allocated_agents = []
         try:
@@ -170,7 +168,5 @@ class TestBlockPoolBatchEngineIntegration:
 
     def test_empty_prompt_rejection(self, engine) -> None:
         """Should reject empty prompt with InvalidRequestError."""
-        from semantic.domain.errors import InvalidRequestError
-
         with pytest.raises(InvalidRequestError, match="Prompt cannot be empty"):
             engine.submit(agent_id="test", prompt="", max_tokens=10)
