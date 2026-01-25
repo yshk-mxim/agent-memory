@@ -242,12 +242,15 @@ def create_app() -> FastAPI:
 
     # Register route handlers
     from semantic.adapters.inbound.anthropic_adapter import router as anthropic_router
+    from semantic.adapters.inbound.openai_adapter import router as openai_router
 
     app.include_router(anthropic_router)
     logger.info("Registered Anthropic Messages API routes (/v1/messages)")
 
+    app.include_router(openai_router)
+    logger.info("Registered OpenAI Chat Completions API routes (/v1/chat/completions)")
+
     # TODO (Day 6): Register remaining adapters
-    # - OpenAI adapter: /v1/chat/completions
     # - Direct adapter: /v1/agents/*
 
     logger.info(f"FastAPI application created (log_level={settings.server.log_level})")
