@@ -177,6 +177,16 @@ def create_app() -> FastAPI:
     app.add_middleware(AuthenticationMiddleware)
     logger.info("Authentication middleware enabled")
 
+    # Rate limiting middleware
+    from semantic.adapters.inbound.rate_limiter import RateLimiter
+
+    app.add_middleware(
+        RateLimiter,
+        requests_per_minute_per_agent=settings.server.rate_limit_per_agent,
+        requests_per_minute_global=settings.server.rate_limit_global,
+    )
+    logger.info("Rate limiting middleware enabled")
+
     # Health check endpoint
     @app.get("/health", status_code=status.HTTP_200_OK)
     async def health_check():

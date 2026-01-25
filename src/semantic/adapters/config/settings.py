@@ -156,6 +156,20 @@ class ServerSettings(BaseSettings):
         description="Number of worker processes (MLX limits concurrency)",
     )
 
+    rate_limit_per_agent: int = Field(
+        default=60,
+        ge=1,
+        le=1000,
+        description="Maximum requests per agent per minute",
+    )
+
+    rate_limit_global: int = Field(
+        default=1000,
+        ge=1,
+        le=10000,
+        description="Maximum global requests per minute",
+    )
+
     log_level: str = Field(
         default="INFO",
         description="Log level (DEBUG, INFO, WARNING, ERROR, CRITICAL)",
