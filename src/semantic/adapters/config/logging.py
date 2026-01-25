@@ -5,8 +5,10 @@ Replaces print statements with JSON-formatted structured logs.
 
 import logging
 import sys
+from typing import Any, Callable, Sequence, cast
 
 import structlog
+from structlog.typing import EventDict, WrappedLogger
 
 
 def configure_logging(log_level: str = "INFO", json_output: bool = True) -> None:
@@ -30,6 +32,8 @@ def configure_logging(log_level: str = "INFO", json_output: bool = True) -> None
     )
 
     # Configure structlog
+    # Type annotation for processors (CRITICAL-2 fix: Sprint 3.5)
+    processors: Sequence[Callable[[WrappedLogger, str, EventDict], Any]]
     if json_output:
         # Production: JSON output
         processors = [
@@ -74,9 +78,11 @@ def get_logger(name: str | None = None) -> structlog.BoundLogger:
         >>> logger.info("cache_hit", agent_id="agent_1", tokens=1024)
         {"event": "cache_hit", "agent_id": "agent_1", "tokens": 1024, "logger": "semantic.application"}
     """
+    # CRITICAL-2 fix (Sprint 3.5): Use cast() to satisfy mypy strict mode
+    # structlog.get_logger() returns Any, but we know it's a BoundLogger
     if name:
-        return structlog.get_logger(name)
-    return structlog.get_logger()
+        return cast(structlog.BoundLogger, structlog.get_logger(name))
+    return cast(structlog.BoundLogger, structlog.get_logger())
 
 
 # Example usage patterns for replacing print statements:
