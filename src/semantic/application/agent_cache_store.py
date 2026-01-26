@@ -359,6 +359,56 @@ class AgentCacheStore:
         """Internal LRU eviction (called when hot tier exceeds max)."""
         self.evict_lru(target_count=self.max_hot_agents)
 
+    def evict_all_to_disk(self) -> int:
+        """Evict ALL hot-tier caches to disk.
+
+        Used during model hot-swap to persist all active caches before
+        unloading the model. Ensures no agent state is lost during swap.
+
+        Returns:
+            Number of caches evicted to disk
+
+        Notes:
+            - Persists all hot-tier caches to warm tier (disk)
+            - Clears hot tier completely
+            - Caches remain in warm tier for future reloading
+            - Model compatibility validated on reload
+
+        Example:
+            >>> evicted = store.evict_all_to_disk()
+            >>> print(f"Evicted {evicted} caches to disk")
+            >>> # Hot tier now empty, all caches on disk
+        """
+        initial_hot_count = len(self._hot_cache)
+
+        # Evict all by setting target to 0
+        evicted = self.evict_lru(target_count=0)
+
+        return evicted
+
+    def update_model_tag(self, new_tag: ModelTag) -> None:
+        """Update model tag for compatibility checking.
+
+        Called after model hot-swap to update the current model tag.
+        Future cache loads will validate against this new tag.
+
+        Args:
+            new_tag: New model tag from swapped model
+
+        Notes:
+            - Existing hot caches are NOT invalidated (caller should evict first)
+            - Warm-tier caches validated on load (incompatible ones rejected)
+            - Use evict_all_to_disk() before model swap to preserve all caches
+
+        Example:
+            >>> # Before swap
+            >>> store.evict_all_to_disk()
+            >>> # After swap completes
+            >>> new_tag = ModelTag.from_spec(new_model_id, new_spec)
+            >>> store.update_model_tag(new_tag)
+        """
+        self.model_tag = new_tag
+
     def _save_to_disk(self, agent_id: str) -> None:
         """Persist cache to warm tier."""
         entry = self._hot_cache.get(agent_id)

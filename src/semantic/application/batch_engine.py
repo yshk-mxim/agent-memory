@@ -1,6 +1,7 @@
 """Block-pool batch inference engine."""
 
 import logging
+import time
 from collections.abc import Callable, Iterator
 from typing import TYPE_CHECKING, Any
 
@@ -446,3 +447,87 @@ class BlockPoolBatchEngine:
             blocks=blocks_dict,
             total_tokens=total_token_count,
         )
+
+    def drain(self, timeout_seconds: float = 30.0) -> None:
+        """Drain all active requests before model swap.
+
+        Waits for all in-flight requests to complete by repeatedly calling step()
+        until _active_requests is empty or timeout is reached.
+
+        Args:
+            timeout_seconds: Maximum time to wait for drain (default: 30s)
+
+        Raises:
+            GenerationError: If timeout is reached before all requests complete
+
+        Notes:
+            - This is a blocking call
+            - New submit() calls during drain will still be accepted
+            - For model hot-swap, caller should prevent new submits before calling drain
+            - Use this before shutdown() or model swap to ensure clean state
+
+        Example:
+            >>> engine.drain(timeout_seconds=60)  # Wait up to 60s for completions
+            >>> engine.shutdown()  # Safe to shutdown now
+        """
+        start_time = time.time()
+        logger = logging.getLogger(__name__)
+        logger.info(f"Draining {len(self._active_requests)} active requests...")
+
+        while self._active_requests:
+            # Check timeout
+            elapsed = time.time() - start_time
+            if elapsed > timeout_seconds:
+                remaining = list(self._active_requests.keys())
+                raise GenerationError(
+                    f"Drain timeout after {timeout_seconds}s. "
+                    f"Still pending: {remaining[:5]}..."  # Show first 5 UIDs
+                )
+
+            # Process one step to let requests complete
+            list(self.step())  # Consume iterator to process completions
+
+            # Brief sleep to avoid busy-waiting
+            time.sleep(0.1)
+
+        logger.info("Drain complete - all requests finished")
+
+    def shutdown(self) -> None:
+        """Shutdown batch engine and release resources.
+
+        Clears all internal state in preparation for model swap or engine teardown.
+        Should be called AFTER drain() to ensure no active requests are lost.
+
+        Notes:
+            - Does NOT free blocks from pool (caller must handle via AgentCacheStore)
+            - Does NOT unload model (caller must handle via ModelRegistry)
+            - After shutdown, engine is unusable until reinitialized
+
+        Example:
+            >>> engine.drain()
+            >>> engine.shutdown()
+            >>> # Engine is now safe to discard
+        """
+        logger = logging.getLogger(__name__)
+        logger.info("Shutting down batch engine...")
+
+        # Clear batch generator
+        if self._batch_gen is not None:
+            del self._batch_gen
+            self._batch_gen = None
+
+        # Clear active requests (should be empty after drain, but be safe)
+        if self._active_requests:
+            logger.warning(
+                f"Shutdown with {len(self._active_requests)} active requests - possible loss"
+            )
+        self._active_requests.clear()
+
+        # Clear agent blocks tracking (blocks remain in pool until explicitly freed)
+        self._agent_blocks.clear()
+
+        # Clear model/tokenizer references (will be freed by ModelRegistry)
+        self._model = None
+        self._tokenizer = None
+
+        logger.info("Batch engine shutdown complete")
