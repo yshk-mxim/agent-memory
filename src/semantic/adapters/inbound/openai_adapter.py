@@ -6,9 +6,11 @@ Implements the OpenAI Chat Completions API with:
 - Session ID extension for persistent caching
 """
 
+import contextlib
 import hashlib
 import json
 import logging
+import re
 import time
 import uuid
 from collections.abc import AsyncIterator
@@ -52,16 +54,81 @@ def generate_agent_id_openai(session_id: str | None, tokens: list[int]) -> str:
     return f"oai_{hash_val}"
 
 
-def openai_messages_to_prompt(messages: list[OpenAIChatMessage]) -> str:
+def parse_function_calls(text: str) -> tuple[str, list[dict[str, Any]]]:
+    """Parse function calls from model output.
+
+    Looks for JSON patterns like:
+    {"function_call": {"name": "get_weather", "arguments": {"location": "Paris"}}}
+
+    Args:
+        text: Model generated text
+
+    Returns:
+        Tuple of (remaining_text, list of function call dicts)
+        Function call dict contains: {"name": str, "arguments": dict or str}
+    """
+    function_calls = []
+    remaining_text = text
+
+    # Look for {"function_call": ...} pattern
+    pattern = r'\{"function_call":\s*\{[^}]+\}\s*\}'
+    matches = re.finditer(pattern, text, re.DOTALL)
+
+    for match in matches:
+        try:
+            func_json = json.loads(match.group())
+            if "function_call" in func_json:
+                func_data = func_json["function_call"]
+                if "name" in func_data and "arguments" in func_data:
+                    # Arguments might be a dict or a JSON string
+                    arguments = func_data["arguments"]
+                    if isinstance(arguments, str):
+                        # Try to parse as JSON, leave as string if fails
+                        with contextlib.suppress(json.JSONDecodeError):
+                            arguments = json.loads(arguments)
+
+                    function_calls.append({
+                        "name": func_data["name"],
+                        "arguments": arguments,
+                    })
+                    # Remove function call from text
+                    remaining_text = remaining_text.replace(match.group(), "").strip()
+        except json.JSONDecodeError:
+            continue
+
+    return remaining_text, function_calls
+
+
+def openai_messages_to_prompt(  # noqa: C901, PLR0912
+    messages: list[OpenAIChatMessage],
+    tools: list[Any] | None = None,
+) -> str:
     """Convert OpenAI messages to prompt string.
 
     Args:
         messages: List of OpenAI chat messages
+        tools: Optional list of tool definitions
 
     Returns:
         Formatted prompt string for tokenization
     """
     lines = []
+
+    # Add tool definitions if present
+    if tools:
+        lines.append("\nAvailable Functions:")
+        for tool in tools:
+            if tool.type == "function":
+                func_def = {
+                    "name": tool.function.get("name"),
+                    "description": tool.function.get("description"),
+                    "parameters": tool.function.get("parameters"),
+                }
+                lines.append(json.dumps(func_def, indent=2))
+        lines.append(
+            '\nTo call a function, output JSON: {"function_call": {"name": "<function_name>", '
+            '"arguments": {<parameters>}}}\n'
+        )
 
     for msg in messages:
         if msg.role == "system":
@@ -69,9 +136,19 @@ def openai_messages_to_prompt(messages: list[OpenAIChatMessage]) -> str:
         elif msg.role == "user":
             lines.append(f"User: {msg.content}")
         elif msg.role == "assistant":
-            lines.append(f"Assistant: {msg.content}")
+            # Handle tool_calls in assistant messages
+            if msg.tool_calls:
+                for tool_call in msg.tool_calls:
+                    func_call = {
+                        "name": tool_call.get("function", {}).get("name"),
+                        "arguments": tool_call.get("function", {}).get("arguments"),
+                    }
+                    lines.append(f"Assistant [Function Call]: {json.dumps(func_call)}")
+            elif msg.content:
+                lines.append(f"Assistant: {msg.content}")
         elif msg.role == "tool" and msg.content:
-            lines.append(f"Tool: {msg.content}")
+            # Tool result
+            lines.append(f"Tool [Result]: {msg.content}")
 
     # Add assistant prefix for continuation
     lines.append("Assistant:")
@@ -79,7 +156,7 @@ def openai_messages_to_prompt(messages: list[OpenAIChatMessage]) -> str:
     return "\n".join(lines)
 
 
-async def stream_chat_completion(
+async def stream_chat_completion(  # noqa: C901, PLR0912
     request_body: ChatCompletionsRequest,
     batch_engine: Any,
     cache_store: Any,
@@ -158,14 +235,58 @@ async def stream_chat_completion(
             logger.error("Streaming generation failed - no completion")
             return
 
+        # Parse for function calls
+        _remaining_text, function_calls = parse_function_calls(accumulated_text)
+
+        # Yield tool_calls if any
+        if function_calls:
+            for func_call in function_calls:
+                tool_call_id = f"call_{uuid.uuid4().hex[:24]}"
+                # Ensure arguments is a JSON string
+                arguments = func_call["arguments"]
+                if isinstance(arguments, dict):
+                    arguments = json.dumps(arguments)
+
+                # Yield tool call delta
+                yield {
+                    "data": json.dumps({
+                        "id": completion_id,
+                        "object": "chat.completion.chunk",
+                        "created": created_timestamp,
+                        "model": request_body.model,
+                        "choices": [{
+                            "index": 0,
+                            "delta": {
+                                "tool_calls": [{
+                                    "index": 0,
+                                    "id": tool_call_id,
+                                    "type": "function",
+                                    "function": {
+                                        "name": func_call["name"],
+                                        "arguments": arguments,
+                                    },
+                                }],
+                            },
+                            "finish_reason": None,
+                        }],
+                    })
+                }
+
         # Save updated cache
         if agent_id in batch_engine._agent_blocks:
             updated_blocks = batch_engine._agent_blocks[agent_id]
             cache_store.save(agent_id, updated_blocks)
             logger.debug(f"Saved cache: {agent_id} ({updated_blocks.total_tokens} tokens)")
 
+        # Determine finish_reason
+        if function_calls:
+            finish_reason = "tool_calls"
+        elif completion.finish_reason == "stop":
+            finish_reason = "stop"
+        else:
+            finish_reason = "length"
+
         # Yield final chunk with finish_reason
-        finish_reason = "stop" if completion.finish_reason == "stop" else "length"
         yield {
             "data": json.dumps({
                 "id": completion_id,
@@ -202,7 +323,7 @@ async def stream_chat_completion(
 
 
 @router.post("/chat/completions", status_code=status.HTTP_200_OK)
-async def create_chat_completion(
+async def create_chat_completion(  # noqa: C901, PLR0912, PLR0915
     request_body: ChatCompletionsRequest, request: Request
 ) -> ChatCompletionsResponse:
     """Create a chat completion (POST /v1/chat/completions).
@@ -228,8 +349,11 @@ async def create_chat_completion(
     cache_store: AgentCacheStore = request.app.state.semantic.cache_store
 
     try:
-        # 1. Convert OpenAI messages to prompt
-        prompt = openai_messages_to_prompt(request_body.messages)
+        # 1. Convert OpenAI messages to prompt (including tools if present)
+        prompt = openai_messages_to_prompt(
+            request_body.messages,
+            request_body.tools if request_body.tools else None,
+        )
         logger.debug(f"Prompt length: {len(prompt)} chars")
 
         # 2. Tokenize to get agent ID
@@ -291,7 +415,41 @@ async def create_chat_completion(
             cache_store.save(agent_id, updated_blocks)
             logger.debug(f"Saved cache: {agent_id} ({updated_blocks.total_tokens} tokens)")
 
-        # 8. Format OpenAI response
+        # 8. Parse for function calls
+        remaining_text, function_calls = parse_function_calls(completion.text)
+
+        # 9. Format OpenAI response
+        # Build tool_calls array if function calls detected
+        tool_calls_array = None
+        if function_calls:
+            tool_calls_array = []
+            for func_call in function_calls:
+                tool_call_id = f"call_{uuid.uuid4().hex[:24]}"
+                # Ensure arguments is a JSON string
+                arguments = func_call["arguments"]
+                if isinstance(arguments, dict):
+                    arguments = json.dumps(arguments)
+
+                tool_calls_array.append({
+                    "id": tool_call_id,
+                    "type": "function",
+                    "function": {
+                        "name": func_call["name"],
+                        "arguments": arguments,
+                    },
+                })
+
+        # Determine finish_reason
+        if function_calls:
+            finish_reason = "tool_calls"
+        elif completion.finish_reason == "stop":
+            finish_reason = "stop"
+        else:
+            finish_reason = "length"
+
+        # Build message (content can be None if only tool calls)
+        message_content = remaining_text.strip() if remaining_text.strip() else None
+
         response = ChatCompletionsResponse(
             id=f"chatcmpl-{uuid.uuid4().hex[:24]}",
             created=int(time.time()),
@@ -299,8 +457,12 @@ async def create_chat_completion(
             choices=[
                 OpenAIChatChoice(
                     index=0,
-                    message=OpenAIChatMessage(role="assistant", content=completion.text),
-                    finish_reason="stop" if completion.finish_reason == "stop" else "length",
+                    message=OpenAIChatMessage(
+                        role="assistant",
+                        content=message_content,
+                        tool_calls=tool_calls_array,
+                    ),
+                    finish_reason=finish_reason,
                 )
             ],
             usage=OpenAIChatCompletionUsage(
