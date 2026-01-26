@@ -6,6 +6,7 @@ This module defines:
 - Platform-specific skip conditions
 """
 
+import os
 import platform
 import sys
 from unittest.mock import MagicMock
@@ -14,7 +15,10 @@ import pytest
 
 
 def pytest_configure(config: pytest.Config) -> None:
-    """Register custom markers."""
+    """Register custom markers and configure environment."""
+    # Skip MLX tests by default (require manual opt-in with SKIP_MLX_TESTS=0)
+    if "SKIP_MLX_TESTS" not in os.environ:
+        os.environ["SKIP_MLX_TESTS"] = "1"
     config.addinivalue_line(
         "markers",
         "unit: Fast unit tests with mocked boundaries (no MLX dependencies)",
