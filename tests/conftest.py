@@ -6,7 +6,6 @@ This module defines:
 - Platform-specific skip conditions
 """
 
-import os
 import platform
 import sys
 from unittest.mock import MagicMock

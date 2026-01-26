@@ -57,7 +57,7 @@ class TestOpenAIFunctionCalling:
                     "messages": [
                         {
                             "role": "user",
-                            "content": 'Get weather for Paris. Use {"function_call": {"name": "get_current_weather", "arguments": {"location": "Paris", "unit": "celsius"}}}',  # noqa: E501
+                            "content": 'Get weather for Paris. Use {"function_call": {"name": "get_current_weather", "arguments": {"location": "Paris", "unit": "celsius"}}}',
                         }
                     ],
                     "tools": tools,
@@ -93,7 +93,7 @@ class TestOpenAIFunctionCalling:
                         "messages": [
                             {
                                 "role": "user",
-                                "content": 'Get weather for Paris. Use {"function_call": {"name": "get_current_weather", "arguments": {"location": "Paris", "unit": "celsius"}}}',  # noqa: E501
+                                "content": 'Get weather for Paris. Use {"function_call": {"name": "get_current_weather", "arguments": {"location": "Paris", "unit": "celsius"}}}',
                             },
                             {
                                 "role": "assistant",
@@ -175,7 +175,7 @@ class TestOpenAIFunctionCalling:
                     "messages": [
                         {
                             "role": "user",
-                            "content": 'Call two functions: {"function_call": {"name": "get_weather", "arguments": {"location": "Paris"}}} and {"function_call": {"name": "get_time", "arguments": {"timezone": "Europe/Paris"}}}',  # noqa: E501
+                            "content": 'Call two functions: {"function_call": {"name": "get_weather", "arguments": {"location": "Paris"}}} and {"function_call": {"name": "get_time", "arguments": {"timezone": "Europe/Paris"}}}',
                         }
                     ],
                     "tools": tools,
@@ -277,7 +277,7 @@ class TestOpenAIFunctionCallingStreaming:
                 "messages": [
                     {
                         "role": "user",
-                        "content": 'Calculate 5+3. Use {"function_call": {"name": "calculate", "arguments": {"expression": "5+3"}}}',  # noqa: E501
+                        "content": 'Calculate 5+3. Use {"function_call": {"name": "calculate", "arguments": {"expression": "5+3"}}}',
                     }
                 ],
                 "tools": [

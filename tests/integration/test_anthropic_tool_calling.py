@@ -51,7 +51,7 @@ class TestAnthropicToolCalling:
                     "messages": [
                         {
                             "role": "user",
-                            "content": 'Get weather for Paris. Use the get_weather tool with {"tool_use": {"name": "get_weather", "input": {"location": "Paris"}}}',  # noqa: E501
+                            "content": 'Get weather for Paris. Use the get_weather tool with {"tool_use": {"name": "get_weather", "input": {"location": "Paris"}}}',
                         }
                     ],
                     "tools": tools,
@@ -87,7 +87,7 @@ class TestAnthropicToolCalling:
                         "messages": [
                             {
                                 "role": "user",
-                                "content": 'Get weather for Paris. Use the get_weather tool with {"tool_use": {"name": "get_weather", "input": {"location": "Paris"}}}',  # noqa: E501
+                                "content": 'Get weather for Paris. Use the get_weather tool with {"tool_use": {"name": "get_weather", "input": {"location": "Paris"}}}',
                             },
                             {"role": "assistant", "content": data["content"]},
                             {
@@ -221,7 +221,7 @@ class TestAnthropicToolCallingStreaming:
                     "messages": [
                         {
                             "role": "user",
-                            "content": 'Calculate 2+2. Use {"tool_use": {"name": "calculate", "input": {"expression": "2+2"}}}',  # noqa: E501
+                            "content": 'Calculate 2+2. Use {"tool_use": {"name": "calculate", "input": {"expression": "2+2"}}}',
                         }
                     ],
                     "tools": tools,

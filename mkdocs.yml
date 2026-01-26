@@ -79,6 +79,7 @@ nav:
   - User Guide:
       - User Guide: user-guide.md
       - Configuration: configuration.md
+      - FAQ: faq.md
   - Architecture:
       - Overview: architecture.md
       - Domain Core: architecture/domain.md
