@@ -436,6 +436,11 @@ def _register_routes(app: FastAPI):
     """
     logger = structlog.get_logger(__name__)
 
+    @app.post("/api/event_logging/batch", status_code=status.HTTP_200_OK)
+    async def event_logging_stub():
+        """Stub endpoint for Claude Code CLI event logging (no-op)."""
+        return {"status": "ok"}
+
     @app.get("/", status_code=status.HTTP_200_OK)
     async def root():
         """Root endpoint with API info."""
