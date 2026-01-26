@@ -11,6 +11,7 @@ import sys
 import typer
 import uvicorn
 
+from semantic import __version__
 from semantic.adapters.config.settings import get_settings
 from semantic.entrypoints.api_server import create_app
 
@@ -117,8 +118,8 @@ def serve(
 @app.command()
 def version() -> None:
     """Show version information."""
-    typer.echo("Semantic Caching Server v0.2.0")
-    typer.echo("Sprint 7: Observability + Production Hardening")
+    typer.echo(f"Semantic Caching Server v{__version__}")
+    typer.echo("Sprint 8: Production Release - Tool Calling + Multi-Model Support")
 
 
 @app.command()
