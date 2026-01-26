@@ -65,7 +65,7 @@ class MLXSettings(BaseSettings):
     default_max_tokens: int = Field(
         default=256,
         ge=1,
-        le=8192,
+        le=65536,
         description="Default max tokens for generation if not specified",
     )
 

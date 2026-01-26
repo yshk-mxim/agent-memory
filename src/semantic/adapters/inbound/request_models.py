@@ -81,7 +81,7 @@ class ThinkingConfig(BaseModel):
     """Extended thinking configuration."""
 
     type: Literal["enabled", "disabled"] = "enabled"
-    budget_tokens: int = Field(default=1000, ge=0, le=10000)
+    budget_tokens: int = Field(default=1000, ge=0, le=32000)
 
 
 class MessagesRequest(BaseModel):
@@ -99,7 +99,7 @@ class MessagesRequest(BaseModel):
 
     model: str
     messages: list[Message]
-    max_tokens: int = Field(ge=1, le=8192)
+    max_tokens: int = Field(ge=1, le=65536)
     temperature: float = Field(default=1.0, ge=0.0, le=2.0)
     top_p: float = Field(default=1.0, ge=0.0, le=1.0)
     top_k: int = Field(default=0, ge=0)
@@ -334,7 +334,7 @@ class GenerateRequest(BaseModel):
     """Request to generate text for an agent."""
 
     prompt: str
-    max_tokens: int = Field(default=256, ge=1, le=8192)
+    max_tokens: int = Field(default=256, ge=1, le=65536)
     temperature: float = Field(default=0.7, ge=0.0, le=2.0)
 
 

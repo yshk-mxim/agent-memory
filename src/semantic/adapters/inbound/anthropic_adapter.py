@@ -360,6 +360,7 @@ async def create_message(request_body: MessagesRequest, request: Request):  # no
         HTTPException: On generation errors
     """
     logger.info(f"POST /v1/messages: model={request_body.model}, stream={request_body.stream}")
+    logger.debug(f"Messages: {request_body.messages}")
 
     # Get app dependencies
     batch_engine: BlockPoolBatchEngine = request.app.state.semantic.batch_engine
@@ -373,6 +374,7 @@ async def create_message(request_body: MessagesRequest, request: Request):  # no
             request_body.tools if request_body.tools else None,
         )
         logger.debug(f"Prompt length: {len(prompt)} chars")
+        logger.debug(f"Full prompt:\n{prompt}")
 
         # 2. Tokenize to get agent ID
         tokenizer = batch_engine._tokenizer

@@ -133,11 +133,20 @@ class BlockPoolBatchEngine:
         kv_cache: Any | None = None  # list[tuple[mx.array, mx.array]] | None
 
         if cache is not None:
-            # Cache reconstruction not yet supported - allocate fresh
-            logging.warning(
-                f"Cache reconstruction not supported. Allocating fresh for {agent_id}"
-            )
-            cache = None
+            # Reconstruct cache from saved blocks
+            try:
+                kv_cache = self._reconstruct_cache(cache)
+                logging.info(f"Cache reconstructed for {agent_id}: {cache.total_tokens} tokens")
+                cache_len = len(kv_cache) if kv_cache else 0
+                logging.debug(f"Cache type: {type(kv_cache)}, length: {cache_len}")
+                if kv_cache and len(kv_cache) > 0:
+                    first_cache = kv_cache[0]
+                    has_state = hasattr(first_cache, 'state')
+                    logging.debug(f"First layer type: {type(first_cache)}, has state: {has_state}")
+            except Exception as e:
+                logging.error(f"Cache reconstruction failed for {agent_id}: {e}", exc_info=True)
+                cache = None
+                kv_cache = None
 
         if cache is None:
             # No cache - allocate blocks for prompt
@@ -193,12 +202,17 @@ class BlockPoolBatchEngine:
                 sampler = self._cache_adapter.create_sampler(temperature=0.0)
                 samplers = [sampler]
 
-            uids = self._batch_gen.insert(
-                prompts=[prompt_tokens],
-                max_tokens=[max_tokens],
-                caches=[kv_cache] if kv_cache is not None else None,
-                samplers=samplers,
-            )
+            # Build insert kwargs
+            insert_kwargs = {
+                "prompts": [prompt_tokens],
+                "max_tokens": [max_tokens],
+            }
+            if samplers is not None:
+                insert_kwargs["samplers"] = samplers
+            if kv_cache is not None:
+                insert_kwargs["caches"] = [kv_cache]
+
+            uids = self._batch_gen.insert(**insert_kwargs)
         except Exception as e:
             #If insertion fails, free ALL allocated blocks (not just layer 0)
             if cache is None and agent_id in self._agent_blocks:
@@ -305,7 +319,7 @@ class BlockPoolBatchEngine:
                         text=text,
                         blocks=blocks,
                         finish_reason=response.finish_reason,
-                        token_count=blocks.total_tokens,
+                        token_count=len(tokens),  # Generated tokens only
                     )
 
                     # Clean up tracking
@@ -314,18 +328,40 @@ class BlockPoolBatchEngine:
                     # Yield completion
                     yield completion
 
-    def _reconstruct_cache(self, agent_blocks: AgentBlocks) -> Any:
-        """Reconstruct KVCache from blocks."""
-        cache: list[tuple[Any, Any]] = []
+    def _reconstruct_cache(self, agent_blocks: AgentBlocks) -> list[Any]:
+        """Reconstruct MLX cache objects from blocks.
 
-        # 2. For each layer in the model
+        Returns:
+            List[KVCache]: List of cache objects (one per layer) in production
+            or List[tuple]: List of (k, v) tuples in test mode
+        """
+        # Detect test mode: if batch_gen_factory is set, we're using fakes
+        use_kv_cache = self._batch_gen_factory is None
+
+        if use_kv_cache:
+            # Production mode: use real MLX KVCache objects
+            import mlx.core as mx  # noqa: PLC0415
+            from mlx_lm.models.cache import KVCache  # noqa: PLC0415
+        else:
+            # Test mode: use tuples (FakeBatchGenerator expects tuples)
+            mx = None  # type: ignore[assignment]
+            KVCache = None  # type: ignore[assignment]  # noqa: N806
+
+        cache: list[Any] = []
+
+        # For each layer in the model
         for layer_id in range(self._spec.n_layers):
             # Get all blocks for this layer
             layer_blocks = agent_blocks.blocks_for_layer(layer_id)
 
-            # Handle empty layers (shouldn't happen, but be defensive)
+            # Handle empty layers
             if not layer_blocks:
-                cache.append((None, None))
+                if use_kv_cache:
+                    empty_cache = KVCache()
+                    cache.append(empty_cache)
+                else:
+                    # Test environment: use tuples
+                    cache.append((None, None))
                 continue
 
             # Extract K and V tensors from all blocks
@@ -336,16 +372,33 @@ class BlockPoolBatchEngine:
                     raise GenerationError(
                         f"Block {block.block_id} for layer {layer_id} has no K/V data"
                     )
-                k_tensors.append(block.layer_data["k"])
-                v_tensors.append(block.layer_data["v"])
 
-            # Concatenate using adapter (handles validation, concatenation, and evaluation)
+                k_data = block.layer_data["k"]
+                v_data = block.layer_data["v"]
+
+                # Convert numpy → mx.array if needed (only if MLX available)
+                if use_kv_cache and mx is not None:
+                    if not isinstance(k_data, mx.array):
+                        k_data = mx.array(k_data)
+                    if not isinstance(v_data, mx.array):
+                        v_data = mx.array(v_data)
+
+                k_tensors.append(k_data)
+                v_tensors.append(v_data)
+
+            # Concatenate using adapter
             k_full, v_full = self._cache_adapter.concatenate_cache_blocks(
                 k_tensors, v_tensors
             )
 
-            # Append to cache
-            cache.append((k_full, v_full))
+            if use_kv_cache:
+                # Production: Create KVCache object
+                kv_cache = KVCache()
+                kv_cache.state = (k_full, v_full)  # Sets keys, values, offset
+                cache.append(kv_cache)
+            else:
+                # Test environment: Use tuple format
+                cache.append((k_full, v_full))
 
         return cache
 

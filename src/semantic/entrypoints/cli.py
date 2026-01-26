@@ -50,6 +50,12 @@ def serve(
         "-p",
         help="Server port (default: from settings)",
     ),
+    model: str = typer.Option(
+        None,
+        "--model",
+        "-m",
+        help="Model ID (default: from settings)",
+    ),
     workers: int = typer.Option(
         None,
         "--workers",
@@ -71,17 +77,23 @@ def serve(
     """Start the semantic caching server.
 
     Example:
-        $ python -m semantic.entrypoints.cli serve
-        $ python -m semantic.entrypoints.cli serve --host 0.0.0.0 --port 8080
-        $ python -m semantic.entrypoints.cli serve --reload  # Dev mode
+        $ semantic serve
+        $ semantic serve --host 0.0.0.0 --port 8080
+        $ semantic serve --model mlx-community/gpt-oss-20b-MXFP4-Q4
+        $ semantic serve --reload  # Dev mode
     """
     settings = get_settings()
 
     # Use CLI args or fall back to settings
     final_host = host or settings.server.host
     final_port = port or settings.server.port
+    final_model = model or settings.mlx.model_id
     final_workers = workers or settings.server.workers
     final_log_level = log_level or settings.server.log_level
+
+    # Override model in settings if provided
+    if model:
+        settings.mlx.model_id = model
 
     # Setup logging
     setup_logging(final_log_level)
@@ -95,7 +107,7 @@ def serve(
     logger.info(f"Workers: {final_workers}")
     logger.info(f"Log level: {final_log_level}")
     logger.info(f"Reload: {reload}")
-    logger.info(f"Model: {settings.mlx.model_id}")
+    logger.info(f"Model: {final_model}")
     logger.info(f"Cache budget: {settings.mlx.cache_budget_mb} MB")
     logger.info(f"Max agents: {settings.agent.max_agents_in_memory}")
     logger.info("=" * 60)
