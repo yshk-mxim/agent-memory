@@ -1,6 +1,5 @@
 """Unit tests for ModelRegistry lifecycle management."""
 
-import gc
 import sys
 from unittest.mock import MagicMock, Mock, patch
 

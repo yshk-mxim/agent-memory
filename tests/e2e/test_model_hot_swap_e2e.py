@@ -4,11 +4,9 @@ Tests verify that the server can swap models at runtime while maintaining
 system stability and preserving agent caches.
 """
 
-import time
 
 import httpx
 import pytest
-import psutil
 
 
 @pytest.mark.e2e

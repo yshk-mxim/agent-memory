@@ -4,7 +4,6 @@ Tests verify that agent caches are saved to disk and can be restored
 when the server restarts, enabling session resumption.
 """
 
-import subprocess
 import time
 from pathlib import Path
 

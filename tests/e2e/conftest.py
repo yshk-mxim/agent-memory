@@ -6,13 +6,12 @@ This module provides fixtures for end-to-end testing with real components:
 - cleanup_caches: Cleans up test cache directories
 """
 
-import multiprocessing
 import os
 import socket
 import subprocess
 import time
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Iterator
 
 import httpx
 import pytest
@@ -73,25 +72,46 @@ def live_server(cleanup_caches) -> Iterator[str]:
     env = os.environ.copy()
     env["SEMANTIC_CACHE_DIR"] = str(Path.home() / ".cache" / "semantic" / "test")
     env["SEMANTIC_LOG_LEVEL"] = "WARNING"  # Reduce noise in tests
-    env["ANTHROPIC_API_KEY"] = "test-key-for-e2e"
+    # Support all test API keys (comma-separated for multiple agents)
+    test_keys = [
+        "test-key-for-e2e",
+        "test-key-for-stress",
+        "test-key-sustained",
+        "test-key-memory",
+        "test-key-perf",
+    ]
+    # Add agent-specific keys (agent_0 through agent_9)
+    test_keys.extend([f"test-key-agent_{i}" for i in range(10)])
+    env["ANTHROPIC_API_KEY"] = ",".join(test_keys)
+
+    # Create log files for debugging
+    log_dir = Path("/tmp/claude") / "e2e_logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    stdout_log = log_dir / f"server_{port}_stdout.log"
+    stderr_log = log_dir / f"server_{port}_stderr.log"
+
+    # Open log files (will be closed in finally block)
+    stdout_file = open(stdout_log, "w")
+    stderr_file = open(stderr_log, "w")
 
     # Start server in subprocess
     process = subprocess.Popen(
         [
             "python",
             "-m",
-            "semantic.entrypoints.cli",
-            "serve",
+            "uvicorn",
+            "semantic.entrypoints.api_server:create_app",
             "--host",
             "127.0.0.1",
             "--port",
             str(port),
+            "--factory",
         ],
         env=env,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        stdout=stdout_file,
+        stderr=stderr_file,
         text=True,
-        close_fds=True,  # Ensure file descriptors are closed
+        close_fds=False,  # Don't close log file descriptors
     )
 
     # Wait for server to start (poll health endpoint)
@@ -101,7 +121,7 @@ def live_server(cleanup_caches) -> Iterator[str]:
 
     while time.time() - start_time < timeout:
         try:
-            response = httpx.get(f"{server_url}/health", timeout=2.0)
+            response = httpx.get(f"{server_url}/health/live", timeout=2.0)
             if response.status_code == 200:
                 server_ready = True
                 break
@@ -109,13 +129,21 @@ def live_server(cleanup_caches) -> Iterator[str]:
             time.sleep(0.5)
 
     if not server_ready:
-        # Server failed to start - capture logs
-        stdout, stderr = process.communicate(timeout=5)
+        # Server failed to start - read logs
         process.kill()
+        process.wait()
+        stdout_file.close()
+        stderr_file.close()
+
+        # Read log files
+        stdout_content = stdout_log.read_text() if stdout_log.exists() else ""
+        stderr_content = stderr_log.read_text() if stderr_log.exists() else ""
+
         raise RuntimeError(
             f"Server failed to start within {timeout}s\n"
-            f"STDOUT:\n{stdout}\n"
-            f"STDERR:\n{stderr}"
+            f"Logs saved to: {log_dir}\n"
+            f"STDOUT:\n{stdout_content}\n"
+            f"STDERR:\n{stderr_content}"
         )
 
     # Yield server URL to test
@@ -123,11 +151,15 @@ def live_server(cleanup_caches) -> Iterator[str]:
         yield server_url
     finally:
         # Teardown: stop server and clean up resources
-        # Close pipes to prevent resource warnings
-        if process.stdout:
-            process.stdout.close()
-        if process.stderr:
-            process.stderr.close()
+        # Close log files to prevent resource warnings
+        try:
+            stdout_file.close()
+        except:
+            pass
+        try:
+            stderr_file.close()
+        except:
+            pass
 
         process.terminate()
         try:

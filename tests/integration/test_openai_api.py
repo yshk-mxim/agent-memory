@@ -192,12 +192,9 @@ class TestOpenAIAPIWithModel:
     def test_simple_generation(self):
         """Simple text generation should work end-to-end."""
         # This would test with real model loading via TestClient lifespan
-        pass
 
     def test_session_persistence(self):
         """Session ID should persist cache across multiple requests."""
-        pass
 
     def test_response_format(self):
         """Response should match OpenAI format."""
-        pass

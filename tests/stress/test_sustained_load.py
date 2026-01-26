@@ -12,7 +12,6 @@ import time
 
 import aiohttp
 import pytest
-import psutil
 
 from tests.stress.conftest import MetricsCollector, RequestResult, get_server_memory_usage
 from tests.stress.harness import StressTestHarness
@@ -63,33 +62,32 @@ async def test_one_hour_sustained_load(live_server, cleanup_after_stress, memory
 
         try:
             timeout = aiohttp.ClientTimeout(total=60.0)
-            async with aiohttp.ClientSession(timeout=timeout) as session:
-                async with session.post(
-                    f"{base_url}/v1/messages",
-                    json={
-                        "model": "test-model",
-                        "messages": [
-                            {
-                                "role": "user",
-                                "content": "Sustained load test - 1 hour stability",
-                            }
-                        ],
-                        "max_tokens": 50,
-                    },
-                    headers={
-                        "Content-Type": "application/json",
-                        "X-API-Key": "test-key-sustained",
-                    },
-                ) as response:
-                    latency_ms = (time.time() - request_start) * 1000
+            async with aiohttp.ClientSession(timeout=timeout) as session, session.post(
+                f"{base_url}/v1/messages",
+                json={
+                    "model": "test-model",
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": "Sustained load test - 1 hour stability",
+                        }
+                    ],
+                    "max_tokens": 50,
+                },
+                headers={
+                    "Content-Type": "application/json",
+                    "X-API-Key": "test-key-sustained",
+                },
+            ) as response:
+                latency_ms = (time.time() - request_start) * 1000
 
-                    all_results.append(
-                        RequestResult(
-                            status_code=response.status,
-                            latency_ms=latency_ms,
-                            timestamp=request_start,
-                        )
+                all_results.append(
+                    RequestResult(
+                        status_code=response.status,
+                        latency_ms=latency_ms,
+                        timestamp=request_start,
                     )
+                )
         except Exception as e:
             all_results.append(
                 RequestResult(
@@ -327,28 +325,27 @@ async def test_memory_stable_no_leaks(live_server, cleanup_after_stress, memory_
 
         try:
             timeout = aiohttp.ClientTimeout(total=60.0)
-            async with aiohttp.ClientSession(timeout=timeout) as session:
-                async with session.post(
-                    f"{base_url}/v1/messages",
-                    json={
-                        "model": "test-model",
-                        "messages": [
-                            {"role": "user", "content": "Memory leak detection test"}
-                        ],
-                        "max_tokens": 50,
-                    },
-                    headers={
-                        "Content-Type": "application/json",
-                        "X-API-Key": "test-key-memory",
-                    },
-                ) as response:
-                    all_results.append(
-                        RequestResult(
-                            status_code=response.status,
-                            latency_ms=(time.time() - request_start) * 1000,
-                            timestamp=request_start,
-                        )
+            async with aiohttp.ClientSession(timeout=timeout) as session, session.post(
+                f"{base_url}/v1/messages",
+                json={
+                    "model": "test-model",
+                    "messages": [
+                        {"role": "user", "content": "Memory leak detection test"}
+                    ],
+                    "max_tokens": 50,
+                },
+                headers={
+                    "Content-Type": "application/json",
+                    "X-API-Key": "test-key-memory",
+                },
+            ) as response:
+                all_results.append(
+                    RequestResult(
+                        status_code=response.status,
+                        latency_ms=(time.time() - request_start) * 1000,
+                        timestamp=request_start,
                     )
+                )
         except Exception as e:
             all_results.append(
                 RequestResult(
@@ -442,43 +439,42 @@ async def test_no_performance_degradation_over_time(live_server, cleanup_after_s
 
         try:
             timeout = aiohttp.ClientTimeout(total=60.0)
-            async with aiohttp.ClientSession(timeout=timeout) as session:
-                async with session.post(
-                    f"{base_url}/v1/messages",
-                    json={
-                        "model": "test-model",
-                        "messages": [
-                            {
-                                "role": "user",
-                                "content": "Performance degradation test",
-                            }
-                        ],
-                        "max_tokens": 50,
-                    },
-                    headers={
-                        "Content-Type": "application/json",
-                        "X-API-Key": "test-key-perf",
-                    },
-                ) as response:
-                    latency_ms = (time.time() - request_start) * 1000
+            async with aiohttp.ClientSession(timeout=timeout) as session, session.post(
+                f"{base_url}/v1/messages",
+                json={
+                    "model": "test-model",
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": "Performance degradation test",
+                        }
+                    ],
+                    "max_tokens": 50,
+                },
+                headers={
+                    "Content-Type": "application/json",
+                    "X-API-Key": "test-key-perf",
+                },
+            ) as response:
+                latency_ms = (time.time() - request_start) * 1000
 
-                    result = RequestResult(
-                        status_code=response.status,
-                        latency_ms=latency_ms,
-                        timestamp=request_start,
-                    )
+                result = RequestResult(
+                    status_code=response.status,
+                    latency_ms=latency_ms,
+                    timestamp=request_start,
+                )
 
-                    # Categorize by time period
-                    if elapsed < measurement_window:
-                        early_results.append(result)
-                    elif (
-                        duration_seconds / 2 - measurement_window / 2
-                        < elapsed
-                        < duration_seconds / 2 + measurement_window / 2
-                    ):
-                        middle_results.append(result)
-                    elif elapsed > duration_seconds - measurement_window:
-                        late_results.append(result)
+                # Categorize by time period
+                if elapsed < measurement_window:
+                    early_results.append(result)
+                elif (
+                    duration_seconds / 2 - measurement_window / 2
+                    < elapsed
+                    < duration_seconds / 2 + measurement_window / 2
+                ):
+                    middle_results.append(result)
+                elif elapsed > duration_seconds - measurement_window:
+                    late_results.append(result)
 
         except Exception:
             pass

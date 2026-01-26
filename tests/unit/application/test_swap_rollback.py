@@ -1,7 +1,7 @@
 """Unit tests for model swap rollback and error recovery."""
 
 import sys
-from unittest.mock import MagicMock, Mock, call
+from unittest.mock import MagicMock, Mock
 
 import pytest
 

@@ -2,7 +2,6 @@
 
 import os
 import sys
-from pathlib import Path
 from unittest.mock import MagicMock, Mock, patch
 
 import pytest
@@ -24,8 +23,9 @@ from semantic.domain.value_objects import ModelCacheSpec
 @pytest.fixture
 def test_app():
     """Create test FastAPI app with admin router."""
-    from fastapi import FastAPI
     from types import SimpleNamespace
+
+    from fastapi import FastAPI
 
     app = FastAPI()
     app.include_router(router)

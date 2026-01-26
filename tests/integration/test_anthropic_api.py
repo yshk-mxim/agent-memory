@@ -216,12 +216,9 @@ class TestAnthropicAPIWithModel:
     def test_simple_generation(self):
         """Simple text generation should work end-to-end."""
         # This would test with real model loading via TestClient lifespan
-        pass
 
     def test_cache_reuse_across_requests(self):
         """Cache should persist across multiple requests."""
-        pass
 
     def test_multi_turn_conversation(self):
         """Multi-turn conversation should maintain context."""
-        pass

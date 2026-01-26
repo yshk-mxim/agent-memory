@@ -153,12 +153,9 @@ class TestDirectAgentAPIWithModel:
     def test_create_and_generate(self):
         """Create agent and generate text should work end-to-end."""
         # This would test with real model loading via TestClient lifespan
-        pass
 
     def test_agent_persistence(self):
         """Agent cache should persist across requests."""
-        pass
 
     def test_delete_agent(self):
         """Deleting agent should remove cache."""
-        pass

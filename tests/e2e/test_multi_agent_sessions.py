@@ -6,7 +6,6 @@ and no interference between sessions.
 
 import threading
 from pathlib import Path
-from typing import List, Tuple
 
 import httpx
 import pytest
@@ -24,7 +23,7 @@ def test_five_concurrent_claude_code_sessions(test_client: httpx.Client, cleanup
     Pattern: Simulate 5 Claude Code CLI instances making concurrent requests
     """
     num_agents = 5
-    results: List[Tuple[str, dict | Exception]] = []
+    results: list[tuple[str, dict | Exception]] = []
     barrier = threading.Barrier(num_agents)  # Synchronize start
 
     def agent_worker(agent_num: int) -> None:

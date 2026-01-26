@@ -9,8 +9,9 @@ Provides fixtures for:
 import json
 import subprocess
 import time
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
 import httpx
 import pytest
@@ -169,7 +170,7 @@ def benchmark_server() -> Iterator[str]:
         process.kill()
         process.wait()
 
-    print(f"\n✅ Benchmark server shut down")
+    print("\n✅ Benchmark server shut down")
 
 
 @pytest.fixture

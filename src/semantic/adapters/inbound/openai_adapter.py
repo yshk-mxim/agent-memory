@@ -11,7 +11,8 @@ import json
 import logging
 import time
 import uuid
-from typing import Any, AsyncIterator
+from collections.abc import AsyncIterator
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request, status
 from sse_starlette.sse import EventSourceResponse
@@ -318,7 +319,7 @@ async def create_chat_completion(
         logger.error(f"Pool exhausted: {e}")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"Server capacity exceeded: {str(e)}",
+            detail=f"Server capacity exceeded: {e!s}",
         )
     except SemanticError as e:
         logger.error(f"Domain error: {e}")

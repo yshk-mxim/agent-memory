@@ -1,7 +1,7 @@
 """Unit tests for ModelSwapOrchestrator."""
 
 import sys
-from unittest.mock import MagicMock, Mock, patch, call
+from unittest.mock import MagicMock, Mock
 
 import pytest
 

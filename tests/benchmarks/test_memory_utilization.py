@@ -26,7 +26,6 @@ def test_memory_per_agent_1_5_10_agents(benchmark_client: httpx.Client, benchmar
 
     Expected: Linear scaling, <100MB per agent
     """
-    import os
     import time
 
     results = []
@@ -162,9 +161,9 @@ def test_block_padding_overhead(benchmark_client: httpx.Client, benchmark_report
     )
 
     print(
-        f"\n📊 Block padding overhead benchmark:"
-        f"\n  Note: Detailed measurement requires server instrumentation"
-        f"\n  Target: <20% overhead"
+        "\n📊 Block padding overhead benchmark:"
+        "\n  Note: Detailed measurement requires server instrumentation"
+        "\n  Target: <20% overhead"
     )
 
 

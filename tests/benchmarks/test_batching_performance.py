@@ -323,6 +323,6 @@ def test_throughput_comparison(benchmark_reporter: BenchmarkReporter):
     assert speedup_3 > 1.5, f"3-agent batching speedup too low: {speedup_3:.2f}x (target >1.5x)"
     assert speedup_5 > 2.5, f"5-agent batching speedup too low: {speedup_5:.2f}x (target >2.5x)"
 
-    print(f"\n✅ Batching speedup targets met:")
+    print("\n✅ Batching speedup targets met:")
     print(f"  3-agent: {speedup_3:.2f}x (target >1.5x)")
     print(f"  5-agent: {speedup_5:.2f}x (target >2.5x)")

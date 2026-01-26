@@ -6,7 +6,7 @@ Returns 401 Unauthorized for invalid or missing keys.
 
 import logging
 import os
-from typing import Callable
+from collections.abc import Callable
 
 from fastapi import Request, Response, status
 from fastapi.responses import JSONResponse
@@ -86,6 +86,10 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
         """
         # Skip authentication for public endpoints
         if request.url.path in self.PUBLIC_ENDPOINTS:
+            return await call_next(request)
+
+        # Skip authentication for all health endpoints
+        if request.url.path.startswith("/health/"):
             return await call_next(request)
 
         # Skip authentication if no keys configured (development mode)

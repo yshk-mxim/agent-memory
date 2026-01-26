@@ -7,7 +7,6 @@ These tests verify basic server functionality:
 - Graceful shutdown works
 """
 
-import time
 
 import httpx
 import pytest

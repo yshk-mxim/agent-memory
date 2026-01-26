@@ -1,18 +1,15 @@
 """Unit tests for cache invalidation during model hot-swap."""
 
 import sys
-from pathlib import Path
-from unittest.mock import MagicMock, Mock, patch
-
-import pytest
+from unittest.mock import MagicMock, Mock
 
 # Mock MLX modules
 sys.modules["mlx"] = MagicMock()
 sys.modules["mlx.core"] = MagicMock()
 sys.modules["mlx_lm"] = MagicMock()
 
-from semantic.application.agent_cache_store import AgentCacheStore, CacheEntry, ModelTag
-from semantic.domain.entities import AgentBlocks, KVBlock
+from semantic.application.agent_cache_store import AgentCacheStore, ModelTag
+from semantic.domain.entities import AgentBlocks
 from semantic.domain.value_objects import ModelCacheSpec
 
 

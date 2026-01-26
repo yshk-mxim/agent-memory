@@ -207,6 +207,7 @@ class TestSwapModelEndpoint:
     def test_swap_lock_exists(self):
         """Verify global swap lock exists for thread safety (CR-2)."""
         import asyncio
+
         from semantic.adapters.inbound.admin_api import _swap_lock
 
         # Verify lock exists and is an asyncio.Lock

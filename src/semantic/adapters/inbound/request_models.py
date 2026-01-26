@@ -11,7 +11,6 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
-
 # ============================================================================
 # Anthropic Messages API Models
 # ============================================================================

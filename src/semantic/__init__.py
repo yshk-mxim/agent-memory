@@ -14,6 +14,6 @@ Architecture: Hexagonal (Ports & Adapters)
 For details, see project/architecture/ADR-001-hexagonal-architecture.md.
 """
 
-__version__ = "0.1.0-alpha"
+__version__ = "0.2.0"
 
 __all__ = ["__version__"]

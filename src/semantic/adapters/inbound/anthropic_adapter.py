@@ -12,7 +12,8 @@ import hashlib
 import json
 import logging
 import uuid
-from typing import Any, AsyncIterator
+from collections.abc import AsyncIterator
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request, status
 from sse_starlette.sse import EventSourceResponse
@@ -25,10 +26,10 @@ from semantic.adapters.inbound.request_models import (
     CountTokensResponse,
     Message,
     MessageDeltaEvent,
-    MessageStartEvent,
-    MessageStopEvent,
     MessagesRequest,
     MessagesResponse,
+    MessageStartEvent,
+    MessageStopEvent,
     TextContentBlock,
     Usage,
 )
@@ -327,7 +328,7 @@ async def create_message(request_body: MessagesRequest, request: Request):
         logger.error(f"Pool exhausted: {e}")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"Server capacity exceeded: {str(e)}",
+            detail=f"Server capacity exceeded: {e!s}",
         )
     except SemanticError as e:
         logger.error(f"Domain error: {e}")
@@ -384,5 +385,5 @@ async def count_tokens(request_body: CountTokensRequest, request: Request) -> Co
         logger.error(f"Token counting error: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to count tokens: {str(e)}",
+            detail=f"Failed to count tokens: {e!s}",
         )

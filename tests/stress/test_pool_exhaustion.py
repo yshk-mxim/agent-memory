@@ -143,7 +143,7 @@ async def test_graceful_429_when_pool_exhausted(live_server, cleanup_after_stres
         assert status_5xx == 0, f"Got {status_5xx} × 5xx errors during pool exhaustion"
     else:
         print(
-            f"\n⚠️  No 429s observed (pool may be large enough for this test)"
+            "\n⚠️  No 429s observed (pool may be large enough for this test)"
         )
         # If no 429s, all requests should have succeeded
         assert (
@@ -229,7 +229,7 @@ async def test_no_crashes_under_load(live_server, cleanup_after_stress):
 
     # Verify health endpoint still responsive
     async with aiohttp.ClientSession() as session:
-        async with session.get(f"{base_url}/health", timeout=aiohttp.ClientTimeout(total=5.0)) as response:
+        async with session.get(f"{base_url}/health/live", timeout=aiohttp.ClientTimeout(total=5.0)) as response:
             assert (
                 response.status == 200
             ), f"Health endpoint not responsive: {response.status}"
@@ -318,7 +318,7 @@ async def test_pool_recovery_after_load(live_server, cleanup_after_stress):
 
     # Verify health endpoint responsive
     async with aiohttp.ClientSession() as session:
-        async with session.get(f"{base_url}/health", timeout=aiohttp.ClientTimeout(total=5.0)) as response:
+        async with session.get(f"{base_url}/health/live", timeout=aiohttp.ClientTimeout(total=5.0)) as response:
             assert response.status == 200, "Health endpoint not responsive after recovery"
 
     # If we have latency data, verify it's reasonable

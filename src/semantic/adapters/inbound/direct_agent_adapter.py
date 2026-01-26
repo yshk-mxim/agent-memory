@@ -76,7 +76,7 @@ async def create_agent(request_body: CreateAgentRequest, request: Request) -> Ag
         logger.error(f"Agent creation error: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to create agent: {str(e)}",
+            detail=f"Failed to create agent: {e!s}",
         )
 
 
@@ -123,7 +123,7 @@ async def get_agent(agent_id: str, request: Request) -> AgentResponse:
         logger.error(f"Agent retrieval error: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to retrieve agent: {str(e)}",
+            detail=f"Failed to retrieve agent: {e!s}",
         )
 
 
@@ -211,7 +211,7 @@ async def generate(
         logger.error(f"Pool exhausted: {e}")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"Server capacity exceeded: {str(e)}",
+            detail=f"Server capacity exceeded: {e!s}",
         )
     except SemanticError as e:
         logger.error(f"Domain error: {e}")
@@ -267,7 +267,7 @@ async def delete_agent(agent_id: str, request: Request):
         cache_store.delete(agent_id)
         logger.info(f"Agent deleted: {agent_id}")
 
-        return None  # 204 No Content
+        return  # 204 No Content
 
     except HTTPException:
         raise
@@ -275,5 +275,5 @@ async def delete_agent(agent_id: str, request: Request):
         logger.error(f"Agent deletion error: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to delete agent: {str(e)}",
+            detail=f"Failed to delete agent: {e!s}",
         )

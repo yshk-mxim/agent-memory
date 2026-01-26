@@ -7,7 +7,7 @@ Returns 429 Too Many Requests with Retry-After header when limits exceeded.
 import logging
 import time
 from collections import defaultdict, deque
-from typing import Callable
+from collections.abc import Callable
 
 from fastapi import Request, Response, status
 from fastapi.responses import JSONResponse
@@ -155,6 +155,10 @@ class RateLimiter(BaseHTTPMiddleware):
         Returns:
             Response from handler or 429 error
         """
+        # Skip rate limiting for health endpoints
+        if request.url.path.startswith("/health/"):
+            return await call_next(request)
+
         now = time.time()
 
         # Check global rate limit

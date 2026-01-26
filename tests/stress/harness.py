@@ -10,7 +10,8 @@ Provides StressTestHarness class for:
 
 import asyncio
 import time
-from typing import Any, Awaitable, Callable
+from collections.abc import Awaitable, Callable
+from typing import Any
 
 import aiohttp
 
@@ -69,7 +70,7 @@ class StressTestHarness:
         if headers is None:
             headers = {
                 "Content-Type": "application/json",
-                "X-API-Key": "test-key-for-stress",
+                "X-API-Key": "test-key-for-e2e",
             }
 
         # Create shared session for all requests (more efficient than per-request sessions)
@@ -254,7 +255,7 @@ class StressTestHarness:
                     error=None,
                 )
 
-        except asyncio.TimeoutError as e:
+        except TimeoutError as e:
             return RequestResult(
                 status_code=0,
                 latency_ms=(time.time() - start_time) * 1000,
@@ -349,16 +350,15 @@ class StressTestHarness:
         url = health_url or f"{self.base_url}/health"
 
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        # Assume health endpoint returns pool stats
-                        # Adjust based on actual API
-                        if "pool" in data:
-                            used = data["pool"].get("used_blocks", 0)
-                            total = data["pool"].get("total_blocks", 1)
-                            return used / total if total > 0 else 0.0
+            async with aiohttp.ClientSession() as session, session.get(url) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    # Assume health endpoint returns pool stats
+                    # Adjust based on actual API
+                    if "pool" in data:
+                        used = data["pool"].get("used_blocks", 0)
+                        total = data["pool"].get("total_blocks", 1)
+                        return used / total if total > 0 else 0.0
         except Exception:
             pass
 

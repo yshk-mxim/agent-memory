@@ -12,7 +12,6 @@ import asyncio
 import statistics
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
 
 import aiohttp
 import psutil

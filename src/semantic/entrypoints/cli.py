@@ -117,8 +117,40 @@ def serve(
 @app.command()
 def version() -> None:
     """Show version information."""
-    typer.echo("Semantic Caching Server v0.1.0")
-    typer.echo("Sprint 4: Multi-Protocol API Adapter")
+    typer.echo("Semantic Caching Server v0.2.0")
+    typer.echo("Sprint 7: Observability + Production Hardening")
+
+
+@app.command()
+def config() -> None:
+    """Show current configuration."""
+    settings = get_settings()
+
+    typer.echo("=" * 60)
+    typer.echo("Semantic Caching Server - Configuration")
+    typer.echo("=" * 60)
+    typer.echo()
+    typer.echo("[Server]")
+    typer.echo(f"  Host: {settings.server.host}")
+    typer.echo(f"  Port: {settings.server.port}")
+    typer.echo(f"  Workers: {settings.server.workers}")
+    typer.echo(f"  Log level: {settings.server.log_level}")
+    typer.echo(f"  CORS origins: {settings.server.cors_origins}")
+    typer.echo()
+    typer.echo("[MLX]")
+    typer.echo(f"  Model ID: {settings.mlx.model_id}")
+    typer.echo(f"  Cache budget: {settings.mlx.cache_budget_mb} MB")
+    typer.echo(f"  Max batch size: {settings.mlx.max_batch_size}")
+    typer.echo(f"  Prefill step size: {settings.mlx.prefill_step_size}")
+    typer.echo()
+    typer.echo("[Agent]")
+    typer.echo(f"  Cache dir: {settings.agent.cache_dir}")
+    typer.echo(f"  Max agents in memory: {settings.agent.max_agents_in_memory}")
+    typer.echo()
+    typer.echo("[Rate Limiting]")
+    typer.echo(f"  Per agent: {settings.server.rate_limit_per_agent}/min")
+    typer.echo(f"  Global: {settings.server.rate_limit_global}/min")
+    typer.echo("=" * 60)
 
 
 def main() -> None:

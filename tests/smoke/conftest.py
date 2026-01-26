@@ -4,7 +4,6 @@ Smoke tests are minimal tests that verify the server can start and handle
 basic operations. They run quickly and catch critical regressions.
 """
 
-import pytest
 
 # Smoke tests reuse E2E fixtures from parent conftest
 # This file exists to:

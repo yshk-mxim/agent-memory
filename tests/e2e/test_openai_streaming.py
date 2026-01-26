@@ -122,7 +122,7 @@ def test_delta_chunks_arrive_progressively(live_server: str):
         # Verify accumulated text is not empty
         assert len(accumulated_text) > 0, "Accumulated text should not be empty"
 
-        print(f"\n📊 Streaming stats:")
+        print("\n📊 Streaming stats:")
         print(f"  Content chunks: {content_chunks_received}")
         print(f"  Total text length: {len(accumulated_text)}")
         print(f"  Accumulated text: {accumulated_text[:100]}...")
@@ -259,7 +259,7 @@ def test_openai_streaming_vs_non_streaming(live_server: str):
 
         # Note: Content might differ slightly due to non-determinism,
         # but both should be valid responses
-        print(f"\n📊 Comparison:")
+        print("\n📊 Comparison:")
         print(f"  Non-streaming: {non_stream_text}")
         print(f"  Streaming: {accumulated_text}")
 

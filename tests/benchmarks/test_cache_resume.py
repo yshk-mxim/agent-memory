@@ -161,7 +161,7 @@ def test_cache_load_time_2k_4k_8k_tokens(benchmark_client: httpx.Client, benchma
     print(
         f"\n📊 Cache load time benchmark:"
         f"\n  Results: {load_times}"
-        f"\n  ✅ All targets met" if load_times["8000_tokens"] < 500 else f"\n  ⚠️  8K target missed"
+        f"\n  ✅ All targets met" if load_times["8000_tokens"] < 500 else "\n  ⚠️  8K target missed"
     )
 
 

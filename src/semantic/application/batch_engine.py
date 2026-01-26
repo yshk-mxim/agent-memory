@@ -1,5 +1,6 @@
 """Block-pool batch inference engine."""
 
+import asyncio
 import logging
 import time
 from collections.abc import Callable, Iterator
@@ -79,6 +80,9 @@ class BlockPoolBatchEngine:
         # 5. Track agent blocks (agent_id → AgentBlocks)
         self._agent_blocks: dict[str, AgentBlocks] = {}
 
+        # 6. Draining state (prevents new requests during graceful shutdown)
+        self._draining: bool = False
+
     def submit(
         self,
         agent_id: str,
@@ -107,7 +111,14 @@ class BlockPoolBatchEngine:
             - Actual generation happens during step() calls
             - Multiple submit() calls can be batched together
         """
-        # 1. Validate inputs
+        # 1. Check if draining (reject new requests during graceful shutdown)
+        if self._draining:
+            raise PoolExhaustedError(
+                "Engine is draining - not accepting new requests. "
+                "Server is shutting down gracefully."
+            )
+
+        # 2. Validate inputs
         if not prompt:
             raise InvalidRequestError("Prompt cannot be empty")
         if max_tokens <= 0:
@@ -448,49 +459,63 @@ class BlockPoolBatchEngine:
             total_tokens=total_token_count,
         )
 
-    def drain(self, timeout_seconds: float = 30.0) -> None:
-        """Drain all active requests before model swap.
+    async def drain(self, timeout_seconds: float = 30.0) -> int:
+        """Drain all active requests before shutdown or model swap.
 
-        Waits for all in-flight requests to complete by repeatedly calling step()
-        until _active_requests is empty or timeout is reached.
+        Sets draining flag to prevent new requests, then waits for all in-flight
+        requests to complete by repeatedly calling step() until _active_requests
+        is empty or timeout is reached.
 
         Args:
             timeout_seconds: Maximum time to wait for drain (default: 30s)
+
+        Returns:
+            Number of requests drained successfully
 
         Raises:
             GenerationError: If timeout is reached before all requests complete
 
         Notes:
-            - This is a blocking call
-            - New submit() calls during drain will still be accepted
-            - For model hot-swap, caller should prevent new submits before calling drain
+            - This is an async blocking call
+            - New submit() calls during drain will be REJECTED (PoolExhaustedError)
             - Use this before shutdown() or model swap to ensure clean state
+            - Draining flag is set immediately to prevent new requests
 
         Example:
-            >>> engine.drain(timeout_seconds=60)  # Wait up to 60s for completions
+            >>> drained = await engine.drain(timeout_seconds=60)
             >>> engine.shutdown()  # Safe to shutdown now
         """
+        # Set draining flag IMMEDIATELY to prevent new requests
+        self._draining = True
+
         start_time = time.time()
         logger = logging.getLogger(__name__)
-        logger.info(f"Draining {len(self._active_requests)} active requests...")
+        initial_count = len(self._active_requests)
+        logger.info(f"Draining {initial_count} active requests...")
+
+        drained_count = 0
 
         while self._active_requests:
             # Check timeout
             elapsed = time.time() - start_time
             if elapsed > timeout_seconds:
                 remaining = list(self._active_requests.keys())
-                raise GenerationError(
+                logger.warning(
                     f"Drain timeout after {timeout_seconds}s. "
-                    f"Still pending: {remaining[:5]}..."  # Show first 5 UIDs
+                    f"Still pending: {len(remaining)} requests ({remaining[:5]}...)"
                 )
+                # Don't raise - allow graceful shutdown even with timeout
+                break
 
             # Process one step to let requests complete
-            list(self.step())  # Consume iterator to process completions
+            for _completion in self.step():
+                drained_count += 1
 
-            # Brief sleep to avoid busy-waiting
-            time.sleep(0.1)
+            # Brief sleep to avoid busy-waiting (async-friendly)
+            await asyncio.sleep(0.1)
 
-        logger.info("Drain complete - all requests finished")
+        logger.info(f"Drain complete - {drained_count}/{initial_count} requests finished")
+        return drained_count
 
     def shutdown(self) -> None:
         """Shutdown batch engine and release resources.

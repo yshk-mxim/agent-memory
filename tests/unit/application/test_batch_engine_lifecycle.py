@@ -13,7 +13,7 @@ sys.modules["mlx_lm"] = MagicMock()
 
 from semantic.application.batch_engine import BlockPoolBatchEngine
 from semantic.domain.errors import GenerationError
-from semantic.domain.value_objects import CompletedGeneration, ModelCacheSpec
+from semantic.domain.value_objects import ModelCacheSpec
 
 
 class TestBatchEngineDrain:
