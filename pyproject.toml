@@ -21,7 +21,7 @@ keywords = [
     "kv-cache",
 ]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
@@ -158,6 +158,40 @@ max-public-methods = 20 # Detect large classes
     "ERA001",  # Allow commented-out code in tests (TODO placeholders)
     "ARG001",  # Allow unused fixture arguments (pytest fixtures)
     "ARG002",  # Allow unused method arguments (pytest fixtures)
+    "ARG005",  # Allow unused lambda arguments in tests
+    "PLC0415", # Allow imports inside functions (for mocking/lazy imports)
+    "E402",    # Allow module imports not at top (for mocking)
+    "PTH123",  # Allow open() instead of Path.open() in tests
+    "B017",    # Allow blind exception assertions in tests
+    "F841",    # Allow unused variables in tests
+    "E501",    # Allow long lines in tests
+    "RET504",  # Allow unnecessary variable assignments in tests
+]
+"tests/benchmarks/**/*.py" = [
+    "S603",    # Allow subprocess calls (needed for server startup)
+    "S607",    # Allow partial executable paths (test environment)
+]
+"tests/e2e/**/*.py" = [
+    "S603",    # Allow subprocess calls (E2E server startup)
+    "S607",    # Allow partial executable paths (test environment)
+    "S108",    # Allow /tmp usage in tests
+    "S110",    # Allow try-except-pass in cleanup code
+    "E722",    # Allow bare except in cleanup code
+    "SIM105",  # Allow try-except-pass instead of suppress
+    "SIM115",  # Allow open() without context manager in fixtures
+    "SIM117",  # Allow nested with statements
+    "PLR0915", # Allow many statements in E2E fixtures
+]
+"tests/stress/**/*.py" = [
+    "S603",    # Allow subprocess calls (stress test server)
+    "S607",    # Allow partial executable paths
+    "S110",    # Allow try-except-pass in stress test cleanup
+    "SIM105",  # Allow try-except-pass in stress tests
+    "SIM117",  # Allow nested with statements for concurrent requests
+    "B905",    # Allow zip() without strict in stress tests
+    "B007",    # Allow unused loop variables in stress tests
+    "RUF001",  # Allow ambiguous characters (× for multiplication)
+    "RUF002",  # Allow ambiguous characters in docstrings
 ]
 # MLX adapters use runtime imports to avoid ImportError when MLX not installed
 "src/semantic/adapters/outbound/mlx_*.py" = [
