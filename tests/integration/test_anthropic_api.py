@@ -200,25 +200,88 @@ class TestAnthropicMessagesAPI:
 
 
 @pytest.mark.integration
-@pytest.mark.skip(reason="Requires model loading - run manually with real server")
 class TestAnthropicAPIWithModel:
     """Tests that require MLX model loaded.
 
-    These tests are skipped by default because they:
-    - Load the full MLX model (~several GB)
-    - Take 30+ seconds to complete
-    - Require GPU/Metal
-
-    To run manually:
-        pytest -v -m integration tests/integration/test_anthropic_api.py::TestAnthropicAPIWithModel
+    These tests load the full MLX model and verify end-to-end functionality.
     """
 
     def test_simple_generation(self):
         """Simple text generation should work end-to-end."""
-        # This would test with real model loading via TestClient lifespan
+        from fastapi.testclient import TestClient
+
+        app = create_app()
+
+        with TestClient(app) as client:
+            response = client.post(
+                "/v1/messages",
+                headers={"Content-Type": "application/json"},
+                json={
+                    "model": "SmolLM2-135M-Instruct",
+                    "messages": [{"role": "user", "content": "Say hello"}],
+                    "max_tokens": 20,
+                },
+            )
+
+            assert response.status_code == 200
+            data = response.json()
+            assert "content" in data
+            assert len(data["content"]) > 0
+            assert data["content"][0]["type"] == "text"
+            assert len(data["content"][0]["text"]) > 0
 
     def test_cache_reuse_across_requests(self):
         """Cache should persist across multiple requests."""
+        from fastapi.testclient import TestClient
+
+        app = create_app()
+
+        with TestClient(app) as client:
+            # First request creates cache
+            response1 = client.post(
+                "/v1/messages",
+                json={
+                    "model": "SmolLM2-135M-Instruct",
+                    "messages": [{"role": "user", "content": "Hello"}],
+                    "max_tokens": 10,
+                },
+            )
+            assert response1.status_code == 200
+            usage1 = response1.json()["usage"]
+            assert usage1["cache_creation_input_tokens"] > 0
+
+            # Second request reuses cache
+            response2 = client.post(
+                "/v1/messages",
+                json={
+                    "model": "SmolLM2-135M-Instruct",
+                    "messages": [{"role": "user", "content": "Hello"}],
+                    "max_tokens": 10,
+                },
+            )
+            assert response2.status_code == 200
+            usage2 = response2.json()["usage"]
+            assert usage2["cache_read_input_tokens"] > 0
 
     def test_multi_turn_conversation(self):
         """Multi-turn conversation should maintain context."""
+        from fastapi.testclient import TestClient
+
+        app = create_app()
+
+        with TestClient(app) as client:
+            response = client.post(
+                "/v1/messages",
+                json={
+                    "model": "SmolLM2-135M-Instruct",
+                    "messages": [
+                        {"role": "user", "content": "Hi"},
+                        {"role": "assistant", "content": "Hello"},
+                        {"role": "user", "content": "How are you?"},
+                    ],
+                    "max_tokens": 20,
+                },
+            )
+            assert response.status_code == 200
+            data = response.json()
+            assert len(data["content"]) > 0

@@ -176,25 +176,87 @@ class TestOpenAIChatCompletionsAPI:
 
 
 @pytest.mark.integration
-@pytest.mark.skip(reason="Requires model loading - run manually with real server")
 class TestOpenAIAPIWithModel:
-    """Tests that require MLX model loaded.
-
-    These tests are skipped by default because they:
-    - Load the full MLX model (~several GB)
-    - Take 30+ seconds to complete
-    - Require GPU/Metal
-
-    To run manually:
-        pytest -v -m integration tests/integration/test_openai_api.py::TestOpenAIAPIWithModel
-    """
+    """Tests that require MLX model loaded."""
 
     def test_simple_generation(self):
         """Simple text generation should work end-to-end."""
-        # This would test with real model loading via TestClient lifespan
+        from fastapi.testclient import TestClient
+
+        app = create_app()
+
+        with TestClient(app) as client:
+            response = client.post(
+                "/v1/chat/completions",
+                json={
+                    "model": "SmolLM2-135M-Instruct",
+                    "messages": [{"role": "user", "content": "Say hello"}],
+                    "max_tokens": 20,
+                },
+            )
+
+            assert response.status_code == 200
+            data = response.json()
+            assert "choices" in data
+            assert len(data["choices"]) > 0
+            assert data["choices"][0]["message"]["role"] == "assistant"
+            assert len(data["choices"][0]["message"]["content"]) > 0
 
     def test_session_persistence(self):
         """Session ID should persist cache across multiple requests."""
+        from fastapi.testclient import TestClient
+
+        app = create_app()
+
+        with TestClient(app) as client:
+            session_id = "test-session-123"
+
+            # First request with session ID
+            response1 = client.post(
+                "/v1/chat/completions",
+                json={
+                    "model": "SmolLM2-135M-Instruct",
+                    "messages": [{"role": "user", "content": "Hello"}],
+                    "max_tokens": 10,
+                    "session_id": session_id,
+                },
+            )
+            assert response1.status_code == 200
+
+            # Second request with same session ID should reuse cache
+            response2 = client.post(
+                "/v1/chat/completions",
+                json={
+                    "model": "SmolLM2-135M-Instruct",
+                    "messages": [{"role": "user", "content": "Hello"}],
+                    "max_tokens": 10,
+                    "session_id": session_id,
+                },
+            )
+            assert response2.status_code == 200
 
     def test_response_format(self):
         """Response should match OpenAI format."""
+        from fastapi.testclient import TestClient
+
+        app = create_app()
+
+        with TestClient(app) as client:
+            response = client.post(
+                "/v1/chat/completions",
+                json={
+                    "model": "SmolLM2-135M-Instruct",
+                    "messages": [{"role": "user", "content": "Test"}],
+                    "max_tokens": 10,
+                },
+            )
+
+            assert response.status_code == 200
+            data = response.json()
+            # OpenAI format fields
+            assert "id" in data
+            assert "created" in data
+            assert "model" in data
+            assert "choices" in data
+            assert "usage" in data
+            assert data["choices"][0]["finish_reason"] in ["stop", "length"]

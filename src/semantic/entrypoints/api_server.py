@@ -217,35 +217,39 @@ async def lifespan(app: FastAPI):
     logger.info("server_starting")
     settings = get_settings()
 
-    # Load model and extract spec
-    model, tokenizer, model_spec = _load_model_and_extract_spec(settings)
+    try:
+        # Load model and extract spec
+        model, tokenizer, model_spec = _load_model_and_extract_spec(settings)
 
-    # Initialize components
-    block_pool = _initialize_block_pool(settings, model_spec)
-    cache_store, cache_adapter = _initialize_cache_store(settings, model_spec)
-    batch_engine, mlx_adapter = _initialize_batch_engine(
-        model, tokenizer, block_pool, model_spec, settings
-    )
+        # Initialize components
+        block_pool = _initialize_block_pool(settings, model_spec)
+        cache_store, cache_adapter = _initialize_cache_store(settings, model_spec)
+        batch_engine, mlx_adapter = _initialize_batch_engine(
+            model, tokenizer, block_pool, model_spec, settings
+        )
 
-    # Store in app state
-    app.state.semantic = AppState()
-    app.state.semantic.block_pool = block_pool
-    app.state.semantic.batch_engine = batch_engine
-    app.state.semantic.cache_store = cache_store
-    app.state.semantic.mlx_adapter = mlx_adapter
-    app.state.semantic.cache_adapter = cache_adapter
-    app.state.shutting_down = False
+        # Store in app state
+        app.state.semantic = AppState()
+        app.state.semantic.block_pool = block_pool
+        app.state.semantic.batch_engine = batch_engine
+        app.state.semantic.cache_store = cache_store
+        app.state.semantic.mlx_adapter = mlx_adapter
+        app.state.semantic.cache_adapter = cache_adapter
+        app.state.shutting_down = False
 
-    logger.info("server_ready")
+        logger.info("server_ready")
 
-    yield
+        yield
 
-    # Shutdown: cleanup resources
-    logger.info("server_shutting_down")
-    app.state.shutting_down = True
+        # Shutdown: cleanup resources
+        logger.info("server_shutting_down")
+        app.state.shutting_down = True
 
-    await _drain_and_persist(batch_engine, cache_store)
-    logger.info("server_shutdown_complete")
+        await _drain_and_persist(batch_engine, cache_store)
+        logger.info("server_shutdown_complete")
+    except Exception as e:
+        logger.error("lifespan_error", error=str(e), exc_info=True)
+        raise
 
 
 def _register_middleware(app: FastAPI, settings):

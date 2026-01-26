@@ -10,29 +10,7 @@ from semantic.application.batch_engine import BlockPoolBatchEngine
 from semantic.domain.errors import InvalidRequestError, PoolExhaustedError
 from semantic.domain.services import BlockPool
 
-# Check if MLX is available (requires Apple Silicon)
-# MLX only works on Apple Silicon Macs
-import platform
-import os
-
-def check_mlx_available():
-    """Check if MLX can actually be used (not just installed)."""
-    # Allow forcing skip via env var
-    if os.getenv("SKIP_MLX_TESTS"):
-        return False
-
-    # MLX requires Apple Silicon
-    if platform.machine() != "arm64":
-        return False
-
-    # Try to actually import (will crash if Metal not available)
-    try:
-        import mlx.core  # noqa: F401
-        return True
-    except Exception:
-        return False
-
-MLX_AVAILABLE = check_mlx_available()
+# MLX tests will run - models will be downloaded on first run
 
 
 @pytest.fixture(scope="module")
@@ -79,7 +57,6 @@ def engine(model_and_tokenizer, pool, spec):
 
 
 @pytest.mark.integration
-@pytest.mark.skipif(not MLX_AVAILABLE, reason="MLX not available (requires Apple Silicon)")
 class TestBlockPoolBatchEngineIntegration:
     """Integration tests with real MLX model."""
 

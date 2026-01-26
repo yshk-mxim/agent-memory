@@ -137,25 +137,74 @@ class TestDirectAgentAPI:
 
 
 @pytest.mark.integration
-@pytest.mark.skip(reason="Requires model loading - run manually with real server")
 class TestDirectAgentAPIWithModel:
-    """Tests that require MLX model loaded.
-
-    These tests are skipped by default because they:
-    - Load the full MLX model (~several GB)
-    - Take 30+ seconds to complete
-    - Require GPU/Metal
-
-    To run manually:
-        pytest -v -m integration tests/integration/test_direct_agent_api.py::TestDirectAgentAPIWithModel
-    """
+    """Tests that require MLX model loaded."""
 
     def test_create_and_generate(self):
         """Create agent and generate text should work end-to-end."""
-        # This would test with real model loading via TestClient lifespan
+        from fastapi.testclient import TestClient
+
+        app = create_app()
+
+        with TestClient(app) as client:
+            # Create agent
+            response = client.post("/v1/agents", json={"agent_id": "test-agent"})
+            assert response.status_code == 201
+
+            # Generate with agent
+            response = client.post(
+                "/v1/agents/test-agent/generate",
+                json={"prompt": "Hello", "max_tokens": 20},
+            )
+            assert response.status_code == 200
+            data = response.json()
+            assert "text" in data
+            assert len(data["text"]) > 0
+            assert data["tokens_generated"] > 0
 
     def test_agent_persistence(self):
         """Agent cache should persist across requests."""
+        from fastapi.testclient import TestClient
+
+        app = create_app()
+
+        with TestClient(app) as client:
+            # Create agent and generate
+            client.post("/v1/agents", json={"agent_id": "persist-test"})
+            response1 = client.post(
+                "/v1/agents/persist-test/generate",
+                json={"prompt": "First", "max_tokens": 10},
+            )
+            assert response1.status_code == 200
+            cache_size_1 = response1.json()["cache_size_tokens"]
+
+            # Second generation should have larger cache
+            response2 = client.post(
+                "/v1/agents/persist-test/generate",
+                json={"prompt": "Second", "max_tokens": 10},
+            )
+            assert response2.status_code == 200
+            cache_size_2 = response2.json()["cache_size_tokens"]
+            assert cache_size_2 >= cache_size_1
 
     def test_delete_agent(self):
         """Deleting agent should remove cache."""
+        from fastapi.testclient import TestClient
+
+        app = create_app()
+
+        with TestClient(app) as client:
+            # Create agent and generate
+            client.post("/v1/agents", json={"agent_id": "delete-test"})
+            client.post(
+                "/v1/agents/delete-test/generate",
+                json={"prompt": "Test", "max_tokens": 10},
+            )
+
+            # Delete agent
+            response = client.delete("/v1/agents/delete-test")
+            assert response.status_code == 204
+
+            # Agent should not exist
+            response = client.get("/v1/agents/delete-test")
+            assert response.status_code == 404

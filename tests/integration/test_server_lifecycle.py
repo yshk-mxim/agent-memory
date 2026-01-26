@@ -86,7 +86,6 @@ class TestServerLifecycle:
     These tests are marked slow because they load the MLX model.
     """
 
-    @pytest.mark.skip(reason="Model loading test - run manually to avoid long test times")
     def test_server_starts_and_stops_cleanly(self):
         """Server should initialize all components and shut down cleanly.
 
