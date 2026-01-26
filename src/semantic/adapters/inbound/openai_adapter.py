@@ -7,11 +7,14 @@ Implements the OpenAI Chat Completions API with:
 """
 
 import hashlib
+import json
 import logging
 import time
 import uuid
+from typing import Any, AsyncIterator
 
 from fastapi import APIRouter, HTTPException, Request, status
+from sse_starlette.sse import EventSourceResponse
 
 from semantic.adapters.inbound.request_models import (
     ChatCompletionsRequest,
@@ -75,6 +78,128 @@ def openai_messages_to_prompt(messages: list[OpenAIChatMessage]) -> str:
     return "\n".join(lines)
 
 
+async def stream_chat_completion(
+    request_body: ChatCompletionsRequest,
+    batch_engine: Any,
+    cache_store: Any,
+    tokens: list[int],
+    agent_id: str,
+    cached_blocks: Any,
+    prompt: str,
+) -> AsyncIterator[dict[str, Any]]:
+    """Stream chat completion results as SSE events (OpenAI format).
+
+    OpenAI SSE format:
+    - data: {"id": "...", "choices": [{"delta": {"content": "..."}, ...}], ...}
+    - data: [DONE]
+
+    Yields:
+        SSE events in OpenAI Chat Completions format
+    """
+    try:
+        # Submit to batch engine
+        max_tokens = request_body.max_tokens or 256
+        uid = batch_engine.submit(
+            agent_id=agent_id,
+            prompt=prompt,
+            cache=cached_blocks,
+            max_tokens=max_tokens,
+        )
+        logger.debug(f"Submitted streaming generation: uid={uid}")
+
+        completion_id = f"chatcmpl-{uuid.uuid4().hex[:24]}"
+        created_timestamp = int(time.time())
+
+        # Yield initial chunk with role
+        yield {
+            "data": json.dumps({
+                "id": completion_id,
+                "object": "chat.completion.chunk",
+                "created": created_timestamp,
+                "model": request_body.model,
+                "choices": [{
+                    "index": 0,
+                    "delta": {"role": "assistant", "content": ""},
+                    "finish_reason": None,
+                }],
+            })
+        }
+
+        # Stream token deltas
+        completion = None
+        accumulated_text = ""
+        for result in batch_engine.step():
+            if result.uid == uid:
+                completion = result
+                # Yield text delta
+                if result.text:
+                    # Incremental text (only new text since last yield)
+                    new_text = result.text[len(accumulated_text):]
+                    accumulated_text = result.text
+
+                    if new_text:
+                        yield {
+                            "data": json.dumps({
+                                "id": completion_id,
+                                "object": "chat.completion.chunk",
+                                "created": created_timestamp,
+                                "model": request_body.model,
+                                "choices": [{
+                                    "index": 0,
+                                    "delta": {"content": new_text},
+                                    "finish_reason": None,
+                                }],
+                            })
+                        }
+                break
+
+        if completion is None:
+            logger.error("Streaming generation failed - no completion")
+            return
+
+        # Save updated cache
+        if agent_id in batch_engine._agent_blocks:
+            updated_blocks = batch_engine._agent_blocks[agent_id]
+            cache_store.save(agent_id, updated_blocks)
+            logger.debug(f"Saved cache: {agent_id} ({updated_blocks.total_tokens} tokens)")
+
+        # Yield final chunk with finish_reason
+        finish_reason = "stop" if completion.finish_reason == "stop" else "length"
+        yield {
+            "data": json.dumps({
+                "id": completion_id,
+                "object": "chat.completion.chunk",
+                "created": created_timestamp,
+                "model": request_body.model,
+                "choices": [{
+                    "index": 0,
+                    "delta": {},
+                    "finish_reason": finish_reason,
+                }],
+            })
+        }
+
+        # Yield [DONE] marker
+        yield {"data": "[DONE]"}
+
+        logger.info(
+            f"Streaming complete: {completion.token_count} tokens, "
+            f"finish_reason={finish_reason}"
+        )
+
+    except Exception as e:
+        logger.error(f"Streaming error: {e}", exc_info=True)
+        # Yield error event
+        yield {
+            "data": json.dumps({
+                "error": {
+                    "message": str(e),
+                    "type": "server_error",
+                }
+            })
+        }
+
+
 @router.post("/chat/completions", status_code=status.HTTP_200_OK)
 async def create_chat_completion(
     request_body: ChatCompletionsRequest, request: Request
@@ -122,7 +247,17 @@ async def create_chat_completion(
         else:
             logger.info(f"Cache miss: {agent_id}")
 
-        # 4. Submit to batch engine
+        # 4. Handle streaming vs non-streaming
+        if request_body.stream:
+            # Return SSE stream
+            logger.info("Returning OpenAI SSE stream")
+            return EventSourceResponse(
+                stream_chat_completion(
+                    request_body, batch_engine, cache_store, tokens, agent_id, cached_blocks, prompt
+                )
+            )
+
+        # 5. Submit to batch engine (non-streaming)
         max_tokens = request_body.max_tokens or 256  # Default if not specified
         uid = batch_engine.submit(
             agent_id=agent_id,
@@ -132,14 +267,7 @@ async def create_chat_completion(
         )
         logger.debug(f"Submitted generation: uid={uid}")
 
-        # 5. Execute generation (non-streaming only for now)
-        # TODO: Add streaming support with OpenAI format (data: {...}\ndata: [DONE])
-        if request_body.stream:
-            raise HTTPException(
-                status_code=status.HTTP_501_NOT_IMPLEMENTED,
-                detail="Streaming not yet implemented for OpenAI API",
-            )
-
+        # 6. Execute generation (step until complete)
         completion = None
         for result in batch_engine.step():
             if result.uid == uid:
@@ -156,13 +284,13 @@ async def create_chat_completion(
                 detail="Generation failed - no completion returned",
             )
 
-        # 6. Save updated cache
+        # 7. Save updated cache
         if agent_id in batch_engine._agent_blocks:
             updated_blocks = batch_engine._agent_blocks[agent_id]
             cache_store.save(agent_id, updated_blocks)
             logger.debug(f"Saved cache: {agent_id} ({updated_blocks.total_tokens} tokens)")
 
-        # 7. Format OpenAI response
+        # 8. Format OpenAI response
         response = ChatCompletionsResponse(
             id=f"chatcmpl-{uuid.uuid4().hex[:24]}",
             created=int(time.time()),

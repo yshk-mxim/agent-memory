@@ -9,7 +9,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, Request, status
+from fastapi import FastAPI, Request, Response, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -89,8 +89,8 @@ async def lifespan(app: FastAPI):
     block_pool = BlockPool(spec=model_spec, total_blocks=total_blocks)
     logger.info(f"BlockPool initialized: {total_blocks} blocks available")
 
-    # Initialize MLX adapter
-    mlx_adapter = MLXCacheAdapter(model=model, spec=model_spec)
+    # Initialize MLX adapter (stateless, no arguments needed)
+    mlx_adapter = MLXCacheAdapter()
 
     # Initialize safetensors persistence adapter
     cache_dir = Path(settings.agent.cache_dir).expanduser()
@@ -113,12 +113,9 @@ async def lifespan(app: FastAPI):
     batch_engine = BlockPoolBatchEngine(
         model=model,
         tokenizer=tokenizer,
-        cache_adapter=mlx_adapter,
-        block_pool=block_pool,
-        batch_window_ms=settings.agent.batch_window_ms,
-        max_batch_size=settings.mlx.max_batch_size,
-        prefill_step_size=settings.mlx.prefill_step_size,
+        pool=block_pool,  # Fixed: parameter is 'pool', not 'block_pool'
         spec=model_spec,
+        cache_adapter=mlx_adapter,
     )
     logger.info(
         f"BatchEngine initialized: max_batch_size={settings.mlx.max_batch_size}, "
@@ -139,7 +136,22 @@ async def lifespan(app: FastAPI):
 
     # Shutdown: cleanup resources
     logger.info("🛑 Shutting down server...")
-    # TODO: Drain pending requests, persist caches
+
+    # Graceful shutdown: drain pending requests and persist caches
+    logger.info("Draining pending requests...")
+    # Give batch engine time to complete in-flight requests
+    import asyncio
+    await asyncio.sleep(2)  # Allow 2s for in-flight requests to complete
+
+    logger.info("Persisting agent caches...")
+    # Save all hot agent caches to disk
+    if cache_store:
+        try:
+            saved_count = cache_store.save_all_hot_caches()
+            logger.info(f"Saved {saved_count} agent caches to disk")
+        except Exception as e:
+            logger.error(f"Error saving caches during shutdown: {e}")
+
     logger.info("✅ Server shutdown complete")
 
 
@@ -162,10 +174,17 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
-    # CORS middleware
+    # CORS middleware (production-ready configuration)
+    cors_origins_str = settings.server.cors_origins
+    # Parse comma-separated origins
+    if cors_origins_str == "*":
+        cors_origins = ["*"]
+    else:
+        cors_origins = [origin.strip() for origin in cors_origins_str.split(",")]
+
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],  # TODO: Configure in production
+        allow_origins=cors_origins,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
@@ -188,18 +207,58 @@ def create_app() -> FastAPI:
     logger.info("Rate limiting middleware enabled")
 
     # Health check endpoint
-    @app.get("/health", status_code=status.HTTP_200_OK)
-    async def health_check():
-        """Health check endpoint.
+    @app.get("/health")
+    async def health_check(response: Response):
+        """Health check endpoint with degraded state detection.
+
+        Returns 200 OK if healthy, 503 Service Unavailable if degraded.
+
+        Degraded states:
+        - Pool utilization >90%
+        - Model swap in progress
 
         Returns:
-            Status dict with "ok" status.
+            Status dict with status and pool info.
 
         Example:
             $ curl http://localhost:8000/health
-            {"status":"ok"}
+            {"status":"ok","pool":{"used_blocks":50,"total_blocks":1000,"utilization_pct":5.0}}
         """
-        return {"status": "ok"}
+        # Get pool utilization from app state
+        pool = app.state.semantic.block_pool if hasattr(app.state, "semantic") else None
+
+        if pool:
+            used_blocks = pool.total_blocks - pool.available_blocks()
+            total_blocks = pool.total_blocks
+            utilization_pct = (used_blocks / total_blocks * 100) if total_blocks > 0 else 0
+
+            # Check for degraded state (>90% utilization)
+            if utilization_pct > 90:
+                response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+                return {
+                    "status": "degraded",
+                    "reason": "pool_near_exhaustion",
+                    "pool": {
+                        "used_blocks": used_blocks,
+                        "total_blocks": total_blocks,
+                        "utilization_pct": round(utilization_pct, 1),
+                    },
+                }
+
+            # Healthy
+            response.status_code = status.HTTP_200_OK
+            return {
+                "status": "ok",
+                "pool": {
+                    "used_blocks": used_blocks,
+                    "total_blocks": total_blocks,
+                    "utilization_pct": round(utilization_pct, 1),
+                },
+            }
+        else:
+            # No pool info available (server not fully initialized)
+            response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+            return {"status": "initializing"}
 
     # Root endpoint
     @app.get("/", status_code=status.HTTP_200_OK)

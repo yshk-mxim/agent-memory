@@ -237,6 +237,8 @@ markers = [
     "integration: Tests with real MLX and disk I/O (Apple Silicon only)",
     "smoke: Basic server lifecycle tests",
     "e2e: Full-stack multi-agent tests (slow, Apple Silicon only)",
+    "stress: Load and concurrency stress tests (very slow, Apple Silicon only)",
+    "benchmark: Performance benchmarks (very slow, Apple Silicon only)",
 ]
 addopts = [
     "--strict-markers",

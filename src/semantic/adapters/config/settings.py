@@ -175,6 +175,11 @@ class ServerSettings(BaseSettings):
         description="Log level (DEBUG, INFO, WARNING, ERROR, CRITICAL)",
     )
 
+    cors_origins: str = Field(
+        default="http://localhost:3000",
+        description="Comma-separated list of allowed CORS origins (* for all, not recommended for production)",
+    )
+
 
 class SecretsSettings(BaseSettings):
     """Sensitive configuration (API keys, tokens).
