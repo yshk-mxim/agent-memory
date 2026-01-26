@@ -136,8 +136,8 @@ def get_old_engine() -> Any:
 async def swap_model(
     swap_request: SwapModelRequest,
     request: Request,
-    orchestrator: ModelSwapOrchestrator = Depends(get_orchestrator),
-    old_engine: Any = Depends(get_old_engine),
+    orchestrator: ModelSwapOrchestrator = Depends(get_orchestrator),  # noqa: B008
+    old_engine: Any = Depends(get_old_engine),  # noqa: B008
     _auth: None = Depends(verify_admin_key),
 ) -> SwapModelResponse:
     """Swap to a different model while preserving agent caches.
@@ -206,7 +206,7 @@ async def swap_model(
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Model swap failed: {e!s}",
-            )
+            ) from e
 
 
 def get_registry() -> ModelRegistry:
@@ -216,7 +216,7 @@ def get_registry() -> ModelRegistry:
 
 @router.get("/models/current", response_model=CurrentModelResponse)
 async def get_current_model(
-    registry: ModelRegistry = Depends(get_registry),
+    registry: ModelRegistry = Depends(get_registry),  # noqa: B008
     _auth: None = Depends(verify_admin_key),
 ) -> CurrentModelResponse:
     """Get information about the currently loaded model.

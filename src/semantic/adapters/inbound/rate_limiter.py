@@ -173,7 +173,10 @@ class RateLimiter(BaseHTTPMiddleware):
                 content={
                     "error": {
                         "type": "rate_limit_error",
-                        "message": f"Global rate limit exceeded. Retry after {global_retry_after}s.",
+                        "message": (
+                            f"Global rate limit exceeded. "
+                            f"Retry after {global_retry_after}s."
+                        ),
                     }
                 },
             )
@@ -197,7 +200,10 @@ class RateLimiter(BaseHTTPMiddleware):
                     content={
                         "error": {
                             "type": "rate_limit_error",
-                            "message": f"Agent rate limit exceeded. Retry after {agent_retry_after}s.",
+                            "message": (
+                                f"Agent rate limit exceeded. "
+                                f"Retry after {agent_retry_after}s."
+                            ),
                         }
                     },
                 )
@@ -207,10 +213,16 @@ class RateLimiter(BaseHTTPMiddleware):
         if agent_id:
             self._agent_requests[agent_id].append(now)
 
+        agent_info = (
+            f", agent: {len(self._agent_requests[agent_id])}/"
+            f"{self.requests_per_minute_per_agent})"
+            if agent_id
+            else ")"
+        )
         logger.debug(
             f"{request.method} {request.url.path} - "
-            f"Rate limit OK (global: {len(self._global_requests)}/{self.requests_per_minute_global}"
-            + (f", agent: {len(self._agent_requests[agent_id])}/{self.requests_per_minute_per_agent})" if agent_id else ")")
+            f"Rate limit OK (global: {len(self._global_requests)}/"
+            f"{self.requests_per_minute_global}{agent_info}"
         )
 
         return await call_next(request)

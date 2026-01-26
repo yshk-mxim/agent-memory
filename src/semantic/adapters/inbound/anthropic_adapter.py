@@ -58,7 +58,7 @@ def generate_agent_id_from_tokens(tokens: list[int]) -> str:
     return f"msg_{hash_val}"
 
 
-def messages_to_prompt(messages: list[Message], system: str | list[Any] = "") -> str:
+def messages_to_prompt(messages: list[Message], system: str | list[Any] = "") -> str:  # noqa: PLR0912
     """Convert Anthropic messages to prompt string.
 
     Args:
@@ -320,7 +320,8 @@ async def create_message(request_body: MessagesRequest, request: Request):
         )
 
         logger.info(
-            f"Response: {len(response.content)} blocks, {response.usage.output_tokens} output tokens"
+            f"Response: {len(response.content)} blocks, "
+            f"{response.usage.output_tokens} output tokens"
         )
         return response
 
@@ -329,19 +330,19 @@ async def create_message(request_body: MessagesRequest, request: Request):
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=f"Server capacity exceeded: {e!s}",
-        )
+        ) from e
     except SemanticError as e:
         logger.error(f"Domain error: {e}")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e),
-        )
+        ) from e
     except Exception as e:
         logger.error(f"Unexpected error: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Internal server error",
-        )
+        ) from e
 
 
 @router.post("/messages/count_tokens", status_code=status.HTTP_200_OK)
@@ -386,4 +387,4 @@ async def count_tokens(request_body: CountTokensRequest, request: Request) -> Co
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to count tokens: {e!s}",
-        )
+        ) from e

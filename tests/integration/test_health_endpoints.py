@@ -27,6 +27,7 @@ def test_app():
             self.semantic = type('obj', (object,), {
                 'block_pool': None,
                 'batch_engine': None,
+                'cache_store': None,
             })()
 
     app.state = MockAppState()

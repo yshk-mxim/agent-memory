@@ -379,12 +379,8 @@ class AgentCacheStore:
             >>> print(f"Evicted {evicted} caches to disk")
             >>> # Hot tier now empty, all caches on disk
         """
-        initial_hot_count = len(self._hot_cache)
-
         # Evict all by setting target to 0
-        evicted = self.evict_lru(target_count=0)
-
-        return evicted
+        return self.evict_lru(target_count=0)
 
     def update_model_tag(self, new_tag: ModelTag) -> None:
         """Update model tag for compatibility checking.

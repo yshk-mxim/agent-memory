@@ -7,6 +7,7 @@ Returns 401 Unauthorized for invalid or missing keys.
 import logging
 import os
 from collections.abc import Callable
+from typing import ClassVar
 
 from fastapi import Request, Response, status
 from fastapi.responses import JSONResponse
@@ -26,7 +27,7 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
     """
 
     # Endpoints that don't require authentication
-    PUBLIC_ENDPOINTS = {
+    PUBLIC_ENDPOINTS: ClassVar[set[str]] = {
         "/",
         "/health",
         "/docs",

@@ -19,7 +19,7 @@ from semantic.domain.value_objects import ModelCacheSpec
 class TestBatchEngineDrain:
     """Test drain() method for graceful shutdown."""
 
-    def test_drain_with_no_active_requests(self):
+    async def test_drain_with_no_active_requests(self):
         """Drain with no active requests returns immediately."""
         # Setup
         mock_model = MagicMock()
@@ -40,14 +40,14 @@ class TestBatchEngineDrain:
 
         # Execute - should return immediately
         start_time = time.time()
-        engine.drain(timeout_seconds=5.0)
+        await engine.drain(timeout_seconds=5.0)
         elapsed = time.time() - start_time
 
         # Verify - drain should be instant
         assert elapsed < 1.0  # Should finish in <1s
 
     @patch("semantic.application.batch_engine.time.sleep")
-    def test_drain_waits_for_active_requests_to_complete(self, mock_sleep):
+    async def test_drain_waits_for_active_requests_to_complete(self, mock_sleep):
         """Drain waits until all active requests finish."""
         # Setup
         mock_model = MagicMock()
@@ -93,14 +93,14 @@ class TestBatchEngineDrain:
         engine._batch_gen = mock_batch_gen
 
         # Execute drain
-        engine.drain(timeout_seconds=10.0)
+        await engine.drain(timeout_seconds=10.0)
 
         # Verify - requests should be cleared
         assert len(engine._active_requests) == 0
         assert mock_batch_gen.next.call_count >= 2  # At least 2 steps needed
 
     @patch("semantic.application.batch_engine.time.time")
-    def test_drain_raises_on_timeout(self, mock_time):
+    async def test_drain_raises_on_timeout(self, mock_time):
         """Drain raises GenerationError if timeout exceeded."""
         # Setup
         mock_model = MagicMock()
@@ -136,12 +136,13 @@ class TestBatchEngineDrain:
         engine._batch_gen = mock_batch_gen
 
         # Mock time to simulate timeout
-        # Start at 0, then jump to 31s immediately to trigger timeout
-        mock_time.side_effect = [0.0, 31.0]
+        # Start at 0, then jump to 31s to trigger timeout
+        # Provide enough values to cover all time.time() calls
+        mock_time.side_effect = [0.0, 31.0, 31.0, 31.0, 31.0]
 
         # Execute and verify timeout
         with pytest.raises(GenerationError) as exc_info:
-            engine.drain(timeout_seconds=30.0)
+            await engine.drain(timeout_seconds=30.0)
 
         assert "Drain timeout after 30.0s" in str(exc_info.value)
         assert "Still pending" in str(exc_info.value)
@@ -249,7 +250,7 @@ class TestDrainShutdownIntegration:
     """Test drain → shutdown sequence for model hot-swap."""
 
     @patch("semantic.application.batch_engine.time.sleep")
-    def test_drain_then_shutdown_clears_all_state(self, mock_sleep):
+    async def test_drain_then_shutdown_clears_all_state(self, mock_sleep):
         """Typical hot-swap sequence: drain active requests then shutdown."""
         # Setup
         mock_model = MagicMock()
@@ -284,7 +285,7 @@ class TestDrainShutdownIntegration:
         engine._batch_gen = mock_batch_gen
 
         # Execute drain → shutdown
-        engine.drain(timeout_seconds=10.0)
+        await engine.drain(timeout_seconds=10.0)
         engine.shutdown()
 
         # Verify clean state

@@ -259,11 +259,15 @@ class ChatCompletionsRequest(BaseModel):
     tool_choice: str | dict[str, Any] | None = None
 
     # Extension: session ID for persistent cache
-    session_id: str | None = Field(default=None, description="Optional session ID for cache persistence")
+    session_id: str | None = Field(
+        default=None, description="Optional session ID for cache persistence"
+    )
 
     @field_validator("messages")
     @classmethod
-    def validate_messages_not_empty(cls, messages: list[OpenAIChatMessage]) -> list[OpenAIChatMessage]:
+    def validate_messages_not_empty(
+        cls, messages: list[OpenAIChatMessage]
+    ) -> list[OpenAIChatMessage]:
         """Validate that messages list is not empty."""
         if not messages:
             raise ValueError("At least one message is required")

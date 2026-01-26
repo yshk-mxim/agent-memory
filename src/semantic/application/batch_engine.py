@@ -500,12 +500,12 @@ class BlockPoolBatchEngine:
             elapsed = time.time() - start_time
             if elapsed > timeout_seconds:
                 remaining = list(self._active_requests.keys())
-                logger.warning(
+                error_msg = (
                     f"Drain timeout after {timeout_seconds}s. "
                     f"Still pending: {len(remaining)} requests ({remaining[:5]}...)"
                 )
-                # Don't raise - allow graceful shutdown even with timeout
-                break
+                logger.error(error_msg)
+                raise GenerationError(error_msg)
 
             # Process one step to let requests complete
             for _completion in self.step():

@@ -77,7 +77,7 @@ async def create_agent(request_body: CreateAgentRequest, request: Request) -> Ag
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to create agent: {e!s}",
-        )
+        ) from e
 
 
 @router.get("/{agent_id}", status_code=status.HTTP_200_OK)
@@ -124,7 +124,7 @@ async def get_agent(agent_id: str, request: Request) -> AgentResponse:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to retrieve agent: {e!s}",
-        )
+        ) from e
 
 
 @router.post("/{agent_id}/generate", status_code=status.HTTP_200_OK)
@@ -212,19 +212,19 @@ async def generate(
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=f"Server capacity exceeded: {e!s}",
-        )
+        ) from e
     except SemanticError as e:
         logger.error(f"Domain error: {e}")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e),
-        )
+        ) from e
     except Exception as e:
         logger.error(f"Generation error: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Internal server error",
-        )
+        ) from e
 
 
 @router.delete("/{agent_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -276,4 +276,4 @@ async def delete_agent(agent_id: str, request: Request):
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to delete agent: {e!s}",
-        )
+        ) from e

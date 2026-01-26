@@ -1,4 +1,4 @@
-"""OpenAI Chat Completions API adapter (POST /v1/chat/completions).
+r"""OpenAI Chat Completions API adapter (POST /v1/chat/completions).
 
 Implements the OpenAI Chat Completions API with:
 - Non-streaming generation
@@ -83,7 +83,7 @@ async def stream_chat_completion(
     request_body: ChatCompletionsRequest,
     batch_engine: Any,
     cache_store: Any,
-    tokens: list[int],
+    _tokens: list[int],
     agent_id: str,
     cached_blocks: Any,
     prompt: str,
@@ -320,16 +320,16 @@ async def create_chat_completion(
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=f"Server capacity exceeded: {e!s}",
-        )
+        ) from e
     except SemanticError as e:
         logger.error(f"Domain error: {e}")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e),
-        )
+        ) from e
     except Exception as e:
         logger.error(f"Unexpected error: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Internal server error",
-        )
+        ) from e

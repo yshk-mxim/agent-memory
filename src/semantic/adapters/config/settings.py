@@ -177,7 +177,10 @@ class ServerSettings(BaseSettings):
 
     cors_origins: str = Field(
         default="http://localhost:3000",
-        description="Comma-separated list of allowed CORS origins (* for all, not recommended for production)",
+        description=(
+            "Comma-separated list of allowed CORS origins "
+            "(* for all, not recommended for production)"
+        ),
     )
 
 

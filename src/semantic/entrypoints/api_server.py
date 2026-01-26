@@ -12,9 +12,20 @@ from fastapi import FastAPI, Request, Response, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from mlx_lm import load
+from prometheus_client import generate_latest
 
 from semantic.adapters.config.logging import configure_logging
 from semantic.adapters.config.settings import get_settings
+from semantic.adapters.inbound.anthropic_adapter import router as anthropic_router
+from semantic.adapters.inbound.auth_middleware import AuthenticationMiddleware
+from semantic.adapters.inbound.direct_agent_adapter import router as direct_router
+from semantic.adapters.inbound.metrics import agents_active, pool_utilization_ratio, registry
+from semantic.adapters.inbound.metrics_middleware import RequestMetricsMiddleware
+from semantic.adapters.inbound.openai_adapter import router as openai_router
+from semantic.adapters.inbound.rate_limiter import RateLimiter
+from semantic.adapters.inbound.request_id_middleware import RequestIDMiddleware
+from semantic.adapters.inbound.request_logging_middleware import RequestLoggingMiddleware
 from semantic.adapters.outbound.mlx_cache_adapter import MLXCacheAdapter
 from semantic.adapters.outbound.mlx_spec_extractor import get_extractor
 from semantic.adapters.outbound.safetensors_cache_adapter import SafetensorsCacheAdapter
@@ -40,6 +51,151 @@ class AppState:
         self.cache_adapter: SafetensorsCacheAdapter | None = None
 
 
+def _load_model_and_extract_spec(settings):
+    """Load MLX model and extract cache spec.
+
+    Args:
+        settings: Application settings
+
+    Returns:
+        Tuple of (model, tokenizer, model_spec)
+    """
+    logger = structlog.get_logger(__name__)
+    logger.info("loading_model", model_id=settings.mlx.model_id)
+
+    model, tokenizer = load(
+        settings.mlx.model_id,
+        tokenizer_config={"trust_remote_code": True},
+    )
+
+    spec_extractor = get_extractor()
+    model_spec: ModelCacheSpec = spec_extractor.extract_spec(model)
+    logger.info(
+        "model_loaded",
+        n_layers=model_spec.n_layers,
+        n_kv_heads=model_spec.n_kv_heads,
+        head_dim=model_spec.head_dim
+    )
+
+    return model, tokenizer, model_spec
+
+
+def _initialize_block_pool(settings, model_spec):
+    """Initialize BlockPool with cache budget.
+
+    Args:
+        settings: Application settings
+        model_spec: Model cache specification
+
+    Returns:
+        Configured BlockPool instance
+    """
+    logger = structlog.get_logger(__name__)
+
+    bytes_per_block = model_spec.bytes_per_block_per_layer()
+    total_blocks = (settings.mlx.cache_budget_mb * 1024 * 1024) // bytes_per_block
+    mb_per_block = bytes_per_block / 1024 / 1024
+    logger.info(
+        "block_budget_calculated",
+        total_blocks=total_blocks,
+        mb_per_block=round(mb_per_block, 2)
+    )
+
+    block_pool = BlockPool(spec=model_spec, total_blocks=total_blocks)
+    logger.info("block_pool_initialized", total_blocks=total_blocks)
+
+    return block_pool
+
+
+def _initialize_cache_store(settings, model_spec):
+    """Initialize cache store and persistence adapter.
+
+    Args:
+        settings: Application settings
+        model_spec: Model cache specification
+
+    Returns:
+        Tuple of (cache_store, cache_adapter)
+    """
+    logger = structlog.get_logger(__name__)
+
+    cache_dir = Path(settings.agent.cache_dir).expanduser()
+    cache_adapter = SafetensorsCacheAdapter(cache_dir=cache_dir)
+    logger.info("cache_persistence_configured", cache_dir=str(cache_dir))
+
+    model_tag = ModelTag.from_spec(settings.mlx.model_id, model_spec)
+    cache_store = AgentCacheStore(
+        cache_dir=cache_dir,
+        max_hot_agents=settings.agent.max_agents_in_memory,
+        model_tag=model_tag,
+        cache_adapter=cache_adapter,
+    )
+    logger.info(
+        "cache_store_initialized",
+        max_hot_agents=settings.agent.max_agents_in_memory
+    )
+
+    return cache_store, cache_adapter
+
+
+def _initialize_batch_engine(model, tokenizer, block_pool, model_spec, settings):
+    """Initialize batch engine for inference.
+
+    Args:
+        model: MLX model
+        tokenizer: Model tokenizer
+        block_pool: BlockPool instance
+        model_spec: Model cache specification
+        settings: Application settings
+
+    Returns:
+        Configured BlockPoolBatchEngine instance
+    """
+    logger = structlog.get_logger(__name__)
+
+    mlx_adapter = MLXCacheAdapter()
+    batch_engine = BlockPoolBatchEngine(
+        model=model,
+        tokenizer=tokenizer,
+        pool=block_pool,
+        spec=model_spec,
+        cache_adapter=mlx_adapter,
+    )
+    logger.info(
+        "batch_engine_initialized",
+        max_batch_size=settings.mlx.max_batch_size,
+        prefill_step_size=settings.mlx.prefill_step_size
+    )
+
+    return batch_engine, mlx_adapter
+
+
+async def _drain_and_persist(batch_engine, cache_store):
+    """Drain pending requests and persist caches during shutdown.
+
+    Args:
+        batch_engine: Batch engine to drain
+        cache_store: Cache store to persist
+    """
+    logger = structlog.get_logger(__name__)
+
+    logger.info("draining_requests")
+    if batch_engine:
+        try:
+            drained = await batch_engine.drain(timeout_seconds=30)
+            logger.info("requests_drained", count=drained)
+        except Exception as e:
+            logger.error("drain_error", error=str(e), exc_info=True)
+
+    logger.info("persisting_caches")
+    if cache_store:
+        try:
+            saved_count = cache_store.evict_all_to_disk()
+            logger.info("caches_persisted", count=saved_count)
+        except Exception as e:
+            logger.error("persist_error", error=str(e), exc_info=True)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan manager (startup/shutdown).
@@ -61,72 +217,14 @@ async def lifespan(app: FastAPI):
     logger.info("server_starting")
     settings = get_settings()
 
-    # Load MLX model and extract spec
-    logger.info("loading_model", model_id=settings.mlx.model_id)
-    from mlx_lm import load
+    # Load model and extract spec
+    model, tokenizer, model_spec = _load_model_and_extract_spec(settings)
 
-    model, tokenizer = load(
-        settings.mlx.model_id,
-        tokenizer_config={"trust_remote_code": True},
-    )
-
-    # Extract model cache spec
-    spec_extractor = get_extractor()
-    model_spec: ModelCacheSpec = spec_extractor.extract_spec(model)
-    logger.info(
-        "model_loaded",
-        n_layers=model_spec.n_layers,
-        n_kv_heads=model_spec.n_kv_heads,
-        head_dim=model_spec.head_dim
-    )
-
-    # Calculate block budget
-    bytes_per_block = model_spec.bytes_per_block_per_layer()
-    total_blocks = (settings.mlx.cache_budget_mb * 1024 * 1024) // bytes_per_block
-    mb_per_block = bytes_per_block / 1024 / 1024
-    logger.info(
-        "block_budget_calculated",
-        total_blocks=total_blocks,
-        mb_per_block=round(mb_per_block, 2)
-    )
-
-    # Initialize BlockPool
-    block_pool = BlockPool(spec=model_spec, total_blocks=total_blocks)
-    logger.info("block_pool_initialized", total_blocks=total_blocks)
-
-    # Initialize MLX adapter (stateless, no arguments needed)
-    mlx_adapter = MLXCacheAdapter()
-
-    # Initialize safetensors persistence adapter
-    cache_dir = Path(settings.agent.cache_dir).expanduser()
-    cache_adapter = SafetensorsCacheAdapter(cache_dir=cache_dir)
-    logger.info("cache_persistence_configured", cache_dir=str(cache_dir))
-
-    # Initialize AgentCacheStore
-    model_tag = ModelTag.from_spec(settings.mlx.model_id, model_spec)
-    cache_store = AgentCacheStore(
-        cache_dir=cache_dir,
-        max_hot_agents=settings.agent.max_agents_in_memory,
-        model_tag=model_tag,
-        cache_adapter=cache_adapter,
-    )
-    logger.info(
-        "cache_store_initialized",
-        max_hot_agents=settings.agent.max_agents_in_memory
-    )
-
-    # Initialize BatchEngine
-    batch_engine = BlockPoolBatchEngine(
-        model=model,
-        tokenizer=tokenizer,
-        pool=block_pool,  # Fixed: parameter is 'pool', not 'block_pool'
-        spec=model_spec,
-        cache_adapter=mlx_adapter,
-    )
-    logger.info(
-        "batch_engine_initialized",
-        max_batch_size=settings.mlx.max_batch_size,
-        prefill_step_size=settings.mlx.prefill_step_size
+    # Initialize components
+    block_pool = _initialize_block_pool(settings, model_spec)
+    cache_store, cache_adapter = _initialize_cache_store(settings, model_spec)
+    batch_engine, mlx_adapter = _initialize_batch_engine(
+        model, tokenizer, block_pool, model_spec, settings
     )
 
     # Store in app state
@@ -136,103 +234,49 @@ async def lifespan(app: FastAPI):
     app.state.semantic.cache_store = cache_store
     app.state.semantic.mlx_adapter = mlx_adapter
     app.state.semantic.cache_adapter = cache_adapter
+    app.state.shutting_down = False
 
     logger.info("server_ready")
-
-    # Set shutdown flag to false (ready to serve)
-    app.state.shutting_down = False
 
     yield
 
     # Shutdown: cleanup resources
     logger.info("server_shutting_down")
-
-    # Set shutdown flag IMMEDIATELY (health checks will return 503)
     app.state.shutting_down = True
 
-    # Graceful shutdown: drain pending requests and persist caches
-    logger.info("draining_requests")
-    if batch_engine:
-        try:
-            drained = await batch_engine.drain(timeout_seconds=30)
-            logger.info("requests_drained", count=drained)
-        except Exception as e:
-            logger.error("drain_error", error=str(e), exc_info=True)
-
-    logger.info("persisting_caches")
-    # Save all hot agent caches to disk
-    if cache_store:
-        try:
-            saved_count = cache_store.evict_all_to_disk()
-            logger.info("caches_persisted", count=saved_count)
-        except Exception as e:
-            logger.error("persist_error", error=str(e), exc_info=True)
-
+    await _drain_and_persist(batch_engine, cache_store)
     logger.info("server_shutdown_complete")
 
 
-def create_app() -> FastAPI:
-    """Create and configure FastAPI application.
+def _register_middleware(app: FastAPI, settings):
+    """Register all middleware in correct order.
 
-    Returns:
-        Configured FastAPI application instance.
-
-    Example:
-        >>> app = create_app()
-        >>> # Use with uvicorn: uvicorn.run(app, host="0.0.0.0", port=8000)
+    Args:
+        app: FastAPI application
+        settings: Application settings
     """
-    settings = get_settings()
-
-    # Initialize structured logging (BEFORE creating FastAPI app)
-    json_output = settings.server.log_level == "PRODUCTION"
-    configure_logging(
-        log_level=settings.server.log_level,
-        json_output=json_output
-    )
-
-    # Get structlog logger
     logger = structlog.get_logger(__name__)
-    logger.info("creating_fastapi_app", version="0.1.0")
 
-    app = FastAPI(
-        title="Semantic Caching API",
-        description="Multi-protocol API for semantic KV cache management",
-        version="0.1.0",
-        lifespan=lifespan,
-    )
-
-    # Request ID middleware (FIRST - executed last, but sets up context)
-    from semantic.adapters.inbound.request_id_middleware import RequestIDMiddleware
-
+    # Request ID middleware (FIRST - sets up context)
     app.add_middleware(RequestIDMiddleware)
     logger.info("middleware_registered", middleware="RequestIDMiddleware")
 
-    # Request logging middleware (skip health checks to avoid spam)
-    from semantic.adapters.inbound.request_logging_middleware import RequestLoggingMiddleware
-
+    # Request logging middleware
     app.add_middleware(
         RequestLoggingMiddleware,
         skip_paths={"/health/live", "/health/ready", "/health/startup"}
     )
     logger.info("middleware_registered", middleware="RequestLoggingMiddleware")
 
-    # Metrics middleware (skip /metrics endpoint itself)
-    from semantic.adapters.inbound.metrics_middleware import RequestMetricsMiddleware
-
-    app.add_middleware(
-        RequestMetricsMiddleware,
-        skip_paths={"/metrics"}
-    )
+    # Metrics middleware
+    app.add_middleware(RequestMetricsMiddleware, skip_paths={"/metrics"})
     logger.info("middleware_registered", middleware="RequestMetricsMiddleware")
 
-    # CORS middleware (production-ready configuration)
+    # CORS middleware
     cors_origins_str = settings.server.cors_origins
-    # Parse comma-separated origins
-    if cors_origins_str == "*":
-        cors_origins = ["*"]
-    else:
-        cors_origins = [origin.strip() for origin in cors_origins_str.split(",")]
-
+    cors_origins = ["*"] if cors_origins_str == "*" else [
+        origin.strip() for origin in cors_origins_str.split(",")
+    ]
     app.add_middleware(
         CORSMiddleware,
         allow_origins=cors_origins,
@@ -242,14 +286,10 @@ def create_app() -> FastAPI:
     )
 
     # Authentication middleware
-    from semantic.adapters.inbound.auth_middleware import AuthenticationMiddleware
-
     app.add_middleware(AuthenticationMiddleware)
     logger.info("middleware_registered", middleware="AuthenticationMiddleware")
 
     # Rate limiting middleware
-    from semantic.adapters.inbound.rate_limiter import RateLimiter
-
     app.add_middleware(
         RateLimiter,
         requests_per_minute_per_agent=settings.server.rate_limit_per_agent,
@@ -257,48 +297,26 @@ def create_app() -> FastAPI:
     )
     logger.info("middleware_registered", middleware="RateLimiter")
 
-    # 3-Tier Health Check Endpoints (Kubernetes-compatible)
+
+def _register_health_endpoints(app: FastAPI):
+    """Register 3-tier health check endpoints.
+
+    Args:
+        app: FastAPI application
+    """
+    @app.get("/health")
+    async def health():
+        """Basic health check - alias for /health/live."""
+        return {"status": "ok"}
 
     @app.get("/health/live")
     async def health_live():
-        """Liveness probe - process is alive.
-
-        Returns 200 if server process is running.
-        Kubernetes liveness probe should use this endpoint.
-
-        Returns:
-            Status dict indicating the process is alive.
-
-        Example:
-            $ curl http://localhost:8000/health/live
-            {"status":"alive"}
-        """
+        """Liveness probe - process is alive."""
         return {"status": "alive"}
 
     @app.get("/health/ready")
     async def health_ready(response: Response):
-        """Readiness probe - ready to accept requests.
-
-        Returns:
-            200 if ready, 503 if not ready
-
-        Not ready states:
-        - Pool utilization >90%
-        - Server is shutting down
-        - Pool not initialized
-
-        Kubernetes readiness probe should use this endpoint.
-
-        Also updates Prometheus metrics:
-        - pool_utilization_ratio gauge
-        - agents_active gauge
-
-        Example:
-            $ curl http://localhost:8000/health/ready
-            {"status":"ready","pool_utilization":15.2}
-        """
-        from semantic.adapters.inbound.metrics import agents_active, pool_utilization_ratio
-
+        """Readiness probe - ready to accept requests."""
         # Check pool utilization
         pool = app.state.semantic.block_pool if hasattr(app.state, "semantic") else None
 
@@ -316,14 +334,11 @@ def create_app() -> FastAPI:
         total_blocks = pool.total_blocks
         utilization = (used_blocks / total_blocks) if total_blocks > 0 else 0
 
-        # Update pool utilization metric
+        # Update metrics
         pool_utilization_ratio.set(utilization)
-
-        # Update active agents metric
         cache_store = app.state.semantic.cache_store if hasattr(app.state, "semantic") else None
         if cache_store and hasattr(cache_store, '_hot_agents'):
-            hot_count = len(cache_store._hot_agents)
-            agents_active.set(hot_count)
+            agents_active.set(len(cache_store._hot_agents))
 
         if utilization > POOL_UTILIZATION_THRESHOLD:
             response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
@@ -333,68 +348,96 @@ def create_app() -> FastAPI:
                 "pool_utilization": round(utilization * 100, 1),
             }
 
-        # Ready
-        return {
-            "status": "ready",
-            "pool_utilization": round(utilization * 100, 1),
-        }
+        return {"status": "ready", "pool_utilization": round(utilization * 100, 1)}
 
     @app.get("/health/startup")
     async def health_startup(response: Response):
-        """Startup probe - initialization complete.
-
-        Returns:
-            200 if startup complete, 503 if still initializing
-
-        Kubernetes startup probe should use this endpoint.
-
-        Example:
-            $ curl http://localhost:8000/health/startup
-            {"status":"started"}
-        """
-        # Check if model loaded (semantic state initialized)
+        """Startup probe - initialization complete."""
         if not hasattr(app.state, "semantic") or not app.state.semantic.batch_engine:
             response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
             return {"status": "starting", "reason": "model_loading"}
-
         return {"status": "started"}
 
-    # Metrics endpoint (Prometheus)
+
+def _register_metrics_endpoint(app: FastAPI):
+    """Register Prometheus metrics endpoint.
+
+    Args:
+        app: FastAPI application
+    """
     @app.get("/metrics")
     async def metrics():
-        """Prometheus metrics endpoint.
-
-        Returns metrics in Prometheus exposition format.
-
-        Returns:
-            Plain text response with Prometheus metrics.
-
-        Example:
-            $ curl http://localhost:8000/metrics
-            # HELP semantic_request_total Total number of HTTP requests
-            # TYPE semantic_request_total counter
-            semantic_request_total{method="GET",path="/",status_code="200"} 1.0
-        """
-        from prometheus_client import generate_latest
-
-        from semantic.adapters.inbound.metrics import registry
-
+        """Prometheus metrics endpoint."""
         return Response(
             content=generate_latest(registry),
             media_type="text/plain; version=0.0.4"
         )
 
-    # Root endpoint
+
+def _register_error_handlers(app: FastAPI):
+    """Register error handlers for exceptions.
+
+    Args:
+        app: FastAPI application
+    """
+    logger = structlog.get_logger(__name__)
+
+    @app.exception_handler(SemanticError)
+    async def semantic_error_handler(_request: Request, exc: SemanticError):
+        """Handle domain errors."""
+        logger.error(
+            "domain_error",
+            error_type=exc.__class__.__name__,
+            message=str(exc),
+            exc_info=True
+        )
+        return JSONResponse(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            content={"error": exc.__class__.__name__, "message": str(exc)},
+        )
+
+    @app.exception_handler(RequestValidationError)
+    async def validation_error_handler(_request: Request, exc: RequestValidationError):
+        """Handle request validation errors."""
+        logger.warning("validation_error", error=str(exc))
+        errors = [
+            {"loc": error["loc"], "msg": error["msg"], "type": error["type"]}
+            for error in exc.errors()
+        ]
+        return JSONResponse(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            content={"error": "ValidationError", "details": errors},
+        )
+
+    @app.exception_handler(Exception)
+    async def general_error_handler(_request: Request, exc: Exception):
+        """Handle unexpected errors."""
+        logger.error(
+            "unexpected_error",
+            error_type=type(exc).__name__,
+            message=str(exc),
+            exc_info=True
+        )
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content={"error": "InternalServerError", "message": "An unexpected error occurred"},
+        )
+
+
+def _register_routes(app: FastAPI):
+    """Register API route handlers.
+
+    Args:
+        app: FastAPI application
+    """
+    logger = structlog.get_logger(__name__)
+
     @app.get("/", status_code=status.HTTP_200_OK)
     async def root():
-        """Root endpoint with API info.
-
-        Returns:
-            API info dict.
-        """
+        """Root endpoint with API info."""
         return {
             "name": "Semantic Caching API",
-            "version": "0.1.0",
+            "version": "0.2.0",
             "endpoints": {
                 "health": "/health",
                 "metrics": "/metrics",
@@ -404,47 +447,6 @@ def create_app() -> FastAPI:
             },
         }
 
-    # Error handlers
-    @app.exception_handler(SemanticError)
-    async def semantic_error_handler(request: Request, exc: SemanticError):
-        """Handle domain errors."""
-        logger.error("domain_error", error_type=exc.__class__.__name__, message=str(exc), exc_info=True)
-        return JSONResponse(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            content={"error": exc.__class__.__name__, "message": str(exc)},
-        )
-
-    @app.exception_handler(RequestValidationError)
-    async def validation_error_handler(request: Request, exc: RequestValidationError):
-        """Handle request validation errors."""
-        logger.warning("validation_error", error=str(exc))
-        # Convert errors to JSON-serializable format
-        errors = []
-        for error in exc.errors():
-            errors.append({
-                "loc": error["loc"],
-                "msg": error["msg"],
-                "type": error["type"],
-            })
-        return JSONResponse(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            content={"error": "ValidationError", "details": errors},
-        )
-
-    @app.exception_handler(Exception)
-    async def general_error_handler(request: Request, exc: Exception):
-        """Handle unexpected errors."""
-        logger.error("unexpected_error", error_type=type(exc).__name__, message=str(exc), exc_info=True)
-        return JSONResponse(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            content={"error": "InternalServerError", "message": "An unexpected error occurred"},
-        )
-
-    # Register route handlers
-    from semantic.adapters.inbound.anthropic_adapter import router as anthropic_router
-    from semantic.adapters.inbound.direct_agent_adapter import router as direct_router
-    from semantic.adapters.inbound.openai_adapter import router as openai_router
-
     app.include_router(anthropic_router)
     logger.info("routes_registered", router="anthropic", path="/v1/messages")
 
@@ -453,6 +455,37 @@ def create_app() -> FastAPI:
 
     app.include_router(direct_router)
     logger.info("routes_registered", router="direct_agent", path="/v1/agents")
+
+
+def create_app() -> FastAPI:
+    """Create and configure FastAPI application.
+
+    Returns:
+        Configured FastAPI application instance.
+    """
+    settings = get_settings()
+
+    # Initialize structured logging
+    json_output = settings.server.log_level == "PRODUCTION"
+    configure_logging(log_level=settings.server.log_level, json_output=json_output)
+
+    logger = structlog.get_logger(__name__)
+    logger.info("creating_fastapi_app", version="0.2.0")
+
+    # Create FastAPI app
+    app = FastAPI(
+        title="Semantic Caching API",
+        description="Multi-protocol API for semantic KV cache management",
+        version="0.2.0",
+        lifespan=lifespan,
+    )
+
+    # Register components
+    _register_middleware(app, settings)
+    _register_health_endpoints(app)
+    _register_metrics_endpoint(app)
+    _register_error_handlers(app)
+    _register_routes(app)
 
     logger.info("fastapi_app_created", log_level=settings.server.log_level)
     return app
