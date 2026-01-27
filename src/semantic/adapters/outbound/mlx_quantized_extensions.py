@@ -200,10 +200,13 @@ class BatchQuantizedKVCache:
         prev = self.offset
 
         # Check if we need to expand cache capacity
-        if self.keys is None or (prev + num_steps) > self.keys[0].shape[-2]:
+        # Add +1 to account for potential rounding issues
+        required_capacity = prev + num_steps + 1
+        if self.keys is None or required_capacity > self.keys[0].shape[-2]:
             el_per_int = 8 * mx.uint32.size // self.bits
             # Round up num_steps to step boundary for efficient allocation
-            new_steps = ((num_steps + self.step - 1) // self.step) * self.step
+            # Add extra step to ensure we have enough space
+            new_steps = ((num_steps + self.step) // self.step) * self.step
             shape = (B, n_kv_heads, new_steps)
 
             def init_quant(dim):
@@ -235,22 +238,19 @@ class BatchQuantizedKVCache:
         q_keys = mx.quantize(keys, group_size=self.group_size, bits=self.bits)
         q_values = mx.quantize(values, group_size=self.group_size, bits=self.bits)
 
-        # Get actual token count from quantized tensor (should match num_steps)
-        n_tokens = q_keys[0].shape[-2]
+        # Use num_steps directly - quantization preserves token dimension
+        # Calculate available space in cache and clamp to avoid overflow
+        cache_seq_len = self.keys[0].shape[-2]
+        available_space = cache_seq_len - prev
+        n_tokens = min(num_steps, available_space)
 
-        # Update offset AFTER quantization to ensure correct slice
+        # Update offset
         self.offset = prev + n_tokens
 
-        # Update cache with quantized data - use n_tokens for exact slice size
+        # Update cache with quantized data - slice both to exact size
         for i in range(len(self.keys)):
-            self.keys[i][..., prev:prev + n_tokens, :] = q_keys[i]
-            self.values[i][..., prev:prev + n_tokens, :] = q_values[i]
-
-        # CRITICAL: Force evaluation after in-place updates to prevent lazy graph accumulation
-        # Without this, MLX builds deferred computation graphs that hold ALL intermediate
-        # tensors in memory during long generation sessions → OOM
-        mx.eval(self.keys[0], self.keys[1], self.keys[2],
-                self.values[0], self.values[1], self.values[2])
+            self.keys[i][..., prev:prev + n_tokens, :] = q_keys[i][..., :n_tokens, :]
+            self.values[i][..., prev:prev + n_tokens, :] = q_values[i][..., :n_tokens, :]
 
         # Return trimmed cache up to current offset
         from mlx.utils import tree_map
