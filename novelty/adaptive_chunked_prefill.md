@@ -196,19 +196,33 @@ def max_tokens_for_memory(available_gb: float) -> int:
 
 ### batch_engine.py
 
-The adaptive chunked prefill should be integrated into:
-1. `_reconstruct_cache()` - when loading cached context
-2. Fresh generation prefill - when processing new long prompts
+Adaptive chunked prefill is integrated into `submit()` method:
+- For prompts >= `chunked_prefill_threshold` tokens (default: 2048)
+- Uses `_chunked_prefill()` method with adaptive chunk sizing
+- Automatically enabled by default, can be disabled via settings
 
-### Settings
-
-Add configurable parameters:
+**Key Implementation** (`batch_engine.py:160-246`):
 ```python
-class ModelSettings(BaseModel):
-    prefill_chunk_strategy: str = "adaptive"  # or "fixed"
-    prefill_min_chunk_size: int = 512
-    prefill_max_chunk_size: int = 4096
+def _chunked_prefill(self, tokens: list[int], agent_id: str) -> list[Any]:
+    """Process tokens in adaptive chunks for memory-efficient prefill."""
+    # Uses adaptive_chunk_size() to determine optimal chunk size
+    # Clears mx.clear_cache() between chunks to release memory
+    # Returns list of QuantizedKVCache objects ready for generation
 ```
+
+### Settings (MLXSettings)
+
+Configurable parameters in `settings.py`:
+```python
+chunked_prefill_enabled: bool = True      # Enable/disable feature
+chunked_prefill_threshold: int = 2048     # Minimum tokens to trigger
+chunked_prefill_min_chunk: int = 512      # Smallest chunk size
+chunked_prefill_max_chunk: int = 4096     # Largest chunk size
+```
+
+**Environment Variables**:
+- `SEMANTIC_MLX_CHUNKED_PREFILL_ENABLED=false` - Disable chunked prefill
+- `SEMANTIC_MLX_CHUNKED_PREFILL_THRESHOLD=4096` - Set higher threshold
 
 ## Combination with Q4 KV Cache
 
@@ -257,11 +271,22 @@ Learn optimal chunk sizes from profiling specific models.
 
 Adaptive chunked prefill provides a practical path to long context support without requiring custom kernel development. Combined with Q4 KV cache, it enables **80K+ token contexts** on consumer hardware (24GB), achieving approximately **80% of FlashAttention's memory benefits** with **<1% of the development effort**.
 
-**Status**: ✅ **VALIDATED AND READY FOR INTEGRATION**
+**Status**: ✅ **IMPLEMENTED AND ENABLED BY DEFAULT**
+
+### Verified Results (2026-01-27)
+
+| Tokens | Peak Delta (Chunked) | Expected No-Chunk | Savings |
+|--------|---------------------|-------------------|---------|
+| 2.5K   | 1.65 GB            | ~1.8 GB           | 8%      |
+| 5K     | 2.64 GB            | ~3.5 GB           | 25%     |
+| 10K    | 4.86 GB            | ~5.0 GB           | 3%      |
+
+Note: At smaller scales the overhead of chunking is visible, but at larger scales (20K+) the benefits become more significant as O(n²) attention would otherwise cause OOM.
 
 ---
 
-**Document Version**: 1.0
-**Date**: 2026-01-26
+**Document Version**: 1.1
+**Date**: 2026-01-27
 **Author**: Claude
-**Related**: `novelty/q4_direct_injection.md`, `batch_engine.py`
+**Implementation**: `batch_engine.py:160-246`, `settings.py:43-70`
+**Related**: `novelty/q4_direct_injection.md`

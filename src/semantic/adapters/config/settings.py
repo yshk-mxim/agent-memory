@@ -47,6 +47,33 @@ class MLXSettings(BaseSettings):
         description="Tokens per prefill step (larger = faster prefill, more memory)",
     )
 
+    # Adaptive chunked prefill settings (memory-efficient long context)
+    chunked_prefill_enabled: bool = Field(
+        default=True,
+        description="Enable adaptive chunked prefill for memory efficiency",
+    )
+
+    chunked_prefill_threshold: int = Field(
+        default=2048,
+        ge=512,
+        le=16384,
+        description="Minimum tokens to trigger chunked prefill (shorter prompts use standard prefill)",
+    )
+
+    chunked_prefill_min_chunk: int = Field(
+        default=512,
+        ge=256,
+        le=2048,
+        description="Minimum chunk size for chunked prefill (used for large cache positions)",
+    )
+
+    chunked_prefill_max_chunk: int = Field(
+        default=4096,
+        ge=1024,
+        le=8192,
+        description="Maximum chunk size for chunked prefill (used for small cache positions)",
+    )
+
     kv_bits: int | None = Field(
         default=4,
         ge=4,
