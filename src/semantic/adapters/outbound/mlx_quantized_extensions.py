@@ -202,7 +202,8 @@ class BatchQuantizedKVCache:
         # Check if we need to expand cache capacity
         if self.keys is None or (prev + num_steps) > self.keys[0].shape[-2]:
             el_per_int = 8 * mx.uint32.size // self.bits
-            new_steps = (self.step + num_steps - 1) // self.step * self.step
+            # Round up num_steps to step boundary for efficient allocation
+            new_steps = ((num_steps + self.step - 1) // self.step) * self.step
             shape = (B, n_kv_heads, new_steps)
 
             def init_quant(dim):
@@ -230,16 +231,20 @@ class BatchQuantizedKVCache:
             else:
                 self.keys, self.values = init_quant(k_head_dim), init_quant(v_head_dim)
 
-        self.offset += num_steps
-
         # Quantize new keys/values and append to cache
         q_keys = mx.quantize(keys, group_size=self.group_size, bits=self.bits)
         q_values = mx.quantize(values, group_size=self.group_size, bits=self.bits)
 
-        # Update cache with quantized data
+        # Get actual token count from quantized tensor (should match num_steps)
+        n_tokens = q_keys[0].shape[-2]
+
+        # Update offset AFTER quantization to ensure correct slice
+        self.offset = prev + n_tokens
+
+        # Update cache with quantized data - use n_tokens for exact slice size
         for i in range(len(self.keys)):
-            self.keys[i][..., prev:self.offset, :] = q_keys[i]
-            self.values[i][..., prev:self.offset, :] = q_values[i]
+            self.keys[i][..., prev:prev + n_tokens, :] = q_keys[i]
+            self.values[i][..., prev:prev + n_tokens, :] = q_values[i]
 
         # CRITICAL: Force evaluation after in-place updates to prevent lazy graph accumulation
         # Without this, MLX builds deferred computation graphs that hold ALL intermediate
