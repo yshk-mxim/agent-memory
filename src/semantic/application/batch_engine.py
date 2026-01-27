@@ -534,6 +534,13 @@ class BlockPoolBatchEngine:
                     kv_cache.values = (v_weights, v_scales, v_biases)
                     kv_cache.offset = k_weights.shape[2]
 
+                    # CRITICAL: Force evaluation to materialize tensors and prevent
+                    # lazy graph accumulation that causes OOM
+                    import mlx.core as mx
+                    mx.eval(k_weights, k_scales, v_weights, v_scales)
+                    if k_biases is not None:
+                        mx.eval(k_biases, v_biases)
+
                     logger = logging.getLogger(__name__)
                     seq_len = self._cache_adapter.get_sequence_length(k_full)
                     logger.info(

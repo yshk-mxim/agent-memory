@@ -115,6 +115,12 @@ class BatchQuantizedKVCache:
             keys_zeros[i:i+1, :, p:p+c.offset, :] = k_z[..., :c.offset, :]
             values_zeros[i:i+1, :, p:p+c.offset, :] = v_z[..., :c.offset, :]
 
+        # CRITICAL: Force evaluation to prevent lazy graph accumulation
+        # Without this, MLX builds a deferred computation graph that
+        # holds ALL intermediate tensors in memory → OOM
+        mx.eval(keys_quant, keys_scales, keys_zeros,
+                values_quant, values_scales, values_zeros)
+
         batch_cache = cls(group_size=group_size, bits=bits)
         batch_cache.keys = (keys_quant, keys_scales, keys_zeros)
         batch_cache.values = (values_quant, values_scales, values_zeros)
