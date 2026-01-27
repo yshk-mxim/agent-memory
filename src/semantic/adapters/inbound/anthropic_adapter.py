@@ -8,10 +8,10 @@ Implements the Anthropic Messages API with:
 - Prompt caching
 """
 
+import asyncio
 import hashlib
 import json
 import logging
-import re
 import uuid
 from collections.abc import AsyncIterator
 from typing import Any
@@ -19,6 +19,11 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request, status
 from sse_starlette.sse import EventSourceResponse
 
+from semantic.adapters.inbound.adapter_helpers import (
+    get_semantic_state,
+    run_step_for_uid,
+    try_parse_json_at,
+)
 from semantic.adapters.inbound.request_models import (
     ContentBlockDeltaEvent,
     ContentBlockStartEvent,
@@ -66,6 +71,8 @@ def parse_tool_calls(text: str) -> tuple[str, list[dict[str, Any]]]:
     Looks for JSON patterns like:
     {"tool_use": {"name": "read_file", "input": {"path": "test.py"}}}
 
+    Uses proper JSON parsing instead of regex to handle nested objects.
+
     Args:
         text: Model generated text
 
@@ -74,28 +81,38 @@ def parse_tool_calls(text: str) -> tuple[str, list[dict[str, Any]]]:
         Tool call dict contains: {"name": str, "input": dict}
     """
     tool_calls = []
+    found_ranges = []  # Track (start, end) ranges to remove
+
+    # Find all potential JSON start positions with "tool_use" key
+    search_pattern = '{"tool_use"'
+    pos = 0
+
+    while True:
+        start = text.find(search_pattern, pos)
+        if start == -1:
+            break
+
+        parsed, end = try_parse_json_at(text, start)
+        if parsed and "tool_use" in parsed:
+            tool_data = parsed["tool_use"]
+            if isinstance(tool_data, dict) and "name" in tool_data and "input" in tool_data:
+                tool_calls.append({
+                    "name": tool_data["name"],
+                    "input": tool_data["input"],
+                })
+                found_ranges.append((start, end))
+                pos = end  # Continue searching after this match
+            else:
+                pos = start + 1
+        else:
+            pos = start + 1
+
+    # Remove found tool calls from text (in reverse order to preserve indices)
     remaining_text = text
+    for start, end in sorted(found_ranges, reverse=True):
+        remaining_text = remaining_text[:start] + remaining_text[end:]
 
-    # Look for {"tool_use": ...} pattern
-    pattern = r'\{"tool_use":\s*\{[^}]+\}\s*\}'
-    matches = re.finditer(pattern, text, re.DOTALL)
-
-    for match in matches:
-        try:
-            tool_json = json.loads(match.group())
-            if "tool_use" in tool_json:
-                tool_data = tool_json["tool_use"]
-                if "name" in tool_data and "input" in tool_data:
-                    tool_calls.append({
-                        "name": tool_data["name"],
-                        "input": tool_data["input"],
-                    })
-                    # Remove tool call from text
-                    remaining_text = remaining_text.replace(match.group(), "").strip()
-        except json.JSONDecodeError:
-            continue
-
-    return remaining_text, tool_calls
+    return remaining_text.strip(), tool_calls
 
 
 def messages_to_prompt(  # noqa: PLR0912, C901
@@ -203,6 +220,13 @@ async def stream_generation(  # noqa: C901, PLR0912
         )
         logger.debug(f"Submitted streaming generation: uid={uid}")
 
+        # Invalidate hot cache entry if we passed in a cache
+        # batch_engine clears the Q4 blocks after reconstruction, so the
+        # shared reference in hot_cache is now stale. Invalidating prevents
+        # unnecessary has_data checks on future loads (disk backup remains valid).
+        if cached_blocks is not None:
+            cache_store.invalidate_hot(agent_id)
+
         # Yield message_start event
         message_id = f"msg_{uuid.uuid4().hex[:24]}"
         yield {
@@ -302,8 +326,8 @@ async def stream_generation(  # noqa: C901, PLR0912
             content_block_index += 1
 
         # Save updated cache
-        if agent_id in batch_engine._agent_blocks:
-            updated_blocks = batch_engine._agent_blocks[agent_id]
+        updated_blocks = batch_engine.get_agent_blocks(agent_id)
+        if updated_blocks:
             cache_store.save(agent_id, updated_blocks)
 
         # Determine stop_reason
@@ -334,6 +358,11 @@ async def stream_generation(  # noqa: C901, PLR0912
             "data": json.dumps(MessageStopEvent().model_dump()),
         }
 
+    except asyncio.CancelledError:
+        # Client disconnected mid-stream - clean up gracefully
+        logger.info(f"Streaming cancelled for agent {agent_id} (client disconnect)")
+        # Don't yield anything - client is gone
+        raise  # Re-raise to properly cancel the coroutine
     except Exception as e:
         logger.error(f"Streaming error: {e}", exc_info=True)
         # Yield error event
@@ -362,9 +391,10 @@ async def create_message(request_body: MessagesRequest, request: Request):  # no
     logger.info(f"POST /v1/messages: model={request_body.model}, stream={request_body.stream}")
     logger.debug(f"Messages: {request_body.messages}")
 
-    # Get app dependencies
-    batch_engine: BlockPoolBatchEngine = request.app.state.semantic.batch_engine
-    cache_store: AgentCacheStore = request.app.state.semantic.cache_store
+    # Get app dependencies (with null check)
+    semantic_state = get_semantic_state(request)
+    batch_engine: BlockPoolBatchEngine = semantic_state.batch_engine
+    cache_store: AgentCacheStore = semantic_state.cache_store
 
     try:
         # 1. Convert messages to prompt (including tools if present)
@@ -376,9 +406,9 @@ async def create_message(request_body: MessagesRequest, request: Request):  # no
         logger.debug(f"Prompt length: {len(prompt)} chars")
         logger.debug(f"Full prompt:\n{prompt}")
 
-        # 2. Tokenize to get agent ID
-        tokenizer = batch_engine._tokenizer
-        tokens = tokenizer.encode(prompt)
+        # 2. Tokenize to get agent ID (run in executor to avoid blocking)
+        tokenizer = batch_engine.tokenizer
+        tokens = await asyncio.to_thread(tokenizer.encode, prompt)
         agent_id = generate_agent_id_from_tokens(tokens)
         logger.debug(f"Agent ID: {agent_id}, tokens: {len(tokens)}")
 
@@ -399,8 +429,9 @@ async def create_message(request_body: MessagesRequest, request: Request):  # no
                 )
             )
 
-        # 4. Submit to batch engine
-        uid = batch_engine.submit(
+        # 4. Submit to batch engine (run in executor to avoid blocking)
+        uid = await asyncio.to_thread(
+            batch_engine.submit,
             agent_id=agent_id,
             prompt=prompt,
             cache=cached_blocks,
@@ -408,16 +439,18 @@ async def create_message(request_body: MessagesRequest, request: Request):  # no
         )
         logger.debug(f"Submitted generation: uid={uid}")
 
-        # 5. Execute generation (step until complete)
-        completion = None
-        for result in batch_engine.step():
-            if result.uid == uid:
-                completion = result
-                logger.debug(
-                    f"Generation complete: {result.token_count} tokens, "
-                    f"finish_reason={result.finish_reason}"
-                )
-                break
+        # Invalidate hot cache entry if we passed in a cache
+        # batch_engine clears Q4 blocks after reconstruction
+        if cached_blocks is not None:
+            cache_store.invalidate_hot(agent_id)
+
+        # 5. Execute generation (step until complete - run in executor)
+        completion = await asyncio.to_thread(run_step_for_uid, batch_engine, uid)
+        if completion:
+            logger.debug(
+                f"Generation complete: {completion.token_count} tokens, "
+                f"finish_reason={completion.finish_reason}"
+            )
 
         if completion is None:
             raise HTTPException(
@@ -426,8 +459,8 @@ async def create_message(request_body: MessagesRequest, request: Request):  # no
             )
 
         # 6. Save updated cache
-        if agent_id in batch_engine._agent_blocks:
-            updated_blocks = batch_engine._agent_blocks[agent_id]
+        updated_blocks = batch_engine.get_agent_blocks(agent_id)
+        if updated_blocks:
             cache_store.save(agent_id, updated_blocks)
             logger.debug(f"Saved cache: {agent_id} ({updated_blocks.total_tokens} tokens)")
 
@@ -489,6 +522,12 @@ async def create_message(request_body: MessagesRequest, request: Request):  # no
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e),
         ) from e
+    except TimeoutError as e:
+        logger.error(f"Generation timeout: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            detail=f"Generation timed out: {e!s}",
+        ) from e
     except Exception as e:
         logger.error(f"Unexpected error: {e}", exc_info=True)
         raise HTTPException(
@@ -513,8 +552,9 @@ async def count_tokens(request_body: CountTokensRequest, request: Request) -> Co
     """
     logger.info(f"POST /v1/messages/count_tokens: model={request_body.model}")
 
-    # Get batch engine for tokenizer access
-    batch_engine: BlockPoolBatchEngine = request.app.state.semantic.batch_engine
+    # Get batch engine for tokenizer access (with null check)
+    semantic_state = get_semantic_state(request)
+    batch_engine: BlockPoolBatchEngine = semantic_state.batch_engine
 
     try:
         # Convert messages to prompt
@@ -527,9 +567,9 @@ async def count_tokens(request_body: CountTokensRequest, request: Request) -> Co
             )
             prompt = f"{tool_descriptions}\n\n{prompt}"
 
-        # Tokenize
-        tokenizer = batch_engine._tokenizer
-        tokens = tokenizer.encode(prompt)
+        # Tokenize (run in executor to avoid blocking)
+        tokenizer = batch_engine.tokenizer
+        tokens = await asyncio.to_thread(tokenizer.encode, prompt)
 
         logger.info(f"Token count: {len(tokens)}")
         return CountTokensResponse(input_tokens=len(tokens))

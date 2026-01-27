@@ -6,6 +6,7 @@ Returns 401 Unauthorized for invalid or missing keys.
 
 import logging
 import os
+import secrets
 from collections.abc import Callable
 from typing import ClassVar
 
@@ -43,16 +44,32 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
         """
         super().__init__(app)
         self._valid_keys = self._load_valid_keys()
+        self._auth_disabled = self._check_auth_disabled()
 
         if not self._valid_keys:
-            logger.warning(
-                "No ANTHROPIC_API_KEY configured - authentication disabled! "
-                "Set ANTHROPIC_API_KEY environment variable to enable."
-            )
+            if self._auth_disabled:
+                logger.warning(
+                    "Authentication explicitly disabled via SEMANTIC_AUTH_DISABLED=true. "
+                    "This is insecure and should only be used for local development."
+                )
+            else:
+                logger.error(
+                    "No ANTHROPIC_API_KEY configured and auth not explicitly disabled. "
+                    "Set ANTHROPIC_API_KEY or SEMANTIC_AUTH_DISABLED=true to start."
+                )
         else:
             logger.info(
                 f"Authentication enabled with {len(self._valid_keys)} valid key(s)"
             )
+
+    def _check_auth_disabled(self) -> bool:
+        """Check if authentication is explicitly disabled.
+
+        Returns:
+            True if SEMANTIC_AUTH_DISABLED=true (case-insensitive)
+        """
+        disabled = os.environ.get("SEMANTIC_AUTH_DISABLED", "").lower()
+        return disabled in ("true", "1", "yes")
 
     def _load_valid_keys(self) -> set[str]:
         """Load valid API keys from environment.
@@ -93,10 +110,25 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
         if request.url.path.startswith("/health/"):
             return await call_next(request)
 
-        # Skip authentication if no keys configured (development mode)
+        # Fail-closed: require auth unless explicitly disabled
         if not self._valid_keys:
-            logger.debug(f"{request.method} {request.url.path} - Auth disabled")
-            return await call_next(request)
+            if self._auth_disabled:
+                logger.debug(f"{request.method} {request.url.path} - Auth disabled")
+                return await call_next(request)
+            else:
+                logger.error(
+                    f"{request.method} {request.url.path} - Auth required but not configured"
+                )
+                return JSONResponse(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    content={
+                        "error": {
+                            "type": "configuration_error",
+                            "message": "Authentication not configured. "
+                            "Set ANTHROPIC_API_KEY or SEMANTIC_AUTH_DISABLED=true.",
+                        }
+                    },
+                )
 
         # Extract API key from header
         api_key = request.headers.get("x-api-key")
@@ -120,7 +152,7 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
                 },
             )
 
-        if api_key not in self._valid_keys:
+        if not any(secrets.compare_digest(api_key, valid_key) for valid_key in self._valid_keys):
             logger.warning(
                 f"{request.method} {request.url.path} - Invalid API key"
             )

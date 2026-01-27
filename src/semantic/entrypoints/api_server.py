@@ -31,7 +31,16 @@ from semantic.adapters.outbound.mlx_spec_extractor import get_extractor
 from semantic.adapters.outbound.safetensors_cache_adapter import SafetensorsCacheAdapter
 from semantic.application.agent_cache_store import AgentCacheStore, ModelTag
 from semantic.application.batch_engine import BlockPoolBatchEngine
-from semantic.domain.errors import SemanticError
+from semantic.domain.errors import (
+    AgentNotFoundError,
+    CacheCorruptionError,
+    CachePersistenceError,
+    GenerationError,
+    IncompatibleCacheError,
+    InvalidRequestError,
+    PoolExhaustedError,
+    SemanticError,
+)
 from semantic.domain.services import BlockPool
 from semantic.domain.value_objects import ModelCacheSpec
 
@@ -68,7 +77,7 @@ def _load_model_and_extract_spec(settings):
 
     # CRITICAL: Override tokenizer max length for long context support
     tokenizer_config = {
-        "model_max_length": 100000,  # 100K tokens (6x Claude CLI needs)
+        "model_max_length": settings.mlx.max_context_length,
         "truncation_side": "left",   # Keep recent tokens if needed
         "trust_remote_code": True,
     }
@@ -80,13 +89,14 @@ def _load_model_and_extract_spec(settings):
 
     # Verify tokenizer configuration applied
     actual_max = tokenizer.model_max_length
-    logger.info("tokenizer_configured", max_length=actual_max)
+    expected_max = settings.mlx.max_context_length
+    logger.info("tokenizer_configured", max_length=actual_max, expected=expected_max)
 
-    if actual_max < 100000:
+    if actual_max < expected_max:
         logger.warning(
             "tokenizer_limit_warning",
             actual=actual_max,
-            target=100000,
+            target=expected_max,
             message="Tokenizer max length less than target, requests may be truncated"
         )
 
@@ -97,8 +107,8 @@ def _load_model_and_extract_spec(settings):
     from dataclasses import replace
     model_spec = replace(
         base_spec,
-        kv_bits=settings.mlx.kv_bits if hasattr(settings.mlx, 'kv_bits') else 4,
-        kv_group_size=settings.mlx.kv_group_size if hasattr(settings.mlx, 'kv_group_size') else 64,
+        kv_bits=settings.mlx.kv_bits,
+        kv_group_size=settings.mlx.kv_group_size,
     )
 
     logger.info(
@@ -374,8 +384,8 @@ def _register_health_endpoints(app: FastAPI):
         # Update metrics
         pool_utilization_ratio.set(utilization)
         cache_store = app.state.semantic.cache_store if hasattr(app.state, "semantic") else None
-        if cache_store and hasattr(cache_store, '_hot_agents'):
-            agents_active.set(len(cache_store._hot_agents))
+        if cache_store:
+            agents_active.set(len(cache_store._hot_cache))
 
         if utilization > POOL_UTILIZATION_THRESHOLD:
             response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
@@ -411,6 +421,94 @@ def _register_metrics_endpoint(app: FastAPI):
         )
 
 
+def _is_openai_request(request: Request) -> bool:
+    """Check if request is to OpenAI-style endpoint."""
+    return "/chat/completions" in request.url.path
+
+
+def _is_anthropic_request(request: Request) -> bool:
+    """Check if request is to Anthropic-style endpoint."""
+    path = request.url.path
+    return "/messages" in path and "/chat/completions" not in path
+
+
+def _format_error_response(
+    request: Request,
+    status_code: int,
+    error_type: str,
+    message: str,
+) -> JSONResponse:
+    """Format error response according to API type (OpenAI/Anthropic/default).
+
+    Args:
+        request: The HTTP request
+        status_code: HTTP status code
+        error_type: Error type string
+        message: Error message
+
+    Returns:
+        JSONResponse with properly formatted error
+    """
+    if _is_openai_request(request):
+        # OpenAI format: {"error": {"message": ..., "type": ..., "param": null, "code": null}}
+        content = {
+            "error": {
+                "message": message,
+                "type": error_type,
+                "param": None,
+                "code": None,
+            }
+        }
+    elif _is_anthropic_request(request):
+        # Anthropic format: {"type": "error", "error": {"type": ..., "message": ...}}
+        content = {
+            "type": "error",
+            "error": {
+                "type": error_type,
+                "message": message,
+            }
+        }
+    else:
+        # Default format for other endpoints
+        content = {
+            "error": {
+                "type": error_type,
+                "message": message,
+            }
+        }
+
+    return JSONResponse(status_code=status_code, content=content)
+
+
+def _get_semantic_error_details(exc: SemanticError) -> tuple[int, str]:
+    """Get HTTP status code and error type for SemanticError subclasses.
+
+    Args:
+        exc: The SemanticError instance
+
+    Returns:
+        Tuple of (status_code, error_type)
+    """
+    # Map specific error types to appropriate HTTP status codes
+    if isinstance(exc, PoolExhaustedError):
+        return status.HTTP_503_SERVICE_UNAVAILABLE, "overloaded_error"
+    elif isinstance(exc, AgentNotFoundError):
+        return status.HTTP_404_NOT_FOUND, "not_found_error"
+    elif isinstance(exc, InvalidRequestError):
+        return status.HTTP_400_BAD_REQUEST, "invalid_request_error"
+    elif isinstance(exc, CacheCorruptionError):
+        return status.HTTP_500_INTERNAL_SERVER_ERROR, "api_error"
+    elif isinstance(exc, CachePersistenceError):
+        return status.HTTP_500_INTERNAL_SERVER_ERROR, "api_error"
+    elif isinstance(exc, IncompatibleCacheError):
+        return status.HTTP_409_CONFLICT, "invalid_request_error"
+    elif isinstance(exc, GenerationError):
+        return status.HTTP_500_INTERNAL_SERVER_ERROR, "api_error"
+    else:
+        # Default for unknown SemanticError subclasses
+        return status.HTTP_400_BAD_REQUEST, "invalid_request_error"
+
+
 def _register_error_handlers(app: FastAPI):
     """Register error handlers for exceptions.
 
@@ -420,34 +518,37 @@ def _register_error_handlers(app: FastAPI):
     logger = structlog.get_logger(__name__)
 
     @app.exception_handler(SemanticError)
-    async def semantic_error_handler(_request: Request, exc: SemanticError):
-        """Handle domain errors."""
+    async def semantic_error_handler(request: Request, exc: SemanticError):
+        """Handle domain errors with appropriate status codes and API format."""
+        status_code, error_type = _get_semantic_error_details(exc)
         logger.error(
             "domain_error",
             error_type=exc.__class__.__name__,
+            http_status=status_code,
             message=str(exc),
             exc_info=True
         )
-        return JSONResponse(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            content={"error": exc.__class__.__name__, "message": str(exc)},
-        )
+        return _format_error_response(request, status_code, error_type, str(exc))
 
     @app.exception_handler(RequestValidationError)
-    async def validation_error_handler(_request: Request, exc: RequestValidationError):
+    async def validation_error_handler(request: Request, exc: RequestValidationError):
         """Handle request validation errors."""
         logger.warning("validation_error", error=str(exc))
-        errors = [
-            {"loc": error["loc"], "msg": error["msg"], "type": error["type"]}
-            for error in exc.errors()
-        ]
-        return JSONResponse(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            content={"error": "ValidationError", "details": errors},
+        # Format validation errors into a readable message
+        error_messages = []
+        for error in exc.errors():
+            loc = ".".join(str(part) for part in error["loc"])
+            error_messages.append(f"{loc}: {error['msg']}")
+        message = "; ".join(error_messages)
+        return _format_error_response(
+            request,
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "invalid_request_error",
+            message,
         )
 
     @app.exception_handler(Exception)
-    async def general_error_handler(_request: Request, exc: Exception):
+    async def general_error_handler(request: Request, exc: Exception):
         """Handle unexpected errors."""
         logger.error(
             "unexpected_error",
@@ -455,9 +556,11 @@ def _register_error_handlers(app: FastAPI):
             message=str(exc),
             exc_info=True
         )
-        return JSONResponse(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            content={"error": "InternalServerError", "message": "An unexpected error occurred"},
+        return _format_error_response(
+            request,
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            "api_error",
+            "An internal error occurred",
         )
 
 
@@ -508,7 +611,8 @@ def create_app() -> FastAPI:
     settings = get_settings()
 
     # Initialize structured logging
-    json_output = settings.server.log_level == "PRODUCTION"
+    # Use JSON output for non-DEBUG levels (production-like environments)
+    json_output = settings.server.log_level not in ("DEBUG",)
     configure_logging(log_level=settings.server.log_level, json_output=json_output)
 
     logger = structlog.get_logger(__name__)

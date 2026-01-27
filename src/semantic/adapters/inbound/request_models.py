@@ -222,11 +222,18 @@ class MessageStopEvent(BaseModel):
 class OpenAIChatMessage(BaseModel):
     """Message in OpenAI chat format."""
 
+    model_config = {"extra": "ignore"}
+
     role: Literal["system", "user", "assistant", "tool"]
     content: str | None = None
     name: str | None = None
     tool_calls: list[dict[str, Any]] | None = None
     tool_call_id: str | None = None
+
+    def model_dump(self, **kwargs: Any) -> dict[str, Any]:
+        """Override to exclude None values by default for OpenAI compatibility."""
+        kwargs.setdefault("exclude_none", True)
+        return super().model_dump(**kwargs)
 
 
 class OpenAITool(BaseModel):

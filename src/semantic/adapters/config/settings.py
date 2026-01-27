@@ -1,7 +1,9 @@
 """Configuration management using Pydantic Settings."""
 
 
-from pydantic import Field, SecretStr
+from typing import Literal
+
+from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from semantic.domain.entities import BLOCK_SIZE_TOKENS
@@ -76,10 +78,31 @@ class MLXSettings(BaseSettings):
 
     kv_bits: int | None = Field(
         default=4,
-        ge=4,
-        le=8,
         description="KV cache quantization (4 or 8 bits, None = FP16)",
     )
+
+    kv_group_size: int = Field(
+        default=64,
+        ge=16,
+        le=256,
+        description="KV cache quantization group size (must be power of 2)",
+    )
+
+    @field_validator("kv_bits")
+    @classmethod
+    def validate_kv_bits(cls, v: int | None) -> int | None:
+        """Validate kv_bits is 4, 8, or None."""
+        if v is not None and v not in (4, 8):
+            raise ValueError("kv_bits must be 4, 8, or None (FP16)")
+        return v
+
+    @field_validator("kv_group_size")
+    @classmethod
+    def validate_kv_group_size(cls, v: int) -> int:
+        """Validate kv_group_size is a power of 2."""
+        if v & (v - 1) != 0:
+            raise ValueError("kv_group_size must be a power of 2")
+        return v
 
     block_tokens: int = Field(
         default=BLOCK_SIZE_TOKENS,
@@ -204,7 +227,7 @@ class ServerSettings(BaseSettings):
         description="Maximum global requests per minute",
     )
 
-    log_level: str = Field(
+    log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = Field(
         default="INFO",
         description="Log level (DEBUG, INFO, WARNING, ERROR, CRITICAL)",
     )

@@ -11,11 +11,21 @@ from structlog.typing import EventDict, WrappedLogger
 
 def configure_logging(log_level: str = "INFO", json_output: bool = True) -> None:
     """Configure structured logging."""
+    # Validate log level before using getattr (avoids AttributeError crash)
+    valid_levels = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
+    normalized_level = log_level.upper()
+    if normalized_level not in valid_levels:
+        logging.warning(
+            f"Invalid log level '{log_level}', defaulting to INFO. "
+            f"Valid levels: {', '.join(sorted(valid_levels))}"
+        )
+        normalized_level = "INFO"
+
     # Configure stdlib logging
     logging.basicConfig(
         format="%(message)s",
         stream=sys.stdout,
-        level=getattr(logging, log_level.upper()),
+        level=getattr(logging, normalized_level),
     )
 
     # Configure structlog
@@ -42,7 +52,7 @@ def configure_logging(log_level: str = "INFO", json_output: bool = True) -> None
     structlog.configure(
         processors=processors,
         wrapper_class=structlog.make_filtering_bound_logger(
-            getattr(logging, log_level.upper())
+            getattr(logging, normalized_level)
         ),
         context_class=dict,
         logger_factory=structlog.PrintLoggerFactory(),

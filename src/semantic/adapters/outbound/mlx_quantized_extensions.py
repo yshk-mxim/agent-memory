@@ -106,14 +106,33 @@ class BatchQuantizedKVCache:
             k_q, k_s, k_z = c.keys
             v_q, v_s, v_z = c.values
 
-            keys_quant[i:i+1, :, p:p+c.offset, :] = k_q[..., :c.offset, :]
-            values_quant[i:i+1, :, p:p+c.offset, :] = v_q[..., :c.offset, :]
+            # Validate source tensor bounds before slicing
+            source_len = k_q.shape[-2] if len(k_q.shape) >= 3 else k_q.shape[-1]
+            if c.offset > source_len:
+                logger.warning(
+                    f"[Q4 MERGE] Cache {i} offset ({c.offset}) > tensor size ({source_len}), "
+                    f"clamping to tensor size"
+                )
+                actual_offset = source_len
+            else:
+                actual_offset = c.offset
 
-            keys_scales[i:i+1, :, p:p+c.offset, :] = k_s[..., :c.offset, :]
-            values_scales[i:i+1, :, p:p+c.offset, :] = v_s[..., :c.offset, :]
+            # Validate destination bounds
+            dest_end = p + actual_offset
+            if dest_end > max_length:
+                raise ValueError(
+                    f"Merge bounds error: cache {i} would write to position {dest_end} "
+                    f"but max_length is {max_length}"
+                )
 
-            keys_zeros[i:i+1, :, p:p+c.offset, :] = k_z[..., :c.offset, :]
-            values_zeros[i:i+1, :, p:p+c.offset, :] = v_z[..., :c.offset, :]
+            keys_quant[i:i+1, :, p:dest_end, :] = k_q[..., :actual_offset, :]
+            values_quant[i:i+1, :, p:dest_end, :] = v_q[..., :actual_offset, :]
+
+            keys_scales[i:i+1, :, p:dest_end, :] = k_s[..., :actual_offset, :]
+            values_scales[i:i+1, :, p:dest_end, :] = v_s[..., :actual_offset, :]
+
+            keys_zeros[i:i+1, :, p:dest_end, :] = k_z[..., :actual_offset, :]
+            values_zeros[i:i+1, :, p:dest_end, :] = v_z[..., :actual_offset, :]
 
         # CRITICAL: Force evaluation to prevent lazy graph accumulation
         # Without this, MLX builds a deferred computation graph that
@@ -221,6 +240,12 @@ class BatchQuantizedKVCache:
         for i in range(len(self.keys)):
             self.keys[i][..., prev:self.offset, :] = q_keys[i]
             self.values[i][..., prev:self.offset, :] = q_values[i]
+
+        # CRITICAL: Force evaluation after in-place updates to prevent lazy graph accumulation
+        # Without this, MLX builds deferred computation graphs that hold ALL intermediate
+        # tensors in memory during long generation sessions → OOM
+        mx.eval(self.keys[0], self.keys[1], self.keys[2],
+                self.values[0], self.values[1], self.values[2])
 
         # Return trimmed cache up to current offset
         from mlx.utils import tree_map
@@ -399,6 +424,18 @@ class BatchQuantizedKVCache:
         """
         return self.keys is None
 
+    def size(self) -> int:
+        """Return current sequence length in the cache.
+
+        CRITICAL: BatchGenerator uses this to determine cache hit vs miss.
+        If this returns 0, BatchGenerator treats it as empty and passes
+        the FULL prompt through, causing shape mismatch errors.
+
+        Returns:
+            Number of tokens currently in cache (self.offset)
+        """
+        return self.offset
+
     @property
     def state(self) -> tuple[Any, Any]:
         """Get cache state as (keys, values) tuple."""
@@ -430,6 +467,23 @@ def add_quantized_merge_method():
         QuantizedKVCache.merge = merge
 
         logger.info("[Q4 EXT] Added QuantizedKVCache.merge() successfully")
+
+        # CRITICAL FIX: Add size() method to QuantizedKVCache
+        # MLX's QuantizedKVCache inherits from _BaseCache which returns 0 for size()
+        # This breaks BatchGenerator's cache continuation logic - it can't tell
+        # the difference between a 19K token cache hit and a cold start!
+        def size(self) -> int:
+            """Return actual sequence length (offset), not buffer capacity."""
+            return self.offset
+
+        # Only patch if size() is missing or returns 0 for a non-empty cache
+        test_cache = QuantizedKVCache()
+        test_cache.offset = 100
+        if not hasattr(QuantizedKVCache, 'size') or test_cache.size() == 0:
+            QuantizedKVCache.size = size
+            logger.info("[Q4 EXT] Added QuantizedKVCache.size() method (returns offset)")
+        else:
+            logger.debug("[Q4 EXT] QuantizedKVCache.size() already works correctly")
 
     except ImportError as e:
         logger.warning(f"[Q4 EXT] Could not import QuantizedKVCache: {e}")

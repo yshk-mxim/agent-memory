@@ -6,11 +6,11 @@ Implements the OpenAI Chat Completions API with:
 - Session ID extension for persistent caching
 """
 
+import asyncio
 import contextlib
 import hashlib
 import json
 import logging
-import re
 import time
 import uuid
 from collections.abc import AsyncIterator
@@ -19,6 +19,11 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request, status
 from sse_starlette.sse import EventSourceResponse
 
+from semantic.adapters.inbound.adapter_helpers import (
+    get_semantic_state,
+    run_step_for_uid,
+    try_parse_json_at,
+)
 from semantic.adapters.inbound.request_models import (
     ChatCompletionsRequest,
     ChatCompletionsResponse,
@@ -60,6 +65,8 @@ def parse_function_calls(text: str) -> tuple[str, list[dict[str, Any]]]:
     Looks for JSON patterns like:
     {"function_call": {"name": "get_weather", "arguments": {"location": "Paris"}}}
 
+    Uses proper JSON parsing instead of regex to handle nested objects.
+
     Args:
         text: Model generated text
 
@@ -68,35 +75,45 @@ def parse_function_calls(text: str) -> tuple[str, list[dict[str, Any]]]:
         Function call dict contains: {"name": str, "arguments": dict or str}
     """
     function_calls = []
+    found_ranges = []  # Track (start, end) ranges to remove
+
+    # Find all potential JSON start positions with "function_call" key
+    search_pattern = '{"function_call"'
+    pos = 0
+
+    while True:
+        start = text.find(search_pattern, pos)
+        if start == -1:
+            break
+
+        parsed, end = try_parse_json_at(text, start)
+        if parsed and "function_call" in parsed:
+            func_data = parsed["function_call"]
+            if isinstance(func_data, dict) and "name" in func_data and "arguments" in func_data:
+                # Arguments might be a dict or a JSON string
+                arguments = func_data["arguments"]
+                if isinstance(arguments, str):
+                    # Try to parse as JSON, leave as string if fails
+                    with contextlib.suppress(json.JSONDecodeError):
+                        arguments = json.loads(arguments)
+
+                function_calls.append({
+                    "name": func_data["name"],
+                    "arguments": arguments,
+                })
+                found_ranges.append((start, end))
+                pos = end  # Continue searching after this match
+            else:
+                pos = start + 1
+        else:
+            pos = start + 1
+
+    # Remove found function calls from text (in reverse order to preserve indices)
     remaining_text = text
+    for start, end in sorted(found_ranges, reverse=True):
+        remaining_text = remaining_text[:start] + remaining_text[end:]
 
-    # Look for {"function_call": ...} pattern
-    pattern = r'\{"function_call":\s*\{[^}]+\}\s*\}'
-    matches = re.finditer(pattern, text, re.DOTALL)
-
-    for match in matches:
-        try:
-            func_json = json.loads(match.group())
-            if "function_call" in func_json:
-                func_data = func_json["function_call"]
-                if "name" in func_data and "arguments" in func_data:
-                    # Arguments might be a dict or a JSON string
-                    arguments = func_data["arguments"]
-                    if isinstance(arguments, str):
-                        # Try to parse as JSON, leave as string if fails
-                        with contextlib.suppress(json.JSONDecodeError):
-                            arguments = json.loads(arguments)
-
-                    function_calls.append({
-                        "name": func_data["name"],
-                        "arguments": arguments,
-                    })
-                    # Remove function call from text
-                    remaining_text = remaining_text.replace(match.group(), "").strip()
-        except json.JSONDecodeError:
-            continue
-
-    return remaining_text, function_calls
+    return remaining_text.strip(), function_calls
 
 
 def openai_messages_to_prompt(  # noqa: C901, PLR0912
@@ -184,6 +201,11 @@ async def stream_chat_completion(  # noqa: C901, PLR0912
             max_tokens=max_tokens,
         )
         logger.debug(f"Submitted streaming generation: uid={uid}")
+
+        # Invalidate hot cache entry if we passed in a cache
+        # batch_engine clears Q4 blocks after reconstruction
+        if cached_blocks is not None:
+            cache_store.invalidate_hot(agent_id)
 
         completion_id = f"chatcmpl-{uuid.uuid4().hex[:24]}"
         created_timestamp = int(time.time())
@@ -273,8 +295,8 @@ async def stream_chat_completion(  # noqa: C901, PLR0912
                 }
 
         # Save updated cache
-        if agent_id in batch_engine._agent_blocks:
-            updated_blocks = batch_engine._agent_blocks[agent_id]
+        updated_blocks = batch_engine.get_agent_blocks(agent_id)
+        if updated_blocks:
             cache_store.save(agent_id, updated_blocks)
             logger.debug(f"Saved cache: {agent_id} ({updated_blocks.total_tokens} tokens)")
 
@@ -309,14 +331,22 @@ async def stream_chat_completion(  # noqa: C901, PLR0912
             f"finish_reason={finish_reason}"
         )
 
+    except asyncio.CancelledError:
+        # Client disconnected mid-stream - clean up gracefully
+        logger.info(f"Streaming cancelled for agent {agent_id} (client disconnect)")
+        # Don't yield anything - client is gone
+        raise  # Re-raise to properly cancel the coroutine
     except Exception as e:
         logger.error(f"Streaming error: {e}", exc_info=True)
-        # Yield error event
+        # Yield error event with proper SSE format
+        # OpenAI format: errors are JSON objects in data field
         yield {
+            "event": "error",
             "data": json.dumps({
                 "error": {
                     "message": str(e),
                     "type": "server_error",
+                    "code": "internal_error",
                 }
             })
         }
@@ -345,9 +375,10 @@ async def create_chat_completion(  # noqa: C901, PLR0912, PLR0915
     )
     logger.debug(f"Messages: {request_body.messages}")
 
-    # Get app dependencies
-    batch_engine: BlockPoolBatchEngine = request.app.state.semantic.batch_engine
-    cache_store: AgentCacheStore = request.app.state.semantic.cache_store
+    # Get app dependencies (with null check)
+    semantic_state = get_semantic_state(request)
+    batch_engine: BlockPoolBatchEngine = semantic_state.batch_engine
+    cache_store: AgentCacheStore = semantic_state.cache_store
 
     try:
         # 1. Convert OpenAI messages to prompt (including tools if present)
@@ -358,9 +389,9 @@ async def create_chat_completion(  # noqa: C901, PLR0912, PLR0915
         logger.debug(f"Prompt length: {len(prompt)} chars")
         logger.debug(f"Full prompt:\n{prompt}")
 
-        # 2. Tokenize to get agent ID
-        tokenizer = batch_engine._tokenizer
-        tokens = tokenizer.encode(prompt)
+        # 2. Tokenize to get agent ID (run in executor to avoid blocking)
+        tokenizer = batch_engine.tokenizer
+        tokens = await asyncio.to_thread(tokenizer.encode, prompt)
 
         # Check for session_id in request body or X-Session-ID header
         session_id = request_body.session_id or request.headers.get("X-Session-ID")
@@ -384,9 +415,10 @@ async def create_chat_completion(  # noqa: C901, PLR0912, PLR0915
                 )
             )
 
-        # 5. Submit to batch engine (non-streaming)
+        # 5. Submit to batch engine (non-streaming, run in executor)
         max_tokens = request_body.max_tokens or 256  # Default if not specified
-        uid = batch_engine.submit(
+        uid = await asyncio.to_thread(
+            batch_engine.submit,
             agent_id=agent_id,
             prompt=prompt,
             cache=cached_blocks,
@@ -394,16 +426,18 @@ async def create_chat_completion(  # noqa: C901, PLR0912, PLR0915
         )
         logger.debug(f"Submitted generation: uid={uid}")
 
-        # 6. Execute generation (step until complete)
-        completion = None
-        for result in batch_engine.step():
-            if result.uid == uid:
-                completion = result
-                logger.debug(
-                    f"Generation complete: {result.token_count} tokens, "
-                    f"finish_reason={result.finish_reason}"
-                )
-                break
+        # Invalidate hot cache entry if we passed in a cache
+        # batch_engine clears Q4 blocks after reconstruction
+        if cached_blocks is not None:
+            cache_store.invalidate_hot(agent_id)
+
+        # 6. Execute generation (step until complete - run in executor)
+        completion = await asyncio.to_thread(run_step_for_uid, batch_engine, uid)
+        if completion:
+            logger.debug(
+                f"Generation complete: {completion.token_count} tokens, "
+                f"finish_reason={completion.finish_reason}"
+            )
 
         if completion is None:
             raise HTTPException(
@@ -412,8 +446,8 @@ async def create_chat_completion(  # noqa: C901, PLR0912, PLR0915
             )
 
         # 7. Save updated cache
-        if agent_id in batch_engine._agent_blocks:
-            updated_blocks = batch_engine._agent_blocks[agent_id]
+        updated_blocks = batch_engine.get_agent_blocks(agent_id)
+        if updated_blocks:
             cache_store.save(agent_id, updated_blocks)
             logger.debug(f"Saved cache: {agent_id} ({updated_blocks.total_tokens} tokens)")
 
@@ -490,6 +524,12 @@ async def create_chat_completion(  # noqa: C901, PLR0912, PLR0915
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e),
+        ) from e
+    except TimeoutError as e:
+        logger.error(f"Generation timeout: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            detail=f"Generation timed out: {e!s}",
         ) from e
     except Exception as e:
         logger.error(f"Unexpected error: {e}", exc_info=True)

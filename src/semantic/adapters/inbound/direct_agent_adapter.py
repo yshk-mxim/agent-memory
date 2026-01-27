@@ -7,11 +7,17 @@ Provides low-level CRUD operations for agent cache management:
 - Delete agents
 """
 
+import asyncio
 import logging
 import uuid
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request, status
 
+from semantic.adapters.inbound.adapter_helpers import (
+    get_semantic_state,
+    run_step_for_uid,
+)
 from semantic.adapters.inbound.request_models import (
     AgentResponse,
     CreateAgentRequest,
@@ -44,8 +50,9 @@ async def create_agent(request_body: CreateAgentRequest, request: Request) -> Ag
     Raises:
         HTTPException: On creation errors
     """
-    # Get app dependencies
-    cache_store: AgentCacheStore = request.app.state.semantic.cache_store
+    # Get app dependencies (with null check)
+    semantic_state = get_semantic_state(request)
+    cache_store: AgentCacheStore = semantic_state.cache_store
 
     try:
         # Generate or use provided agent ID
@@ -98,8 +105,9 @@ async def get_agent(agent_id: str, request: Request) -> AgentResponse:
     """
     logger.info(f"GET /v1/agents/{agent_id}")
 
-    # Get app dependencies
-    cache_store: AgentCacheStore = request.app.state.semantic.cache_store
+    # Get app dependencies (with null check)
+    semantic_state = get_semantic_state(request)
+    cache_store: AgentCacheStore = semantic_state.cache_store
 
     try:
         # Load agent cache
@@ -148,9 +156,10 @@ async def generate(
     """
     logger.info(f"POST /v1/agents/{agent_id}/generate: {len(request_body.prompt)} chars")
 
-    # Get app dependencies
-    batch_engine: BlockPoolBatchEngine = request.app.state.semantic.batch_engine
-    cache_store: AgentCacheStore = request.app.state.semantic.cache_store
+    # Get app dependencies (with null check)
+    semantic_state = get_semantic_state(request)
+    batch_engine: BlockPoolBatchEngine = semantic_state.batch_engine
+    cache_store: AgentCacheStore = semantic_state.cache_store
 
     try:
         # Load agent cache (may be empty for new agent)
@@ -160,8 +169,9 @@ async def generate(
         else:
             logger.info(f"New agent or cache miss: {agent_id}")
 
-        # Submit to batch engine
-        uid = batch_engine.submit(
+        # Submit to batch engine (run in executor to avoid blocking)
+        uid = await asyncio.to_thread(
+            batch_engine.submit,
             agent_id=agent_id,
             prompt=request_body.prompt,
             cache=cached_blocks,
@@ -169,16 +179,18 @@ async def generate(
         )
         logger.debug(f"Submitted generation: uid={uid}")
 
-        # Execute generation
-        completion = None
-        for result in batch_engine.step():
-            if result.uid == uid:
-                completion = result
-                logger.debug(
-                    f"Generation complete: {result.token_count} tokens, "
-                    f"finish_reason={result.finish_reason}"
-                )
-                break
+        # Invalidate hot cache entry if we passed in a cache
+        # batch_engine clears Q4 blocks after reconstruction
+        if cached_blocks is not None:
+            cache_store.invalidate_hot(agent_id)
+
+        # Execute generation (run in executor to avoid blocking)
+        completion = await asyncio.to_thread(run_step_for_uid, batch_engine, uid)
+        if completion:
+            logger.debug(
+                f"Generation complete: {completion.token_count} tokens, "
+                f"finish_reason={completion.finish_reason}"
+            )
 
         if completion is None:
             raise HTTPException(
@@ -187,21 +199,18 @@ async def generate(
             )
 
         # Save updated cache
-        if agent_id in batch_engine._agent_blocks:
-            updated_blocks = batch_engine._agent_blocks[agent_id]
+        updated_blocks = batch_engine.get_agent_blocks(agent_id)
+        if updated_blocks:
             cache_store.save(agent_id, updated_blocks)
             logger.debug(f"Saved cache: {agent_id} ({updated_blocks.total_tokens} tokens)")
 
         # Return response
+        agent_blocks_for_size = batch_engine.get_agent_blocks(agent_id)
         response = GenerateResponse(
             text=completion.text,
             tokens_generated=completion.token_count,
             finish_reason=completion.finish_reason,
-            cache_size_tokens=(
-                batch_engine._agent_blocks[agent_id].total_tokens
-                if agent_id in batch_engine._agent_blocks
-                else 0
-            ),
+            cache_size_tokens=agent_blocks_for_size.total_tokens if agent_blocks_for_size else 0,
         )
 
         logger.info(f"Response: {response.tokens_generated} tokens generated")
@@ -218,6 +227,12 @@ async def generate(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e),
+        ) from e
+    except TimeoutError as e:
+        logger.error(f"Generation timeout: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            detail=f"Generation timed out: {e!s}",
         ) from e
     except Exception as e:
         logger.error(f"Generation error: {e}", exc_info=True)
@@ -245,9 +260,10 @@ async def delete_agent(agent_id: str, request: Request):
     """
     logger.info(f"DELETE /v1/agents/{agent_id}")
 
-    # Get app dependencies
-    cache_store: AgentCacheStore = request.app.state.semantic.cache_store
-    batch_engine: BlockPoolBatchEngine = request.app.state.semantic.batch_engine
+    # Get app dependencies (with null check)
+    semantic_state = get_semantic_state(request)
+    cache_store: AgentCacheStore = semantic_state.cache_store
+    batch_engine: BlockPoolBatchEngine = semantic_state.batch_engine
 
     try:
         # Check if agent exists
@@ -258,9 +274,15 @@ async def delete_agent(agent_id: str, request: Request):
                 detail=f"Agent {agent_id} not found",
             )
 
+        # CRITICAL: Free pool blocks BEFORE removing from tracking
+        # Old code just deleted from dict, leaking pool blocks
+        block_pool = semantic_state.block_pool
+        freed_count = block_pool.free_agent_blocks(agent_id)
+        if freed_count > 0:
+            logger.info(f"Freed {freed_count} pool blocks for agent {agent_id}")
+
         # Remove from batch engine's active agents
-        if agent_id in batch_engine._agent_blocks:
-            del batch_engine._agent_blocks[agent_id]
+        if batch_engine.remove_agent_blocks(agent_id):
             logger.debug(f"Removed {agent_id} from batch engine")
 
         # Delete from cache store (memory and disk)

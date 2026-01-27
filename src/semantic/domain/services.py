@@ -206,9 +206,8 @@ class BlockPool:
                         f"Block {block.block_id} does not belong to agent {agent_id}"
                     )
 
-                # Clear layer_data to free memory
-                if hasattr(block, 'layer_data'):
-                    block.layer_data = None
+                # Clear layer_data to free memory (KVBlock always has this attribute)
+                block.layer_data = None
 
                 # Return to free list
                 self.free_list.append(block.block_id)
@@ -250,9 +249,8 @@ class BlockPool:
             for block_id in block_ids:
                 if block_id in self.allocated_blocks:
                     block = self.allocated_blocks[block_id]
-                    # Clear layer_data to free memory
-                    if hasattr(block, 'layer_data'):
-                        block.layer_data = None
+                    # Clear layer_data to free memory (KVBlock always has this attribute)
+                    block.layer_data = None
                     self.free_list.append(block_id)
                     del self.allocated_blocks[block_id]
                     freed_count += 1
@@ -383,20 +381,32 @@ class BlockPool:
 
         Args:
             tokens_per_agent: Estimated tokens per agent (default: 1 block).
+                Must be > 0.
 
         Returns:
             Maximum concurrent agents.
+
+        Raises:
+            BlockOperationError: If tokens_per_agent <= 0.
 
         Example:
             >>> pool = BlockPool(spec, total_blocks=1000)
             >>> pool.max_batch_size(tokens_per_agent=512)
             500  # 1000 blocks / 2 blocks per agent
         """
+        if tokens_per_agent <= 0:
+            raise BlockOperationError(
+                f"tokens_per_agent must be > 0, got {tokens_per_agent}"
+            )
+
+        # Ceiling division: how many blocks needed for this many tokens
         blocks_per_agent = (tokens_per_agent + self.block_tokens - 1) // self.block_tokens
-        if blocks_per_agent == 0:
-            return self.total_blocks  # Edge case: very small contexts
 
         # Account for multi-layer allocation (each agent needs blocks at all layers)
-        blocks_per_agent *= self.spec.n_layers
+        blocks_per_agent_total = blocks_per_agent * self.spec.n_layers
 
-        return self.total_blocks // blocks_per_agent if blocks_per_agent > 0 else 0
+        if blocks_per_agent_total == 0:
+            # Should not happen with tokens_per_agent > 0, but guard anyway
+            return self.total_blocks
+
+        return self.total_blocks // blocks_per_agent_total

@@ -6,7 +6,9 @@ Usage:
 """
 
 import logging
+import signal
 import sys
+from typing import Any
 
 import typer
 import uvicorn
@@ -28,12 +30,45 @@ def setup_logging(log_level: str) -> None:
     Args:
         log_level: Log level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
     """
+    # Validate log level to avoid AttributeError
+    valid_levels = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
+    normalized_level = log_level.upper()
+    if normalized_level not in valid_levels:
+        logging.warning(f"Invalid log level '{log_level}', defaulting to INFO")
+        normalized_level = "INFO"
+
     logging.basicConfig(
-        level=getattr(logging, log_level.upper()),
+        level=getattr(logging, normalized_level),
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
         stream=sys.stdout,
     )
+
+
+def setup_signal_handlers(logger: Any) -> None:
+    """Setup signal handlers for graceful shutdown.
+
+    Args:
+        logger: Logger instance for shutdown messages
+    """
+    def handle_shutdown(signum: int, frame: Any) -> None:
+        """Handle shutdown signals gracefully."""
+        sig_name = signal.Signals(signum).name
+        logger.info(f"Received {sig_name}, initiating graceful shutdown...")
+        # Uvicorn handles SIGINT/SIGTERM internally, but we log for visibility
+        # The actual cleanup happens in FastAPI's lifespan context manager
+        sys.exit(0)
+
+    # Register handlers for common shutdown signals
+    signal.signal(signal.SIGINT, handle_shutdown)
+    signal.signal(signal.SIGTERM, handle_shutdown)
+
+    # SIGHUP for config reload (Unix only)
+    if hasattr(signal, 'SIGHUP'):
+        def handle_reload(signum: int, frame: Any) -> None:
+            logger.info("Received SIGHUP - config reload not implemented yet")
+
+        signal.signal(signal.SIGHUP, handle_reload)
 
 
 @app.command()
@@ -98,6 +133,9 @@ def serve(
     # Setup logging
     setup_logging(final_log_level)
     logger = logging.getLogger(__name__)
+
+    # Setup signal handlers for graceful shutdown
+    setup_signal_handlers(logger)
 
     logger.info("=" * 60)
     logger.info("Semantic Caching Server")

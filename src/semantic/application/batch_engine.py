@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import threading
 import time
 from collections.abc import Callable, Iterator
 from typing import TYPE_CHECKING, Any
@@ -88,7 +89,6 @@ class BlockPoolBatchEngine:
         batch_gen_factory: Callable[[Any, Any], Any] | None = None,  # For testing
     ) -> None:
         """Initialize batch engine."""
-        # 1. Validate inputs
         if model is None:
             raise ModelNotFoundError("Model must be loaded before creating engine")
         if tokenizer is None:
@@ -100,7 +100,6 @@ class BlockPoolBatchEngine:
         if cache_adapter is None:
             raise InvalidRequestError("CacheAdapter is required")
 
-        # 2. Store dependencies
         self._model = model
         self._tokenizer = tokenizer
         self._pool = pool
@@ -108,19 +107,13 @@ class BlockPoolBatchEngine:
         self._cache_adapter = cache_adapter
         self._batch_gen_factory = batch_gen_factory
 
-        # 3. Initialize batch generator (lazy - created on first submit)
-        self._batch_gen: Any | None = None
-
-        # 4. Track active requests (UID → (agent_id, accumulated_tokens))
+        self._batch_gen: Any | None = None  # Lazy - created on first submit
+        self._lock = threading.RLock()
         self._active_requests: dict[str, tuple[str, list[int]]] = {}
-
-        # 5. Track agent blocks (agent_id → AgentBlocks)
         self._agent_blocks: dict[str, AgentBlocks] = {}
-
-        # 6. Draining state (prevents new requests during graceful shutdown)
         self._draining: bool = False
 
-        # 7. Chunked prefill settings (loaded lazily from settings module)
+        # Chunked prefill settings (loaded lazily)
         self._chunked_prefill_enabled: bool | None = None
         self._chunked_prefill_threshold: int | None = None
         self._chunked_prefill_min_chunk: int | None = None
@@ -136,8 +129,16 @@ class BlockPoolBatchEngine:
                 self._chunked_prefill_threshold = settings.mlx.chunked_prefill_threshold
                 self._chunked_prefill_min_chunk = settings.mlx.chunked_prefill_min_chunk
                 self._chunked_prefill_max_chunk = settings.mlx.chunked_prefill_max_chunk
-            except Exception:
-                # Fallback defaults if settings not available
+            except ImportError:
+                # Settings module not available (e.g., in tests) - use defaults
+                logger.debug("Settings module not available, using chunked prefill defaults")
+                self._chunked_prefill_enabled = True
+                self._chunked_prefill_threshold = 2048
+                self._chunked_prefill_min_chunk = 512
+                self._chunked_prefill_max_chunk = 4096
+            except AttributeError as e:
+                # Settings exist but missing required fields - log and use defaults
+                logger.warning(f"Chunked prefill settings incomplete: {e}, using defaults")
                 self._chunked_prefill_enabled = True
                 self._chunked_prefill_threshold = 2048
                 self._chunked_prefill_min_chunk = 512
@@ -149,6 +150,57 @@ class BlockPoolBatchEngine:
             self._chunked_prefill_min_chunk or 512,
             self._chunked_prefill_max_chunk or 4096,
         )
+
+    # --- Public accessors (avoid direct access to private attributes) ---
+
+    @property
+    def tokenizer(self) -> Any:
+        """Get the tokenizer instance."""
+        return self._tokenizer
+
+    def get_agent_blocks(self, agent_id: str) -> "AgentBlocksType | None":
+        """Get agent blocks by ID (thread-safe).
+
+        Args:
+            agent_id: The agent identifier
+
+        Returns:
+            AgentBlocks if found, None otherwise
+        """
+        with self._lock:
+            return self._agent_blocks.get(agent_id)
+
+    def has_agent_blocks(self, agent_id: str) -> bool:
+        """Check if agent has blocks (thread-safe).
+
+        Args:
+            agent_id: The agent identifier
+
+        Returns:
+            True if agent has blocks, False otherwise
+        """
+        with self._lock:
+            return agent_id in self._agent_blocks
+
+    def remove_agent_blocks(self, agent_id: str) -> bool:
+        """Remove agent blocks from tracking (thread-safe).
+
+        Note: This only removes from tracking, does NOT free pool blocks.
+        Use BlockPool.free_agent_blocks() to free pool blocks first.
+
+        Args:
+            agent_id: The agent identifier
+
+        Returns:
+            True if agent was removed, False if not found
+        """
+        with self._lock:
+            if agent_id in self._agent_blocks:
+                del self._agent_blocks[agent_id]
+                return True
+            return False
+
+    # --- End public accessors ---
 
     def _chunked_prefill(
         self,
@@ -273,14 +325,13 @@ class BlockPoolBatchEngine:
             - Actual generation happens during step() calls
             - Multiple submit() calls can be batched together
         """
-        # 1. Check if draining (reject new requests during graceful shutdown)
-        if self._draining:
-            raise PoolExhaustedError(
-                "Engine is draining - not accepting new requests. "
-                "Server is shutting down gracefully."
-            )
+        with self._lock:
+            if self._draining:
+                raise PoolExhaustedError(
+                    "Engine is draining - not accepting new requests. "
+                    "Server is shutting down gracefully."
+                )
 
-        # 2. Validate inputs
         if not prompt:
             raise InvalidRequestError("Prompt cannot be empty")
         if max_tokens <= 0:
@@ -288,23 +339,23 @@ class BlockPoolBatchEngine:
         if not agent_id:
             raise InvalidRequestError("agent_id cannot be empty")
 
-        # 2. Tokenize prompt
         prompt_tokens = self._tokenizer.encode(prompt)
-
-        # 3. Handle cache (reconstruct or allocate)
-        kv_cache: Any | None = None  # list[tuple[mx.array, mx.array]] | None
+        kv_cache: Any | None = None
 
         if cache is not None:
             # CRITICAL: Check if cache is too large to reconstruct safely
-            # With Q4 direct injection, we can handle much larger caches (~73KB per 1K tokens)
-            # 100K tokens at Q4 = ~7.3GB, safe on 24GB GPU with 8GB model
-            MAX_SAFE_CACHE_TOKENS = 100000  # ~7.3GB Q4 for 100K tokens
+            # Calculate using actual model spec, not magic constants
+            # Q4: n_kv_heads * head_dim * 2 (K+V) * 0.5 bytes (4-bit) * n_layers
+            bytes_per_token_q4 = (
+                self._spec.n_kv_heads * self._spec.head_dim * 2 * 0.5 * self._spec.n_layers
+            )
+            max_safe_memory_mb = 7500  # 7.5GB - safe on 24GB GPU with 8GB model
+            max_safe_cache_tokens = int((max_safe_memory_mb * 1024 * 1024) / bytes_per_token_q4)
 
-            if cache.total_tokens > MAX_SAFE_CACHE_TOKENS:
-                # Skip reconstruction for very large caches - treat as cache miss
-                q4_size_mb = cache.total_tokens * 0.073  # ~73KB per token with Q4
-                logging.warning(
-                    f"[CACHE SKIP] Cache too large ({cache.total_tokens} tokens > {MAX_SAFE_CACHE_TOKENS} threshold). "
+            if cache.total_tokens > max_safe_cache_tokens:
+                q4_size_mb = (cache.total_tokens * bytes_per_token_q4) / (1024 * 1024)
+                logger.warning(
+                    f"[CACHE SKIP] Cache too large ({cache.total_tokens} tokens > {max_safe_cache_tokens} threshold). "
                     f"Q4 reconstruction would require ~{q4_size_mb:.0f}MB. "
                     f"Treating as cache miss - will regenerate from scratch."
                 )
@@ -319,13 +370,12 @@ class BlockPoolBatchEngine:
                     mem_before = mx.get_active_memory() / (1024**3)
                     cache_before = mx.get_cache_memory() / (1024**3)
                     peak_before = mx.get_peak_memory() / (1024**3)
-                    logging.info(f"[MEMORY BEFORE RECONSTRUCT] Active: {mem_before:.2f}GB, Cache: {cache_before:.2f}GB, Peak: {peak_before:.2f}GB")
-                    logging.info(f"[CACHE] Agent: {agent_id}, Tokens: {cache.total_tokens}, Blocks: {sum(len(blocks) for blocks in cache.blocks.values())}")
+                    logger.info(f"[MEMORY BEFORE RECONSTRUCT] Active: {mem_before:.2f}GB, Cache: {cache_before:.2f}GB, Peak: {peak_before:.2f}GB")
+                    logger.info(f"[CACHE] Agent: {agent_id}, Tokens: {cache.total_tokens}, Blocks: {sum(len(blocks) for blocks in cache.blocks.values())}")
 
-                    # Calculate Q4 memory footprint
-                    bytes_per_token = (self._spec.n_kv_heads * self._spec.head_dim * 2 * 0.5)  # K+V, 4-bit = 0.5 bytes
-                    q4_memory_mb = (cache.total_tokens * bytes_per_token * self._spec.n_layers) / (1024**2)
-                    logging.info(f"[Q4 BLOCKS] Estimated Q4 memory: {q4_memory_mb:.1f}MB for {cache.total_tokens} tokens")
+                    # Reuse bytes_per_token_q4 calculated above
+                    q4_memory_mb = (cache.total_tokens * bytes_per_token_q4) / (1024 * 1024)
+                    logger.info(f"[Q4 BLOCKS] Estimated Q4 memory: {q4_memory_mb:.1f}MB for {cache.total_tokens} tokens")
 
                     # FIX: Reconstruct cache without dequantization
                     kv_cache = self._reconstruct_cache(cache)
@@ -334,42 +384,58 @@ class BlockPoolBatchEngine:
                     mem_after_reconstruct = mx.get_active_memory() / (1024**3)
                     cache_after_reconstruct = mx.get_cache_memory() / (1024**3)
                     peak_after_reconstruct = mx.get_peak_memory() / (1024**3)
-                    logging.info(f"[MEMORY AFTER RECONSTRUCT] Active: {mem_after_reconstruct:.2f}GB, Cache: {cache_after_reconstruct:.2f}GB, Peak: {peak_after_reconstruct:.2f}GB")
-                    logging.info(f"[MEMORY DELTA RECONSTRUCT] Active: +{(mem_after_reconstruct - mem_before):.2f}GB (should be ~0 with Q4!), Cache: +{(cache_after_reconstruct - cache_before):.2f}GB")
+                    logger.info(f"[MEMORY AFTER RECONSTRUCT] Active: {mem_after_reconstruct:.2f}GB, Cache: {cache_after_reconstruct:.2f}GB, Peak: {peak_after_reconstruct:.2f}GB")
+                    logger.info(f"[MEMORY DELTA RECONSTRUCT] Active: +{(mem_after_reconstruct - mem_before):.2f}GB (should be ~0 with Q4!), Cache: +{(cache_after_reconstruct - cache_before):.2f}GB")
 
                     cache_len = len(kv_cache) if kv_cache else 0
-                    logging.info(f"[RECONSTRUCT] Created {cache_len} layer caches, type: {type(kv_cache[0]) if kv_cache else None}")
+                    logger.info(f"[RECONSTRUCT] Created {cache_len} layer caches, type: {type(kv_cache[0]) if kv_cache else None}")
 
-                    # CRITICAL: Free Q4 memory immediately to avoid OOM
-                    # The hot_cache entry will be replaced with NEW blocks after generation.
-                    # Clearing these blocks is safe - they're about to be replaced anyway.
-                    logging.info(f"[RECONSTRUCT COMPLETE] Loaded {cache.total_tokens} tokens across {len(cache.blocks)} layers, now in FP16 KVCache")
+                    # Verify cache properties are set correctly - raise exceptions for mismatches
+                    if kv_cache and len(kv_cache) > 0:
+                        first_layer = kv_cache[0]
+                        first_offset = getattr(first_layer, 'offset', None)
+                        first_size = first_layer.size() if hasattr(first_layer, 'size') else None
+                        expected_tokens = cache.total_tokens
+                        logger.info(
+                            f"[CACHE VALIDATION] Layer 0: offset={first_offset}, size()={first_size}, "
+                            f"expected_tokens={expected_tokens}"
+                        )
+                        if first_offset is not None and first_offset != expected_tokens:
+                            raise GenerationError(
+                                f"Cache offset mismatch: layer 0 offset ({first_offset}) != "
+                                f"expected tokens ({expected_tokens}). This would cause shape mismatch."
+                            )
+                        if first_size is not None and first_offset is not None and first_size != first_offset:
+                            raise GenerationError(
+                                f"Cache size/offset mismatch: layer 0 size() ({first_size}) != "
+                                f"offset ({first_offset}). BatchGenerator won't recognize cache."
+                            )
+
+                    logger.info(f"[RECONSTRUCT COMPLETE] Loaded {cache.total_tokens} tokens across {len(cache.blocks)} layers, now in FP16 KVCache")
 
                     # Free Q4 memory by clearing layer_data
                     blocks_cleared = 0
                     for layer_id, layer_blocks in cache.blocks.items():
                         for block in layer_blocks:
-                            block.layer_data = None  # Free Q4 tensors (weights, scales, biases)
+                            block.layer_data = None
                             blocks_cleared += 1
 
-                    # Clear the blocks dict to allow GC
                     cache.blocks.clear()
 
-                    # Force garbage collection
                     import gc
                     gc.collect()
 
-                    logging.info(f"[Q4 FREED] Cleared {blocks_cleared} blocks to free Q4 memory")
+                    logger.info(f"[Q4 FREED] Cleared {blocks_cleared} blocks to free Q4 memory")
 
                     # Memory tracking AFTER freeing Q4
                     mem_after_free = mx.get_active_memory() / (1024**3)
                     cache_after_free = mx.get_cache_memory() / (1024**3)
                     peak_after_free = mx.get_peak_memory() / (1024**3)
-                    logging.info(f"[MEMORY POST-FREE] Active: {mem_after_free:.2f}GB, Cache: {cache_after_free:.2f}GB, Peak: {peak_after_free:.2f}GB")
-                    logging.info(f"[MEMORY DELTA] Active: +{(mem_after_free - mem_before):.2f}GB (Q4 freed, FP16 remains)")
+                    logger.info(f"[MEMORY POST-FREE] Active: {mem_after_free:.2f}GB, Cache: {cache_after_free:.2f}GB, Peak: {peak_after_free:.2f}GB")
+                    logger.info(f"[MEMORY DELTA] Active: +{(mem_after_free - mem_before):.2f}GB (Q4 freed, FP16 remains)")
 
                 except Exception as e:
-                    logging.error(f"Cache reconstruction failed for {agent_id}: {e}", exc_info=True)
+                    logger.error(f"Cache reconstruction failed for {agent_id}: {e}", exc_info=True)
                     cache = None
                     kv_cache = None
 
@@ -408,7 +474,8 @@ class BlockPoolBatchEngine:
                     blocks=blocks_dict,
                     total_tokens=0,  # Blocks are empty; cache is in kv_cache
                 )
-                self._agent_blocks[agent_id] = agent_blocks
+                with self._lock:
+                    self._agent_blocks[agent_id] = agent_blocks
 
             else:
                 # Standard path: Let BatchGenerator handle prefill
@@ -447,24 +514,24 @@ class BlockPoolBatchEngine:
                     total_tokens=0,  # Blocks are empty initially; will update during generation
                 )
 
-                # Store agent blocks
-                self._agent_blocks[agent_id] = agent_blocks
+                # Store agent blocks (thread-safe)
+                with self._lock:
+                    self._agent_blocks[agent_id] = agent_blocks
 
-        # 4. Create BatchGenerator lazily
-        if self._batch_gen is None:
-            if self._batch_gen_factory is not None:
-                # Use injected factory (for testing)
-                self._batch_gen = self._batch_gen_factory(self._model, self._tokenizer)
-            else:
-                # Use adapter to create real MLX BatchGenerator with QuantizedKVCache
-                self._batch_gen = self._cache_adapter.create_batch_generator(
-                    model=self._model,
-                    stop_tokens={self._tokenizer.eos_token_id},
-                    kv_bits=self._spec.kv_bits if hasattr(self._spec, 'kv_bits') else 4,
-                    kv_group_size=self._spec.kv_group_size if hasattr(self._spec, 'kv_group_size') else 64,
-                )
+        # Create BatchGenerator lazily (thread-safe)
+        with self._lock:
+            if self._batch_gen is None:
+                if self._batch_gen_factory is not None:
+                    self._batch_gen = self._batch_gen_factory(self._model, self._tokenizer)
+                else:
+                    self._batch_gen = self._cache_adapter.create_batch_generator(
+                        model=self._model,
+                        stop_tokens={self._tokenizer.eos_token_id},
+                        kv_bits=self._spec.kv_bits,
+                        kv_group_size=self._spec.kv_group_size,
+                    )
 
-        # 5. Insert into batch
+        # Insert into batch
         try:
             # Create sampler via adapter if using real MLX (not fake for testing)
             samplers = None
@@ -481,28 +548,44 @@ class BlockPoolBatchEngine:
                 insert_kwargs["samplers"] = samplers
             if kv_cache is not None:
                 insert_kwargs["caches"] = [kv_cache]
+                # VALIDATION: Log cache injection details for debugging
+                first_cache = kv_cache[0] if isinstance(kv_cache, list) else kv_cache
+                cache_offset = getattr(first_cache, 'offset', 'N/A')
+                cache_size = first_cache.size() if hasattr(first_cache, 'size') else 'N/A'
+                cache_type = type(first_cache).__name__
+                has_bits = hasattr(first_cache, 'bits')
+                logger.info(
+                    f"[CACHE INJECT] Injecting {cache_type} into BatchGenerator: "
+                    f"offset={cache_offset}, size()={cache_size}, "
+                    f"is_quantized={has_bits}, prompt_tokens={len(prompt_tokens)}"
+                )
+                # CRITICAL VALIDATION: offset should match what we set
+                if cache_offset != cache_size:
+                    logger.warning(
+                        f"[CACHE MISMATCH] offset ({cache_offset}) != size() ({cache_size}) - "
+                        f"BatchGenerator may not recognize cache!"
+                    )
 
             uids = self._batch_gen.insert(**insert_kwargs)
         except Exception as e:
-            #If insertion fails, free ALL allocated blocks (not just layer 0)
-            if cache is None and agent_id in self._agent_blocks:
-                agent_blocks = self._agent_blocks[agent_id]
-                # Free all layers to prevent resource leak
-                for layer_blocks in agent_blocks.blocks.values():
-                    self._pool.free(layer_blocks, agent_id)
-                del self._agent_blocks[agent_id]
+            # If insertion fails, free ALL allocated blocks (not just layer 0) - thread-safe
+            with self._lock:
+                if cache is None and agent_id in self._agent_blocks:
+                    agent_blocks = self._agent_blocks[agent_id]
+                    # Free all layers to prevent resource leak
+                    for layer_blocks in agent_blocks.blocks.values():
+                        self._pool.free(layer_blocks, agent_id)
+                    del self._agent_blocks[agent_id]
             raise InvalidRequestError(f"Failed to insert into batch: {e}") from e
 
-        # Use the UID from BatchGenerator
-        actual_uid: str = uids[0]  # BatchGenerator returns list of string UIDs
+        actual_uid: str = uids[0]
 
-        # 6. Track UID → (agent_id, tokens, detokenizer) mapping
-        # Initialize empty token list and detokenizer - will accumulate during step()
-        detokenizer = self._tokenizer.detokenizer
-        detokenizer.reset()
-        self._active_requests[actual_uid] = (agent_id, [], detokenizer)
+        # Create a NEW detokenizer per request to avoid shared state corruption
+        detokenizer_class = type(self._tokenizer.detokenizer)
+        detokenizer = detokenizer_class(self._tokenizer)
+        with self._lock:
+            self._active_requests[actual_uid] = (agent_id, [], detokenizer)
 
-        # 7. Return UID
         return actual_uid
 
     def step(self) -> Iterator[CompletedGeneration]:
@@ -530,61 +613,66 @@ class BlockPoolBatchEngine:
             ...     if completion.finish_reason == "stop":
             ...         print(f"Completed with {completion.token_count} tokens")
         """
-        # 1. Guard: if no active batch, return immediately
         if self._batch_gen is None:
-            return  # Generator returns empty
+            return
 
-        # 2. Execute decode loop until all sequences finish
         while True:
-            batch_response = self._batch_gen.next()  # type: ignore[no-untyped-call]
+            try:
+                batch_response = self._batch_gen.next()  # type: ignore[no-untyped-call]
+            except MemoryError as e:
+                logger.error(f"OOM during batch generation step: {e}")
+                # Clean up batch generator to allow recovery
+                self._batch_gen = None
+                raise GenerationError(f"Out of memory during generation: {e}") from e
+            except Exception as e:
+                logger.error(f"Batch generation step failed: {e}", exc_info=True)
+                raise GenerationError(f"Generation step failed: {e}") from e
 
             # Check for termination: empty list means all sequences done
             if not batch_response:
                 break
 
-            # 3. Process all responses (both finished and continuing)
             for response in batch_response:
                 uid = response.uid
 
-                # Validate UID is tracked
-                if uid not in self._active_requests:
-                    logging.error(
-                        f"Untracked UID {uid} in batch - possible memory leak. "
-                        f"Active UIDs: {list(self._active_requests.keys())}"
-                    )
-                    continue
+                with self._lock:
+                    if uid not in self._active_requests:
+                        logger.error(
+                            f"Untracked UID {uid} in batch - possible memory leak. "
+                            f"Active UIDs: {list(self._active_requests.keys())}"
+                        )
+                        continue
+                    agent_id, tokens, detokenizer = self._active_requests[uid]
 
-                # Get tracking info
-                agent_id, tokens, detokenizer = self._active_requests[uid]
-
-                # 3.1. Accumulate token for this step
                 if response.finish_reason != "stop":
                     tokens.append(response.token)
-                    # Add token to streaming detokenizer for proper space handling
                     detokenizer.add_token(response.token)
-                    if len(tokens) <= 5:  # Log first 5 tokens only
+                    if len(tokens) <= 5:
                         logger.info(f"Token {len(tokens)}: {response.token} -> '{detokenizer.text}'")
-
-                # 3.2. Check if sequence finished
                 if response.finish_reason is not None:
                     # Sequence complete - process completion
 
-                    # Extract cache and convert to blocks
+                    # CRITICAL: Free old blocks BEFORE allocating new ones to avoid pool exhaustion
+                    # Old code allocated first, then freed - this could exhaust pool on large caches
+                    with self._lock:
+                        if agent_id in self._agent_blocks:
+                            old_blocks = self._agent_blocks[agent_id]
+                            # Free all blocks from all layers BEFORE allocating new ones
+                            for layer_blocks in old_blocks.blocks.values():
+                                # Clear layer_data BEFORE freeing
+                                for block in layer_blocks:
+                                    block.layer_data = None
+                                self._pool.free(layer_blocks, agent_id)
+                            # Remove from tracking while still under lock
+                            del self._agent_blocks[agent_id]
+
+                    # Extract cache and convert to blocks (allocates for ALL layers)
                     cache = response.prompt_cache
                     blocks = self._extract_cache(uid, cache)
 
-                    # Free old prefill blocks (if any)
-                    if agent_id in self._agent_blocks:
-                        old_blocks = self._agent_blocks[agent_id]
-                        # Free all blocks from all layers
-                        for layer_blocks in old_blocks.blocks.values():
-                            #Clear layer_data BEFORE freeing
-                            for block in layer_blocks:
-                                block.layer_data = None
-                            self._pool.free(layer_blocks, agent_id)
-
-                    # Store new blocks
-                    self._agent_blocks[agent_id] = blocks
+                    # Store new blocks (thread-safe)
+                    with self._lock:
+                        self._agent_blocks[agent_id] = blocks
 
                     # CRITICAL FIX: Use tokenizer.decode() for proper spacing
                     # The streaming detokenizer.text doesn't handle spacing correctly
@@ -614,8 +702,9 @@ class BlockPoolBatchEngine:
                         token_count=len(tokens),  # Generated tokens only
                     )
 
-                    # Clean up tracking
-                    del self._active_requests[uid]
+                    # Clean up tracking (thread-safe)
+                    with self._lock:
+                        del self._active_requests[uid]
 
                     # Yield completion
                     yield completion
@@ -736,7 +825,14 @@ class BlockPoolBatchEngine:
                     kv_cache = QuantizedKVCache(group_size=kv_group_size, bits=kv_bits)
                     kv_cache.keys = (k_weights, k_scales, k_biases)
                     kv_cache.values = (v_weights, v_scales, v_biases)
-                    kv_cache.offset = k_weights.shape[2]
+
+                    # CRITICAL FIX: Use actual sequence length, NOT tensor buffer size!
+                    # Tensor shape[2] may be rounded up to 256-token blocks (e.g., 2048)
+                    # but actual tokens may be fewer (e.g., 2031). offset MUST be actual tokens
+                    # or BatchGenerator will process wrong token counts on continuation.
+                    buffer_size = k_weights.shape[2]
+                    actual_tokens = agent_blocks.total_tokens
+                    kv_cache.offset = actual_tokens
 
                     # CRITICAL: Force evaluation to materialize tensors and prevent
                     # lazy graph accumulation that causes OOM
@@ -746,10 +842,15 @@ class BlockPoolBatchEngine:
                         mx.eval(k_biases, v_biases)
 
                     logger = logging.getLogger(__name__)
-                    seq_len = self._cache_adapter.get_sequence_length(k_full)
-                    logger.info(
-                        f"[Q4 INJECT L{layer_id}] Q4: {q4_size_mb:.1f}MB (NO dequantization!) | {seq_len} tokens"
-                    )
+                    if buffer_size != actual_tokens:
+                        logger.info(
+                            f"[Q4 INJECT L{layer_id}] Q4: {q4_size_mb:.1f}MB | "
+                            f"offset={actual_tokens} (buffer={buffer_size}, delta={buffer_size - actual_tokens})"
+                        )
+                    else:
+                        logger.info(
+                            f"[Q4 INJECT L{layer_id}] Q4: {q4_size_mb:.1f}MB | {actual_tokens} tokens"
+                        )
                 else:
                     # Float format (FP16) - use regular KVCache
                     import mlx.core as mx
@@ -757,14 +858,19 @@ class BlockPoolBatchEngine:
                     kv_cache = KVCache()
                     kv_cache.state = (k_full, v_full)
 
+                    # CRITICAL FIX: Set offset to actual sequence length for continuation
+                    actual_tokens = agent_blocks.total_tokens
+                    kv_cache.offset = actual_tokens
+
                     # Force evaluation for FP16 as well
                     mx.eval(k_full, v_full)
 
                     fp16_size_mb = (k_full.nbytes + v_full.nbytes) / (1024**2)
-                    seq_len = k_full.shape[2] if hasattr(k_full, 'shape') else 0
+                    buffer_size = k_full.shape[2] if hasattr(k_full, 'shape') else 0
                     logger = logging.getLogger(__name__)
                     logger.info(
-                        f"[FP16 INJECT L{layer_id}] FP16: {fp16_size_mb:.1f}MB | {seq_len} tokens"
+                        f"[FP16 INJECT L{layer_id}] FP16: {fp16_size_mb:.1f}MB | "
+                        f"offset={actual_tokens} tokens"
                     )
 
                 cache.append(kv_cache)
@@ -776,33 +882,23 @@ class BlockPoolBatchEngine:
 
     def _extract_cache(self, uid: str, cache: Any | None = None) -> AgentBlocks:
         """Extract updated cache from batch and convert to blocks."""
-        # 1. Get agent_id from UID tracking
         if uid not in self._active_requests:
             raise GenerationError(f"UID {uid} not found in active requests")
-        agent_id, _, _ = self._active_requests[uid]  # Extract agent_id from tuple (agent_id, tokens, detokenizer)
+        agent_id, _, _ = self._active_requests[uid]
 
-        # 2. Use provided cache (from finished.prompt_cache) or try to extract
         if cache is None:
-            # Fallback: try to extract from batch generator (for old code paths)
             if self._batch_gen is None:
                 raise GenerationError("No active batch generator")
-            # NOTE: extract_cache doesn't exist on BatchGenerator - this is legacy code
-            # The cache should be passed in from finished.prompt_cache
             raise GenerationError(f"Cache not provided for UID {uid}")
 
-        # 3. Handle empty cache (before importing MLX to avoid crash in tests)
         if not cache or len(cache) == 0:
-            # Empty cache - return empty AgentBlocks
             return AgentBlocks(agent_id=agent_id, blocks={}, total_tokens=0)
 
-        # 3.1. Convert KVCache objects to (K, V) tuples if needed
-        # MLX BatchGenerator returns KVCache objects, we need (K, V) tuples
-        if hasattr(cache[0], 'state'):
-            # KVCache objects - convert to (K, V) tuples using .state property
+        # Convert KVCache objects to (K, V) tuples if needed
+        first_layer = cache[0]
+        if hasattr(first_layer, 'state'):
             cache = [kv_cache.state for kv_cache in cache]
-
-            # Log cache format for debugging quantization
-            if cache and len(cache) > 0 and cache[0][0] is not None:
+            if cache and cache[0][0] is not None:
                 k_sample = cache[0][0]
                 logger.debug(
                     f"Cache format check: type={type(k_sample)}, "
@@ -810,11 +906,9 @@ class BlockPoolBatchEngine:
                     f"dtype={getattr(k_sample, 'dtype', None)}"
                 )
 
-        # 3.2. Quantize float cache to save GPU memory (CRITICAL for large contexts!)
-        # MLX returns float cache - quantize it immediately to reduce memory 4x
-        # NOTE: Only quantize if kv_bits is set (not None). kv_bits=None means FP16.
-        kv_bits = getattr(self._spec, 'kv_bits', None)
-        kv_group_size = getattr(self._spec, 'kv_group_size', 64) or 64
+        # Quantize float cache to save GPU memory
+        kv_bits = self._spec.kv_bits
+        kv_group_size = self._spec.kv_group_size or 64
 
         if cache and len(cache) > 0 and cache[0][0] is not None:
             k_sample = cache[0][0]
@@ -834,9 +928,18 @@ class BlockPoolBatchEngine:
                     k_quant = tuple(mx.quantize(k, group_size=kv_group_size, bits=kv_bits))
                     v_quant = tuple(mx.quantize(v, group_size=kv_group_size, bits=kv_bits))
 
+                    # CRITICAL FIX: Force evaluation to prevent lazy graph accumulation
+                    # Without this, MLX builds deferred computation graphs that hold ALL
+                    # intermediate tensors in memory → OOM during long generation sessions
+                    mx.eval(k_quant[0], k_quant[1], k_quant[2],
+                            v_quant[0], v_quant[1], v_quant[2])
+
                     quantized_cache.append((k_quant, v_quant))
 
                 cache = quantized_cache
+
+                # Clear MLX cache to release intermediate memory from quantization
+                mx.clear_cache()
 
                 logger.info(
                     f"Quantized cache for {agent_id}: {len(cache)} layers, "
@@ -849,45 +952,42 @@ class BlockPoolBatchEngine:
                     f"(kv_bits=None, no quantization)"
                 )
 
-        # 3.2. Check if cache has actual data
         if cache[0][0] is None:
-            # Empty cache - return empty AgentBlocks
             return AgentBlocks(agent_id=agent_id, blocks={}, total_tokens=0)
 
-        # Handle FakeTensor in unit tests
+        # Handle FakeTensor in unit tests (TODO: replace with dependency injection)
         first_tensor = cache[0][0]
-        if hasattr(first_tensor, '__class__') and first_tensor.__class__.__name__ == 'FakeTensor':
+        if first_tensor.__class__.__name__ == 'FakeTensor':
             seq_len = first_tensor.shape[2]
             n_blocks = (seq_len + self._spec.block_tokens - 1) // self._spec.block_tokens
             fake_blocks: dict[int, list[KVBlock]] = {}
-            for layer_id, (k, v) in enumerate(cache):
-                if k is None:
-                    continue
-                allocated_blocks = self._pool.allocate(n_blocks, layer_id, agent_id)
-                for block_idx, block in enumerate(allocated_blocks):
-                    start_token = block_idx * self._spec.block_tokens
-                    end_token = min(start_token + self._spec.block_tokens, seq_len)
-                    k_slice = k[:, :, start_token:end_token]
-                    v_slice = v[:, :, start_token:end_token]
-                    block.layer_data = {"k": k_slice, "v": v_slice}
-                    block.token_count = end_token - start_token
-                fake_blocks[layer_id] = allocated_blocks
+            try:
+                for layer_id, (k, v) in enumerate(cache):
+                    if k is None:
+                        continue
+                    allocated_blocks = self._pool.allocate(n_blocks, layer_id, agent_id)
+                    for block_idx, block in enumerate(allocated_blocks):
+                        start_token = block_idx * self._spec.block_tokens
+                        end_token = min(start_token + self._spec.block_tokens, seq_len)
+                        k_slice = k[:, :, start_token:end_token]
+                        v_slice = v[:, :, start_token:end_token]
+                        block.layer_data = {"k": k_slice, "v": v_slice}
+                        block.token_count = end_token - start_token
+                    fake_blocks[layer_id] = allocated_blocks
+            except PoolExhaustedError:
+                for allocated_layer_blocks in fake_blocks.values():
+                    self._pool.free(allocated_layer_blocks, agent_id)
+                raise
 
             return AgentBlocks(
                 agent_id=agent_id, blocks=fake_blocks, total_tokens=seq_len
             )
 
-        # Get sequence length from first layer K tensor shape
-        first_k = cache[0][0]  # Shape: [n_kv_heads, head_dim, total_seq_len]
+        first_k = cache[0][0]
         seq_len = self._cache_adapter.get_sequence_length(first_k)
-
-        # 5. Calculate blocks needed per layer
         n_blocks = (seq_len + self._spec.block_tokens - 1) // self._spec.block_tokens
-
-        # Create blocks dictionary
         blocks_dict: dict[int, list[KVBlock]] = {}
 
-        # 7. For each layer, split cache into blocks
         try:
             for layer_id, (k, v) in enumerate(cache):
                 if k is None:
@@ -916,14 +1016,11 @@ class BlockPoolBatchEngine:
                 blocks_dict[layer_id] = layer_blocks
 
         except PoolExhaustedError:
-            # Partial allocation failure: free all blocks allocated so far
             for _allocated_layer_id, allocated_layer_blocks in blocks_dict.items():
                 self._pool.free(allocated_layer_blocks, agent_id)
-            raise  # Re-raise the original error
+            raise
 
-        # 8. Return AgentBlocks with total_tokens (seq_len, not sum across layers)
-        # CRITICAL FIX: All layers store the SAME sequence of tokens, so total_tokens
-        # should be seq_len, not accumulated across layers (that was counting 27x too many!)
+        # total_tokens = seq_len (not sum across layers - all layers have same sequence)
         return AgentBlocks(
             agent_id=agent_id,
             blocks=blocks_dict,
@@ -957,7 +1054,9 @@ class BlockPoolBatchEngine:
             >>> engine.shutdown()  # Safe to shutdown now
         """
         # Set draining flag IMMEDIATELY to prevent new requests
-        self._draining = True
+        # Use lock to prevent race condition with submit() checking _draining
+        with self._lock:
+            self._draining = True
 
         start_time = time.time()
         logger = logging.getLogger(__name__)

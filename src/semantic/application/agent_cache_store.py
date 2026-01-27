@@ -1,5 +1,7 @@
 """Agent cache storage with trie-based prefix matching and LRU eviction."""
 
+import logging
+import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -8,6 +10,8 @@ from typing import Any
 from semantic.domain.entities import AgentBlocks
 from semantic.domain.errors import InvalidRequestError
 from semantic.domain.value_objects import ModelCacheSpec
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -161,6 +165,9 @@ class AgentCacheStore:
         self.model_tag = model_tag
         self._cache_adapter = cache_adapter
 
+        # Thread-safe lock for cache access
+        self._lock = threading.RLock()
+
         # Hot tier: agent_id → CacheEntry (in-memory)
         self._hot_cache: dict[str, CacheEntry] = {}
 
@@ -202,18 +209,19 @@ class AgentCacheStore:
         )
         entry.mark_accessed()
 
-        # Add to hot tier
-        self._hot_cache[agent_id] = entry
+        with self._lock:
+            # Add to hot tier
+            self._hot_cache[agent_id] = entry
 
-        # CRITICAL: Always persist to disk immediately!
-        # The hot_cache stores a reference to blocks, but batch_engine may clear
-        # the blocks after reconstruction. By persisting to disk, we ensure
-        # the cache can always be recovered from warm tier.
-        self._save_to_disk(agent_id)
+            # CRITICAL: Always persist to disk immediately!
+            # The hot_cache stores a reference to blocks, but batch_engine may clear
+            # the blocks after reconstruction. By persisting to disk, we ensure
+            # the cache can always be recovered from warm tier.
+            self._save_to_disk(agent_id)
 
-        # Check if eviction needed
-        if len(self._hot_cache) > self.max_hot_agents:
-            self._evict_lru()
+            # Check if eviction needed
+            if len(self._hot_cache) > self.max_hot_agents:
+                self._evict_lru()
 
     def load(self, agent_id: str) -> AgentBlocks | None:
         """Load agent cache from hot or warm tier.
@@ -237,34 +245,35 @@ class AgentCacheStore:
             >>> if blocks is None:
             ...     print("Cache miss - need to regenerate")
         """
-        # Check hot tier first
-        if agent_id in self._hot_cache:
-            entry = self._hot_cache[agent_id]
+        with self._lock:
+            # Check hot tier first
+            if agent_id in self._hot_cache:
+                entry = self._hot_cache[agent_id]
 
-            # CRITICAL: Check if blocks were cleared by batch_engine
-            # batch_engine clears layer_data after reconstruction to free Q4 memory,
-            # but this also clears the shared reference in hot_cache.
-            # If blocks are empty, fall back to disk.
-            if entry.blocks is not None and entry.blocks.blocks:
-                # Check if at least one block has actual data
-                has_data = False
-                for layer_blocks in entry.blocks.blocks.values():
-                    if layer_blocks and any(b.layer_data is not None for b in layer_blocks):
-                        has_data = True
-                        break
+                # CRITICAL: Check if blocks were cleared by batch_engine
+                # batch_engine clears layer_data after reconstruction to free Q4 memory,
+                # but this also clears the shared reference in hot_cache.
+                # If blocks are empty, fall back to disk.
+                if entry.blocks is not None and entry.blocks.blocks:
+                    # Check if at least one block has actual data
+                    has_data = False
+                    for layer_blocks in entry.blocks.blocks.values():
+                        if layer_blocks and any(b.layer_data is not None for b in layer_blocks):
+                            has_data = True
+                            break
 
-                if has_data:
-                    entry.mark_accessed()
-                    return entry.blocks
+                    if has_data:
+                        entry.mark_accessed()
+                        return entry.blocks
 
-            # Blocks were cleared - fall through to disk load
+                # Blocks were cleared - fall through to disk load
 
-        # Check warm tier (disk)
-        if agent_id in self._warm_cache:
-            return self._load_from_disk(agent_id)
+            # Check warm tier (disk)
+            if agent_id in self._warm_cache:
+                return self._load_from_disk(agent_id)
 
-        # Cache miss
-        return None
+            # Cache miss
+            return None
 
     def delete(self, agent_id: str) -> bool:
         """Delete agent cache from all tiers.
@@ -285,22 +294,23 @@ class AgentCacheStore:
             >>> if deleted:
             ...     print("Agent cache deleted successfully")
         """
-        found = False
+        with self._lock:
+            found = False
 
-        # Remove from hot tier
-        if agent_id in self._hot_cache:
-            del self._hot_cache[agent_id]
-            found = True
+            # Remove from hot tier
+            if agent_id in self._hot_cache:
+                del self._hot_cache[agent_id]
+                found = True
 
-        # Remove from warm tier and delete disk file
-        if agent_id in self._warm_cache:
-            cache_path = self._warm_cache[agent_id]
-            if cache_path.exists():
-                cache_path.unlink()
-            del self._warm_cache[agent_id]
-            found = True
+            # Remove from warm tier and delete disk file
+            if agent_id in self._warm_cache:
+                cache_path = self._warm_cache[agent_id]
+                if cache_path.exists():
+                    cache_path.unlink()
+                del self._warm_cache[agent_id]
+                found = True
 
-        return found
+            return found
 
     def find_prefix(self, tokens: list[int]) -> AgentBlocks | None:
         """Find longest prefix match in cache (simplified dict-based implementation).
@@ -326,23 +336,24 @@ class AgentCacheStore:
         if not tokens:
             return None
 
-        best_match: AgentBlocks | None = None
-        best_prefix_len = 0
+        with self._lock:
+            best_match: AgentBlocks | None = None
+            best_prefix_len = 0
 
-        # Check all cached agents for prefix match
-        for _agent_id, entry in self._hot_cache.items():
-            if entry.blocks is None:
-                continue
+            # Check all cached agents for prefix match
+            for _agent_id, entry in self._hot_cache.items():
+                if entry.blocks is None:
+                    continue
 
-            # Simplified prefix matching using total_tokens as proxy
-            prefix_len = min(len(tokens), entry.blocks.total_tokens)
+                # Simplified prefix matching using total_tokens as proxy
+                prefix_len = min(len(tokens), entry.blocks.total_tokens)
 
-            if prefix_len > best_prefix_len:
-                best_prefix_len = prefix_len
-                best_match = entry.blocks
-                entry.mark_accessed()  # Update LRU
+                if prefix_len > best_prefix_len:
+                    best_prefix_len = prefix_len
+                    best_match = entry.blocks
+                    entry.mark_accessed()  # Update LRU
 
-        return best_match
+            return best_match
 
     def evict_lru(self, target_count: int) -> int:
         """Evict least-recently-used caches to target count.
@@ -362,23 +373,24 @@ class AgentCacheStore:
             >>> store.evict_lru(target_count=3)
             2  # Evicted 2 caches to reach target
         """
-        evicted = 0
+        with self._lock:
+            evicted = 0
 
-        while len(self._hot_cache) > target_count:
-            # Find LRU entry
-            lru_agent_id = min(
-                self._hot_cache.keys(),
-                key=lambda aid: self._hot_cache[aid].last_accessed,
-            )
+            while len(self._hot_cache) > target_count:
+                # Find LRU entry
+                lru_agent_id = min(
+                    self._hot_cache.keys(),
+                    key=lambda aid: self._hot_cache[aid].last_accessed,
+                )
 
-            # Persist to disk
-            self._save_to_disk(lru_agent_id)
+                # Persist to disk
+                self._save_to_disk(lru_agent_id)
 
-            # Remove from hot tier
-            del self._hot_cache[lru_agent_id]
-            evicted += 1
+                # Remove from hot tier
+                del self._hot_cache[lru_agent_id]
+                evicted += 1
 
-        return evicted
+            return evicted
 
     def _evict_lru(self) -> None:
         """Internal LRU eviction (called when hot tier exceeds max)."""
@@ -430,6 +442,28 @@ class AgentCacheStore:
         """
         self.model_tag = new_tag
 
+    def invalidate_hot(self, agent_id: str) -> None:
+        """Remove agent from hot tier after blocks are cleared.
+
+        Called by batch_engine after clearing Q4 blocks to free memory.
+        The cache remains in warm tier (disk) for future loads.
+
+        This prevents the hot cache from holding a stale reference to
+        cleared blocks, which would cause unnecessary has_data checks
+        on every load.
+
+        Args:
+            agent_id: Agent whose hot cache entry should be invalidated
+
+        Notes:
+            - Only removes from hot tier (memory reference)
+            - Warm tier (disk) is NOT affected
+            - Future loads will reload from disk
+        """
+        with self._lock:
+            if agent_id in self._hot_cache:
+                del self._hot_cache[agent_id]
+
     def _save_to_disk(self, agent_id: str) -> None:
         """Persist cache to warm tier."""
         entry = self._hot_cache.get(agent_id)
@@ -446,18 +480,10 @@ class AgentCacheStore:
             "total_tokens": entry.blocks.total_tokens,
         }
 
-        if self._cache_adapter is not None:
-            cache_path = self._cache_adapter.save(agent_id, entry.blocks, metadata)
-            self._warm_cache[agent_id] = cache_path
-        else:
-            # Lazy import for backward compatibility
-            from semantic.adapters.outbound.safetensors_cache_adapter import (
-                SafetensorsCacheAdapter,
-            )
-
-            adapter = SafetensorsCacheAdapter(self.cache_dir)
-            cache_path = adapter.save(agent_id, entry.blocks, metadata)
-            self._warm_cache[agent_id] = cache_path
+        if self._cache_adapter is None:
+            raise InvalidRequestError("CacheAdapter is required - dependency not injected")
+        cache_path = self._cache_adapter.save(agent_id, entry.blocks, metadata)
+        self._warm_cache[agent_id] = cache_path
 
     def _load_from_disk(self, agent_id: str) -> AgentBlocks | None:
         """Load cache from warm tier."""
@@ -466,16 +492,9 @@ class AgentCacheStore:
             return None
 
         try:
-            # Load via adapter
-            if self._cache_adapter is not None:
-                blocks_dict, metadata = self._cache_adapter.load(cache_path)
-            else:
-                from semantic.adapters.outbound.safetensors_cache_adapter import (
-                    SafetensorsCacheAdapter,
-                )
-
-                adapter = SafetensorsCacheAdapter(self.cache_dir)
-                blocks_dict, metadata = adapter.load(cache_path)
+            if self._cache_adapter is None:
+                raise InvalidRequestError("CacheAdapter is required - dependency not injected")
+            blocks_dict, metadata = self._cache_adapter.load(cache_path)
 
             # Validate model tag compatibility
             saved_tag = ModelTag(
@@ -512,6 +531,12 @@ class AgentCacheStore:
 
             return blocks
 
-        except Exception:
-            # Corrupted or invalid file - treat as cache miss
+        except (OSError, IOError) as e:
+            logger.warning(f"Failed to load cache for {agent_id} from {cache_path}: {e}")
+            return None
+        except (ValueError, KeyError) as e:
+            logger.warning(f"Invalid cache format for {agent_id} at {cache_path}: {e}")
+            return None
+        except Exception as e:
+            logger.error(f"Unexpected error loading cache for {agent_id}: {e}", exc_info=True)
             return None

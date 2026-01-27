@@ -4,6 +4,7 @@ Implements per-agent and global rate limiting using sliding window algorithm.
 Returns 429 Too Many Requests with Retry-After header when limits exceeded.
 """
 
+import asyncio
 import logging
 import time
 from collections import defaultdict, deque
@@ -56,6 +57,14 @@ class RateLimiter(BaseHTTPMiddleware):
         # Track global requests: deque of timestamps
         self._global_requests: deque[float] = deque()
 
+        # Thread safety: asyncio lock for concurrent request handling
+        # Without this, deque operations can corrupt state under concurrent access
+        self._lock = asyncio.Lock()
+
+        # Counter for periodic stale entry cleanup (every N requests)
+        self._cleanup_counter = 0
+        self._cleanup_interval = 100  # Clean up every 100 requests
+
         logger.info(
             f"Rate limiter enabled: {requests_per_minute_per_agent} req/min per agent, "
             f"{requests_per_minute_global} req/min global"
@@ -73,6 +82,39 @@ class RateLimiter(BaseHTTPMiddleware):
         window_start = now - self.window_size_seconds
         while requests and requests[0] < window_start:
             requests.popleft()
+
+    def _cleanup_stale_agents(self, now: float) -> int:
+        """Remove empty agent entries to prevent memory leaks.
+
+        Called periodically to clean up agents with no recent requests.
+        This prevents unbounded growth of _agent_requests dict.
+
+        Args:
+            now: Current timestamp
+
+        Returns:
+            Number of stale entries removed
+        """
+        stale_agents = []
+        window_start = now - self.window_size_seconds
+
+        for agent_id, requests in self._agent_requests.items():
+            # Clean old requests first
+            while requests and requests[0] < window_start:
+                requests.popleft()
+
+            # Mark for removal if empty
+            if not requests:
+                stale_agents.append(agent_id)
+
+        # Remove stale entries
+        for agent_id in stale_agents:
+            del self._agent_requests[agent_id]
+
+        if stale_agents:
+            logger.debug(f"Cleaned up {len(stale_agents)} stale rate limit entries")
+
+        return len(stale_agents)
 
     def _is_rate_limited_agent(
         self, agent_id: str, now: float
@@ -161,68 +203,77 @@ class RateLimiter(BaseHTTPMiddleware):
 
         now = time.time()
 
-        # Check global rate limit
-        is_global_limited, global_retry_after = self._is_rate_limited_global(now)
-        if is_global_limited:
-            logger.warning(
-                f"{request.method} {request.url.path} - Global rate limit exceeded"
-            )
-            return JSONResponse(
-                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                headers={"Retry-After": str(global_retry_after)},
-                content={
-                    "error": {
-                        "type": "rate_limit_error",
-                        "message": (
-                            f"Global rate limit exceeded. "
-                            f"Retry after {global_retry_after}s."
-                        ),
-                    }
-                },
-            )
-
-        # Extract agent ID (if available)
-        agent_id = self._extract_agent_id(request)
-
-        # Check per-agent rate limit (if agent ID available)
-        if agent_id:
-            is_agent_limited, agent_retry_after = self._is_rate_limited_agent(
-                agent_id, now
-            )
-            if is_agent_limited:
+        # Thread safety: acquire lock for all rate limit checks and updates
+        # This prevents deque corruption under concurrent async access
+        async with self._lock:
+            # Check global rate limit
+            is_global_limited, global_retry_after = self._is_rate_limited_global(now)
+            if is_global_limited:
                 logger.warning(
-                    f"{request.method} {request.url.path} - "
-                    f"Agent {agent_id} rate limit exceeded"
+                    f"{request.method} {request.url.path} - Global rate limit exceeded"
                 )
                 return JSONResponse(
                     status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                    headers={"Retry-After": str(agent_retry_after)},
+                    headers={"Retry-After": str(global_retry_after)},
                     content={
                         "error": {
                             "type": "rate_limit_error",
                             "message": (
-                                f"Agent rate limit exceeded. "
-                                f"Retry after {agent_retry_after}s."
+                                f"Global rate limit exceeded. "
+                                f"Retry after {global_retry_after}s."
                             ),
                         }
                     },
                 )
 
-        # Not rate limited - record request and proceed
-        self._global_requests.append(now)
-        if agent_id:
-            self._agent_requests[agent_id].append(now)
+            # Extract agent ID (if available)
+            agent_id = self._extract_agent_id(request)
 
-        agent_info = (
-            f", agent: {len(self._agent_requests[agent_id])}/"
-            f"{self.requests_per_minute_per_agent})"
-            if agent_id
-            else ")"
-        )
-        logger.debug(
-            f"{request.method} {request.url.path} - "
-            f"Rate limit OK (global: {len(self._global_requests)}/"
-            f"{self.requests_per_minute_global}{agent_info}"
-        )
+            # Check per-agent rate limit (if agent ID available)
+            if agent_id:
+                is_agent_limited, agent_retry_after = self._is_rate_limited_agent(
+                    agent_id, now
+                )
+                if is_agent_limited:
+                    logger.warning(
+                        f"{request.method} {request.url.path} - "
+                        f"Agent {agent_id} rate limit exceeded"
+                    )
+                    return JSONResponse(
+                        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                        headers={"Retry-After": str(agent_retry_after)},
+                        content={
+                            "error": {
+                                "type": "rate_limit_error",
+                                "message": (
+                                    f"Agent rate limit exceeded. "
+                                    f"Retry after {agent_retry_after}s."
+                                ),
+                            }
+                        },
+                    )
+
+            # Not rate limited - record request and proceed
+            self._global_requests.append(now)
+            if agent_id:
+                self._agent_requests[agent_id].append(now)
+
+            # Periodic cleanup of stale agent entries (prevents memory leak)
+            self._cleanup_counter += 1
+            if self._cleanup_counter >= self._cleanup_interval:
+                self._cleanup_counter = 0
+                self._cleanup_stale_agents(now)
+
+            agent_info = (
+                f", agent: {len(self._agent_requests[agent_id])}/"
+                f"{self.requests_per_minute_per_agent})"
+                if agent_id
+                else ")"
+            )
+            logger.debug(
+                f"{request.method} {request.url.path} - "
+                f"Rate limit OK (global: {len(self._global_requests)}/"
+                f"{self.requests_per_minute_global}{agent_info}"
+            )
 
         return await call_next(request)

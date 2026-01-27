@@ -70,7 +70,7 @@ class ModelSwapOrchestrator:
         self._cache_store = cache_store
         self._cache_adapter = cache_adapter
 
-    def swap_model(
+    async def swap_model(
         self,
         old_engine: BlockPoolBatchEngine | None,
         new_model_id: str,
@@ -97,7 +97,7 @@ class ModelSwapOrchestrator:
             - Caller must update app.state.batch_engine with returned engine
 
         Example:
-            >>> new_engine = orchestrator.swap_model(
+            >>> new_engine = await orchestrator.swap_model(
             ...     old_engine=app.state.batch_engine,
             ...     new_model_id="mlx-community/Qwen2.5-14B-Instruct-4bit",
             ... )
@@ -113,7 +113,7 @@ class ModelSwapOrchestrator:
             # Step 1: Drain active requests (if engine exists)
             if old_engine is not None:
                 logger.info("Step 1/7: Draining active requests...")
-                old_engine.drain(timeout_seconds=timeout_seconds)
+                await old_engine.drain(timeout_seconds=timeout_seconds)
                 logger.info("Drain complete")
 
             # Step 2: Evict all caches to disk

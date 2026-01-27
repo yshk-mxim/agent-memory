@@ -149,24 +149,47 @@ class AgentBlocks:
         if self.total_tokens < 0:
             raise AgentBlocksValidationError(f"total_tokens must be >= 0, got {self.total_tokens}")
 
-        # Validate that total_tokens matches token count in ONE layer
-        # (all layers store the SAME sequence, so we don't sum across layers)
-        if self.blocks:
-            # Get token count from first non-empty layer
-            first_layer_blocks = next(iter(self.blocks.values()))
-            computed_total = sum(block.token_count for block in first_layer_blocks)
-
-            if self.total_tokens != computed_total:
+        # Validate consistency between total_tokens and blocks
+        if not self.blocks:
+            # Empty blocks dict: total_tokens must be 0
+            if self.total_tokens > 0:
                 raise AgentBlocksValidationError(
-                    f"total_tokens ({self.total_tokens}) doesn't match "
-                    f"sum of block tokens in first layer ({computed_total})"
+                    f"total_tokens is {self.total_tokens} but blocks dict is empty"
                 )
+            return  # Valid empty state
 
-            # Validate all layers have the same token count
-            for layer_id, layer_blocks in self.blocks.items():
-                layer_total = sum(block.token_count for block in layer_blocks)
-                if layer_total != self.total_tokens:
-                    raise AgentBlocksValidationError(
-                        f"Layer {layer_id} has {layer_total} tokens, "
-                        f"but total_tokens is {self.total_tokens}"
-                    )
+        # Find first non-empty layer (skip layers with empty block lists)
+        first_layer_blocks: list[KVBlock] | None = None
+        for layer_blocks in self.blocks.values():
+            if layer_blocks:  # Skip empty lists
+                first_layer_blocks = layer_blocks
+                break
+
+        if first_layer_blocks is None:
+            # All layers have empty block lists
+            if self.total_tokens > 0:
+                raise AgentBlocksValidationError(
+                    f"total_tokens is {self.total_tokens} but all layer block lists are empty"
+                )
+            return  # Valid empty state (all layers exist but have no blocks)
+
+        # Validate that total_tokens matches token count in first non-empty layer
+        # (all layers store the SAME sequence, so we don't sum across layers)
+        computed_total = sum(block.token_count for block in first_layer_blocks)
+
+        if self.total_tokens != computed_total:
+            raise AgentBlocksValidationError(
+                f"total_tokens ({self.total_tokens}) doesn't match "
+                f"sum of block tokens in first layer ({computed_total})"
+            )
+
+        # Validate all non-empty layers have the same token count
+        for layer_id, layer_blocks in self.blocks.items():
+            if not layer_blocks:
+                continue  # Skip empty layers
+            layer_total = sum(block.token_count for block in layer_blocks)
+            if layer_total != self.total_tokens:
+                raise AgentBlocksValidationError(
+                    f"Layer {layer_id} has {layer_total} tokens, "
+                    f"but total_tokens is {self.total_tokens}"
+                )

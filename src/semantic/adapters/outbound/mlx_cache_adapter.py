@@ -52,14 +52,28 @@ class MLXCacheAdapter:
             v_scales_list = [v[1] for v in v_tensors]
             v_biases_list = [v[2] for v in v_tensors]
 
+            # Validate bias consistency - all None or all not None
+            k_has_biases = [b is not None for b in k_biases_list]
+            v_has_biases = [b is not None for b in v_biases_list]
+            if any(k_has_biases) != all(k_has_biases):
+                raise GenerationError(
+                    f"Inconsistent K biases: some blocks have biases, others don't. "
+                    f"Has biases: {k_has_biases}"
+                )
+            if any(v_has_biases) != all(v_has_biases):
+                raise GenerationError(
+                    f"Inconsistent V biases: some blocks have biases, others don't. "
+                    f"Has biases: {v_has_biases}"
+                )
+
             # Concatenate each component along sequence axis (axis=2)
             k_weights = mx.concatenate(k_weights_list, axis=2)
             k_scales = mx.concatenate(k_scales_list, axis=2)
-            k_biases = mx.concatenate(k_biases_list, axis=2) if k_biases_list[0] is not None else None
+            k_biases = mx.concatenate(k_biases_list, axis=2) if all(k_has_biases) else None
 
             v_weights = mx.concatenate(v_weights_list, axis=2)
             v_scales = mx.concatenate(v_scales_list, axis=2)
-            v_biases = mx.concatenate(v_biases_list, axis=2) if v_biases_list[0] is not None else None
+            v_biases = mx.concatenate(v_biases_list, axis=2) if all(v_has_biases) else None
 
             # Force evaluation
             if k_biases is not None:
@@ -142,17 +156,34 @@ class MLXCacheAdapter:
         """Slice cache tensor along sequence axis.
 
         Handles both float tensors and quantized tuples (weights, scales, biases).
+        Validates bounds to prevent out-of-range slicing.
         """
         # Check if quantized (tuple of 3 tensors)
         if isinstance(tensor, tuple) and len(tensor) == 3:
             # Quantized format - slice each component
             weights, scales, biases = tensor
+
+            # Validate bounds against weights tensor (authoritative size)
+            seq_len = weights.shape[2]
+            if start_token < 0 or end_token > seq_len or start_token > end_token:
+                raise GenerationError(
+                    f"Invalid slice bounds [{start_token}:{end_token}] for tensor "
+                    f"with sequence length {seq_len}"
+                )
+
             weights_slice = weights[:, :, start_token:end_token]
             scales_slice = scales[:, :, start_token:end_token]
             biases_slice = biases[:, :, start_token:end_token] if biases is not None else None
             return (weights_slice, scales_slice, biases_slice)
 
-        # Float format - normal slicing
+        # Float format - validate bounds
+        seq_len = tensor.shape[2]
+        if start_token < 0 or end_token > seq_len or start_token > end_token:
+            raise GenerationError(
+                f"Invalid slice bounds [{start_token}:{end_token}] for tensor "
+                f"with sequence length {seq_len}"
+            )
+
         return tensor[:, :, start_token:end_token]
 
     def create_batch_generator(

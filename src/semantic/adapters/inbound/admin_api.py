@@ -11,6 +11,7 @@ Authentication: Requires SEMANTIC_ADMIN_KEY header matching env var.
 import asyncio
 import logging
 import os
+import secrets
 from typing import Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
@@ -112,7 +113,7 @@ def verify_admin_key(
             detail="Admin authentication required (X-Admin-Key header missing)",
         )
 
-    if x_admin_key != expected_key:
+    if not secrets.compare_digest(x_admin_key, expected_key):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid admin key",
@@ -183,8 +184,8 @@ async def swap_model(
             if hasattr(orchestrator, "_registry"):
                 old_model_id = orchestrator._registry.get_current_id()
 
-            # Execute swap
-            new_engine = orchestrator.swap_model(
+            # Execute swap (async to properly await drain)
+            new_engine = await orchestrator.swap_model(
                 old_engine=old_engine,
                 new_model_id=swap_request.model_id,
                 timeout_seconds=swap_request.timeout_seconds,
