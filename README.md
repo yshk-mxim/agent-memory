@@ -28,7 +28,7 @@ A high-performance HTTP server for running MLX language models with **persistent
 
 ### Supported Models
 
-- **Gemma 3** (12B 4-bit) - Default production model
+- **DeepSeek-Coder-V2-Lite** (16B 4-bit) - Default production model (163K context)
 - **SmolLM2** (135M) - Lightweight testing model
 - Extensible to any MLX-compatible model
 
@@ -58,7 +58,7 @@ semantic version
 ### Start Server
 
 ```bash
-# Start with default Gemma 3 model
+# Start with default DeepSeek-Coder-V2-Lite model
 semantic serve
 
 # Or specify options
@@ -75,7 +75,7 @@ Server starts on `http://0.0.0.0:8000`
 curl -X POST http://localhost:8000/v1/messages \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "gemma-3-12b-it-4bit",
+    "model": "deepseek-coder-v2-lite",
     "max_tokens": 200,
     "messages": [
       {"role": "user", "content": "What is semantic caching?"}
@@ -89,7 +89,7 @@ curl -X POST http://localhost:8000/v1/messages \
 curl -X POST http://localhost:8000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "gemma-3-12b-it-4bit",
+    "model": "deepseek-coder-v2-lite",
     "messages": [
       {"role": "user", "content": "What is semantic caching?"}
     ],
@@ -103,7 +103,7 @@ curl -X POST http://localhost:8000/v1/chat/completions \
 curl -X POST http://localhost:8000/v1/messages \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "gemma-3-12b-it-4bit",
+    "model": "deepseek-coder-v2-lite",
     "max_tokens": 200,
     "messages": [
       {"role": "user", "content": "What is the weather in Paris?"}
@@ -197,7 +197,7 @@ Create a `.env` file:
 
 ```bash
 # MLX Model Configuration
-SEMANTIC_MLX_MODEL_ID=mlx-community/gemma-3-12b-it-4bit
+SEMANTIC_MLX_MODEL_ID=mlx-community/DeepSeek-Coder-V2-Lite-Instruct-4bit-mlx
 SEMANTIC_MLX_CACHE_BUDGET_MB=4096
 SEMANTIC_MLX_MAX_BATCH_SIZE=5
 
@@ -242,12 +242,12 @@ pytest tests/ --cov=src/semantic --cov-report=term-missing
 # Agent 1
 curl -X POST http://localhost:8000/v1/messages \
   -H "X-Session-ID: agent-alice" \
-  -d '{"model": "gemma-3-12b-it-4bit", "messages": [...]}'
+  -d '{"model": "deepseek-coder-v2-lite", "messages": [...]}'
 
 # Agent 2 (separate cache)
 curl -X POST http://localhost:8000/v1/messages \
   -H "X-Session-ID: agent-bob" \
-  -d '{"model": "gemma-3-12b-it-4bit", "messages": [...]}'
+  -d '{"model": "deepseek-coder-v2-lite", "messages": [...]}'
 ```
 
 ### Tool-Enabled Assistants
@@ -273,10 +273,10 @@ Cache persists across server restarts:
 
 ## Performance
 
-**Gemma 3 (M2 Max, 64GB RAM)**:
+**DeepSeek-Coder-V2-Lite (M3 Max, 64GB RAM)**:
 - Latency: ~50-100ms per token
-- Throughput: 10-15 tokens/second
-- Memory: ~8GB (model + cache)
+- Throughput: 50-100 tokens/second
+- Memory: ~20GB (model + cache)
 
 **SmolLM2 (M1, 16GB RAM)**:
 - Latency: ~20-40ms per token

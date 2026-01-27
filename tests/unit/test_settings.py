@@ -23,7 +23,7 @@ class TestMLXSettings:
         """Should load with documented default values."""
         settings = MLXSettings()
 
-        assert settings.model_id == "mlx-community/gemma-3-12b-it-4bit"
+        assert settings.model_id == "mlx-community/DeepSeek-Coder-V2-Lite-Instruct-4bit-mlx"
         assert settings.max_batch_size == 5
         assert settings.prefill_step_size == 512
         assert settings.kv_bits is None
@@ -165,7 +165,7 @@ class TestRootSettings:
         assert isinstance(settings.server, ServerSettings)
 
         # Verify defaults propagate
-        assert settings.mlx.model_id == "mlx-community/gemma-3-12b-it-4bit"
+        assert settings.mlx.model_id == "mlx-community/DeepSeek-Coder-V2-Lite-Instruct-4bit-mlx"
         assert settings.agent.max_agents_in_memory == 5
         assert settings.server.port == 8000
 

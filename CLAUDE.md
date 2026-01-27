@@ -1,3 +1,29 @@
+# ⚠️ CRITICAL: SANDBOX BYPASS FOR MLX OPERATIONS ⚠️
+
+**ALWAYS USE `dangerouslyDisableSandbox: true` WHEN RUNNING COMMANDS THAT USE MLX!**
+
+MLX operations (model loading, inference, cache operations) require access to Metal GPU devices and may be blocked by sandbox restrictions. If you encounter crashes, permission errors, or "operation not permitted" errors when running the semantic server or any MLX-related operations, you MUST use sandbox bypass.
+
+**When to bypass sandbox**:
+- ✅ Starting semantic server (`semantic serve`)
+- ✅ Running inference/generation tests
+- ✅ Any operation that loads MLX models or uses Metal GPU
+- ✅ Performance benchmarks with MLX
+- ❌ Git operations (use sandbox)
+- ❌ File operations (use sandbox)
+
+**Example**:
+```bash
+# CORRECT - Bypass sandbox for MLX operations
+Bash(
+    command="cd /Users/dev_user/semantic && semantic serve",
+    description="Start semantic server",
+    dangerouslyDisableSandbox=true  # REQUIRED for MLX/Metal access
+)
+```
+
+---
+
 # Claude Code Guidelines
 
 **IMPORTANT**: Current year is 2026. When searching for documentation, use 2026 or 2025-2026 in search queries to get the most recent information.

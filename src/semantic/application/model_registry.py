@@ -37,7 +37,7 @@ class ModelRegistry:
         >>> from semantic.adapters.outbound.mlx_model_loader import MLXModelLoader
         >>> loader = MLXModelLoader()
         >>> registry = ModelRegistry(model_loader=loader)
-        >>> registry.load_model("mlx-community/gemma-3-12b-it-4bit")
+        >>> registry.load_model("mlx-community/DeepSeek-Coder-V2-Lite-Instruct-4bit-mlx")
         >>> spec = registry.get_current_spec()
         >>> registry.unload_model()  # 100% memory reclaimed (per EXP-011)
     """
@@ -54,11 +54,19 @@ class ModelRegistry:
         self._spec: ModelCacheSpec | None = None  # Cache spec
         self._current_model_id: str | None = None  # HuggingFace model ID
 
-    def load_model(self, model_id: str) -> tuple[Any, Any]:
+    def load_model(
+        self,
+        model_id: str,
+        kv_bits: int | None = 4,
+        kv_group_size: int = 64,
+    ) -> tuple[Any, Any]:
         """Load a model and extract its cache spec.
 
         Args:
-            model_id: HuggingFace model ID (e.g., "mlx-community/gemma-3-12b-it-4bit")
+            model_id: HuggingFace model ID
+                (e.g., "mlx-community/DeepSeek-Coder-V2-Lite-Instruct-4bit-mlx")
+            kv_bits: KV cache quantization bits (4 or 8, None = FP16)
+            kv_group_size: Quantization group size
 
         Returns:
             Tuple of (model, tokenizer)
@@ -78,14 +86,24 @@ class ModelRegistry:
         except Exception as e:
             raise ModelNotFoundError(f"Failed to load model {model_id}: {e}") from e
 
-        # Extract cache spec
+        # Extract cache spec from model
         extractor = get_extractor()
-        spec = extractor.extract_spec(model)
+        base_spec = extractor.extract_spec(model)
+
+        # Add quantization settings from caller
+        from dataclasses import replace
+        spec = replace(
+            base_spec,
+            kv_bits=kv_bits,
+            kv_group_size=kv_group_size,
+        )
 
         logger.info(
             f"Model loaded: {spec.n_layers} layers, "
             f"{spec.n_kv_heads} KV heads, "
-            f"{spec.head_dim} head dim"
+            f"{spec.head_dim} head dim, "
+            f"kv_bits={spec.kv_bits}, "
+            f"kv_group_size={spec.kv_group_size}"
         )
 
         # Store state

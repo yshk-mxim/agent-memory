@@ -68,7 +68,7 @@ SEMANTIC_AGENT_CACHE_DIR=/custom/path
 
 ### How much disk space do caches use?
 
-- **Gemma 3**: ~100-200MB per agent (1000-token cache)
+- **DeepSeek-Coder-V2-Lite**: ~100-200MB per agent (1000-token cache)
 - **SmolLM2**: ~20-50MB per agent
 
 Caches grow as conversations get longer.
@@ -78,7 +78,7 @@ Caches grow as conversations get longer.
 ### Which models are supported?
 
 Currently tested:
-- **Gemma 3** (mlx-community/gemma-3-12b-it-4bit) - Default
+- **DeepSeek-Coder-V2-Lite** (mlx-community/DeepSeek-Coder-V2-Lite-Instruct-4bit-mlx) - Default
 - **SmolLM2** (mlx-community/SmolLM2-135M-Instruct) - Testing
 
 Any MLX-compatible model can be added. See [Model Onboarding](model-onboarding.md).
@@ -108,9 +108,9 @@ curl -X POST http://localhost:8000/admin/swap \
   -d '{"model_id": "mlx-community/SmolLM2-135M-Instruct"}'
 ```
 
-### Why is Gemma 3 the default?
+### Why is DeepSeek-Coder-V2-Lite the default?
 
-Gemma 3 offers the best balance of:
+DeepSeek-Coder-V2-Lite offers the best balance of:
 - Quality (12B parameters)
 - Tool calling support
 - Memory efficiency (4-bit quantization)
@@ -120,7 +120,7 @@ Gemma 3 offers the best balance of:
 
 ### How fast is generation?
 
-**Gemma 3 (M2 Max)**:
+**DeepSeek-Coder-V2-Lite (M2 Max)**:
 - First token: ~100-200ms
 - Subsequent tokens: ~50-100ms each
 - Throughput: 10-15 tokens/second
@@ -132,7 +132,7 @@ Gemma 3 offers the best balance of:
 
 ### Why is my first request slow?
 
-The first request loads the model (~5-10s for Gemma 3). Subsequent requests are much faster.
+The first request loads the model (~5-10s for DeepSeek-Coder-V2-Lite). Subsequent requests are much faster.
 
 ### How much faster is cache reuse?
 
@@ -141,7 +141,7 @@ The first request loads the model (~5-10s for Gemma 3). Subsequent requests are 
 ### Why is my server using lots of memory?
 
 This is expected:
-- **Model weights**: ~6-8GB (Gemma 3)
+- **Model weights**: ~6-8GB (DeepSeek-Coder-V2-Lite)
 - **KV cache**: ~4GB (default budget)
 - **System overhead**: ~2GB
 
@@ -167,7 +167,7 @@ Since MLX models don't natively support tool formats, we use prompt engineering:
 
 ### Which models work best for tools?
 
-**Gemma 3** works well with tool calling. **SmolLM2** has basic support but may be less reliable.
+**DeepSeek-Coder-V2-Lite** works well with tool calling. **SmolLM2** has basic support but may be less reliable.
 
 ### Can I use parallel tool calls?
 
@@ -268,7 +268,7 @@ response = requests.post(
 
 Create `.env` file in project root:
 ```bash
-SEMANTIC_MLX_MODEL_ID=mlx-community/gemma-3-12b-it-4bit
+SEMANTIC_MLX_MODEL_ID=mlx-community/DeepSeek-Coder-V2-Lite-Instruct-4bit-mlx
 SEMANTIC_MLX_CACHE_BUDGET_MB=4096
 ...
 ```
@@ -353,12 +353,12 @@ SEMANTIC_MLX_MAX_BATCH_SIZE=2         # Lower latency
 
 **Check**:
 1. Tool schema is valid JSON Schema
-2. Model supports instruction following (Gemma 3 works best)
+2. Model supports instruction following (DeepSeek-Coder-V2-Lite works best)
 3. Clear tool descriptions
 
 **Try**:
 - Add explicit instructions in user message
-- Use Gemma 3 instead of SmolLM2
+- Use DeepSeek-Coder-V2-Lite instead of SmolLM2
 - Simplify tool schema
 
 ## Development

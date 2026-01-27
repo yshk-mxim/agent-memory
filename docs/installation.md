@@ -7,7 +7,7 @@ Complete installation instructions for Semantic.
 ### Hardware
 
 - **Apple Silicon Required** — M1, M2, M3, or M4 chip
-- **Minimum RAM**: 16GB (24GB recommended for 12B models)
+- **Minimum RAM**: 20GB (24GB recommended for 16B models)
 - **Disk Space**: ~20GB (10GB for models + caches)
 
 **Note**: MLX framework requires Apple Silicon. This project will not run on Intel Macs or other platforms.
@@ -111,7 +111,7 @@ Create `~/.semantic/config.toml`:
 
 ```toml
 [model]
-model_id = "mlx-community/gemma-3-12b-it-4bit"
+model_id = "mlx-community/DeepSeek-Coder-V2-Lite-Instruct-4bit-mlx"
 max_batch_size = 5
 block_tokens = 256
 

@@ -22,26 +22,33 @@ class MLXSettings(BaseSettings):
 
     # Model configuration
     model_id: str = Field(
-        default="mlx-community/gemma-3-12b-it-4bit",
+        default="mlx-community/DeepSeek-Coder-V2-Lite-Instruct-4bit-mlx",
         description="HuggingFace model ID or local path",
     )
 
+    max_context_length: int = Field(
+        default=100000,
+        ge=1024,
+        le=163840,
+        description="Maximum context length in tokens (tokenizer override)",
+    )
+
     max_batch_size: int = Field(
-        default=5,
+        default=1,
         ge=1,
         le=20,
         description="Maximum number of concurrent sequences in batch",
     )
 
     prefill_step_size: int = Field(
-        default=512,
+        default=256,
         ge=128,
         le=2048,
         description="Tokens per prefill step (larger = faster prefill, more memory)",
     )
 
     kv_bits: int | None = Field(
-        default=None,
+        default=4,
         ge=4,
         le=8,
         description="KV cache quantization (4 or 8 bits, None = FP16)",
@@ -55,7 +62,7 @@ class MLXSettings(BaseSettings):
     )
 
     cache_budget_mb: int = Field(
-        default=4096,
+        default=8192,
         ge=512,
         le=16384,
         description="Maximum cache memory budget in MB",

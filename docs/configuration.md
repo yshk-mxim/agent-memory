@@ -15,7 +15,7 @@ Create a `.env` file in your project root:
 
 ```bash
 # MLX Model Configuration
-SEMANTIC_MLX_MODEL_ID=mlx-community/gemma-3-12b-it-4bit
+SEMANTIC_MLX_MODEL_ID=mlx-community/DeepSeek-Coder-V2-Lite-Instruct-4bit-mlx
 SEMANTIC_MLX_CACHE_BUDGET_MB=4096
 SEMANTIC_MLX_MAX_BATCH_SIZE=5
 
@@ -41,7 +41,7 @@ Control MLX inference engine behavior.
 
 | Variable | Type | Default | Description |
 |----------|------|---------|-------------|
-| `SEMANTIC_MLX_MODEL_ID` | string | `mlx-community/gemma-3-12b-it-4bit` | HuggingFace model ID or local path |
+| `SEMANTIC_MLX_MODEL_ID` | string | `mlx-community/DeepSeek-Coder-V2-Lite-Instruct-4bit-mlx` | HuggingFace model ID or local path |
 | `SEMANTIC_MLX_MAX_BATCH_SIZE` | int | `5` | Maximum concurrent sequences (1-20) |
 | `SEMANTIC_MLX_PREFILL_STEP_SIZE` | int | `512` | Tokens per prefill step (128-2048) |
 | `SEMANTIC_MLX_KV_BITS` | int\|null | `null` | KV cache quantization (4, 8, or null for FP16) |
@@ -53,20 +53,20 @@ Control MLX inference engine behavior.
 ### Supported Models
 
 **Production-Ready**:
-- `mlx-community/gemma-3-12b-it-4bit` (default, 12GB model, ~6GB quantized)
+- `mlx-community/DeepSeek-Coder-V2-Lite-Instruct-4bit-mlx` (default, 16B model, 163K context)
 - `mlx-community/SmolLM2-135M-Instruct` (lightweight, testing)
 
 **Memory Requirements**:
-- Gemma 3: 16GB+ RAM recommended
+- DeepSeek-Coder-V2-Lite: 20GB+ RAM recommended (163K context support)
 - SmolLM2: 4GB+ RAM sufficient
 
 ### Cache Budget Calculation
 
 ```python
-# Example: Gemma 3 with 4GB cache budget
+# Example: DeepSeek-Coder-V2-Lite with 4GB cache budget
 bytes_per_block = model_spec.bytes_per_block_per_layer()
 total_blocks = (4096 * 1024 * 1024) // bytes_per_block
-# ~1600 blocks for Gemma 3 (each block = 256 tokens)
+# ~1400 blocks for DeepSeek-Coder-V2-Lite (each block = 256 tokens)
 ```
 
 ## Agent Settings
@@ -157,7 +157,7 @@ Tool calling is enabled by default when tools are provided in requests.
 curl -X POST http://localhost:8000/v1/messages \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "gemma-3-12b-it-4bit",
+    "model": "deepseek-coder-v2-lite",
     "max_tokens": 200,
     "messages": [
       {"role": "user", "content": "What's the weather in Paris?"}
@@ -184,7 +184,7 @@ curl -X POST http://localhost:8000/v1/messages \
 curl -X POST http://localhost:8000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "gemma-3-12b-it-4bit",
+    "model": "deepseek-coder-v2-lite",
     "messages": [
       {"role": "user", "content": "What's the weather in Paris?"}
     ],
@@ -225,7 +225,7 @@ SEMANTIC_SERVER_CORS_ORIGINS=*
 
 ```bash
 # .env.production
-SEMANTIC_MLX_MODEL_ID=mlx-community/gemma-3-12b-it-4bit
+SEMANTIC_MLX_MODEL_ID=mlx-community/DeepSeek-Coder-V2-Lite-Instruct-4bit-mlx
 SEMANTIC_MLX_CACHE_BUDGET_MB=4096
 SEMANTIC_MLX_MAX_BATCH_SIZE=5
 SEMANTIC_AGENT_MAX_AGENTS_IN_MEMORY=10
@@ -242,7 +242,7 @@ SEMANTIC_ADMIN_KEY=your-admin-key
 
 ```bash
 # .env.multitenant
-SEMANTIC_MLX_MODEL_ID=mlx-community/gemma-3-12b-it-4bit
+SEMANTIC_MLX_MODEL_ID=mlx-community/DeepSeek-Coder-V2-Lite-Instruct-4bit-mlx
 SEMANTIC_MLX_CACHE_BUDGET_MB=8192
 SEMANTIC_MLX_MAX_BATCH_SIZE=10
 SEMANTIC_AGENT_MAX_AGENTS_IN_MEMORY=50

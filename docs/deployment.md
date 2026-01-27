@@ -20,9 +20,9 @@ Guide for deploying Semantic Caching API on Apple Silicon.
 ### Hardware Requirements
 
 - **Apple Silicon**: M1, M2, M3, or later
-- **RAM**: Minimum 16GB recommended
+- **RAM**: Minimum 20GB recommended
   - SmolLM2: 4GB+ sufficient
-  - Gemma 3: 16GB+ recommended
+  - DeepSeek-Coder-V2-Lite: 20GB+ recommended (163K context)
 - **Storage**: 10GB+ free space for models and cache
 
 ### Software Requirements
@@ -90,7 +90,7 @@ Create a `.env` file in your project directory:
 # .env
 
 # MLX Model Configuration
-SEMANTIC_MLX_MODEL_ID=mlx-community/gemma-3-12b-it-4bit
+SEMANTIC_MLX_MODEL_ID=mlx-community/DeepSeek-Coder-V2-Lite-Instruct-4bit-mlx
 SEMANTIC_MLX_CACHE_BUDGET_MB=4096
 SEMANTIC_MLX_MAX_BATCH_SIZE=5
 SEMANTIC_MLX_PREFILL_STEP_SIZE=512
@@ -146,7 +146,7 @@ SEMANTIC_SERVER_CORS_ORIGINS=*
 
 **Production** (.env.production):
 ```bash
-SEMANTIC_MLX_MODEL_ID=mlx-community/gemma-3-12b-it-4bit
+SEMANTIC_MLX_MODEL_ID=mlx-community/DeepSeek-Coder-V2-Lite-Instruct-4bit-mlx
 SEMANTIC_MLX_CACHE_BUDGET_MB=4096
 SEMANTIC_MLX_MAX_BATCH_SIZE=5
 SEMANTIC_SERVER_LOG_LEVEL=INFO
@@ -174,7 +174,7 @@ semantic serve --port 8080 --log-level DEBUG
 
 **Expected output**:
 ```
-INFO: Loading model: mlx-community/gemma-3-12b-it-4bit
+INFO: Loading model: mlx-community/DeepSeek-Coder-V2-Lite-Instruct-4bit-mlx
 INFO: Model loaded successfully
 INFO: Started server on http://0.0.0.0:8000
 INFO: Prometheus metrics on /metrics
@@ -191,7 +191,7 @@ curl http://localhost:8000/health
 curl -X POST http://localhost:8000/v1/messages \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "gemma-3-12b-it-4bit",
+    "model": "deepseek-coder-v2-lite",
     "max_tokens": 50,
     "messages": [{"role": "user", "content": "Hello!"}]
   }'
@@ -247,7 +247,7 @@ Create a launchd plist for automatic startup:
         <key>PATH</key>
         <string>/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
         <key>SEMANTIC_MLX_MODEL_ID</key>
-        <string>mlx-community/gemma-3-12b-it-4bit</string>
+        <string>mlx-community/DeepSeek-Coder-V2-Lite-Instruct-4bit-mlx</string>
         <key>SEMANTIC_MLX_CACHE_BUDGET_MB</key>
         <string>4096</string>
         <key>SEMANTIC_SERVER_LOG_LEVEL</key>
@@ -580,10 +580,10 @@ block in proto tcp to any port 8000
 
 ## Performance Benchmarks
 
-**Gemma 3 (M2 Max, 64GB RAM)**:
+**DeepSeek-Coder-V2-Lite (M3 Max, 64GB RAM)**:
 - Latency: ~50-100ms per token
-- Throughput: 10-15 tokens/second
-- Memory: ~8GB (model + cache)
+- Throughput: 50-100 tokens/second
+- Memory: ~20GB (model + cache)
 
 **SmolLM2 (M1, 16GB RAM)**:
 - Latency: ~20-40ms per token

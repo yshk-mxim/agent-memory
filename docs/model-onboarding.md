@@ -17,12 +17,12 @@ Semantic Caching API currently supports the following MLX models:
 
 ### Production Models
 
-#### Gemma 3 (Default)
+#### DeepSeek-Coder-V2-Lite (Default)
 
-**Model ID**: `mlx-community/gemma-3-12b-it-4bit`
+**Model ID**: `mlx-community/DeepSeek-Coder-V2-Lite-Instruct-4bit-mlx`
 
 **Specifications**:
-- Architecture: Gemma 3 (Google DeepMind)
+- Architecture: DeepSeek-Coder-V2-Lite (Google DeepMind)
 - Parameters: 12B (4-bit quantized)
 - Context: 8K tokens
 - Memory: ~6GB quantized
@@ -30,7 +30,7 @@ Semantic Caching API currently supports the following MLX models:
 
 **Configuration**:
 ```bash
-SEMANTIC_MLX_MODEL_ID=mlx-community/gemma-3-12b-it-4bit
+SEMANTIC_MLX_MODEL_ID=mlx-community/DeepSeek-Coder-V2-Lite-Instruct-4bit-mlx
 SEMANTIC_MLX_CACHE_BUDGET_MB=4096
 SEMANTIC_MLX_MAX_BATCH_SIZE=5
 ```
@@ -134,14 +134,14 @@ print(f"Bytes per block: {spec.bytes_per_block_per_layer()}")
 Calculate appropriate cache budget:
 
 ```python
-# Example: Gemma 3 with 256-token blocks
+# Example: DeepSeek-Coder-V2-Lite with 256-token blocks
 bytes_per_block = spec.bytes_per_block_per_layer()
-# ~6MB per block for Gemma 3
+# ~6MB per block for DeepSeek-Coder-V2-Lite
 
 # 4GB cache budget
 cache_budget_mb = 4096
 total_blocks = (cache_budget_mb * 1024 * 1024) // bytes_per_block
-# ~700 blocks for Gemma 3
+# ~700 blocks for DeepSeek-Coder-V2-Lite
 
 # Total cacheable tokens
 total_tokens = total_blocks * spec.block_size
@@ -481,7 +481,7 @@ Calculate optimal settings:
 ```python
 # Target: 16GB total system memory, 8GB for cache
 
-# Model loading: ~6GB (Gemma 3)
+# Model loading: ~6GB (DeepSeek-Coder-V2-Lite)
 # Cache budget: 4GB
 # System overhead: 2GB
 # Remaining: 4GB for other operations
@@ -600,7 +600,7 @@ print(f"Blocks: {num_blocks}")
 
 | Model Family | Tested | Cache Support | Tool Calling | Notes |
 |--------------|--------|---------------|--------------|-------|
-| Gemma 3 | ✅ | ✅ | ✅ | Production ready |
+| DeepSeek-Coder-V2-Lite | ✅ | ✅ | ✅ | Production ready |
 | SmolLM2 | ✅ | ✅ | ⚠️ | Testing only, basic tool support |
 | Llama 3 | 🔄 | ✅ | ✅ | Compatible, not tested |
 | Mistral | 🔄 | ✅ | ✅ | Compatible, not tested |

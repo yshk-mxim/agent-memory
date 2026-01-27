@@ -81,7 +81,7 @@ If rollback also fails, server enters degraded state (requires manual interventi
 ```json
 {
   "status": "success",
-  "old_model_id": "mlx-community/gemma-3-12b-it-4bit",
+  "old_model_id": "mlx-community/DeepSeek-Coder-V2-Lite-Instruct-4bit-mlx",
   "new_model_id": "mlx-community/Qwen2.5-14B-Instruct-4bit",
   "message": "Model swapped successfully"
 }
@@ -90,9 +90,9 @@ If rollback also fails, server enters degraded state (requires manual interventi
 ### Supported Models
 
 All MLX 4-bit quantized models on HuggingFace:
+- `mlx-community/DeepSeek-Coder-V2-Lite-Instruct-4bit-mlx` (default)
 - `mlx-community/Qwen2.5-14B-Instruct-4bit`
 - `mlx-community/Llama-3.1-8B-Instruct-4bit`
-- `mlx-community/gemma-3-12b-it-4bit`
 - `mlx-community/SmolLM2-135M-Instruct` (for testing)
 
 ### Best Practices

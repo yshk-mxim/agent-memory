@@ -43,7 +43,7 @@ semantic serve --model mlx-community/SmolLM2-135M-Instruct
 semantic serve --log-level DEBUG
 
 # Combine options
-semantic serve --port 8080 --log-level INFO --model mlx-community/gemma-3-12b-it-4bit
+semantic serve --port 8080 --log-level INFO --model mlx-community/DeepSeek-Coder-V2-Lite-Instruct-4bit-mlx
 ```
 
 ### Using Environment Variables
@@ -57,7 +57,7 @@ SEMANTIC_SERVER_PORT=8000
 SEMANTIC_SERVER_LOG_LEVEL=INFO
 
 # MLX model settings
-SEMANTIC_MLX_MODEL_ID=mlx-community/gemma-3-12b-it-4bit
+SEMANTIC_MLX_MODEL_ID=mlx-community/DeepSeek-Coder-V2-Lite-Instruct-4bit-mlx
 SEMANTIC_MLX_CACHE_BUDGET_MB=4096
 SEMANTIC_MLX_MAX_BATCH_SIZE=5
 

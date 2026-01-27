@@ -54,6 +54,9 @@ class AppState:
 def _load_model_and_extract_spec(settings):
     """Load MLX model and extract cache spec.
 
+    CRITICAL: Override tokenizer model_max_length to support long context
+    required by Claude Code CLI (18K+ tokens observed).
+
     Args:
         settings: Application settings
 
@@ -63,18 +66,48 @@ def _load_model_and_extract_spec(settings):
     logger = structlog.get_logger(__name__)
     logger.info("loading_model", model_id=settings.mlx.model_id)
 
+    # CRITICAL: Override tokenizer max length for long context support
+    tokenizer_config = {
+        "model_max_length": 100000,  # 100K tokens (6x Claude CLI needs)
+        "truncation_side": "left",   # Keep recent tokens if needed
+        "trust_remote_code": True,
+    }
+
     model, tokenizer = load(
         settings.mlx.model_id,
-        tokenizer_config={"trust_remote_code": True},
+        tokenizer_config=tokenizer_config,
     )
 
+    # Verify tokenizer configuration applied
+    actual_max = tokenizer.model_max_length
+    logger.info("tokenizer_configured", max_length=actual_max)
+
+    if actual_max < 100000:
+        logger.warning(
+            "tokenizer_limit_warning",
+            actual=actual_max,
+            target=100000,
+            message="Tokenizer max length less than target, requests may be truncated"
+        )
+
     spec_extractor = get_extractor()
-    model_spec: ModelCacheSpec = spec_extractor.extract_spec(model)
+    base_spec: ModelCacheSpec = spec_extractor.extract_spec(model)
+
+    # Add quantization settings from config
+    from dataclasses import replace
+    model_spec = replace(
+        base_spec,
+        kv_bits=settings.mlx.kv_bits if hasattr(settings.mlx, 'kv_bits') else 4,
+        kv_group_size=settings.mlx.kv_group_size if hasattr(settings.mlx, 'kv_group_size') else 64,
+    )
+
     logger.info(
         "model_loaded",
         n_layers=model_spec.n_layers,
         n_kv_heads=model_spec.n_kv_heads,
-        head_dim=model_spec.head_dim
+        head_dim=model_spec.head_dim,
+        kv_bits=model_spec.kv_bits,
+        kv_group_size=model_spec.kv_group_size
     )
 
     return model, tokenizer, model_spec

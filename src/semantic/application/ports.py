@@ -23,7 +23,8 @@ class ModelLoaderPort(Protocol):
         """Load a model from HuggingFace.
 
         Args:
-            model_id: HuggingFace model ID (e.g., "mlx-community/gemma-3-12b-it-4bit")
+            model_id: HuggingFace model ID
+                (e.g., "mlx-community/DeepSeek-Coder-V2-Lite-Instruct-4bit-mlx")
 
         Returns:
             Tuple of (model, tokenizer)

@@ -121,7 +121,7 @@ class BlockPoolBatchEngine:
 **Structure**:
 ```python
 class MLXSettings(BaseSettings):
-    model_id: str = "mlx-community/gemma-3-12b-it-4bit"
+    model_id: str = "mlx-community/DeepSeek-Coder-V2-Lite-Instruct-4bit-mlx"
     cache_budget_mb: int = 4096
     max_batch_size: int = 5
     ...

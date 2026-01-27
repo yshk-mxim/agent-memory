@@ -29,6 +29,8 @@ class ModelCacheSpec:
         block_tokens: Number of tokens per cache block.
         layer_types: Type of each layer ("global" or "sliding_window").
         sliding_window_size: Window size for sliding window layers.
+        kv_bits: KV cache quantization bits (4 or 8, None = FP16).
+        kv_group_size: Quantization group size.
     """
 
     n_layers: int
@@ -37,6 +39,8 @@ class ModelCacheSpec:
     block_tokens: int
     layer_types: list[str]
     sliding_window_size: int | None = None
+    kv_bits: int | None = 4
+    kv_group_size: int = 64
 
     def __post_init__(self) -> None:
         """Validate cache spec invariants."""

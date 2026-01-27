@@ -1,4 +1,7 @@
-"""Safetensors cache persistence adapter."""
+"""Safetensors cache persistence adapter.
+
+CRITICAL: Preserves 4-bit quantization when saving/loading KV cache.
+"""
 
 import json
 import struct
@@ -47,19 +50,55 @@ class SafetensorsCacheAdapter:
                 if hasattr(k_data, "__class__") and k_data.__class__.__name__ == "FakeTensor":
                     continue
 
-                # Convert to numpy
+                # CRITICAL: Quantize KV cache to 4-bit before saving
+                # MLX's BatchGenerator returns float16 arrays (dequantized)
+                # We need to quantize them ourselves to save disk space and memory
                 try:
-                    if hasattr(k_data, "__array_interface__") or hasattr(k_data, "__array__"):
-                        k_np = np.asarray(k_data)
-                        v_np = np.asarray(v_data)
-                    else:
-                        k_np = np.array(k_data)
-                        v_np = np.array(v_data)
+                    import mlx.core as mx  # Import here to avoid circular deps
 
-                    k_key = f"L{layer_id}_B{block_idx}_K"
-                    v_key = f"L{layer_id}_B{block_idx}_V"
-                    tensors[k_key] = k_np
-                    tensors[v_key] = v_np
+                    # Check if k_data is already quantized (tuple of 3 components)
+                    if isinstance(k_data, tuple) and len(k_data) == 3:
+                        # Already quantized format: (weights, scales, biases)
+                        k_weights, k_scales, k_biases = k_data
+                        v_weights, v_scales, v_biases = v_data
+
+                        # Save all quantized components separately
+                        tensors[f"L{layer_id}_B{block_idx}_K_weights"] = np.asarray(k_weights)
+                        tensors[f"L{layer_id}_B{block_idx}_K_scales"] = np.asarray(k_scales)
+                        if k_biases is not None:
+                            tensors[f"L{layer_id}_B{block_idx}_K_biases"] = np.asarray(k_biases)
+
+                        tensors[f"L{layer_id}_B{block_idx}_V_weights"] = np.asarray(v_weights)
+                        tensors[f"L{layer_id}_B{block_idx}_V_scales"] = np.asarray(v_scales)
+                        if v_biases is not None:
+                            tensors[f"L{layer_id}_B{block_idx}_V_biases"] = np.asarray(v_biases)
+
+                    else:
+                        # Float16/float32 array - QUANTIZE it before saving
+                        # Convert to MLX array if needed
+                        if not hasattr(k_data, "dtype") or "mlx" not in str(type(k_data)):
+                            k_data = mx.array(k_data)
+                            v_data = mx.array(v_data)
+
+                        # Quantize to 4-bit with group_size=64
+                        k_weights, k_scales, k_biases = mx.quantize(
+                            k_data, group_size=64, bits=4
+                        )
+                        v_weights, v_scales, v_biases = mx.quantize(
+                            v_data, group_size=64, bits=4
+                        )
+
+                        # Save quantized components
+                        tensors[f"L{layer_id}_B{block_idx}_K_weights"] = np.asarray(k_weights)
+                        tensors[f"L{layer_id}_B{block_idx}_K_scales"] = np.asarray(k_scales)
+                        if k_biases is not None:
+                            tensors[f"L{layer_id}_B{block_idx}_K_biases"] = np.asarray(k_biases)
+
+                        tensors[f"L{layer_id}_B{block_idx}_V_weights"] = np.asarray(v_weights)
+                        tensors[f"L{layer_id}_B{block_idx}_V_scales"] = np.asarray(v_scales)
+                        if v_biases is not None:
+                            tensors[f"L{layer_id}_B{block_idx}_V_biases"] = np.asarray(v_biases)
+
                 except Exception:
                     continue
 
@@ -94,34 +133,65 @@ class SafetensorsCacheAdapter:
 
         # Reconstruct blocks
         blocks_dict: dict[int, list[KVBlock]] = {}
+        processed_blocks: set[tuple[int, int]] = set()
 
+        # First pass: find all unique (layer_id, block_idx) pairs
         for key in sorted(tensors_data.keys()):
-            if not key.endswith("_K"):
-                continue
+            if "_K" in key or "_V" in key:
+                parts = key.split("_")
+                if len(parts) >= 3:
+                    try:
+                        layer_id = int(parts[0][1:])  # L123 -> 123
+                        block_idx = int(parts[1][1:])  # B456 -> 456
+                        processed_blocks.add((layer_id, block_idx))
+                    except (ValueError, IndexError):
+                        continue
 
-            parts = key.split("_")
-            if len(parts) != 3:
-                continue
+        # Second pass: reconstruct each block
+        import mlx.core as mx  # Import for quantized array reconstruction
 
-            layer_id = int(parts[0][1:])
-            block_idx = int(parts[1][1:])
+        for layer_id, block_idx in sorted(processed_blocks):
+            # Check for quantized format first (has _weights suffix)
+            k_weights_key = f"L{layer_id}_B{block_idx}_K_weights"
+            v_weights_key = f"L{layer_id}_B{block_idx}_V_weights"
 
-            k_key = key
-            v_key = key.replace("_K", "_V")
+            if k_weights_key in tensors_data and v_weights_key in tensors_data:
+                # QUANTIZED FORMAT: Reconstruct quantized tuple
+                k_weights = mx.array(tensors_data[k_weights_key])
+                k_scales = mx.array(tensors_data[f"L{layer_id}_B{block_idx}_K_scales"])
+                k_biases_key = f"L{layer_id}_B{block_idx}_K_biases"
+                k_biases = mx.array(tensors_data[k_biases_key]) if k_biases_key in tensors_data else None
 
-            if v_key not in tensors_data:
-                continue
+                v_weights = mx.array(tensors_data[v_weights_key])
+                v_scales = mx.array(tensors_data[f"L{layer_id}_B{block_idx}_V_scales"])
+                v_biases_key = f"L{layer_id}_B{block_idx}_V_biases"
+                v_biases = mx.array(tensors_data[v_biases_key]) if v_biases_key in tensors_data else None
 
-            k_array = tensors_data[k_key]
-            v_array = tensors_data[v_key]
+                # Store as quantized tuples (don't dequantize unless needed)
+                k_data = (k_weights, k_scales, k_biases)
+                v_data = (v_weights, v_scales, v_biases)
 
-            token_count = k_array.shape[2] if len(k_array.shape) >= 3 else 0
+                # Get token count from weights shape (axis 2)
+                token_count = k_weights.shape[2] if len(k_weights.shape) >= 3 else 0
+
+            else:
+                # REGULAR FORMAT: Float arrays
+                k_key = f"L{layer_id}_B{block_idx}_K"
+                v_key = f"L{layer_id}_B{block_idx}_V"
+
+                if k_key not in tensors_data or v_key not in tensors_data:
+                    continue
+
+                k_data = tensors_data[k_key]
+                v_data = tensors_data[v_key]
+
+                token_count = k_data.shape[2] if len(k_data.shape) >= 3 else 0
 
             block = KVBlock(
                 block_id=layer_id * 1000 + block_idx,
                 layer_id=layer_id,
                 token_count=token_count,
-                layer_data={"k": k_array, "v": v_array},
+                layer_data={"k": k_data, "v": v_data},
             )
 
             if layer_id not in blocks_dict:

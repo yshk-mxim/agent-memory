@@ -20,7 +20,7 @@ Stored in safetensors metadata header (JSON):
 {
   "__metadata__": {
     "agent_id": "agent_123",
-    "model_id": "mlx-community/gemma-3-12b-it-4bit",
+    "model_id": "mlx-community/DeepSeek-Coder-V2-Lite-Instruct-4bit-mlx",
     "model_tag": {
       "n_layers": 48,
       "n_kv_heads": 8,
