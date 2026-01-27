@@ -172,7 +172,7 @@ class AgentCacheStore:
         self._prefix_trie: dict[int | str, Any] = {}
 
     def save(self, agent_id: str, blocks: AgentBlocks) -> None:
-        """Save agent cache to hot tier (and optionally warm tier).
+        """Save agent cache to hot tier AND warm tier (disk).
 
         Args:
             agent_id: Unique agent identifier
@@ -183,12 +183,13 @@ class AgentCacheStore:
 
         Notes:
             - Adds to hot tier immediately
+            - ALWAYS persists to disk (warm tier) as backup
+            - This ensures cache survives even if hot tier blocks are cleared
             - May trigger LRU eviction if hot tier full
-            - Evicted caches persisted to warm tier (disk)
 
         Example:
             >>> store.save("agent_1", blocks)
-            >>> # Cache now in hot tier, accessible via load()
+            >>> # Cache now in both hot tier (memory) and warm tier (disk)
         """
         if not agent_id:
             raise InvalidRequestError("agent_id cannot be empty")
@@ -203,6 +204,12 @@ class AgentCacheStore:
 
         # Add to hot tier
         self._hot_cache[agent_id] = entry
+
+        # CRITICAL: Always persist to disk immediately!
+        # The hot_cache stores a reference to blocks, but batch_engine may clear
+        # the blocks after reconstruction. By persisting to disk, we ensure
+        # the cache can always be recovered from warm tier.
+        self._save_to_disk(agent_id)
 
         # Check if eviction needed
         if len(self._hot_cache) > self.max_hot_agents:
@@ -219,7 +226,9 @@ class AgentCacheStore:
 
         Notes:
             - Checks hot tier first (fast)
-            - Falls back to warm tier (disk load)
+            - Falls back to warm tier (disk load) if:
+              - Not in hot tier, OR
+              - Hot tier entry has empty/cleared blocks
             - Promotes warm→hot on access
             - Validates model compatibility
 
@@ -231,8 +240,24 @@ class AgentCacheStore:
         # Check hot tier first
         if agent_id in self._hot_cache:
             entry = self._hot_cache[agent_id]
-            entry.mark_accessed()
-            return entry.blocks
+
+            # CRITICAL: Check if blocks were cleared by batch_engine
+            # batch_engine clears layer_data after reconstruction to free Q4 memory,
+            # but this also clears the shared reference in hot_cache.
+            # If blocks are empty, fall back to disk.
+            if entry.blocks is not None and entry.blocks.blocks:
+                # Check if at least one block has actual data
+                has_data = False
+                for layer_blocks in entry.blocks.blocks.values():
+                    if layer_blocks and any(b.layer_data is not None for b in layer_blocks):
+                        has_data = True
+                        break
+
+                if has_data:
+                    entry.mark_accessed()
+                    return entry.blocks
+
+            # Blocks were cleared - fall through to disk load
 
         # Check warm tier (disk)
         if agent_id in self._warm_cache:

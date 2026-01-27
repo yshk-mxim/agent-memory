@@ -166,20 +166,65 @@ class BatchQuantizedKVCache:
     def update_and_fetch(self, keys: Any, values: Any) -> tuple[tuple[Any, Any, Any], tuple[Any, Any, Any]]:
         """Update cache with new keys/values and return full cache for attention.
 
-        For quantized cache, returns the Q4 format (weights, scales, biases)
-        which MLX's quantized_scaled_dot_product_attention expects.
+        CRITICAL: This must quantize new K/V tokens and append them to the cache.
+        Without this, new tokens during generation are ignored!
 
         Args:
-            keys: New keys tensor (for current token, FP16)
+            keys: New keys tensor (for current token, FP16) shape [B, n_kv_heads, num_steps, head_dim]
             values: New values tensor (for current token, FP16)
 
         Returns:
             Tuple of (keys_tuple, values_tuple) in Q4 format for quantized attention
         """
-        # Return the Q4 cache state for quantized attention
-        # The new keys/values (FP16) for current token are handled separately
-        # by the model's attention mechanism
-        return self.keys, self.values
+        B, n_kv_heads, num_steps, k_head_dim = keys.shape
+        v_head_dim = values.shape[-1]
+        prev = self.offset
+
+        # Check if we need to expand cache capacity
+        if self.keys is None or (prev + num_steps) > self.keys[0].shape[-2]:
+            el_per_int = 8 * mx.uint32.size // self.bits
+            new_steps = (self.step + num_steps - 1) // self.step * self.step
+            shape = (B, n_kv_heads, new_steps)
+
+            def init_quant(dim):
+                return (
+                    mx.zeros((*shape, dim // el_per_int), dtype=mx.uint32),
+                    mx.zeros((*shape, dim // self.group_size), dtype=keys.dtype),
+                    mx.zeros((*shape, dim // self.group_size), dtype=keys.dtype),
+                )
+
+            def expand_quant(x):
+                new_x = mx.zeros((*shape, x.shape[-1]), dtype=x.dtype)
+                return mx.concatenate([x, new_x], axis=-2)
+
+            if self.keys is not None:
+                # Trim and expand existing cache
+                if prev % self.step != 0:
+                    from mlx.utils import tree_map
+                    self.keys, self.values = tree_map(
+                        lambda x: x[..., :prev, :], (self.keys, self.values)
+                    )
+                from mlx.utils import tree_map
+                self.keys, self.values = tree_map(
+                    expand_quant, (self.keys, self.values)
+                )
+            else:
+                self.keys, self.values = init_quant(k_head_dim), init_quant(v_head_dim)
+
+        self.offset += num_steps
+
+        # Quantize new keys/values and append to cache
+        q_keys = mx.quantize(keys, group_size=self.group_size, bits=self.bits)
+        q_values = mx.quantize(values, group_size=self.group_size, bits=self.bits)
+
+        # Update cache with quantized data
+        for i in range(len(self.keys)):
+            self.keys[i][..., prev:self.offset, :] = q_keys[i]
+            self.values[i][..., prev:self.offset, :] = q_values[i]
+
+        # Return trimmed cache up to current offset
+        from mlx.utils import tree_map
+        return tree_map(lambda x: x[..., :self.offset, :], (self.keys, self.values))
 
     def finalize(self) -> None:
         """Finalize cache after generation completes.
@@ -189,11 +234,14 @@ class BatchQuantizedKVCache:
         # No cleanup needed for quantized cache
         pass
 
-    def filter(self, batch_indices: list[int]) -> None:
+    def filter(self, batch_indices: Any) -> None:
         """Filter cache to keep only specified batch indices (in-place).
 
+        Called when sequences complete to remove their cache data.
+        CRITICAL: Must properly release memory for filtered-out sequences.
+
         Args:
-            batch_indices: Indices of batch elements to keep
+            batch_indices: Indices of batch elements to keep (mx.array or list)
         """
         if self.keys is None:
             return
@@ -201,6 +249,7 @@ class BatchQuantizedKVCache:
         k_quant, k_scales, k_zeros = self.keys
         v_quant, v_scales, v_zeros = self.values
 
+        # Create new tensors with only kept indices
         self.keys = (
             k_quant[batch_indices],
             k_scales[batch_indices],
@@ -212,8 +261,18 @@ class BatchQuantizedKVCache:
             v_zeros[batch_indices],
         )
 
-        self._left_padding = [self._left_padding[i] for i in batch_indices]
-        self._lengths = [self._lengths[i] for i in batch_indices]
+        # Force evaluation to materialize new tensors and allow old ones to be freed
+        mx.eval(self.keys[0], self.keys[1], self.keys[2],
+                self.values[0], self.values[1], self.values[2])
+
+        # Convert mx.array to list for Python list indexing
+        if hasattr(batch_indices, 'tolist'):
+            indices_list = batch_indices.tolist()
+        else:
+            indices_list = list(batch_indices)
+
+        self._left_padding = [self._left_padding[i] for i in indices_list]
+        self._lengths = [self._lengths[i] for i in indices_list]
 
     def extend(self, other: "BatchQuantizedKVCache") -> None:
         """Extend this cache with another cache (in-place merge).

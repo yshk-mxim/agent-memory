@@ -139,14 +139,16 @@ class BlockPoolBatchEngine:
 
         if cache is not None:
             # CRITICAL: Check if cache is too large to reconstruct safely
-            # Large caches (>10K tokens) when dequantized to FP16 can exceed GPU memory
-            MAX_SAFE_CACHE_TOKENS = 10000  # ~512MB FP16 per 10K tokens (safe threshold)
+            # With Q4 direct injection, we can handle much larger caches (~73KB per 1K tokens)
+            # 100K tokens at Q4 = ~7.3GB, safe on 24GB GPU with 8GB model
+            MAX_SAFE_CACHE_TOKENS = 100000  # ~7.3GB Q4 for 100K tokens
 
             if cache.total_tokens > MAX_SAFE_CACHE_TOKENS:
-                # Skip reconstruction for large caches - treat as cache miss
+                # Skip reconstruction for very large caches - treat as cache miss
+                q4_size_mb = cache.total_tokens * 0.073  # ~73KB per token with Q4
                 logging.warning(
                     f"[CACHE SKIP] Cache too large ({cache.total_tokens} tokens > {MAX_SAFE_CACHE_TOKENS} threshold). "
-                    f"FP16 reconstruction would require ~{cache.total_tokens * 0.052:.0f}MB which risks OOM. "
+                    f"Q4 reconstruction would require ~{q4_size_mb:.0f}MB. "
                     f"Treating as cache miss - will regenerate from scratch."
                 )
                 cache = None  # Force cache miss path
@@ -157,9 +159,9 @@ class BlockPoolBatchEngine:
                     import mlx.core as mx
 
                     # Memory tracking BEFORE reconstruction
-                    mem_before = mx.metal.get_active_memory() / (1024**3)
-                    cache_before = mx.metal.get_cache_memory() / (1024**3)
-                    peak_before = mx.metal.get_peak_memory() / (1024**3)
+                    mem_before = mx.get_active_memory() / (1024**3)
+                    cache_before = mx.get_cache_memory() / (1024**3)
+                    peak_before = mx.get_peak_memory() / (1024**3)
                     logging.info(f"[MEMORY BEFORE RECONSTRUCT] Active: {mem_before:.2f}GB, Cache: {cache_before:.2f}GB, Peak: {peak_before:.2f}GB")
                     logging.info(f"[CACHE] Agent: {agent_id}, Tokens: {cache.total_tokens}, Blocks: {sum(len(blocks) for blocks in cache.blocks.values())}")
 
@@ -172,9 +174,9 @@ class BlockPoolBatchEngine:
                     kv_cache = self._reconstruct_cache(cache)
 
                     # Memory tracking AFTER reconstruction (should be SAME as before - no dequant!)
-                    mem_after_reconstruct = mx.metal.get_active_memory() / (1024**3)
-                    cache_after_reconstruct = mx.metal.get_cache_memory() / (1024**3)
-                    peak_after_reconstruct = mx.metal.get_peak_memory() / (1024**3)
+                    mem_after_reconstruct = mx.get_active_memory() / (1024**3)
+                    cache_after_reconstruct = mx.get_cache_memory() / (1024**3)
+                    peak_after_reconstruct = mx.get_peak_memory() / (1024**3)
                     logging.info(f"[MEMORY AFTER RECONSTRUCT] Active: {mem_after_reconstruct:.2f}GB, Cache: {cache_after_reconstruct:.2f}GB, Peak: {peak_after_reconstruct:.2f}GB")
                     logging.info(f"[MEMORY DELTA RECONSTRUCT] Active: +{(mem_after_reconstruct - mem_before):.2f}GB (should be ~0 with Q4!), Cache: +{(cache_after_reconstruct - cache_before):.2f}GB")
 
@@ -203,9 +205,9 @@ class BlockPoolBatchEngine:
                     logging.info(f"[Q4 FREED] Cleared {blocks_cleared} blocks to free Q4 memory")
 
                     # Memory tracking AFTER freeing Q4
-                    mem_after_free = mx.metal.get_active_memory() / (1024**3)
-                    cache_after_free = mx.metal.get_cache_memory() / (1024**3)
-                    peak_after_free = mx.metal.get_peak_memory() / (1024**3)
+                    mem_after_free = mx.get_active_memory() / (1024**3)
+                    cache_after_free = mx.get_cache_memory() / (1024**3)
+                    peak_after_free = mx.get_peak_memory() / (1024**3)
                     logging.info(f"[MEMORY POST-FREE] Active: {mem_after_free:.2f}GB, Cache: {cache_after_free:.2f}GB, Peak: {peak_after_free:.2f}GB")
                     logging.info(f"[MEMORY DELTA] Active: +{(mem_after_free - mem_before):.2f}GB (Q4 freed, FP16 remains)")
 
@@ -521,8 +523,10 @@ class BlockPoolBatchEngine:
                     k_weights, k_scales, k_biases = k_full
                     v_weights, v_scales, v_biases = v_full
 
-                    kv_bits = self._spec.kv_bits if hasattr(self._spec, 'kv_bits') and self._spec.kv_bits else 4
-                    kv_group_size = self._spec.kv_group_size if hasattr(self._spec, 'kv_group_size') else 64
+                    # Q4 data detected - get quantization params from spec
+                    # Default to 4 bits if spec doesn't specify (Q4 is the standard)
+                    kv_bits = getattr(self._spec, 'kv_bits', 4) or 4
+                    kv_group_size = getattr(self._spec, 'kv_group_size', 64) or 64
 
                     # Calculate Q4 size
                     q4_size_mb = (k_weights.nbytes + k_scales.nbytes + (k_biases.nbytes if k_biases is not None else 0) +
@@ -547,9 +551,21 @@ class BlockPoolBatchEngine:
                         f"[Q4 INJECT L{layer_id}] Q4: {q4_size_mb:.1f}MB (NO dequantization!) | {seq_len} tokens"
                     )
                 else:
-                    # Float format - use regular KVCache
+                    # Float format (FP16) - use regular KVCache
+                    import mlx.core as mx
+
                     kv_cache = KVCache()
                     kv_cache.state = (k_full, v_full)
+
+                    # Force evaluation for FP16 as well
+                    mx.eval(k_full, v_full)
+
+                    fp16_size_mb = (k_full.nbytes + v_full.nbytes) / (1024**2)
+                    seq_len = k_full.shape[2] if hasattr(k_full, 'shape') else 0
+                    logger = logging.getLogger(__name__)
+                    logger.info(
+                        f"[FP16 INJECT L{layer_id}] FP16: {fp16_size_mb:.1f}MB | {seq_len} tokens"
+                    )
 
                 cache.append(kv_cache)
             else:
@@ -596,15 +612,15 @@ class BlockPoolBatchEngine:
 
         # 3.2. Quantize float cache to save GPU memory (CRITICAL for large contexts!)
         # MLX returns float cache - quantize it immediately to reduce memory 4x
+        # NOTE: Only quantize if kv_bits is set (not None). kv_bits=None means FP16.
+        kv_bits = getattr(self._spec, 'kv_bits', None)
+        kv_group_size = getattr(self._spec, 'kv_group_size', 64) or 64
+
         if cache and len(cache) > 0 and cache[0][0] is not None:
             k_sample = cache[0][0]
-            # Check if float (not already quantized)
-            if not isinstance(k_sample, tuple):
+            # Check if float (not already quantized) AND kv_bits is set (not None)
+            if not isinstance(k_sample, tuple) and kv_bits is not None:
                 import mlx.core as mx
-
-                # Get quantization settings from spec
-                kv_bits = self._spec.kv_bits if hasattr(self._spec, 'kv_bits') and self._spec.kv_bits else 4
-                kv_group_size = self._spec.kv_group_size if hasattr(self._spec, 'kv_group_size') else 64
 
                 # Quantize each layer's K and V tensors
                 quantized_cache = []
@@ -626,6 +642,11 @@ class BlockPoolBatchEngine:
                     f"Quantized cache for {agent_id}: {len(cache)} layers, "
                     f"bits={kv_bits}, group_size={kv_group_size} "
                     f"(75% memory savings!)"
+                )
+            elif not isinstance(k_sample, tuple):
+                logger.info(
+                    f"Keeping FP16 cache for {agent_id}: {len(cache)} layers "
+                    f"(kv_bits=None, no quantization)"
                 )
 
         # 3.2. Check if cache has actual data
