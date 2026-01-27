@@ -46,30 +46,43 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
         self._valid_keys = self._load_valid_keys()
         self._auth_disabled = self._check_auth_disabled()
 
-        if not self._valid_keys:
-            if self._auth_disabled:
-                logger.warning(
-                    "Authentication explicitly disabled via SEMANTIC_AUTH_DISABLED=true. "
-                    "This is insecure and should only be used for local development."
-                )
-            else:
-                logger.error(
-                    "No ANTHROPIC_API_KEY configured and auth not explicitly disabled. "
-                    "Set ANTHROPIC_API_KEY or SEMANTIC_AUTH_DISABLED=true to start."
-                )
-        else:
+        if self._valid_keys:
             logger.info(
                 f"Authentication enabled with {len(self._valid_keys)} valid key(s)"
             )
+        elif self._auth_disabled:
+            logger.info(
+                "Authentication disabled (local development mode). "
+                "Set ANTHROPIC_API_KEY to enable authentication."
+            )
+        else:
+            logger.error(
+                "Authentication required but no ANTHROPIC_API_KEY configured. "
+                "Set ANTHROPIC_API_KEY or remove SEMANTIC_AUTH_DISABLED=false."
+            )
 
     def _check_auth_disabled(self) -> bool:
-        """Check if authentication is explicitly disabled.
+        """Check if authentication is disabled.
 
         Returns:
-            True if SEMANTIC_AUTH_DISABLED=true (case-insensitive)
+            True if auth should be disabled.
+
+        Notes:
+            Auth is disabled by default for local development.
+            Set SEMANTIC_AUTH_DISABLED=false to require authentication.
         """
-        disabled = os.environ.get("SEMANTIC_AUTH_DISABLED", "").lower()
-        return disabled in ("true", "1", "yes")
+        disabled_env = os.environ.get("SEMANTIC_AUTH_DISABLED", "").lower()
+
+        # If explicitly set to false, require auth
+        if disabled_env in ("false", "0", "no"):
+            return False
+
+        # If explicitly set to true, disable auth
+        if disabled_env in ("true", "1", "yes"):
+            return True
+
+        # Default: disabled for local development (no env var set)
+        return True
 
     def _load_valid_keys(self) -> set[str]:
         """Load valid API keys from environment.
@@ -124,8 +137,8 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
                     content={
                         "error": {
                             "type": "configuration_error",
-                            "message": "Authentication not configured. "
-                            "Set ANTHROPIC_API_KEY or SEMANTIC_AUTH_DISABLED=true.",
+                            "message": "Authentication required but not configured. "
+                            "Set ANTHROPIC_API_KEY or remove SEMANTIC_AUTH_DISABLED=false.",
                         }
                     },
                 )
