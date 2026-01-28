@@ -713,8 +713,26 @@ def messages_to_prompt(messages: list[Message], system: Any = "", tools: list[To
     """Convert messages to prompt string (matching main anthropic adapter)."""
     lines = []
     system_text = extract_text(system)
-    if system_text:
-        lines.append(f"System: {system_text}\n")
+
+    # Split system text into static and variable parts for better cache prefix matching.
+    # The <env> section contains working directory which changes per session.
+    # Put static system text first, then tools (static), then variable env, then messages.
+    env_marker = "<env>"
+    static_system = system_text
+    variable_system = ""
+    if env_marker in system_text:
+        env_idx = system_text.index(env_marker)
+        # Find the text before <env> - may include intro line
+        intro_end = system_text.rfind("\n", 0, env_idx)
+        if intro_end > 0:
+            static_system = system_text[:intro_end]
+            variable_system = system_text[intro_end:]
+        else:
+            static_system = system_text[:env_idx]
+            variable_system = system_text[env_idx:]
+
+    if static_system:
+        lines.append(f"System: {static_system}\n")
 
     # Add tool definitions in a format DeepSeek understands
     if tools:
@@ -723,18 +741,31 @@ def messages_to_prompt(messages: list[Message], system: Any = "", tools: list[To
         lines.append('```json')
         lines.append('{"name": "function_name", "arguments": {"param1": "value1"}}')
         lines.append('```\n')
+        lines.append("IMPORTANT: To create or modify files, you MUST use the Write function. Use the actual file path relative to the working directory:")
+        lines.append('```json')
+        lines.append('{"name": "Write", "arguments": {"file_path": "src/example.py", "content": "file contents here"}}')
+        lines.append('```')
+        lines.append("Do NOT output file contents in markdown code blocks. Always use Write with a real file path.\n")
+        lines.append("To launch a background task or subagent, use the Task function:")
+        lines.append('```json')
+        lines.append('{"name": "Task", "arguments": {"description": "short desc", "prompt": "what to do", "subagent_type": "general-purpose"}}')
+        lines.append('```')
+        lines.append("To track tasks with a todo list, use TodoWrite with the todos array:")
+        lines.append('```json')
+        lines.append('{"name": "TodoWrite", "arguments": {"todos": [{"content": "task name", "status": "pending", "activeForm": "Doing task"}]}}')
+        lines.append('```\n')
         lines.append("Available functions:\n")
         for tool in tools:
             lines.append(f"### {tool.name}")
             if tool.description:
-                lines.append(f"{tool.description[:500]}")
+                lines.append(f"{tool.description[:2000]}")
             if tool.input_schema and tool.input_schema.get("properties"):
                 props = tool.input_schema["properties"]
                 required = tool.input_schema.get("required", [])
                 lines.append("Parameters:")
                 for name, spec in props.items():
                     req_marker = " (required)" if name in required else ""
-                    desc = spec.get("description", "")[:100]
+                    desc = spec.get("description", "")[:300]
                     param_type = spec.get('type', 'any')
                     lines.append(f"  - {name}: {param_type}{req_marker} - {desc}")
                     # Show nested structure for arrays/objects
@@ -746,10 +777,13 @@ def messages_to_prompt(messages: list[Message], system: Any = "", tools: list[To
                         lines.append(f"    Object must have: {list(spec['properties'].keys())}")
             lines.append("")
 
+    # Append variable system parts (env section) after static prefix
+    if variable_system:
+        lines.append(variable_system.strip())
+
     for i, msg in enumerate(messages):
         content_text = extract_text(msg.content)
         lines.append(f"{msg.role.capitalize()}: {content_text}")
-        # Debug: log what each message becomes after conversion
         logger.info(f"[MSG {i} CONVERTED] {msg.role}: {content_text[:300]}")
     lines.append("Assistant:")
     return "\n".join(lines)
@@ -866,6 +900,7 @@ def parse_tool_calls(text: str, available_tools: list[Tool] | None = None) -> tu
         logger.debug(f"[TOOL PARSE] JSON parse failed: {e}")
 
     # Second, try DeepSeek native format
+    MAX_TOOL_CALLS = 10  # Cap to prevent degenerate output loops
     if TOOL_CALL_BEGIN in text:
         logger.info(f"[TOOL PARSE] Found DeepSeek markers in output")
 
@@ -874,6 +909,10 @@ def parse_tool_calls(text: str, available_tools: list[Tool] | None = None) -> tu
         remaining_parts = [parts[0]]  # Keep text before first marker
 
         for part in parts[1:]:
+            if len(tool_uses) >= MAX_TOOL_CALLS:
+                logger.warning(f"[TOOL PARSE] Hit max tool call limit ({MAX_TOOL_CALLS}), ignoring rest")
+                break
+
             # Each part should be: function<｜tool▁sep｜>name\ncode...<｜tool▁call▁end｜>
             if TOOL_SEP in part:
                 sep_parts = part.split(TOOL_SEP, 1)
@@ -895,13 +934,33 @@ def parse_tool_calls(text: str, available_tools: list[Tool] | None = None) -> tu
                             if TOOL_CALL_END in args_text:
                                 args_text = args_text.split(TOOL_CALL_END)[0]
 
-                            # Try to parse as JSON
-                            json_match = re.search(r'\{[^{}]*\}', args_text)
-                            if json_match:
-                                try:
-                                    args = json.loads(json_match.group())
-                                except json.JSONDecodeError:
-                                    pass
+                            # Strip markdown code fences from args
+                            args_text = re.sub(r'```(?:json)?\s*', '', args_text)
+                            args_text = args_text.strip()
+
+                            # Use bracket counting for nested JSON (not flat regex)
+                            json_start = args_text.find('{')
+                            if json_start >= 0:
+                                depth = 0
+                                json_end = json_start
+                                for i, c in enumerate(args_text[json_start:]):
+                                    if c == '{':
+                                        depth += 1
+                                    elif c == '}':
+                                        depth -= 1
+                                        if depth == 0:
+                                            json_end = json_start + i + 1
+                                            break
+                                if json_end > json_start:
+                                    try:
+                                        args = json.loads(args_text[json_start:json_end])
+                                    except json.JSONDecodeError:
+                                        pass
+
+                            # Skip empty tool calls (degenerate output)
+                            if not args:
+                                logger.warning(f"[TOOL PARSE] Skipping empty tool call: {parsed_name}")
+                                continue
 
                             tool_id = f"toolu_{hashlib.md5(f'{canonical_name}{time.time()}'.encode()).hexdigest()[:24]}"
                             tool_uses.append({
