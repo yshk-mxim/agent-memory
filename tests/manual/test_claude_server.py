@@ -730,7 +730,15 @@ def messages_to_prompt(messages: list[Message], system: Any = "", tools: list[To
                 for name, spec in props.items():
                     req_marker = " (required)" if name in required else ""
                     desc = spec.get("description", "")[:100]
-                    lines.append(f"  - {name}: {spec.get('type', 'any')}{req_marker} - {desc}")
+                    param_type = spec.get('type', 'any')
+                    lines.append(f"  - {name}: {param_type}{req_marker} - {desc}")
+                    # Show nested structure for arrays/objects
+                    if param_type == "array" and "items" in spec:
+                        items = spec["items"]
+                        if items.get("type") == "object" and "properties" in items:
+                            lines.append(f"    Array items must have: {list(items['properties'].keys())}")
+                    elif param_type == "object" and "properties" in spec:
+                        lines.append(f"    Object must have: {list(spec['properties'].keys())}")
             lines.append("")
 
     for msg in messages:
