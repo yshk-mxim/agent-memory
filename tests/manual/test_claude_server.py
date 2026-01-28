@@ -995,8 +995,8 @@ def parse_tool_calls(text: str, available_tools: list[Tool] | None = None) -> tu
                     "name": tool_name_map['bash'],
                     "input": {"command": command},
                 })
-                remaining_text = remaining_text[:bash_match.start()] + remaining_text[bash_match.end():]
-                remaining_text = remaining_text.strip()
+                # Clear remaining text - it would be confusing ("Here's the code:" with no code)
+                remaining_text = ""
                 logger.info(f"[TOOL PARSE] Extracted bash from markdown: {command[:50]}...")
 
         # Match ```python code blocks -> run via Bash
@@ -1014,8 +1014,8 @@ def parse_tool_calls(text: str, available_tools: list[Tool] | None = None) -> tu
                         "name": tool_name_map['bash'],
                         "input": {"command": f"python3 -c '{escaped_code}'"},
                     })
-                    remaining_text = remaining_text[:python_match.start()] + remaining_text[python_match.end():]
-                    remaining_text = remaining_text.strip()
+                    # Clear remaining text - it would be confusing ("Here's the code:" with no code)
+                    remaining_text = ""
                     logger.info(f"[TOOL PARSE] Extracted python from markdown, running via bash")
 
     # Always clean up any DeepSeek markers from remaining text
@@ -1298,6 +1298,7 @@ async def create_message(request_body: MessagesRequest, request: Request) -> JSO
 
     # When tool_uses exist, clean up remaining text but keep explanations
     if tool_uses:
+        logger.info(f"[CONTENT] remaining_text before filter: {remaining_text[:200] if remaining_text else 'None'}...")
         if remaining_text:
             clean_text = sanitize_terminal_output(remaining_text.strip())
             # Remove duplicate JSON tool calls that model sometimes outputs
@@ -1309,6 +1310,7 @@ async def create_message(request_body: MessagesRequest, request: Request) -> JSO
             clean_text = re.sub(r'```json\s*```', '', clean_text)
             clean_text = re.sub(r'```\s*```', '', clean_text)
             clean_text = clean_text.strip()
+            logger.info(f"[CONTENT] clean_text after filter: {clean_text[:200] if clean_text else 'None'}...")
             # Include if there's meaningful text left
             if clean_text and len(clean_text) > 3:
                 content_blocks.append({"type": "text", "text": clean_text})
