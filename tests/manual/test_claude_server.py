@@ -1284,14 +1284,28 @@ async def create_message(request_body: MessagesRequest, request: Request) -> JSO
 
     # Build content blocks
     content_blocks: list[dict] = []
-    # Only add text block if it has meaningful content (not empty or just code fences)
-    if remaining_text:
-        clean_text = sanitize_terminal_output(remaining_text.strip())
-        # Filter out empty JSON code blocks or other meaningless content
-        if clean_text and clean_text not in ["```json\n\n```", "```\n```", "```json```", "```"]:
-            content_blocks.append({"type": "text", "text": clean_text})
-    for tool_use in tool_uses:
-        content_blocks.append(tool_use)
+
+    # When tool_uses exist, filter remaining_text more aggressively
+    # The model often hallucinates fake results after tool calls
+    if tool_uses:
+        # Don't include text that looks like fake results or empty code blocks
+        if remaining_text:
+            clean_text = sanitize_terminal_output(remaining_text.strip())
+            # Filter out fake results, empty blocks, and JSON-looking content
+            if clean_text and not re.search(r'```json|"result"|"output"|\{\s*"', clean_text):
+                # Only include if it looks like legitimate pre-tool explanation
+                if not clean_text.startswith('```'):
+                    content_blocks.append({"type": "text", "text": clean_text})
+        # Add tool uses after any text
+        for tool_use in tool_uses:
+            content_blocks.append(tool_use)
+    else:
+        # No tool uses - include text normally
+        if remaining_text:
+            clean_text = sanitize_terminal_output(remaining_text.strip())
+            # Filter out empty JSON code blocks or other meaningless content
+            if clean_text and clean_text not in ["```json\n\n```", "```\n```", "```json```", "```"]:
+                content_blocks.append({"type": "text", "text": clean_text})
 
     # Determine stop reason
     if tool_uses:
