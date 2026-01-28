@@ -406,20 +406,29 @@ async def create_message(request_body: MessagesRequest, request: Request):  # no
         logger.debug(f"Prompt length: {len(prompt)} chars")
         logger.debug(f"Full prompt:\n{prompt}")
 
-        # 2. Tokenize to get agent ID (run in executor to avoid blocking)
+        # 2. Tokenize (run in executor to avoid blocking)
         tokenizer = batch_engine.tokenizer
         tokens = await asyncio.to_thread(tokenizer.encode, prompt)
-        agent_id = generate_agent_id_from_tokens(tokens)
-        logger.debug(f"Agent ID: {agent_id}, tokens: {len(tokens)}")
 
-        # 3. Check cache store for existing cache
+        # 3. Determine agent_id: use X-Session-ID for session-based caching,
+        # fall back to token-based ID for stateless requests.
+        # Session-based lookup enables prefix caching across conversation turns.
+        session_id = request.headers.get("X-Session-ID")
+        if session_id:
+            agent_id = f"sess_{session_id}"
+            logger.debug(f"Session-based agent ID: {agent_id}, tokens: {len(tokens)}")
+        else:
+            agent_id = generate_agent_id_from_tokens(tokens)
+            logger.debug(f"Token-based agent ID: {agent_id}, tokens: {len(tokens)}")
+
+        # 4. Check cache store for existing cache
         cached_blocks = cache_store.load(agent_id)
         if cached_blocks:
             logger.info(f"Cache hit: {agent_id} ({cached_blocks.total_tokens} tokens)")
         else:
             logger.info(f"Cache miss: {agent_id}")
 
-        # 4. Handle streaming vs non-streaming
+        # 5. Handle streaming vs non-streaming
         if request_body.stream:
             # Return SSE stream
             logger.info("Returning SSE stream")
@@ -429,7 +438,7 @@ async def create_message(request_body: MessagesRequest, request: Request):  # no
                 )
             )
 
-        # 4. Submit to batch engine (run in executor to avoid blocking)
+        # 6. Submit to batch engine (run in executor to avoid blocking)
         uid = await asyncio.to_thread(
             batch_engine.submit,
             agent_id=agent_id,
@@ -444,7 +453,7 @@ async def create_message(request_body: MessagesRequest, request: Request):  # no
         if cached_blocks is not None:
             cache_store.invalidate_hot(agent_id)
 
-        # 5. Execute generation (step until complete - run in executor)
+        # 7. Execute generation (step until complete - run in executor)
         completion = await asyncio.to_thread(run_step_for_uid, batch_engine, uid)
         if completion:
             logger.debug(
@@ -458,16 +467,16 @@ async def create_message(request_body: MessagesRequest, request: Request):  # no
                 detail="Generation failed - no completion returned",
             )
 
-        # 6. Save updated cache
+        # 8. Save updated cache
         updated_blocks = batch_engine.get_agent_blocks(agent_id)
         if updated_blocks:
             cache_store.save(agent_id, updated_blocks)
             logger.debug(f"Saved cache: {agent_id} ({updated_blocks.total_tokens} tokens)")
 
-        # 7. Parse for tool calls
+        # 9. Parse for tool calls
         remaining_text, tool_calls = parse_tool_calls(completion.text)
 
-        # 8. Format response
+        # 10. Format response
         content_blocks = []
 
         # Add text block if there's remaining text

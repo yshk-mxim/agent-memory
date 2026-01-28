@@ -478,6 +478,7 @@ class AgentCacheStore:
             "head_dim": self.model_tag.head_dim,
             "block_tokens": self.model_tag.block_tokens,
             "total_tokens": entry.blocks.total_tokens,
+            "token_sequence": entry.blocks.token_sequence,
         }
 
         if self._cache_adapter is None:
@@ -518,7 +519,13 @@ class AgentCacheStore:
                 return None
 
             total_tokens = int(metadata.get("total_tokens", 0))
-            blocks = AgentBlocks(agent_id=agent_id, blocks=blocks_dict, total_tokens=total_tokens)
+            token_sequence = metadata.get("token_sequence", [])
+            blocks = AgentBlocks(
+                agent_id=agent_id,
+                blocks=blocks_dict,
+                total_tokens=total_tokens,
+                token_sequence=token_sequence,
+            )
 
             # Promote to hot tier
             entry = CacheEntry(

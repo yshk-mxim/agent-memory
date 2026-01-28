@@ -113,6 +113,7 @@ class AgentBlocks:
     agent_id: str
     blocks: dict[int, list[KVBlock]]
     total_tokens: int
+    token_sequence: list[int] = field(default_factory=list)  # Actual tokens for prefix matching
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def num_blocks(self) -> int:
@@ -141,6 +142,34 @@ class AgentBlocks:
             List of blocks for this layer (empty list if none allocated).
         """
         return self.blocks.get(layer_id, [])
+
+    def common_prefix_length(self, query_tokens: list[int]) -> int:
+        """Find length of common prefix between cached tokens and query.
+
+        This is the key method for prefix cache hit detection. Returns the
+        number of tokens that match between the cached sequence and the query.
+
+        Args:
+            query_tokens: The new token sequence to compare against.
+
+        Returns:
+            Number of matching tokens from the start (0 if no match).
+
+        Example:
+            >>> # Cache has: [1, 2, 3, 4, 5]
+            >>> # Query is:  [1, 2, 3, 6, 7]
+            >>> agent.common_prefix_length([1, 2, 3, 6, 7])
+            3  # First 3 tokens match
+        """
+        if not self.token_sequence or not query_tokens:
+            return 0
+
+        prefix_len = 0
+        for cached_tok, query_tok in zip(self.token_sequence, query_tokens):
+            if cached_tok != query_tok:
+                break
+            prefix_len += 1
+        return prefix_len
 
     def __post_init__(self) -> None:
         """Validate agent blocks invariants after construction."""

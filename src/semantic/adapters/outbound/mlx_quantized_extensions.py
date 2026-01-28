@@ -9,10 +9,16 @@ import mlx.core as mx
 from typing import Any
 import logging
 
+# Import MLX's base cache class so model recognizes our cache
+try:
+    from mlx_lm.models.cache import _BaseCache
+except ImportError:
+    _BaseCache = object  # Fallback if not available
+
 logger = logging.getLogger(__name__)
 
 
-class BatchQuantizedKVCache:
+class BatchQuantizedKVCache(_BaseCache):
     """Batched quantized KV cache for multiple sequences.
 
     This class provides a batched version of QuantizedKVCache that can be
@@ -195,19 +201,29 @@ class BatchQuantizedKVCache:
         Returns:
             Tuple of (keys_tuple, values_tuple) in Q4 format for quantized attention
         """
+        import time
+        start_time = time.time()
+
         B, n_kv_heads, num_steps, k_head_dim = keys.shape
         v_head_dim = values.shape[-1]
         prev = self.offset
 
+        expanded = False
         # Check if we need to expand cache capacity
         # Add +1 to account for potential rounding issues
         required_capacity = prev + num_steps + 1
         if self.keys is None or required_capacity > self.keys[0].shape[-2]:
+            expanded = True
             el_per_int = 8 * mx.uint32.size // self.bits
-            # Round up num_steps to step boundary for efficient allocation
-            # Add extra step to ensure we have enough space
-            new_steps = ((num_steps + self.step) // self.step) * self.step
+            # Conservative headroom to avoid massive memory spikes
+            # Old value (16K tokens) caused 162 tensor allocations across 27 layers
+            # which triggered OOM during single-sequence cache hits
+            # Cap at 1024 tokens max to prevent OOM even with large prefill chunks
+            headroom = min(max(num_steps + 256, 512), 1024)  # Capped at 1K tokens
+            new_capacity = ((prev + headroom + self.step - 1) // self.step) * self.step
+            new_steps = new_capacity - prev if self.keys is not None else new_capacity
             shape = (B, n_kv_heads, new_steps)
+            logger.info(f"[Q4 EXPAND] Allocating {new_steps} new slots (headroom={headroom})")
 
             def init_quant(dim):
                 return (
@@ -231,6 +247,9 @@ class BatchQuantizedKVCache:
                 self.keys, self.values = tree_map(
                     expand_quant, (self.keys, self.values)
                 )
+                # CRITICAL: Force evaluation after expansion to prevent lazy graph accumulation
+                mx.eval(self.keys[0], self.keys[1], self.keys[2],
+                       self.values[0], self.values[1], self.values[2])
             else:
                 self.keys, self.values = init_quant(k_head_dim), init_quant(v_head_dim)
 
@@ -254,7 +273,16 @@ class BatchQuantizedKVCache:
 
         # Return trimmed cache up to current offset
         from mlx.utils import tree_map
-        return tree_map(lambda x: x[..., :self.offset, :], (self.keys, self.values))
+        result = tree_map(lambda x: x[..., :self.offset, :], (self.keys, self.values))
+
+        elapsed = (time.time() - start_time) * 1000
+        if elapsed > 100 or expanded:  # Log if slow or if we expanded
+            logger.info(
+                f"[Q4 UPDATE] offset: {prev}->{self.offset}, expanded={expanded}, "
+                f"time={elapsed:.0f}ms"
+            )
+
+        return result
 
     def finalize(self) -> None:
         """Finalize cache after generation completes.
@@ -496,5 +524,50 @@ def add_quantized_merge_method():
         logger.error(f"[Q4 EXT] Failed to patch QuantizedKVCache: {e}")
 
 
+def patch_batch_kv_cache_merge():
+    """Patch BatchKVCache.merge() to handle QuantizedKVCache objects.
+
+    The BatchGenerator calls BatchKVCache.merge(caches) which doesn't know
+    how to handle QuantizedKVCache. This patch intercepts that call and
+    delegates to BatchQuantizedKVCache.merge() when needed.
+    """
+    try:
+        from mlx_lm.models.cache import BatchKVCache, QuantizedKVCache
+
+        # Store original merge method
+        original_merge = BatchKVCache.merge
+
+        @classmethod
+        def patched_merge(cls, caches):
+            """Merge caches, delegating to Q4 merge if caches are quantized."""
+            if not caches:
+                return original_merge.__func__(cls, caches)
+
+            # Check if first cache is QuantizedKVCache
+            first_cache = caches[0]
+            if isinstance(first_cache, QuantizedKVCache):
+                logger.debug(f"[BatchKVCache.merge] Delegating to Q4 merge for {len(caches)} caches")
+                return BatchQuantizedKVCache.merge(caches)
+
+            # Check if first cache's keys are tuples (quantized format)
+            if hasattr(first_cache, 'keys') and first_cache.keys is not None:
+                if isinstance(first_cache.keys, tuple) and len(first_cache.keys) == 3:
+                    logger.debug(f"[BatchKVCache.merge] Detected Q4 tuples, delegating to Q4 merge")
+                    return BatchQuantizedKVCache.merge(caches)
+
+            # Otherwise use original merge
+            return original_merge.__func__(cls, caches)
+
+        BatchKVCache.merge = patched_merge
+
+        logger.info("[Q4 EXT] Patched BatchKVCache.merge() to handle QuantizedKVCache")
+
+    except ImportError as e:
+        logger.warning(f"[Q4 EXT] Could not import BatchKVCache: {e}")
+    except Exception as e:
+        logger.error(f"[Q4 EXT] Failed to patch BatchKVCache.merge(): {e}")
+
+
 # Auto-patch on module import
 add_quantized_merge_method()
+patch_batch_kv_cache_merge()

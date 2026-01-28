@@ -112,6 +112,7 @@ class BlockPoolBatchEngine:
         self._active_requests: dict[str, tuple[str, list[int]]] = {}
         self._agent_blocks: dict[str, AgentBlocks] = {}
         self._draining: bool = False
+        self._native_completions: dict[str, CompletedGeneration] = {}  # Pre-computed native path results
 
         # Chunked prefill settings (loaded lazily)
         self._chunked_prefill_enabled: bool | None = None
@@ -150,6 +151,22 @@ class BlockPoolBatchEngine:
             self._chunked_prefill_min_chunk or 512,
             self._chunked_prefill_max_chunk or 4096,
         )
+
+    def _log_memory(self, label: str) -> tuple[float, float, float]:
+        """Log current MLX memory state.
+
+        Args:
+            label: Descriptive label for this memory checkpoint
+
+        Returns:
+            Tuple of (active_gb, cache_gb, peak_gb)
+        """
+        import mlx.core as mx
+        active = mx.get_active_memory() / (1024**3)
+        cache = mx.get_cache_memory() / (1024**3)
+        peak = mx.get_peak_memory() / (1024**3)
+        logger.info(f"[MEMORY {label}] Active: {active:.2f}GB, Cache: {cache:.2f}GB, Peak: {peak:.2f}GB")
+        return active, cache, peak
 
     # --- Public accessors (avoid direct access to private attributes) ---
 
@@ -297,6 +314,106 @@ class BlockPoolBatchEngine:
 
         return kv_caches
 
+    def _generate_native(
+        self,
+        prompt_tokens: list[int],
+        kv_cache: list[Any],
+        max_tokens: int,
+        agent_id: str,
+    ) -> tuple[list[int], list[Any]]:
+        """Native generation for single-sequence with Q4 cache.
+
+        Bypasses BatchGenerator to avoid the 27-layer expansion overhead that
+        occurs when BatchQuantizedKVCache.update_and_fetch() allocates 16K+
+        token headroom across all layers simultaneously.
+
+        Args:
+            prompt_tokens: Full prompt token sequence
+            kv_cache: List of QuantizedKVCache objects (one per layer)
+            max_tokens: Maximum tokens to generate
+            agent_id: Agent ID for logging
+
+        Returns:
+            Tuple of (generated_tokens, updated_cache)
+        """
+        import mlx.core as mx
+
+        # Track memory before generation
+        mem_before = mx.get_active_memory() / (1024**3)
+        peak_before = mx.get_peak_memory() / (1024**3)
+
+        # Get cached token count from first layer
+        cached_tokens = kv_cache[0].offset if kv_cache and kv_cache[0].offset else 0
+
+        # Determine which tokens to process (only new ones beyond cache)
+        if cached_tokens > 0 and cached_tokens < len(prompt_tokens):
+            tokens_to_process = prompt_tokens[cached_tokens:]
+        elif cached_tokens >= len(prompt_tokens):
+            # Cache covers entire prompt - just need a seed token for generation
+            tokens_to_process = [prompt_tokens[-1]]
+        else:
+            tokens_to_process = prompt_tokens
+
+        logger.info(
+            f"[NATIVE GEN] Agent: {agent_id}, Cached: {cached_tokens}, "
+            f"Processing: {len(tokens_to_process)}, Max: {max_tokens}"
+        )
+
+        # Process any new prompt tokens (prefill phase)
+        if len(tokens_to_process) > 1 or cached_tokens == 0:
+            tokens_array = mx.array([tokens_to_process])
+            y = self._model(tokens_array, cache=kv_cache)
+            mx.eval(y)
+        else:
+            # Single token continuation - process it
+            tokens_array = mx.array([tokens_to_process])
+            y = self._model(tokens_array, cache=kv_cache)
+            mx.eval(y)
+
+        # Sample first generated token (greedy - temperature=0)
+        logits = y[:, -1, :]
+        next_token = int(mx.argmax(logits, axis=-1).item())
+
+        # Check for immediate EOS
+        if next_token == self._tokenizer.eos_token_id:
+            logger.info(f"[NATIVE GEN] EOS at token 1 (immediate)")
+            generated = []  # Don't include EOS in output
+        else:
+            generated = [next_token]
+
+            # Autoregressive generation loop
+            for i in range(max_tokens - 1):
+                tokens_array = mx.array([[next_token]])
+                y = self._model(tokens_array, cache=kv_cache)
+                mx.eval(y)
+
+                logits = y[:, -1, :]
+                next_token = int(mx.argmax(logits, axis=-1).item())
+
+                # Check for EOS BEFORE adding to output
+                if next_token == self._tokenizer.eos_token_id:
+                    logger.info(f"[NATIVE GEN] EOS at token {i + 2}")
+                    break
+
+                generated.append(next_token)
+
+            # Periodic memory cleanup to prevent fragmentation
+            if i > 0 and i % 100 == 0:
+                mx.clear_cache()
+                logger.debug(f"[NATIVE GEN] Token {i + 1}, cleared cache")
+
+        # Final memory stats
+        mem_after = mx.get_active_memory() / (1024**3)
+        peak_after = mx.get_peak_memory() / (1024**3)
+
+        logger.info(
+            f"[NATIVE GEN DONE] Agent: {agent_id}, Generated: {len(generated)} tokens, "
+            f"Cache offset: {kv_cache[0].offset}, "
+            f"Memory: {mem_before:.2f}GB -> {mem_after:.2f}GB (peak: {peak_after:.2f}GB)"
+        )
+
+        return generated, kv_cache
+
     def submit(
         self,
         agent_id: str,
@@ -439,6 +556,104 @@ class BlockPoolBatchEngine:
                     cache = None
                     kv_cache = None
 
+        # Use BatchGenerator for all generation (simpler, well-tested path)
+        # The headroom fix in mlx_quantized_extensions.py handles the OOM issue
+        if False:  # DISABLED: Native path had too many bugs, reverting to BatchGenerator
+                logger.info(
+                    f"[NATIVE PATH] Agent: {agent_id}, reusable_kv={reusable_kv}, "
+                    f"new={new_tokens} (< {NATIVE_PATH_THRESHOLD} threshold)"
+                )
+
+                # CRITICAL: Slice KV cache to reusable portion before generation
+                # The cache may have KV for generated tokens that don't match new prompt
+                if reusable_kv < cache.total_tokens:
+                    logger.info(
+                        f"[NATIVE PATH TRIM] Slicing cache from {cache.total_tokens} to {reusable_kv} tokens"
+                    )
+                    self._slice_cache_to_length(kv_cache, reusable_kv)
+
+                # Generate synchronously using native path
+                # After slicing, kv_cache[0].offset = reusable_kv, so _generate_native
+                # will correctly process prompt_tokens[reusable_kv:]
+                generated_tokens, updated_cache = self._generate_native(
+                    prompt_tokens, kv_cache, max_tokens, agent_id
+                )
+
+                # Decode generated tokens
+                text = self._tokenizer.decode(generated_tokens)
+                text = text.replace('Ġ', ' ').replace('Ċ', '\n').replace('ċ', '\n').replace('▁', ' ')
+                import re
+                text = re.sub(r' {3,}', '  ', text)
+                text = re.sub(r'\n\n\n+', '\n\n', text)
+
+                # Determine finish reason: "stop" if we generated fewer than max (hit EOS)
+                finish_reason = "stop" if len(generated_tokens) < max_tokens else "length"
+
+                # Extract cache from the updated kv_cache
+                # Store prompt tokens only for prefix matching
+                full_token_sequence = list(prompt_tokens)
+                cache_tuple_list = []
+                for layer_cache in updated_cache:
+                    if hasattr(layer_cache, 'keys') and layer_cache.keys is not None:
+                        cache_tuple_list.append((layer_cache.keys, layer_cache.values))
+                    else:
+                        cache_tuple_list.append((None, None))
+
+                # Use existing _extract_cache-like logic to create AgentBlocks
+                import uuid
+                native_uid = f"native_{uuid.uuid4().hex[:8]}"
+
+                # Store in active_requests temporarily for _extract_cache
+                with self._lock:
+                    self._active_requests[native_uid] = (agent_id, generated_tokens, None, prompt_tokens)
+
+                blocks = self._extract_cache(native_uid, cache_tuple_list, full_token_sequence)
+
+                # CRITICAL: Free kv_cache memory after extraction
+                # The cache data is now in blocks, so we can release the original
+                import mlx.core as mx
+                del kv_cache
+                del cache_tuple_list
+                del updated_cache
+                import gc
+                gc.collect()
+                mx.clear_cache()
+                logger.info(f"[NATIVE PATH] Freed kv_cache memory after extraction")
+
+                # CRITICAL: Free OLD blocks BEFORE storing new ones to avoid pool exhaustion
+                # Old code just overwrote _agent_blocks without freeing → 503 errors
+                with self._lock:
+                    if agent_id in self._agent_blocks:
+                        old_blocks = self._agent_blocks[agent_id]
+                        for layer_blocks in old_blocks.blocks.values():
+                            for block in layer_blocks:
+                                block.layer_data = None
+                            self._pool.free(layer_blocks, agent_id)
+                        logger.info(f"[NATIVE PATH] Freed {sum(len(b) for b in old_blocks.blocks.values())} old blocks")
+                    # Store new blocks
+                    self._agent_blocks[agent_id] = blocks
+
+                # Create completion
+                completion = CompletedGeneration(
+                    uid=native_uid,
+                    text=text,
+                    blocks=blocks,
+                    finish_reason=finish_reason,
+                    token_count=len(generated_tokens),
+                )
+
+                # Store completion for step() to yield
+                with self._lock:
+                    self._native_completions[native_uid] = completion
+                    del self._active_requests[native_uid]
+
+                logger.info(
+                    f"[NATIVE PATH DONE] Agent: {agent_id}, UID: {native_uid}, "
+                    f"Tokens: {len(generated_tokens)}, Finish: {finish_reason}"
+                )
+
+                return native_uid
+
         if cache is None:
             # No cache - check if we should use chunked prefill for long prompts
             enabled, threshold, min_chunk, max_chunk = self._get_chunked_prefill_settings()
@@ -476,6 +691,14 @@ class BlockPoolBatchEngine:
                 )
                 with self._lock:
                     self._agent_blocks[agent_id] = agent_blocks
+
+                # After chunked prefill, pass kv_cache to BatchGenerator for generation
+                # BatchGenerator will handle the rest (generation + cache extraction)
+                logger.info(
+                    f"[CHUNKED PREFILL DONE] Agent: {agent_id}, prefilled={len(prompt_tokens)} tokens, "
+                    f"passing to BatchGenerator for generation"
+                )
+                # Fall through to BatchGenerator insertion below
 
             else:
                 # Standard path: Let BatchGenerator handle prefill
@@ -540,31 +763,157 @@ class BlockPoolBatchEngine:
                 samplers = [sampler]
 
             # Build insert kwargs
+            # Use MLX-LM pattern for prefix caching:
+            #   - Exact match: cache tokens == prompt tokens → pass []
+            #   - Partial match (extend): prompt extends cache → pass tokens[cache_len:]
+            #   - Divergent match: tokens differ → trim cache, pass rest
+            tokens_to_process = prompt_tokens
+
+            # CASE 1: kv_cache from chunked prefill (cache is None on cold start)
+            if kv_cache is not None and cache is None:
+                # Chunked prefill already processed all prompt tokens
+                # Pass empty list - BatchGenerator just needs to generate
+                first_cache = kv_cache[0] if isinstance(kv_cache, list) else kv_cache
+                cached_tokens = getattr(first_cache, 'offset', 0) or 0
+                tokens_to_process = []  # All tokens already in cache
+                logger.info(
+                    f"[CHUNKED PREFILL INSERT] Cache has {cached_tokens} tokens from prefill, "
+                    f"passing empty prompt to BatchGenerator for generation only"
+                )
+
+            # CASE 2: kv_cache from loaded cache (cache is not None)
+            elif kv_cache is not None and cache is not None:
+                from mlx_lm.models.cache import can_trim_prompt_cache, trim_prompt_cache
+
+                first_cache = kv_cache[0] if isinstance(kv_cache, list) else kv_cache
+                cached_tokens = getattr(first_cache, 'offset', 0) or 0
+                cache_size = first_cache.size() if hasattr(first_cache, 'size') else 0
+                cache_type = type(first_cache).__name__
+                has_bits = hasattr(first_cache, 'bits')
+
+                # Use actual token comparison for prefix matching
+                cached_token_seq = getattr(cache, 'token_sequence', [])
+                if cached_token_seq:
+                    # Find common prefix length by comparing actual tokens
+                    common_prefix = cache.common_prefix_length(prompt_tokens)
+
+                    if common_prefix == len(cached_token_seq) == len(prompt_tokens):
+                        # EXACT MATCH: Prompt matches full cached sequence exactly
+                        # This is rare - means user sent exact same prompt+response text
+                        # For reliable generation of NEW content, treat as cache miss
+                        # (The cached KV was computed for generating original response,
+                        # reusing it would bias toward same output)
+                        logger.info(
+                            f"[CACHE EXACT MATCH MISS] {common_prefix} tokens match exactly. "
+                            f"Treating as cache miss for fresh generation."
+                        )
+                        # Free reconstructed cache to avoid memory leak
+                        if kv_cache is not None:
+                            import mlx.core as mx
+                            del kv_cache
+                            import gc
+                            gc.collect()
+                            mx.clear_cache()
+                            logger.info("[CACHE EXACT FREED] Released reconstructed cache memory")
+                        kv_cache = None
+                        # Also set cache = None so chunked prefill can handle long prompts
+                        cache = None
+                        tokens_to_process = prompt_tokens
+                    elif common_prefix == len(cached_token_seq) < len(prompt_tokens):
+                        # PARTIAL MATCH (EXTEND): Prompt prefix matches stored tokens
+                        # The cache may have more KV (from generated tokens) but we can only
+                        # reliably reuse the prompt portion due to BPE boundary issues.
+                        #
+                        # cache.total_tokens = prompt + generated KV positions
+                        # common_prefix = matched prompt tokens (what we can safely reuse)
+                        #
+                        # We need to trim cache to common_prefix and process from there.
+                        cache_total = cache.total_tokens if cache else 0
+                        if cache_total > common_prefix:
+                            # Cache has generated KV beyond prompt - trim it
+                            logger.info(
+                                f"[CACHE EXTEND] Trimming cache from {cache_total} to {common_prefix} "
+                                f"(discarding {cache_total - common_prefix} generated token KV due to BPE boundaries)"
+                            )
+                            self._slice_cache_to_length(kv_cache, common_prefix)
+                            # Force evaluation and cleanup to actually free the discarded memory
+                            import mlx.core as mx
+                            import gc
+                            gc.collect()
+                            mx.clear_cache()
+
+                        tokens_to_process = prompt_tokens[common_prefix:]
+                        logger.info(
+                            f"[CACHE EXTEND] Reusing {common_prefix} prompt tokens, "
+                            f"processing {len(tokens_to_process)} new tokens"
+                        )
+                    elif common_prefix < len(cached_token_seq):
+                        # DIVERGENT MATCH: Prompt tokens differ from cached after common_prefix
+                        # This happens when:
+                        # 1. User sends shorter prompt than cached (wanting new response)
+                        # 2. User sends prompt that diverges from cached sequence
+                        # 3. BPE tokenization boundary mismatch (generated tokens != re-tokenized)
+                        #
+                        # IMPORTANT: We can only reuse cache if the new prompt EXTENDS
+                        # the cached sequence. If it diverges, the KV values won't match
+                        # the new token positions and attention will produce garbage.
+                        logger.info(
+                            f"[CACHE DIVERGE MISS] Common prefix: {common_prefix}, "
+                            f"cached: {len(cached_token_seq)}, prompt: {len(prompt_tokens)}. "
+                            f"Treating as cache miss (KV values tied to original context)."
+                        )
+
+                        # CRITICAL: Free the reconstructed cache BEFORE processing full prompt
+                        # Without this, we hold old cache memory + allocate new → OOM
+                        if kv_cache is not None:
+                            import mlx.core as mx
+                            del kv_cache
+                            import gc
+                            gc.collect()
+                            mx.clear_cache()
+                            logger.info("[CACHE DIVERGE FREED] Released reconstructed cache memory")
+
+                        kv_cache = None
+                        # CRITICAL: Also set cache = None so chunked prefill can kick in
+                        # for long prompts. Without this, we skip the memory-managed path.
+                        cache = None
+                        tokens_to_process = prompt_tokens
+                else:
+                    # No token sequence stored - use offset-based matching (legacy)
+                    if cached_tokens > 0 and cached_tokens < len(prompt_tokens):
+                        tokens_to_process = prompt_tokens[cached_tokens:]
+                        logger.info(
+                            f"[CACHE LEGACY] Skipping {cached_tokens} cached tokens, "
+                            f"processing {len(tokens_to_process)} new tokens"
+                        )
+                    elif cached_tokens >= len(prompt_tokens):
+                        tokens_to_process = []
+                        logger.info(
+                            f"[CACHE LEGACY EXACT] Cache has {cached_tokens} tokens for {len(prompt_tokens)} prompt, "
+                            f"passing empty for generation"
+                        )
+
+                # Safety check: if somehow tokens_to_process is still empty, use last token
+                if not tokens_to_process and prompt_tokens:
+                    logger.warning(
+                        f"[CACHE FALLBACK] Unexpected empty tokens_to_process, "
+                        f"using last token as fallback"
+                    )
+                    tokens_to_process = [prompt_tokens[-1]]
+
+                logger.info(
+                    f"[CACHE INJECT] {cache_type}: offset={cached_tokens}, size()={cache_size}, "
+                    f"is_quantized={has_bits}, prompt={len(prompt_tokens)}, processing={len(tokens_to_process)}"
+                )
+
             insert_kwargs = {
-                "prompts": [prompt_tokens],
+                "prompts": [tokens_to_process],
                 "max_tokens": [max_tokens],
             }
             if samplers is not None:
                 insert_kwargs["samplers"] = samplers
             if kv_cache is not None:
                 insert_kwargs["caches"] = [kv_cache]
-                # VALIDATION: Log cache injection details for debugging
-                first_cache = kv_cache[0] if isinstance(kv_cache, list) else kv_cache
-                cache_offset = getattr(first_cache, 'offset', 'N/A')
-                cache_size = first_cache.size() if hasattr(first_cache, 'size') else 'N/A'
-                cache_type = type(first_cache).__name__
-                has_bits = hasattr(first_cache, 'bits')
-                logger.info(
-                    f"[CACHE INJECT] Injecting {cache_type} into BatchGenerator: "
-                    f"offset={cache_offset}, size()={cache_size}, "
-                    f"is_quantized={has_bits}, prompt_tokens={len(prompt_tokens)}"
-                )
-                # CRITICAL VALIDATION: offset should match what we set
-                if cache_offset != cache_size:
-                    logger.warning(
-                        f"[CACHE MISMATCH] offset ({cache_offset}) != size() ({cache_size}) - "
-                        f"BatchGenerator may not recognize cache!"
-                    )
 
             uids = self._batch_gen.insert(**insert_kwargs)
         except Exception as e:
@@ -584,7 +933,9 @@ class BlockPoolBatchEngine:
         detokenizer_class = type(self._tokenizer.detokenizer)
         detokenizer = detokenizer_class(self._tokenizer)
         with self._lock:
-            self._active_requests[actual_uid] = (agent_id, [], detokenizer)
+            # Store: (agent_id, generated_tokens, detokenizer, prompt_tokens)
+            # prompt_tokens needed to save full token_sequence for prefix matching
+            self._active_requests[actual_uid] = (agent_id, [], detokenizer, list(prompt_tokens))
 
         return actual_uid
 
@@ -613,6 +964,15 @@ class BlockPoolBatchEngine:
             ...     if completion.finish_reason == "stop":
             ...         print(f"Completed with {completion.token_count} tokens")
         """
+        # First, yield any pre-computed native completions (from native path)
+        with self._lock:
+            native_uids = list(self._native_completions.keys())
+        for uid in native_uids:
+            with self._lock:
+                completion = self._native_completions.pop(uid, None)
+            if completion is not None:
+                yield completion
+
         if self._batch_gen is None:
             return
 
@@ -642,7 +1002,7 @@ class BlockPoolBatchEngine:
                             f"Active UIDs: {list(self._active_requests.keys())}"
                         )
                         continue
-                    agent_id, tokens, detokenizer = self._active_requests[uid]
+                    agent_id, tokens, detokenizer, prompt_tokens = self._active_requests[uid]
 
                 if response.finish_reason != "stop":
                     tokens.append(response.token)
@@ -666,9 +1026,35 @@ class BlockPoolBatchEngine:
                             # Remove from tracking while still under lock
                             del self._agent_blocks[agent_id]
 
+                    # Store PROMPT tokens only (not generated) for prefix matching.
+                    # This avoids BPE boundary mismatch: tokenize(A+B) != tokenize(A) + tokenize(B)
+                    #
+                    # When client sends back "prompt + response + new_query":
+                    # - Re-tokenized "prompt" portion matches stored prompt_tokens
+                    # - We use the cache (which has KV for prompt + response)
+                    # - Only process the truly new tokens
+                    #
+                    # Note: We store total_tokens separately in AgentBlocks to know cache size
+                    full_token_sequence = list(prompt_tokens)  # Prompt only, not generated
+
                     # Extract cache and convert to blocks (allocates for ALL layers)
                     cache = response.prompt_cache
-                    blocks = self._extract_cache(uid, cache)
+
+                    # DEBUG: Log cache details before extraction
+                    if cache:
+                        first = cache[0] if cache else None
+                        logger.info(
+                            f"[BATCH EXTRACT] uid={uid}, cache_len={len(cache)}, "
+                            f"first_type={type(first).__name__}, "
+                            f"has_state={hasattr(first, 'state')}, "
+                            f"has_offset={hasattr(first, 'offset')}, "
+                            f"offset={getattr(first, 'offset', 'N/A')}, "
+                            f"callable={callable(cache)}"
+                        )
+                    else:
+                        logger.warning(f"[BATCH EXTRACT] uid={uid}, cache is None or empty!")
+
+                    blocks = self._extract_cache(uid, cache, full_token_sequence)
 
                     # Store new blocks (thread-safe)
                     with self._lock:
@@ -708,6 +1094,51 @@ class BlockPoolBatchEngine:
 
                     # Yield completion
                     yield completion
+
+    def _slice_cache_to_length(self, kv_cache: list[Any], target_length: int) -> None:
+        """Slice cache tensors to exact target length (in-place).
+
+        MLX-LM's trim_prompt_cache only adjusts offset, not tensor shapes.
+        This method properly slices the underlying tensors to prevent
+        shape mismatch errors during attention.
+
+        Args:
+            kv_cache: List of cache objects (one per layer)
+            target_length: Target sequence length to slice to
+        """
+        import mlx.core as mx
+
+        for layer_cache in kv_cache:
+            if layer_cache.keys is None:
+                continue
+
+            # Handle QuantizedKVCache (tuple of 3 tensors)
+            if isinstance(layer_cache.keys, tuple) and len(layer_cache.keys) == 3:
+                k_q, k_s, k_z = layer_cache.keys
+                v_q, v_s, v_z = layer_cache.values
+
+                # Slice all tensors to target length
+                layer_cache.keys = (
+                    k_q[..., :target_length, :],
+                    k_s[..., :target_length, :],
+                    k_z[..., :target_length, :],
+                )
+                layer_cache.values = (
+                    v_q[..., :target_length, :],
+                    v_s[..., :target_length, :],
+                    v_z[..., :target_length, :],
+                )
+            else:
+                # Regular FP16 cache
+                k, v = layer_cache.keys, layer_cache.values
+                layer_cache.keys = k[..., :target_length, :]
+                layer_cache.values = v[..., :target_length, :]
+
+            # Update offset to match sliced length
+            layer_cache.offset = target_length
+
+        # Force evaluation to materialize sliced tensors
+        mx.eval(*[c.keys for c in kv_cache if c.keys is not None])
 
     def _reconstruct_cache(self, agent_blocks: AgentBlocks) -> list[Any]:
         """Reconstruct MLX cache objects from blocks.
@@ -880,11 +1311,22 @@ class BlockPoolBatchEngine:
 
         return cache
 
-    def _extract_cache(self, uid: str, cache: Any | None = None) -> AgentBlocks:
-        """Extract updated cache from batch and convert to blocks."""
+    def _extract_cache(
+        self,
+        uid: str,
+        cache: Any | None = None,
+        token_sequence: list[int] | None = None,
+    ) -> AgentBlocks:
+        """Extract updated cache from batch and convert to blocks.
+
+        Args:
+            uid: Request UID to look up agent_id
+            cache: KV cache from BatchGenerator
+            token_sequence: Full token sequence (prompt + generated) for prefix matching
+        """
         if uid not in self._active_requests:
             raise GenerationError(f"UID {uid} not found in active requests")
-        agent_id, _, _ = self._active_requests[uid]
+        agent_id, _, _, _ = self._active_requests[uid]
 
         if cache is None:
             if self._batch_gen is None:
@@ -892,7 +1334,12 @@ class BlockPoolBatchEngine:
             raise GenerationError(f"Cache not provided for UID {uid}")
 
         if not cache or len(cache) == 0:
-            return AgentBlocks(agent_id=agent_id, blocks={}, total_tokens=0)
+            return AgentBlocks(
+                agent_id=agent_id,
+                blocks={},
+                total_tokens=0,
+                token_sequence=token_sequence or [],
+            )
 
         # Convert KVCache objects to (K, V) tuples if needed
         first_layer = cache[0]
@@ -953,7 +1400,12 @@ class BlockPoolBatchEngine:
                 )
 
         if cache[0][0] is None:
-            return AgentBlocks(agent_id=agent_id, blocks={}, total_tokens=0)
+            return AgentBlocks(
+                agent_id=agent_id,
+                blocks={},
+                total_tokens=0,
+                token_sequence=token_sequence or [],
+            )
 
         # Handle FakeTensor in unit tests (TODO: replace with dependency injection)
         first_tensor = cache[0][0]
@@ -980,7 +1432,10 @@ class BlockPoolBatchEngine:
                 raise
 
             return AgentBlocks(
-                agent_id=agent_id, blocks=fake_blocks, total_tokens=seq_len
+                agent_id=agent_id,
+                blocks=fake_blocks,
+                total_tokens=seq_len,
+                token_sequence=token_sequence or [],
             )
 
         first_k = cache[0][0]
@@ -1025,6 +1480,7 @@ class BlockPoolBatchEngine:
             agent_id=agent_id,
             blocks=blocks_dict,
             total_tokens=seq_len,
+            token_sequence=token_sequence or [],
         )
 
     async def drain(self, timeout_seconds: float = 30.0) -> int:

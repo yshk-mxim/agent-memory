@@ -44,8 +44,30 @@ class FakeModel:
 
 
 
+class FakeDetokenizer:
+    """Fake detokenizer for streaming token-to-text conversion."""
+
+    def __init__(self, tokenizer: "FakeTokenizer") -> None:
+        self._tokenizer = tokenizer
+        self._tokens: list[int] = []
+        self._text = ""
+
+    def add_token(self, token: int) -> None:
+        """Add a token to the stream."""
+        self._tokens.append(token)
+        self._text = f"Generated text with {len(self._tokens)} tokens"
+
+    @property
+    def text(self) -> str:
+        """Get current decoded text."""
+        return self._text
+
+
 class FakeTokenizer:
     """Fake MLX tokenizer for testing."""
+
+    def __init__(self) -> None:
+        self._detokenizer = FakeDetokenizer(self)
 
     def encode(self, text: str) -> list[int]:
         """Fake tokenization - returns list of ints based on text length."""
@@ -56,6 +78,11 @@ class FakeTokenizer:
         """Fake detokenization - returns string from token IDs."""
         # Simple: return string representation of tokens
         return f"Generated text with {len(tokens)} tokens"
+
+    @property
+    def detokenizer(self) -> FakeDetokenizer:
+        """Return the streaming detokenizer."""
+        return self._detokenizer
 
     @property
     def eos_token_id(self) -> int:
