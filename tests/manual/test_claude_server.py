@@ -1296,48 +1296,9 @@ async def create_message(request_body: MessagesRequest, request: Request) -> JSO
     # Build content blocks
     content_blocks: list[dict] = []
 
-    # When tool_uses exist, clean up remaining text but keep explanations
+    # When tool_uses exist, return ONLY the tool_use - no text
+    # Text was causing confusion and infinite loops
     if tool_uses:
-        logger.info(f"[CONTENT] remaining_text before filter: {remaining_text[:200] if remaining_text else 'None'}...")
-        if remaining_text:
-            clean_text = sanitize_terminal_output(remaining_text.strip())
-            # Remove ALL json code blocks (model often outputs multiple tool calls)
-            clean_text = re.sub(r'```json\s*.*?```', '', clean_text, flags=re.DOTALL)
-            # Remove raw JSON tool calls that look like {"name": "...", "arguments": {...}}
-            # Use a function to handle nested braces
-            def remove_json_tool_calls(text):
-                result = text
-                while True:
-                    match = re.search(r'\{\s*"name"\s*:\s*"[^"]+"\s*,\s*"arguments"\s*:\s*\{', result)
-                    if not match:
-                        break
-                    # Find matching closing braces using bracket counting
-                    start = match.start()
-                    depth = 0
-                    end = start
-                    for i, c in enumerate(result[start:]):
-                        if c == '{':
-                            depth += 1
-                        elif c == '}':
-                            depth -= 1
-                            if depth == 0:
-                                end = start + i + 1
-                                break
-                    if end > start:
-                        result = result[:start] + result[end:]
-                    else:
-                        break
-                return result
-            clean_text = remove_json_tool_calls(clean_text)
-            # Clean up leftover empty fences
-            clean_text = re.sub(r'```json\s*```', '', clean_text)
-            clean_text = re.sub(r'```\s*```', '', clean_text)
-            clean_text = clean_text.strip()
-            logger.info(f"[CONTENT] clean_text after filter: {clean_text[:200] if clean_text else 'None'}...")
-            # Include if there's meaningful text left
-            if clean_text and len(clean_text) > 3:
-                content_blocks.append({"type": "text", "text": clean_text})
-        # Add tool uses after any text
         for tool_use in tool_uses:
             content_blocks.append(tool_use)
     else:
