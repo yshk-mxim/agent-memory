@@ -758,6 +758,25 @@ TOOL_CALL_END = "<｜tool▁call▁end｜>"
 TOOL_CALLS_END = "<｜tool▁calls▁end｜>"
 
 
+def sanitize_terminal_output(text: str) -> str:
+    """Remove ANSI escape sequences and control characters that can freeze terminals.
+
+    This prevents model output from containing sequences that could put zsh
+    in alternate screen mode, trigger vi mode, or cause other terminal issues.
+    """
+    # Remove ANSI escape sequences (CSI sequences like \x1b[...)
+    text = re.sub(r'\x1b\[[0-9;]*[a-zA-Z]', '', text)
+    # Remove OSC sequences (like \x1b]...BEL)
+    text = re.sub(r'\x1b\][^\x07]*\x07', '', text)
+    # Remove other escape sequences
+    text = re.sub(r'\x1b[PX^_][^\x1b]*\x1b\\', '', text)
+    # Remove remaining bare escapes
+    text = re.sub(r'\x1b.', '', text)
+    # Remove control characters except tab, newline, carriage return
+    text = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', text)
+    return text
+
+
 def parse_tool_calls(text: str, available_tools: list[Tool] | None = None) -> tuple[str, list[dict]]:
     """Parse DeepSeek tool call format and extract tool_use blocks.
 
@@ -1202,6 +1221,9 @@ async def create_message(request_body: MessagesRequest, request: Request) -> JSO
     log_memory("REQUEST_END")
     logger.info(f"[DONE] {len(generated_ids)} tokens in {elapsed:.2f}s ({len(generated_ids)/elapsed:.1f} tok/s)")
 
+    # Sanitize output to prevent terminal control sequence issues
+    output_text = sanitize_terminal_output(output_text)
+
     # Parse tool calls from output
     remaining_text, tool_uses = parse_tool_calls(output_text, request_body.tools)
 
@@ -1209,10 +1231,10 @@ async def create_message(request_body: MessagesRequest, request: Request) -> JSO
     content_blocks: list[dict] = []
     # Only add text block if it has meaningful content (not empty or just code fences)
     if remaining_text:
-        clean_text = remaining_text.strip()
+        clean_text = sanitize_terminal_output(remaining_text.strip())
         # Filter out empty JSON code blocks or other meaningless content
         if clean_text and clean_text not in ["```json\n\n```", "```\n```", "```json```", "```"]:
-            content_blocks.append({"type": "text", "text": remaining_text})
+            content_blocks.append({"type": "text", "text": clean_text})
     for tool_use in tool_uses:
         content_blocks.append(tool_use)
 
