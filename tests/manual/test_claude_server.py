@@ -230,17 +230,22 @@ def extract_text(content: Any) -> str:
                     # Skip thinking blocks in prompt (internal reasoning)
                     pass
                 elif block.get("type") == "tool_use":
-                    # Format as JSON function call that DeepSeek understands
+                    # Format as completed action - clear natural language
                     name = block.get("name", "")
                     args = block.get("input", {})
-                    # Use clean JSON format the model was trained on
-                    texts.append(f'```json\n{{"name": "{name}", "arguments": {json.dumps(args)}}}\n```')
+                    # Make it VERY clear the action was completed
+                    if name == "Bash" and "command" in args:
+                        texts.append(f"(I executed the bash command: {args['command']})")
+                    elif name == "Read" and "file_path" in args:
+                        texts.append(f"(I read the file: {args['file_path']})")
+                    elif name == "Write" and "file_path" in args:
+                        texts.append(f"(I wrote to the file: {args['file_path']})")
+                    else:
+                        texts.append(f"(I called {name})")
                 elif block.get("type") == "tool_result":
-                    # Format tool results clearly
-                    tool_use_id = block.get("tool_use_id", "")
+                    # Format as clear completion - the output from the tool
                     result_content = block.get("content", "")
                     if isinstance(result_content, list):
-                        # Handle list of content blocks
                         result_text = "\n".join(
                             b.get("text", str(b)) if isinstance(b, dict) else str(b)
                             for b in result_content
@@ -248,9 +253,9 @@ def extract_text(content: Any) -> str:
                     else:
                         result_text = str(result_content)
                     if block.get("is_error"):
-                        texts.append(f"Error: {result_text}")
+                        texts.append(f"The command failed with error:\n{result_text}")
                     else:
-                        texts.append(f"Result: {result_text}")
+                        texts.append(f"The command output was:\n{result_text}")
             elif isinstance(block, str):
                 texts.append(block)
         return "\n".join(texts)
@@ -741,9 +746,11 @@ def messages_to_prompt(messages: list[Message], system: Any = "", tools: list[To
                         lines.append(f"    Object must have: {list(spec['properties'].keys())}")
             lines.append("")
 
-    for msg in messages:
+    for i, msg in enumerate(messages):
         content_text = extract_text(msg.content)
         lines.append(f"{msg.role.capitalize()}: {content_text}")
+        # Debug: log what each message becomes after conversion
+        logger.info(f"[MSG {i} CONVERTED] {msg.role}: {content_text[:300]}")
     lines.append("Assistant:")
     return "\n".join(lines)
 
@@ -980,10 +987,42 @@ def parse_tool_calls(text: str, available_tools: list[Tool] | None = None) -> tu
         except Exception as e:
             logger.debug(f"[TOOL PARSE] Fallback parse failed: {e}")
 
-    # NOTE: We intentionally do NOT convert markdown code blocks (```bash...```) to tool_use.
-    # Such conversions pollute the conversation history - the model would see a tool_use
-    # in its history that it never generated, causing confusion and infinite loops.
-    # Translations should only affect what Claude Code CLI sees, not what the model sees.
+    # Convert markdown code blocks to tool_use for CLI
+    # This is safe because line 237 converts tool_use back to markdown when sending
+    # history to the model, so model always sees consistent markdown format.
+    if not tool_uses:
+        # Match ```bash or ```shell code blocks
+        bash_match = re.search(r'```(?:bash|shell|sh)\n(.*?)```', remaining_text, re.DOTALL)
+        if bash_match and tool_name_map.get('bash'):
+            command = bash_match.group(1).strip()
+            if command:
+                tool_id = f"toolu_{hashlib.md5(f'Bash{time.time()}'.encode()).hexdigest()[:24]}"
+                tool_uses.append({
+                    "type": "tool_use",
+                    "id": tool_id,
+                    "name": tool_name_map['bash'],
+                    "input": {"command": command},
+                })
+                # Keep explanation text, just remove the code block
+                remaining_text = re.sub(r'```(?:bash|shell|sh)\n.*?```', '', remaining_text, flags=re.DOTALL).strip()
+                logger.info(f"[TOOL PARSE] Converted bash markdown to tool_use: {command[:50]}...")
+
+        # Match ```python code blocks -> run via python3 -c
+        if not tool_uses:
+            python_match = re.search(r'```python\n(.*?)```', remaining_text, re.DOTALL)
+            if python_match and tool_name_map.get('bash'):
+                code = python_match.group(1).strip()
+                if code:
+                    escaped_code = code.replace("'", "'\"'\"'")
+                    tool_id = f"toolu_{hashlib.md5(f'Bash{time.time()}'.encode()).hexdigest()[:24]}"
+                    tool_uses.append({
+                        "type": "tool_use",
+                        "id": tool_id,
+                        "name": tool_name_map['bash'],
+                        "input": {"command": f"python3 -c '{escaped_code}'"},
+                    })
+                    remaining_text = re.sub(r'```python\n.*?```', '', remaining_text, flags=re.DOTALL).strip()
+                    logger.info(f"[TOOL PARSE] Converted python markdown to bash tool_use")
 
     # Always clean up any DeepSeek markers from remaining text
     remaining_text = remaining_text.replace(TOOL_CALLS_BEGIN, "")
