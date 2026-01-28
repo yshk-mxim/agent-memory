@@ -969,6 +969,44 @@ def parse_tool_calls(text: str, available_tools: list[Tool] | None = None) -> tu
         except Exception as e:
             logger.debug(f"[TOOL PARSE] Fallback parse failed: {e}")
 
+    # Fallback: parse markdown code blocks as tool calls
+    # Model outputs ```bash\ncommand\n``` instead of proper tool format
+    if not tool_uses:
+        # Match ```bash or ```shell code blocks
+        bash_match = re.search(r'```(?:bash|shell|sh)\n(.*?)```', remaining_text, re.DOTALL)
+        if bash_match and tool_name_map.get('bash'):
+            command = bash_match.group(1).strip()
+            if command:
+                tool_id = f"toolu_{hashlib.md5(f'Bash{time.time()}'.encode()).hexdigest()[:24]}"
+                tool_uses.append({
+                    "type": "tool_use",
+                    "id": tool_id,
+                    "name": tool_name_map['bash'],
+                    "input": {"command": command},
+                })
+                remaining_text = remaining_text[:bash_match.start()] + remaining_text[bash_match.end():]
+                remaining_text = remaining_text.strip()
+                logger.info(f"[TOOL PARSE] Extracted bash from markdown: {command[:50]}...")
+
+        # Match ```python code blocks -> run via Bash
+        if not tool_uses:
+            python_match = re.search(r'```python\n(.*?)```', remaining_text, re.DOTALL)
+            if python_match and tool_name_map.get('bash'):
+                code = python_match.group(1).strip()
+                if code:
+                    # Escape for shell
+                    escaped_code = code.replace("'", "'\"'\"'")
+                    tool_id = f"toolu_{hashlib.md5(f'Bash{time.time()}'.encode()).hexdigest()[:24]}"
+                    tool_uses.append({
+                        "type": "tool_use",
+                        "id": tool_id,
+                        "name": tool_name_map['bash'],
+                        "input": {"command": f"python3 -c '{escaped_code}'"},
+                    })
+                    remaining_text = remaining_text[:python_match.start()] + remaining_text[python_match.end():]
+                    remaining_text = remaining_text.strip()
+                    logger.info(f"[TOOL PARSE] Extracted python from markdown, running via bash")
+
     # Always clean up any DeepSeek markers from remaining text
     remaining_text = remaining_text.replace(TOOL_CALLS_BEGIN, "")
     remaining_text = remaining_text.replace(TOOL_CALLS_END, "")
