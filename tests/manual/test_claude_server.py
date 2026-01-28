@@ -828,6 +828,47 @@ def parse_tool_calls(text: str, available_tools: list[Tool] | None = None) -> tu
     except Exception as e:
         logger.debug(f"[TOOL PARSE] JSON parse failed: {e}")
 
+    # Try fallback: model outputs just arguments without "name" wrapper
+    # e.g., {"command": "..."} instead of {"name": "Bash", "arguments": {"command": "..."}}
+    try:
+        # Find any JSON object
+        json_match = re.search(r'\{[^{}]*\}', text)
+        if json_match:
+            json_str = json_match.group()
+            try:
+                obj = json.loads(json_str)
+                # Infer tool from argument keys
+                inferred_name = None
+                if "command" in obj:
+                    inferred_name = "Bash"
+                elif "file_path" in obj and "content" not in obj:
+                    inferred_name = "Read"
+                elif "file_path" in obj and "content" in obj:
+                    inferred_name = "Write"
+                elif "pattern" in obj:
+                    inferred_name = "Grep"
+                elif "query" in obj:
+                    inferred_name = "WebSearch"
+
+                if inferred_name:
+                    canonical_name = tool_name_map.get(inferred_name.lower())
+                    if canonical_name:
+                        tool_id = f"toolu_{hashlib.md5(f'{canonical_name}{time.time()}'.encode()).hexdigest()[:24]}"
+                        tool_uses.append({
+                            "type": "tool_use",
+                            "id": tool_id,
+                            "name": canonical_name,
+                            "input": obj,
+                        })
+                        remaining_text = text[:json_match.start()] + text[json_match.end():]
+                        remaining_text = remaining_text.strip()
+                        logger.info(f"[TOOL PARSE] Inferred tool from args: {inferred_name} -> {canonical_name}")
+                        return remaining_text, tool_uses
+            except json.JSONDecodeError:
+                pass
+    except Exception as e:
+        logger.debug(f"[TOOL PARSE] Fallback parse failed: {e}")
+
     # Second, try DeepSeek native format
     if TOOL_CALL_BEGIN in text:
         logger.info(f"[TOOL PARSE] Found DeepSeek markers in output")
