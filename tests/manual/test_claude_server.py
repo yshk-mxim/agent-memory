@@ -1301,8 +1301,34 @@ async def create_message(request_body: MessagesRequest, request: Request) -> JSO
         logger.info(f"[CONTENT] remaining_text before filter: {remaining_text[:200] if remaining_text else 'None'}...")
         if remaining_text:
             clean_text = sanitize_terminal_output(remaining_text.strip())
-            # Remove duplicate JSON tool calls that model sometimes outputs
+            # Remove duplicate JSON tool calls (in fences or raw)
             clean_text = re.sub(r'```json\s*\{[^}]*"name"[^}]*\}\s*```', '', clean_text)
+            # Remove raw JSON tool calls that look like {"name": "...", "arguments": {...}}
+            # Use a function to handle nested braces
+            def remove_json_tool_calls(text):
+                result = text
+                while True:
+                    match = re.search(r'\{\s*"name"\s*:\s*"[^"]+"\s*,\s*"arguments"\s*:\s*\{', result)
+                    if not match:
+                        break
+                    # Find matching closing braces using bracket counting
+                    start = match.start()
+                    depth = 0
+                    end = start
+                    for i, c in enumerate(result[start:]):
+                        if c == '{':
+                            depth += 1
+                        elif c == '}':
+                            depth -= 1
+                            if depth == 0:
+                                end = start + i + 1
+                                break
+                    if end > start:
+                        result = result[:start] + result[end:]
+                    else:
+                        break
+                return result
+            clean_text = remove_json_tool_calls(clean_text)
             # Remove fake result blocks
             clean_text = re.sub(r'```json\s*\{[^}]*"result"[^}]*\}\s*```', '', clean_text)
             clean_text = re.sub(r'```json\s*\{[^}]*"output"[^}]*\}\s*```', '', clean_text)
