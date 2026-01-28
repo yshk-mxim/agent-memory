@@ -211,39 +211,56 @@ def extract_content_blocks(content: Any) -> list[dict]:
     return [{"type": "text", "text": str(content)}]
 
 
-def extract_text(content: Any) -> str:
+def extract_text(content: Any, role: str = "") -> str:
     """Extract text from content that may be string or list of blocks.
 
-    Converts tool_use/tool_result to formats DeepSeek understands:
-    - tool_use: JSON function call format
-    - tool_result: Function output format
+    For assistant messages: drops text after tool_use blocks (narration that
+    confuses the model into thinking work is already done).
+    For user messages: separates tool_results from user text with a marker.
     """
     if isinstance(content, str):
         return content
     if isinstance(content, list):
-        texts = []
+        tool_texts = []
+        user_texts = []
+        seen_tool_use = False
         for block in content:
             if isinstance(block, dict):
                 if block.get("type") == "text":
-                    texts.append(block.get("text", ""))
+                    text = block.get("text", "")
+                    # For assistant: skip text after tool_use (it's narration)
+                    if role == "assistant" and seen_tool_use:
+                        continue
+                    # Skip CLI noise that confuses the model into
+                    # thinking "SUGGESTION MODE" is a tool name
+                    if "SUGGESTION MODE" in text:
+                        continue
+                    user_texts.append(text)
                 elif block.get("type") == "thinking":
-                    # Skip thinking blocks in prompt (internal reasoning)
                     pass
                 elif block.get("type") == "tool_use":
-                    # Format as completed action - clear natural language
+                    seen_tool_use = True
                     name = block.get("name", "")
                     args = block.get("input", {})
-                    # Make it VERY clear the action was completed
                     if name == "Bash" and "command" in args:
-                        texts.append(f"(I executed the bash command: {args['command']})")
+                        tool_texts.append(f"(I executed the bash command: {args['command']})")
                     elif name == "Read" and "file_path" in args:
-                        texts.append(f"(I read the file: {args['file_path']})")
+                        tool_texts.append(f"(I read the file: {args['file_path']})")
                     elif name == "Write" and "file_path" in args:
-                        texts.append(f"(I wrote to the file: {args['file_path']})")
+                        tool_texts.append(f"(I wrote to the file: {args['file_path']})")
+                    elif name == "TodoWrite" and "todos" in args:
+                        todos = args["todos"]
+                        if isinstance(todos, list):
+                            items = [t.get("content", "") for t in todos if isinstance(t, dict)]
+                            tool_texts.append(f"(I updated the todo list: {', '.join(items)})")
+                        else:
+                            tool_texts.append("(I updated the todo list)")
+                    elif name == "Task" and "description" in args:
+                        tool_texts.append(f"(I launched a task: {args['description']})")
                     else:
-                        texts.append(f"(I called {name})")
+                        tool_texts.append(f"(I called {name})")
                 elif block.get("type") == "tool_result":
-                    # Format as clear completion - the output from the tool
+                    seen_tool_use = True
                     result_content = block.get("content", "")
                     if isinstance(result_content, list):
                         result_text = "\n".join(
@@ -253,12 +270,21 @@ def extract_text(content: Any) -> str:
                     else:
                         result_text = str(result_content)
                     if block.get("is_error"):
-                        texts.append(f"The command failed with error:\n{result_text}")
+                        tool_texts.append(f"The command failed with error:\n{result_text}")
+                    elif "Todos have been modified" in result_text:
+                        tool_texts.append("Todo list updated. Now execute the first pending task. Use Write to create files or Bash to run commands. Do NOT call TodoWrite again.")
                     else:
-                        texts.append(f"The command output was:\n{result_text}")
+                        tool_texts.append(f"The command output was:\n{result_text}")
             elif isinstance(block, str):
-                texts.append(block)
-        return "\n".join(texts)
+                user_texts.append(block)
+        parts = []
+        if tool_texts:
+            parts.extend(tool_texts)
+        if user_texts:
+            if tool_texts:
+                parts.append("\n--- New message ---")
+            parts.extend(user_texts)
+        return "\n".join(parts)
     return str(content)
 
 
@@ -709,8 +735,8 @@ def find_best_prefix_match(tokens: list[int], request_type: str = "main") -> tup
     return best_agent, best_length
 
 
-def messages_to_prompt(messages: list[Message], system: Any = "", tools: list[Tool] | None = None) -> str:
-    """Convert messages to prompt string (matching main anthropic adapter)."""
+def messages_to_prompt(messages: list[Message], system: Any = "", tools: list[Tool] | None = None) -> tuple[str, str]:
+    """Convert messages to prompt string. Returns (prompt, prefill)."""
     lines = []
     system_text = extract_text(system)
 
@@ -750,10 +776,11 @@ def messages_to_prompt(messages: list[Message], system: Any = "", tools: list[To
         lines.append('```json')
         lines.append('{"name": "Task", "arguments": {"description": "short desc", "prompt": "what to do", "subagent_type": "general-purpose"}}')
         lines.append('```')
-        lines.append("To track tasks with a todo list, use TodoWrite with the todos array:")
+        lines.append("To track COMPLEX multi-step tasks (3+ steps), use TodoWrite. For simple tasks (single file, single command), skip TodoWrite and call Write or Bash directly:")
         lines.append('```json')
         lines.append('{"name": "TodoWrite", "arguments": {"todos": [{"content": "task name", "status": "pending", "activeForm": "Doing task"}]}}')
-        lines.append('```\n')
+        lines.append('```')
+        lines.append("After calling TodoWrite, you MUST call Write or Bash next. Never call TodoWrite twice in a row.\n")
         lines.append("Available functions:\n")
         for tool in tools:
             lines.append(f"### {tool.name}")
@@ -781,12 +808,48 @@ def messages_to_prompt(messages: list[Message], system: Any = "", tools: list[To
     if variable_system:
         lines.append(variable_system.strip())
 
+    has_tool_roundtrip = False
+    last_tool_name = ""
+    consecutive_todo_count = 0
+
     for i, msg in enumerate(messages):
-        content_text = extract_text(msg.content)
+        content_text = extract_text(msg.content, role=msg.role)
         lines.append(f"{msg.role.capitalize()}: {content_text}")
         logger.info(f"[MSG {i} CONVERTED] {msg.role}: {content_text[:300]}")
-    lines.append("Assistant:")
-    return "\n".join(lines)
+        # Detect if conversation has had a tool call round-trip
+        if msg.role == "user" and isinstance(msg.content, list):
+            for block in msg.content:
+                if isinstance(block, dict) and block.get("type") == "tool_result":
+                    has_tool_roundtrip = True
+        # Track last assistant tool_use to detect TodoWrite loops
+        if msg.role == "assistant" and isinstance(msg.content, list):
+            for block in msg.content:
+                if isinstance(block, dict) and block.get("type") == "tool_use":
+                    name = block.get("name", "")
+                    if name:
+                        if name == "TodoWrite":
+                            consecutive_todo_count += 1
+                        else:
+                            consecutive_todo_count = 0
+                        last_tool_name = name
+
+    # After tool results, prefill assistant response to force tool-call mode.
+    # Without this, DeepSeek narrates ("I'll write a file...") instead of calling tools.
+    prefill = ""
+    if has_tool_roundtrip:
+        if last_tool_name == "TodoWrite":
+            # Prevent TodoWrite loop: model re-calls TodoWrite instead of executing tasks.
+            # Force Write immediately - the embedded example in the tool result
+            # biases the model toward completing a valid Write call.
+            lines.append("IMPORTANT: Do NOT call TodoWrite. Write the code now.")
+            prefill = ' ```json\n{"name": "Write", "arguments": {"file_path": "'
+            logger.info(f"[PREFILL] Forcing Write after TodoWrite (consecutive={consecutive_todo_count})")
+        else:
+            prefill = ' ```json\n{"name": "'
+        lines.append(f"Assistant:{prefill}")
+    else:
+        lines.append("Assistant:")
+    return "\n".join(lines), prefill
 
 
 # ============================================================
@@ -865,36 +928,54 @@ def parse_tool_calls(text: str, available_tools: list[Tool] | None = None) -> tu
                         end_idx = start_idx + i + 1
                         break
 
-            if end_idx > start_idx:
-                json_str = text[start_idx:end_idx]
+            # If bracket counting didn't reach depth 0, model may have
+            # omitted closing braces (common with forced prefill).
+            # Try appending missing braces.
+            if end_idx <= start_idx and 0 < depth <= 2:
+                json_str = text[start_idx:]
+                # Strip trailing markdown fences
+                json_str = re.sub(r'\s*```\s*$', '', json_str)
+                json_str = json_str.rstrip() + '}' * depth
+                logger.info(f"[TOOL PARSE] Bracket repair: added {depth} closing brace(s)")
                 try:
                     obj = json.loads(json_str)
                     if "name" in obj and "arguments" in obj:
-                        parsed_name = obj["name"]
-                        args = obj["arguments"] if isinstance(obj["arguments"], dict) else {}
-
-                        # Case-insensitive tool name lookup
-                        canonical_name = tool_name_map.get(parsed_name.lower())
-                        if canonical_name:
-                            tool_id = f"toolu_{hashlib.md5(f'{canonical_name}{time.time()}'.encode()).hexdigest()[:24]}"
-                            tool_uses.append({
-                                "type": "tool_use",
-                                "id": tool_id,
-                                "name": canonical_name,
-                                "input": args,
-                            })
-                            # Remove the JSON and surrounding markdown fences from remaining text
-                            remaining_text = text[:start_idx] + text[end_idx:]
-                            # Also remove markdown code fences that wrapped the JSON
-                            remaining_text = re.sub(r'```json\s*```', '', remaining_text)
-                            remaining_text = re.sub(r'```\s*```', '', remaining_text)
-                            remaining_text = remaining_text.strip()
-                            logger.info(f"[TOOL PARSE] Found JSON tool call: {parsed_name} -> {canonical_name}")
-                            return remaining_text, tool_uses
-                        else:
-                            logger.warning(f"[TOOL PARSE] Unknown tool: {parsed_name}, available: {list(tool_name_map.keys())}")
+                        end_idx = len(text)  # Consumed everything
+                except json.JSONDecodeError:
+                    obj = None
+            elif end_idx > start_idx:
+                json_str = text[start_idx:end_idx]
+                try:
+                    obj = json.loads(json_str)
                 except json.JSONDecodeError as e:
+                    obj = None
                     logger.debug(f"[TOOL PARSE] JSON decode failed: {e}")
+            else:
+                obj = None
+
+            if obj and "name" in obj and "arguments" in obj:
+                parsed_name = obj["name"]
+                args = obj["arguments"] if isinstance(obj["arguments"], dict) else {}
+
+                # Case-insensitive tool name lookup
+                canonical_name = tool_name_map.get(parsed_name.lower())
+                if canonical_name:
+                    tool_id = f"toolu_{hashlib.md5(f'{canonical_name}{time.time()}'.encode()).hexdigest()[:24]}"
+                    tool_uses.append({
+                        "type": "tool_use",
+                        "id": tool_id,
+                        "name": canonical_name,
+                        "input": args,
+                    })
+                    # Remove the JSON and surrounding markdown fences from remaining text
+                    remaining_text = text[:start_idx] + text[end_idx:]
+                    remaining_text = re.sub(r'```json\s*```', '', remaining_text)
+                    remaining_text = re.sub(r'```\s*```', '', remaining_text)
+                    remaining_text = remaining_text.strip()
+                    logger.info(f"[TOOL PARSE] Found JSON tool call: {parsed_name} -> {canonical_name}")
+                    return remaining_text, tool_uses
+                else:
+                    logger.warning(f"[TOOL PARSE] Unknown tool: {parsed_name}, available: {list(tool_name_map.keys())}")
 
     except Exception as e:
         logger.debug(f"[TOOL PARSE] JSON parse failed: {e}")
@@ -956,6 +1037,15 @@ def parse_tool_calls(text: str, available_tools: list[Tool] | None = None) -> tu
                                         args = json.loads(args_text[json_start:json_end])
                                     except json.JSONDecodeError:
                                         pass
+
+                            # Fallback: regex extract for Write with malformed JSON
+                            if not args and canonical_name == "Write":
+                                fp = re.search(r'"file_path"\s*:\s*"([^"]*)"', args_text)
+                                ct = re.search(r'"content"\s*:\s*"(.*?)(?:"\s*[},]|$)', args_text, re.DOTALL)
+                                if fp and ct:
+                                    content_val = ct.group(1).replace('\\n', '\n').replace('\\"', '"').replace('\\\\', '\\')
+                                    args = {"file_path": fp.group(1), "content": content_val}
+                                    logger.info(f"[TOOL PARSE] Regex fallback for Write: {fp.group(1)}")
 
                             # Skip empty tool calls (degenerate output)
                             if not args:
@@ -1186,8 +1276,8 @@ async def create_message(request_body: MessagesRequest, request: Request) -> JSO
         "response": {},    # Response data
     }
 
-    # Cap max_tokens to prevent runaway generation
-    max_tokens = min(request_body.max_tokens, 500)
+    # Cap max_tokens to prevent runaway generation (context window is 100K)
+    max_tokens = min(request_body.max_tokens, 16000)
 
     # Log headers and request parameters for debugging
     session_id = request.headers.get("X-Session-ID")
@@ -1221,7 +1311,7 @@ async def create_message(request_body: MessagesRequest, request: Request) -> JSO
 
     # 1. Convert to prompt and tokenize
     tokenize_start = time.time()
-    prompt = messages_to_prompt(request_body.messages, request_body.system, request_body.tools)
+    prompt, prefill = messages_to_prompt(request_body.messages, request_body.system, request_body.tools)
     tokens = tokenizer.encode(prompt)
     tokenize_time = time.time() - tokenize_start
     logger.info(f"[TOKENIZE] {len(tokens)} tokens")
@@ -1355,6 +1445,11 @@ async def create_message(request_body: MessagesRequest, request: Request) -> JSO
     # Sanitize output to prevent terminal control sequence issues
     output_text = sanitize_terminal_output(output_text)
 
+    # Prepend prefill to output so tool call parsing sees the full JSON
+    if prefill:
+        output_text = prefill + output_text
+        logger.info(f"[PREFILL] Prepended: {prefill.strip()}")
+
     # Parse tool calls from output
     remaining_text, tool_uses = parse_tool_calls(output_text, request_body.tools)
 
@@ -1381,7 +1476,7 @@ async def create_message(request_body: MessagesRequest, request: Request) -> JSO
     if tool_uses:
         stop_reason = "tool_use"
         logger.info(f"[TOOL USE] Detected {len(tool_uses)} tool call(s)")
-    elif generated_ids and generated_ids[-1] == tokenizer.eos_token_id:
+    elif len(generated_ids) < max_tokens:
         stop_reason = "end_turn"
     else:
         stop_reason = "max_tokens"
