@@ -35,7 +35,7 @@ from typing import Any
 import mlx.core as mx
 import uvicorn
 from fastapi import FastAPI, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, JSONResponse
 from mlx_lm import load
 from mlx_lm.models.cache import QuantizedKVCache
 from pydantic import BaseModel
@@ -273,7 +273,7 @@ class ContentBlock(BaseModel):
     name: str | None = None
     input: dict | None = None
 
-    model_config = {"extra": "ignore"}
+    model_config = {"extra": "ignore", "exclude_none": True}
 
 
 class MessagesResponse(BaseModel):
@@ -779,35 +779,51 @@ def parse_tool_calls(text: str, available_tools: list[Tool] | None = None) -> tu
         for t in available_tools:
             tool_name_map[t.name.lower()] = t.name
 
-    # First, try JSON format (preferred)
+    # First, try JSON format (preferred) - handles nested objects/arrays
     try:
-        # Look for JSON object in the text
-        json_match = re.search(r'\{[^{}]*"name"\s*:\s*"([^"]+)"[^{}]*"arguments"\s*:\s*(\{[^{}]*\})[^{}]*\}', text, re.DOTALL)
-        if json_match:
-            parsed_name = json_match.group(1)
-            args_str = json_match.group(2)
-            try:
-                args = json.loads(args_str)
-            except json.JSONDecodeError:
-                args = {}
+        # Find start of JSON with "name" key
+        name_match = re.search(r'\{\s*"name"\s*:', text)
+        if name_match:
+            start_idx = name_match.start()
+            # Use bracket counting to find matching closing brace
+            depth = 0
+            end_idx = start_idx
+            for i, c in enumerate(text[start_idx:]):
+                if c == '{':
+                    depth += 1
+                elif c == '}':
+                    depth -= 1
+                    if depth == 0:
+                        end_idx = start_idx + i + 1
+                        break
 
-            # Case-insensitive tool name lookup
-            canonical_name = tool_name_map.get(parsed_name.lower())
-            if canonical_name:
-                tool_id = f"toolu_{hashlib.md5(f'{canonical_name}{time.time()}'.encode()).hexdigest()[:24]}"
-                tool_uses.append({
-                    "type": "tool_use",
-                    "id": tool_id,
-                    "name": canonical_name,
-                    "input": args,
-                })
-                # Remove the JSON from remaining text
-                remaining_text = text[:json_match.start()] + text[json_match.end():]
-                remaining_text = remaining_text.strip()
-                logger.info(f"[TOOL PARSE] Found JSON tool call: {parsed_name} -> {canonical_name}")
-                return remaining_text, tool_uses
-            else:
-                logger.warning(f"[TOOL PARSE] Unknown tool: {parsed_name}, available: {list(tool_name_map.keys())}")
+            if end_idx > start_idx:
+                json_str = text[start_idx:end_idx]
+                try:
+                    obj = json.loads(json_str)
+                    if "name" in obj and "arguments" in obj:
+                        parsed_name = obj["name"]
+                        args = obj["arguments"] if isinstance(obj["arguments"], dict) else {}
+
+                        # Case-insensitive tool name lookup
+                        canonical_name = tool_name_map.get(parsed_name.lower())
+                        if canonical_name:
+                            tool_id = f"toolu_{hashlib.md5(f'{canonical_name}{time.time()}'.encode()).hexdigest()[:24]}"
+                            tool_uses.append({
+                                "type": "tool_use",
+                                "id": tool_id,
+                                "name": canonical_name,
+                                "input": args,
+                            })
+                            # Remove the JSON from remaining text
+                            remaining_text = text[:start_idx] + text[end_idx:]
+                            remaining_text = remaining_text.strip()
+                            logger.info(f"[TOOL PARSE] Found JSON tool call: {parsed_name} -> {canonical_name}")
+                            return remaining_text, tool_uses
+                        else:
+                            logger.warning(f"[TOOL PARSE] Unknown tool: {parsed_name}, available: {list(tool_name_map.keys())}")
+                except json.JSONDecodeError as e:
+                    logger.debug(f"[TOOL PARSE] JSON decode failed: {e}")
 
     except Exception as e:
         logger.debug(f"[TOOL PARSE] JSON parse failed: {e}")
@@ -876,6 +892,16 @@ def parse_tool_calls(text: str, available_tools: list[Tool] | None = None) -> tu
         remaining_text = remaining_text.replace(TOOL_CALL_END, "")
         remaining_text = remaining_text.strip()
 
+    # Always clean up any DeepSeek markers from remaining text
+    remaining_text = remaining_text.replace(TOOL_CALLS_BEGIN, "")
+    remaining_text = remaining_text.replace(TOOL_CALLS_END, "")
+    remaining_text = remaining_text.replace(TOOL_CALL_BEGIN, "")
+    remaining_text = remaining_text.replace(TOOL_CALL_END, "")
+    remaining_text = remaining_text.replace(TOOL_SEP, "")
+    # Clean up "function" keyword that appears after tool_call_begin
+    remaining_text = re.sub(r'\bfunction\b\s*', '', remaining_text)
+    remaining_text = remaining_text.strip()
+
     return remaining_text, tool_uses
 
 
@@ -917,7 +943,7 @@ async def health():
 
 
 @app.post("/v1/messages")
-async def create_message(request_body: MessagesRequest, request: Request) -> MessagesResponse:
+async def create_message(request_body: MessagesRequest, request: Request) -> JSONResponse:
     """Anthropic Messages API endpoint."""
     start_time = time.time()
     request_id = int(time.time() * 1000)  # Unique request ID
@@ -1140,8 +1166,12 @@ async def create_message(request_body: MessagesRequest, request: Request) -> Mes
 
     # Build content blocks
     content_blocks: list[dict] = []
+    # Only add text block if it has meaningful content (not empty or just code fences)
     if remaining_text:
-        content_blocks.append({"type": "text", "text": remaining_text})
+        clean_text = remaining_text.strip()
+        # Filter out empty JSON code blocks or other meaningless content
+        if clean_text and clean_text not in ["```json\n\n```", "```\n```", "```json```", "```"]:
+            content_blocks.append({"type": "text", "text": remaining_text})
     for tool_use in tool_uses:
         content_blocks.append(tool_use)
 
@@ -1240,7 +1270,8 @@ async def create_message(request_body: MessagesRequest, request: Request) -> Mes
     except Exception as e:
         logger.warning(f"[TEST SET] Failed to save: {e}")
 
-    return response
+    # Return JSON response with None fields excluded for Claude Code CLI compatibility
+    return JSONResponse(content=response.model_dump(exclude_none=True))
 
 
 # ============================================================
