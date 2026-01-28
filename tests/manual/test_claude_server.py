@@ -847,47 +847,6 @@ def parse_tool_calls(text: str, available_tools: list[Tool] | None = None) -> tu
     except Exception as e:
         logger.debug(f"[TOOL PARSE] JSON parse failed: {e}")
 
-    # Try fallback: model outputs just arguments without "name" wrapper
-    # e.g., {"command": "..."} instead of {"name": "Bash", "arguments": {"command": "..."}}
-    try:
-        # Find any JSON object
-        json_match = re.search(r'\{[^{}]*\}', text)
-        if json_match:
-            json_str = json_match.group()
-            try:
-                obj = json.loads(json_str)
-                # Infer tool from argument keys
-                inferred_name = None
-                if "command" in obj:
-                    inferred_name = "Bash"
-                elif "file_path" in obj and "content" not in obj:
-                    inferred_name = "Read"
-                elif "file_path" in obj and "content" in obj:
-                    inferred_name = "Write"
-                elif "pattern" in obj:
-                    inferred_name = "Grep"
-                elif "query" in obj:
-                    inferred_name = "WebSearch"
-
-                if inferred_name:
-                    canonical_name = tool_name_map.get(inferred_name.lower())
-                    if canonical_name:
-                        tool_id = f"toolu_{hashlib.md5(f'{canonical_name}{time.time()}'.encode()).hexdigest()[:24]}"
-                        tool_uses.append({
-                            "type": "tool_use",
-                            "id": tool_id,
-                            "name": canonical_name,
-                            "input": obj,
-                        })
-                        remaining_text = text[:json_match.start()] + text[json_match.end():]
-                        remaining_text = remaining_text.strip()
-                        logger.info(f"[TOOL PARSE] Inferred tool from args: {inferred_name} -> {canonical_name}")
-                        return remaining_text, tool_uses
-            except json.JSONDecodeError:
-                pass
-    except Exception as e:
-        logger.debug(f"[TOOL PARSE] Fallback parse failed: {e}")
-
     # Second, try DeepSeek native format
     if TOOL_CALL_BEGIN in text:
         logger.info(f"[TOOL PARSE] Found DeepSeek markers in output")
@@ -951,6 +910,64 @@ def parse_tool_calls(text: str, available_tools: list[Tool] | None = None) -> tu
         remaining_text = remaining_text.replace(TOOL_CALLS_END, "")
         remaining_text = remaining_text.replace(TOOL_CALL_END, "")
         remaining_text = remaining_text.strip()
+
+    # Fallback: model outputs just arguments without "name" wrapper (last resort)
+    # e.g., {"command": "..."} instead of {"name": "Bash", "arguments": {"command": "..."}}
+    if not tool_uses:
+        try:
+            # Find start of any JSON object using bracket counting
+            json_start = remaining_text.find('{')
+            if json_start >= 0:
+                depth = 0
+                json_end = json_start
+                for i, c in enumerate(remaining_text[json_start:]):
+                    if c == '{':
+                        depth += 1
+                    elif c == '}':
+                        depth -= 1
+                        if depth == 0:
+                            json_end = json_start + i + 1
+                            break
+                if json_end > json_start:
+                    json_str = remaining_text[json_start:json_end]
+                    try:
+                        obj = json.loads(json_str)
+                        # Infer tool from argument keys
+                        inferred_name = None
+                        if "command" in obj:
+                            inferred_name = "Bash"
+                        elif "prompt" in obj and "subagent_type" in obj:
+                            inferred_name = "Task"
+                        elif "description" in obj and "subagent_type" in obj:
+                            inferred_name = "Task"
+                        elif "file_path" in obj and "content" not in obj:
+                            inferred_name = "Read"
+                        elif "file_path" in obj and "content" in obj:
+                            inferred_name = "Write"
+                        elif "pattern" in obj:
+                            inferred_name = "Grep"
+                        elif "query" in obj:
+                            inferred_name = "WebSearch"
+                        elif "todos" in obj:
+                            inferred_name = "TodoWrite"
+
+                        if inferred_name:
+                            canonical_name = tool_name_map.get(inferred_name.lower())
+                            if canonical_name:
+                                tool_id = f"toolu_{hashlib.md5(f'{canonical_name}{time.time()}'.encode()).hexdigest()[:24]}"
+                                tool_uses.append({
+                                    "type": "tool_use",
+                                    "id": tool_id,
+                                    "name": canonical_name,
+                                    "input": obj,
+                                })
+                                remaining_text = remaining_text[:json_start] + remaining_text[json_end:]
+                                remaining_text = remaining_text.strip()
+                                logger.info(f"[TOOL PARSE] Inferred tool from args: {inferred_name} -> {canonical_name}")
+                    except json.JSONDecodeError:
+                        pass
+        except Exception as e:
+            logger.debug(f"[TOOL PARSE] Fallback parse failed: {e}")
 
     # Always clean up any DeepSeek markers from remaining text
     remaining_text = remaining_text.replace(TOOL_CALLS_BEGIN, "")
