@@ -834,8 +834,11 @@ def parse_tool_calls(text: str, available_tools: list[Tool] | None = None) -> tu
                                 "name": canonical_name,
                                 "input": args,
                             })
-                            # Remove the JSON from remaining text
+                            # Remove the JSON and surrounding markdown fences from remaining text
                             remaining_text = text[:start_idx] + text[end_idx:]
+                            # Also remove markdown code fences that wrapped the JSON
+                            remaining_text = re.sub(r'```json\s*```', '', remaining_text)
+                            remaining_text = re.sub(r'```\s*```', '', remaining_text)
                             remaining_text = remaining_text.strip()
                             logger.info(f"[TOOL PARSE] Found JSON tool call: {parsed_name} -> {canonical_name}")
                             return remaining_text, tool_uses
@@ -1285,17 +1288,22 @@ async def create_message(request_body: MessagesRequest, request: Request) -> JSO
     # Build content blocks
     content_blocks: list[dict] = []
 
-    # When tool_uses exist, filter remaining_text more aggressively
-    # The model often hallucinates fake results after tool calls
+    # When tool_uses exist, clean up remaining text but keep explanations
     if tool_uses:
-        # Don't include text that looks like fake results or empty code blocks
         if remaining_text:
             clean_text = sanitize_terminal_output(remaining_text.strip())
-            # Filter out fake results, empty blocks, and JSON-looking content
-            if clean_text and not re.search(r'```json|"result"|"output"|\{\s*"', clean_text):
-                # Only include if it looks like legitimate pre-tool explanation
-                if not clean_text.startswith('```'):
-                    content_blocks.append({"type": "text", "text": clean_text})
+            # Remove duplicate JSON tool calls that model sometimes outputs
+            clean_text = re.sub(r'```json\s*\{[^}]*"name"[^}]*\}\s*```', '', clean_text)
+            # Remove fake result blocks
+            clean_text = re.sub(r'```json\s*\{[^}]*"result"[^}]*\}\s*```', '', clean_text)
+            clean_text = re.sub(r'```json\s*\{[^}]*"output"[^}]*\}\s*```', '', clean_text)
+            # Clean up leftover empty fences
+            clean_text = re.sub(r'```json\s*```', '', clean_text)
+            clean_text = re.sub(r'```\s*```', '', clean_text)
+            clean_text = clean_text.strip()
+            # Include if there's meaningful text left
+            if clean_text and len(clean_text) > 3:
+                content_blocks.append({"type": "text", "text": clean_text})
         # Add tool uses after any text
         for tool_use in tool_uses:
             content_blocks.append(tool_use)
@@ -1303,8 +1311,11 @@ async def create_message(request_body: MessagesRequest, request: Request) -> JSO
         # No tool uses - include text normally
         if remaining_text:
             clean_text = sanitize_terminal_output(remaining_text.strip())
-            # Filter out empty JSON code blocks or other meaningless content
-            if clean_text and clean_text not in ["```json\n\n```", "```\n```", "```json```", "```"]:
+            # Filter out empty JSON code blocks
+            clean_text = re.sub(r'```json\s*```', '', clean_text)
+            clean_text = re.sub(r'```\s*```', '', clean_text)
+            clean_text = clean_text.strip()
+            if clean_text:
                 content_blocks.append({"type": "text", "text": clean_text})
 
     # Determine stop reason
