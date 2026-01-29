@@ -129,10 +129,12 @@ ERROR: false
 FORWARD_TRANSLATOR_SYSTEM = """Output exactly one word: end, complete_and_end, or continue.
 
 Decision rules (first match wins):
-1. HAS_ERROR = true → continue
-2. PENDING_TODOS not none AND FILES_WRITTEN not none → complete_and_end
-3. PENDING_TODOS not none AND FILES_WRITTEN = none → continue
-4. Otherwise → end"""
+1. CONSECUTIVE_ERRORS >= 3 → end (stop retrying, report failure)
+2. CONSECUTIVE_ERRORS 1-2 → continue (let model try a different approach)
+3. PENDING_TODOS not none AND FILES_WRITTEN not none → complete_and_end
+4. PENDING_TODOS not none AND FILES_WRITTEN = none → continue
+5. RESULT_COUNT >= 8 AND PENDING_TODOS = none → end (long chain, wrap up)
+6. Otherwise → end"""
 
 # In-memory cache for reverse translations (deterministic: same input → same output)
 _reverse_translation_cache: dict[str, str] = {}
@@ -918,11 +920,13 @@ def _call_reverse_translator(input_text: str) -> str:
     return result
 
 
-def _is_pure_tool_roundtrip(messages: list) -> bool:
-    """Stateless check: is the last user message a pure tool_result with no new user text?
+def _is_tool_roundtrip(messages: list) -> bool:
+    """Stateless: does the last user message have tool_results?
 
-    Returns True only when the last user message contains tool_results
-    and NO new user instructions (ignoring system-reminders).
+    If yes, forward translator fires to manage the turn.
+    User text may also be present (CLI bundles them) — the 'end' action
+    only suppresses text, never tool calls, so model can still respond
+    to new instructions via tool calls.
     """
     if not messages:
         return False
@@ -931,27 +935,39 @@ def _is_pure_tool_roundtrip(messages: list) -> bool:
         return False
     if not isinstance(last_msg.content, list):
         return False
+    has_tool_result = any(
+        isinstance(b, dict) and b.get("type") == "tool_result"
+        for b in last_msg.content
+    )
+    logger.info(f"[GATE] tool_roundtrip={has_tool_result}")
+    return has_tool_result
 
-    has_tool_result = False
-    has_user_text = False
-    for block in last_msg.content:
-        if not isinstance(block, dict):
-            continue
-        if block.get("type") == "tool_result":
-            has_tool_result = True
-        elif block.get("type") == "text":
-            text = block.get("text", "").strip()
-            # System-reminders are injected by CLI, not user instructions
+
+def _last_message_has_user_text(messages: list) -> bool:
+    """Stateless: does the last user message contain real user text?
+
+    CLI bundles tool_results + user text + system-reminders in the same message.
+    Returns True only if there's non-system-reminder text content.
+    """
+    if not messages:
+        return False
+    last_msg = messages[-1]
+    if last_msg.role != "user":
+        return False
+    if isinstance(last_msg.content, str):
+        return bool(last_msg.content.strip())
+    if not isinstance(last_msg.content, list):
+        return False
+    for b in last_msg.content:
+        if isinstance(b, dict) and b.get("type") == "text":
+            text = b.get("text", "")
             cleaned = re.sub(
-                r"<system-reminder>.*?</system-reminder>",
-                "", text, flags=re.DOTALL,
+                r"<system-reminder>.*?</system-reminder>", "",
+                text, flags=re.DOTALL,
             ).strip()
             if cleaned:
-                has_user_text = True
-
-    is_pure = has_tool_result and not has_user_text
-    logger.info(f"[GATE] pure_tool_roundtrip={is_pure} (tool_result={has_tool_result}, user_text={has_user_text})")
-    return is_pure
+                return True
+    return False
 
 
 def _build_forward_input(
@@ -993,11 +1009,20 @@ def _build_forward_input(
     tools_called = [tu.get("name", "") for tu in tool_uses]
     has_tool_call = len(tool_uses) > 0
 
+    # Count consecutive errors from the end of the result list
+    consecutive_errors = 0
+    for r in reversed(tool_results):
+        if r.get("error"):
+            consecutive_errors += 1
+        else:
+            break
+
     return (
         f"TOOLS_CALLED: {', '.join(tools_called) if tools_called else 'none'}\n"
         f"FILES_WRITTEN: {', '.join(written_files) if written_files else 'none'}\n"
         f"PENDING_TODOS: {', '.join(pending_todos) if pending_todos else 'none'}\n"
         f"HAS_ERROR: {str(has_error).lower()}\n"
+        f"CONSECUTIVE_ERRORS: {consecutive_errors}\n"
         f"WORKING_DIR: {os.getcwd()}\n"
         f"LATEST_OUTPUT: {'tool_use' if has_tool_call else 'text'}\n"
         f"RESULT_COUNT: {len(tool_results)}"
@@ -1012,30 +1037,27 @@ def _call_forward_translator(input_text: str) -> dict:
     """
     conv = [
         {"role": "system", "content": FORWARD_TRANSLATOR_SYSTEM},
-        # Example 1: error → continue
-        {"role": "user", "content": "TOOLS_CALLED: Bash\nFILES_WRITTEN: none\nPENDING_TODOS: none\nHAS_ERROR: true\nWORKING_DIR: /Users/dev\nLATEST_OUTPUT: text\nRESULT_COUNT: 1"},
+        # Example 1: first error → continue (let model try different approach)
+        {"role": "user", "content": "TOOLS_CALLED: Bash\nFILES_WRITTEN: none\nPENDING_TODOS: none\nHAS_ERROR: true\nCONSECUTIVE_ERRORS: 1\nWORKING_DIR: /Users/dev\nLATEST_OUTPUT: text\nRESULT_COUNT: 1"},
         {"role": "assistant", "content": "continue"},
-        # Example 2: files written + pending todos → complete_and_end
-        {"role": "user", "content": "TOOLS_CALLED: Write\nFILES_WRITTEN: stack.py\nPENDING_TODOS: Create stack.py\nHAS_ERROR: false\nWORKING_DIR: /Users/dev\nLATEST_OUTPUT: text\nRESULT_COUNT: 2"},
+        # Example 2: 3 consecutive errors → end (stop retrying)
+        {"role": "user", "content": "TOOLS_CALLED: Bash\nFILES_WRITTEN: none\nPENDING_TODOS: none\nHAS_ERROR: true\nCONSECUTIVE_ERRORS: 3\nWORKING_DIR: /Users/dev\nLATEST_OUTPUT: text\nRESULT_COUNT: 3"},
+        {"role": "assistant", "content": "end"},
+        # Example 3: files written + pending todos → complete_and_end
+        {"role": "user", "content": "TOOLS_CALLED: Write\nFILES_WRITTEN: stack.py\nPENDING_TODOS: Create stack.py\nHAS_ERROR: false\nCONSECUTIVE_ERRORS: 0\nWORKING_DIR: /Users/dev\nLATEST_OUTPUT: text\nRESULT_COUNT: 2"},
         {"role": "assistant", "content": "complete_and_end"},
-        # Example 3: pending todos, no files → continue
-        {"role": "user", "content": "TOOLS_CALLED: TodoWrite\nFILES_WRITTEN: none\nPENDING_TODOS: Create stack.py, Add tests\nHAS_ERROR: false\nWORKING_DIR: /Users/dev\nLATEST_OUTPUT: tool_use\nRESULT_COUNT: 1"},
+        # Example 4: pending todos, no files → continue
+        {"role": "user", "content": "TOOLS_CALLED: TodoWrite\nFILES_WRITTEN: none\nPENDING_TODOS: Create stack.py, Add tests\nHAS_ERROR: false\nCONSECUTIVE_ERRORS: 0\nWORKING_DIR: /Users/dev\nLATEST_OUTPUT: tool_use\nRESULT_COUNT: 1"},
         {"role": "assistant", "content": "continue"},
-        # Example 4: no todos, no error → end
-        {"role": "user", "content": "TOOLS_CALLED: Bash\nFILES_WRITTEN: none\nPENDING_TODOS: none\nHAS_ERROR: false\nWORKING_DIR: /Users/dev\nLATEST_OUTPUT: text\nRESULT_COUNT: 1"},
+        # Example 5: no todos, no error → end
+        {"role": "user", "content": "TOOLS_CALLED: Bash\nFILES_WRITTEN: none\nPENDING_TODOS: none\nHAS_ERROR: false\nCONSECUTIVE_ERRORS: 0\nWORKING_DIR: /Users/dev\nLATEST_OUTPUT: text\nRESULT_COUNT: 1"},
         {"role": "assistant", "content": "end"},
-        # Example 5: read file, done → end
-        {"role": "user", "content": "TOOLS_CALLED: Read\nFILES_WRITTEN: none\nPENDING_TODOS: none\nHAS_ERROR: false\nWORKING_DIR: /Users/dev\nLATEST_OUTPUT: text\nRESULT_COUNT: 2"},
+        # Example 6: long chain done → end
+        {"role": "user", "content": "TOOLS_CALLED: Bash\nFILES_WRITTEN: hello.py\nPENDING_TODOS: none\nHAS_ERROR: false\nCONSECUTIVE_ERRORS: 0\nWORKING_DIR: /Users/dev\nLATEST_OUTPUT: text\nRESULT_COUNT: 8"},
         {"role": "assistant", "content": "end"},
-        # Example 6: multiple files + todos → complete_and_end
-        {"role": "user", "content": "TOOLS_CALLED: Write\nFILES_WRITTEN: stack.py, test_stack.py\nPENDING_TODOS: Create stack.py, Add tests\nHAS_ERROR: false\nWORKING_DIR: /Users/dev\nLATEST_OUTPUT: text\nRESULT_COUNT: 4"},
+        # Example 7: multiple files + todos → complete_and_end
+        {"role": "user", "content": "TOOLS_CALLED: Write\nFILES_WRITTEN: stack.py, test_stack.py\nPENDING_TODOS: Create stack.py, Add tests\nHAS_ERROR: false\nCONSECUTIVE_ERRORS: 0\nWORKING_DIR: /Users/dev\nLATEST_OUTPUT: text\nRESULT_COUNT: 4"},
         {"role": "assistant", "content": "complete_and_end"},
-        # Example 7: files written but NO todos → end (not complete_and_end)
-        {"role": "user", "content": "TOOLS_CALLED: Write\nFILES_WRITTEN: /Users/dev/hello.py\nPENDING_TODOS: none\nHAS_ERROR: false\nWORKING_DIR: /Users/dev\nLATEST_OUTPUT: text\nRESULT_COUNT: 2"},
-        {"role": "assistant", "content": "end"},
-        # Example 8: error → continue (reinforcement)
-        {"role": "user", "content": "TOOLS_CALLED: Write\nFILES_WRITTEN: none\nPENDING_TODOS: Create hello.py\nHAS_ERROR: true\nWORKING_DIR: /Users/dev\nLATEST_OUTPUT: text\nRESULT_COUNT: 1"},
-        {"role": "assistant", "content": "continue"},
         {"role": "user", "content": input_text},
     ]
 
@@ -1115,11 +1137,9 @@ def _call_forward_translator(input_text: str) -> dict:
     files_written = fields.get("FILES_WRITTEN", "none")
     has_files = files_written != "none" and files_written != ""
 
-    # Rule 1: HAS_ERROR=true always means continue
-    if has_error:
-        best_action = "continue"
-    # Rule 2: complete_and_end requires BOTH files AND todos
-    elif model_action == "complete_and_end" and not has_pending:
+    # Minimal guard rail: complete_and_end is meaningless without pending todos
+    # (logit comparison can't reliably handle AND conditions)
+    if model_action == "complete_and_end" and not has_pending:
         best_action = "end"
 
     override = "" if best_action == model_action else f" (override: {model_action}→{best_action})"
@@ -1790,6 +1810,12 @@ async def create_message(request_body: MessagesRequest, request: Request) -> JSO
         request_body.messages, request_body.system, request_body.tools
     )
 
+    # Cap max_tokens during tool roundtrips — model only needs enough for
+    # 1-2 tool calls, not 10K tokens of rambling. Checked before generation.
+    if _is_tool_roundtrip(request_body.messages):
+        max_tokens = min(max_tokens, 2000)
+        logger.info(f"[TOOL RT] Capped max_tokens to {max_tokens}")
+
     # Absolute safety cap: if processor keeps saying "continue", hard-stop here
     if total_tool_results >= ABSOLUTE_SAFETY_CAP:
         logger.info(f"[ABSOLUTE SAFETY CAP] {total_tool_results} results, forcing end_turn")
@@ -1973,9 +1999,11 @@ async def create_message(request_body: MessagesRequest, request: Request) -> JSO
         stop_reason = "max_tokens"
 
     # Forward translator: stateless turn management.
-    # Fires ONLY when the last user message is a pure tool_result (no new user text).
-    # Checked fresh each exchange — no state carried across requests.
-    if _is_pure_tool_roundtrip(request_body.messages):
+    # Fires whenever the last user message has tool_results.
+    # "end" only suppresses text — tool calls always pass through
+    # (the model is actively working). Safety cap handles runaways.
+    is_tool_rt = _is_tool_roundtrip(request_body.messages)
+    if is_tool_rt:
         fwd_input = _build_forward_input(
             tool_uses, request_body.messages, output_text
         )
@@ -2003,9 +2031,13 @@ async def create_message(request_body: MessagesRequest, request: Request) -> JSO
                 logger.info("[FWD] complete_and_end (no pending todos)")
 
         elif action == "end":
-            content_blocks = [{"type": "text", "text": "Done."}]
-            stop_reason = "end_turn"
-            logger.info("[FWD] end")
+            if tool_uses and _last_message_has_user_text(request_body.messages):
+                # Model responding to bundled user instruction — let tool calls through
+                logger.info("[FWD] end but user text present → passing through tool calls")
+            else:
+                content_blocks = [{"type": "text", "text": "Done."}]
+                stop_reason = "end_turn"
+                logger.info("[FWD] end → Done.")
 
         # "continue" → use model's output as-is (already in content_blocks)
 
