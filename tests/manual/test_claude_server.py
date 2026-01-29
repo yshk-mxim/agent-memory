@@ -147,6 +147,33 @@ CACHE_DIR.mkdir(parents=True, exist_ok=True)
 TEST_SET_FILENAME = f"test_set_{time.strftime('%Y%m%d_%H%M%S')}.json"
 TEST_SET_PATH = Path("/tmp/claude") / TEST_SET_FILENAME
 
+# Full trace log — captures complete data at every stage of the pipeline.
+# This is the single source of truth for debugging CLI↔model issues.
+TRACE_PATH = Path("/tmp/claude") / f"trace_{time.strftime('%Y%m%d_%H%M%S')}.jsonl"
+_trace_counter = 0
+
+
+def trace_log(stage: str, data: dict) -> None:
+    """Append a trace entry to the JSONL trace file.
+
+    Each line is a JSON object with: seq, stage, timestamp, and stage-specific data.
+    Stages: CLI_IN, REVERSE_IN, REVERSE_OUT, PROMPT_BUILT, MODEL_OUT_RAW,
+            TOOL_PARSE, FORWARD_IN, FORWARD_OUT, CLI_OUT
+    """
+    global _trace_counter
+    _trace_counter += 1
+    entry = {
+        "seq": _trace_counter,
+        "stage": stage,
+        "ts": time.strftime("%H:%M:%S.") + f"{int(time.time() * 1000) % 1000:03d}",
+        **data,
+    }
+    try:
+        with open(TRACE_PATH, "a") as f:
+            f.write(json.dumps(entry, default=str) + "\n")
+    except Exception as e:
+        logger.warning(f"[TRACE] Write failed: {e}")
+
 # FastAPI app
 @asynccontextmanager
 async def lifespan(application: FastAPI):
@@ -314,50 +341,55 @@ def extract_content_blocks(content: Any) -> list[dict]:
 def extract_text(content: Any, role: str = "") -> str:
     """Extract text from content that may be string or list of blocks.
 
-    For assistant messages: brief tool_use summaries, drops post-tool narration.
-    Tool_result handling is done by the reverse translator in messages_to_prompt(),
-    so this function only provides a fallback for tool_results.
+    For assistant messages with tool_use: compact summary line only.
+    Post-tool text blocks (later turns bundled by CLI) are dropped from
+    the assistant line because small models pattern-copy them. Context
+    is instead preserved via the reverse translator in messages_to_prompt().
     """
     if isinstance(content, str):
         return content
     if isinstance(content, list):
-        tool_texts: list[str] = []
+        tool_names: list[str] = []
+        tool_result_texts: list[str] = []
         user_texts: list[str] = []
         seen_tool_use = False
         for block in content:
             if isinstance(block, dict):
                 if block.get("type") == "text":
                     text = block.get("text", "")
-                    if role == "assistant" and seen_tool_use:
-                        continue
                     if "SUGGESTION MODE" in text:
+                        continue
+                    if role == "assistant" and seen_tool_use:
+                        # Post-tool text = later conversation turns bundled
+                        # by CLI. Skip in assistant line — small models
+                        # pattern-copy exact text. Context is preserved via
+                        # [New user request] boundary in the user message.
                         continue
                     user_texts.append(text)
                 elif block.get("type") == "thinking":
                     pass
                 elif block.get("type") == "tool_use":
                     seen_tool_use = True
-                    name = block.get("name", "")
-                    tool_texts.append(f"(Called {name})")
+                    tool_names.append(block.get("name", ""))
                 elif block.get("type") == "tool_result":
-                    # Fallback — normally handled by reverse translator
                     seen_tool_use = True
                     rc = block.get("content", "")
                     result_text = str(rc) if not isinstance(rc, list) else "\n".join(
                         b.get("text", str(b)) if isinstance(b, dict) else str(b) for b in rc
                     )
                     if block.get("is_error"):
-                        tool_texts.append(f"Error: {result_text}")
+                        tool_result_texts.append(f"Error: {result_text}")
                     elif result_text.strip():
-                        tool_texts.append(result_text)
+                        tool_result_texts.append(result_text)
             elif isinstance(block, str):
                 user_texts.append(block)
         parts: list[str] = []
-        if tool_texts:
-            parts.extend(tool_texts)
+        if tool_names and role == "assistant":
+            unique_names = list(dict.fromkeys(tool_names))
+            parts.append(f"[Used {', '.join(unique_names)}]")
+        if tool_result_texts:
+            parts.extend(tool_result_texts)
         if user_texts:
-            if tool_texts:
-                parts.append("\n--- New message ---")
             parts.extend(user_texts)
         return "\n".join(parts)
     return str(content)
@@ -562,10 +594,15 @@ def generate_tokens(
     else:
         raise ValueError("No tokens to process and no last_input_token provided")
 
-    # Generation loop with sampling
+    # Generation loop with sampling and repetition detection
     generated = []
     eos_id = tokenizer.eos_token_id
     stop_seqs = stop_sequences or []
+    # Repetition detection: check every N tokens if output is stuck in a loop.
+    # Uses token-level ngram detection (faster than decoding every token).
+    REPETITION_CHECK_INTERVAL = 32
+    REPETITION_NGRAM_SIZE = 8  # tokens
+    REPETITION_THRESHOLD = 4   # same ngram appears 4+ times → stuck
 
     for i in range(max_tokens):
         # Get logits for last position
@@ -587,11 +624,41 @@ def generate_tokens(
             for seq in stop_seqs:
                 if seq in current_text:
                     logger.info(f"[GENERATE] Stop sequence '{seq}' at token {i+1}")
-                    # Remove the stop sequence from output
                     idx = current_text.find(seq)
                     if idx >= 0:
                         current_text = current_text[:idx]
                     return generated, current_text
+
+        # Repetition detection: check if the model is stuck in a loop
+        if (i + 1) % REPETITION_CHECK_INTERVAL == 0 and len(generated) >= REPETITION_NGRAM_SIZE * REPETITION_THRESHOLD:
+            # Check last 128 tokens for repeated ngrams
+            window = generated[-128:]
+            ngram_counts: dict[tuple, int] = {}
+            for j in range(len(window) - REPETITION_NGRAM_SIZE + 1):
+                ngram = tuple(window[j:j + REPETITION_NGRAM_SIZE])
+                ngram_counts[ngram] = ngram_counts.get(ngram, 0) + 1
+            max_count = max(ngram_counts.values()) if ngram_counts else 0
+            if max_count >= REPETITION_THRESHOLD:
+                # Find the repeated ngram for logging
+                repeated = next(ng for ng, c in ngram_counts.items() if c == max_count)
+                repeated_text = tokenizer.decode(list(repeated))
+                logger.warning(
+                    f"[GENERATE] Repetition detected at token {i+1}: "
+                    f"'{repeated_text}' repeated {max_count}x in last 128 tokens. Truncating."
+                )
+                # Truncate to just before the repetition started
+                # Find first occurrence of the repeated ngram in window
+                first_idx = 0
+                for j in range(len(window) - REPETITION_NGRAM_SIZE + 1):
+                    if tuple(window[j:j + REPETITION_NGRAM_SIZE]) == repeated:
+                        first_idx = j
+                        break
+                # Keep tokens up to just after first occurrence
+                keep_n = len(generated) - 128 + first_idx + REPETITION_NGRAM_SIZE
+                generated = generated[:keep_n]
+                text = tokenizer.decode(generated)
+                logger.info(f"[GENERATE] Truncated to {len(generated)} tokens")
+                return generated, text
 
         # Forward pass for next token
         y = model(mx.array([[next_token]]), cache=kv_caches)
@@ -826,8 +893,14 @@ def _extract_pending_todos(messages: list) -> list[str]:
     ]
 
 
-def _build_reverse_input(tool_use_block: dict, tool_result_block: dict) -> str:
-    """Build input for the reverse translator from a tool_use + tool_result pair."""
+def _build_reverse_input(
+    tool_use_block: dict, tool_result_block: dict, n_results: int = 1,
+) -> str:
+    """Build input for the reverse translator from a tool_use + tool_result pair.
+
+    n_results: total number of tool results in this message. When high (3+),
+    we truncate aggressively to prevent the main model from being overwhelmed.
+    """
     name = tool_use_block.get("name", "unknown")
     args = tool_use_block.get("input", {})
     is_error = tool_result_block.get("is_error", False)
@@ -854,8 +927,24 @@ def _build_reverse_input(tool_use_block: dict, tool_result_block: dict) -> str:
     else:
         args_str = str(args)[:200]
 
-    if len(result_text) > 500:
-        result_text = result_text[:500] + "...(truncated)"
+    # Adaptive truncation based on number of results.
+    # Many results (3+) → each gets less space to prevent overloading the model.
+    # Errors with tracebacks: keep only first meaningful line.
+    if is_error and n_results >= 3:
+        # For errors in multi-result messages: just the first line of output
+        first_line = result_text.split("\n")[0][:200]
+        result_text = first_line
+    elif n_results >= 4:
+        max_result_len = 150
+        if len(result_text) > max_result_len:
+            result_text = result_text[:max_result_len] + "...(truncated)"
+    elif n_results >= 2:
+        max_result_len = 300
+        if len(result_text) > max_result_len:
+            result_text = result_text[:max_result_len] + "...(truncated)"
+    else:
+        if len(result_text) > 500:
+            result_text = result_text[:500] + "...(truncated)"
 
     return (
         f"TOOL: {name}\n"
@@ -873,10 +962,14 @@ def _call_reverse_translator(input_text: str) -> str:
     Results are also cached in-memory for determinism (same input → same tokens
     in main context, preserving prefix matching).
     """
+    trace_log("REVERSE_IN", {"input": input_text})
+
     cache_key_hash = hashlib.md5(input_text.encode()).hexdigest()
     if cache_key_hash in _reverse_translation_cache:
         logger.info("[REV] In-memory cache hit")
-        return _reverse_translation_cache[cache_key_hash]
+        cached = _reverse_translation_cache[cache_key_hash]
+        trace_log("REVERSE_OUT", {"output": cached, "source": "mem_cache"})
+        return cached
 
     conv = [
         {"role": "system", "content": REVERSE_TRANSLATOR_SYSTEM},
@@ -937,6 +1030,7 @@ def _call_reverse_translator(input_text: str) -> str:
         result = result.split("\n\n")[0]
 
     logger.info(f"[REV] Translated: {result[:200]}")
+    trace_log("REVERSE_OUT", {"output": result, "source": "model", "n_tokens": len(generated_ids)})
     _reverse_translation_cache[cache_key_hash] = result
     return result
 
@@ -1205,7 +1299,8 @@ def messages_to_prompt(messages: list[Message], system: Any = "", tools: list[To
         lines.append("When you call a tool, the result appears as the next User message.")
         lines.append("After seeing the result, either call another tool or respond with text.")
         lines.append("If the user's request is fulfilled, respond briefly (e.g. the result).")
-        lines.append("If a user message contains BOTH a tool result AND a new request, handle the new request.\n")
+        lines.append("If a User message contains '[New user request]', the text after that marker is the user's NEW instruction.")
+        lines.append("Always prioritize the NEW instruction over prior tool result context.\n")
 
     # Add tool definitions in a format DeepSeek understands
     if tools:
@@ -1278,16 +1373,23 @@ def messages_to_prompt(messages: list[Message], system: Any = "", tools: list[To
                 user_texts: list[str] = []
                 block_types = [(type(b).__name__, b.get("type") if isinstance(b, dict) else "?") for b in msg.content]
                 logger.info(f"[MSG {i} BLOCKS] {len(msg.content)} blocks: {block_types}")
+                n_results = len(tool_result_blocks)
+                # Cap translated output length per result based on total count.
+                # Prevents prompt overload when many results (especially errors).
+                max_translated_chars = 500 if n_results <= 1 else (200 if n_results <= 3 else 100)
                 for b in msg.content:
                     if isinstance(b, dict) and b.get("type") == "tool_result":
                         matched = tool_use_map.get(b.get("tool_use_id", ""))
                         if matched:
-                            rev_input = _build_reverse_input(matched, b)
+                            rev_input = _build_reverse_input(matched, b, n_results=n_results)
                             translated = _call_reverse_translator(rev_input)
+                            if len(translated) > max_translated_chars:
+                                translated = translated[:max_translated_chars].rstrip() + "..."
+                                logger.info(f"[REV] Capped translation to {max_translated_chars} chars ({n_results} results)")
                             translated_parts.append(translated)
                         else:
                             rc = b.get("content", "")
-                            translated_parts.append(str(rc) if not isinstance(rc, list) else str(rc))
+                            translated_parts.append(str(rc)[:max_translated_chars] if not isinstance(rc, list) else str(rc)[:max_translated_chars])
                     elif isinstance(b, dict) and b.get("type") == "text":
                         text = b.get("text", "")
                         # Strip CLI metadata
@@ -1300,11 +1402,29 @@ def messages_to_prompt(messages: list[Message], system: Any = "", tools: list[To
                         if cleaned:
                             user_texts.append(cleaned)
 
-                # Only include the LAST user text (newest instruction).
-                # Earlier texts were already responded to in previous roundtrips.
-                logger.info(f"[MSG {i} DEBUG] user_texts={user_texts}, translated_parts={[p[:50] for p in translated_parts]}")
-                if user_texts:
-                    translated_parts.append(user_texts[-1])
+                # Include ALL user texts, filtering out CLI meta-messages
+                # (token limit warnings, continuation prompts, etc.).
+                # Bug fix: previously took user_texts[-1] which picked the CLI
+                # "cut off" warning instead of the actual user instruction.
+                CLI_META_PATTERNS = [
+                    "Your response was cut off",
+                    "output token limit",
+                    "Please break your work into smaller pieces",
+                    "Continue from where you left off",
+                ]
+                filtered_user_texts = [
+                    t for t in user_texts
+                    if not any(pat in t for pat in CLI_META_PATTERNS)
+                ]
+                logger.info(f"[MSG {i} DEBUG] user_texts={user_texts}, filtered={filtered_user_texts}, translated_parts={[p[:50] for p in translated_parts]}")
+                if filtered_user_texts:
+                    # Clear boundary so model distinguishes tool context
+                    # from new user instructions.
+                    translated_parts.append("\n[New user request]")
+                    translated_parts.extend(filtered_user_texts)
+                elif user_texts:
+                    # All texts were CLI meta — still include at least one
+                    translated_parts.append(user_texts[0])
 
                 content_text = "\n".join(translated_parts)
                 lines.append(f"User: {content_text}")
@@ -1381,11 +1501,16 @@ def parse_tool_calls(text: str, available_tools: list[Tool] | None = None) -> tu
         for t in available_tools:
             tool_name_map[t.name.lower()] = t.name
 
-    # Strip model echoing "(Called ToolName)" prefix from prompt pattern.
-    # DeepSeek sometimes copies this from the conversation history.
-    cleaned_text = re.sub(r'^\s*\(Called \w+\)\s*', '', remaining_text)
+    # Strip model echoing assistant tool-call text from prompt pattern.
+    # DeepSeek sometimes copies previous assistant text before its own tool call.
+    # Formats: "(Called Write)", "[Used Write]", "I'll write to file.py."
+    cleaned_text = re.sub(r"^\s*(\(Called \w+\)\s*)+", '', remaining_text)
+    if cleaned_text == remaining_text:
+        cleaned_text = re.sub(r"^\s*\[Used [^\]]+\]\s*", '', remaining_text)
+    if cleaned_text == remaining_text:
+        cleaned_text = re.sub(r"^\s*(I'll (write to|read|run:|edit|update the task|launch:|search for:|use) [^\n]*\.\s*)+", '', remaining_text)
     if cleaned_text != remaining_text:
-        logger.info("[TOOL PARSE] Stripped echoed '(Called ...)' prefix")
+        logger.info(f"[TOOL PARSE] Stripped echoed assistant text prefix ({len(remaining_text) - len(cleaned_text)} chars)")
         remaining_text = cleaned_text
         text = cleaned_text
 
@@ -1861,11 +1986,54 @@ async def create_message(request_body: MessagesRequest, request: Request) -> JSO
         logger.info(f"[RAW MSG {i}] role={msg.role}, content={str(msg.content)[:200]}")
     log_memory("REQUEST_START")
 
+    # TRACE: Full CLI input — every message with COMPLETE content (no truncation)
+    trace_log("CLI_IN", {
+        "n_messages": len(request_body.messages),
+        "max_tokens": max_tokens,
+        "n_tools": n_tools,
+        "system_len": len(str(request_body.system)) if request_body.system else 0,
+        "messages": [
+            {
+                "idx": i,
+                "role": m.role,
+                "content": m.content if isinstance(m.content, str) else [
+                    {
+                        "type": b.get("type", "?"),
+                        "id": b.get("id", b.get("tool_use_id", "")),
+                        "name": b.get("name", ""),
+                        "text": b.get("text", "")[:500] if b.get("type") == "text" else "",
+                        "content": str(b.get("content", ""))[:300] if b.get("type") == "tool_result" else "",
+                        "is_error": b.get("is_error", None),
+                        "input": b.get("input", None),
+                    }
+                    for b in m.content if isinstance(b, dict)
+                ],
+            }
+            for i, m in enumerate(request_body.messages)
+        ],
+    })
+
     # 1. Convert to prompt and tokenize
     tokenize_start = time.time()
     prompt, prefill, total_tool_results = messages_to_prompt(
         request_body.messages, request_body.system, request_body.tools
     )
+
+    # TRACE: Full prompt that will be sent to model (the EXACT text DeepSeek sees)
+    # Split into sections for readability: system, tools, messages
+    prompt_lines = prompt.split("\n")
+    msg_start = next(
+        (i for i, l in enumerate(prompt_lines) if l.startswith("User:") or l.startswith("Assistant:")),
+        len(prompt_lines),
+    )
+    trace_log("PROMPT_BUILT", {
+        "total_chars": len(prompt),
+        "total_lines": len(prompt_lines),
+        "total_tool_results": total_tool_results,
+        "system_and_tools_chars": len("\n".join(prompt_lines[:msg_start])),
+        "messages_section": "\n".join(prompt_lines[msg_start:]),
+        "full_prompt_hash": hashlib.md5(prompt.encode()).hexdigest(),
+    })
 
     # Cap max_tokens during tool roundtrips — model only needs enough for
     # 1-2 tool calls, not 10K tokens of rambling. Checked before generation.
@@ -2008,6 +2176,16 @@ async def create_message(request_body: MessagesRequest, request: Request) -> JSO
         stop_sequences=_get_stop_sequences(request_body),
     )
 
+    # TRACE: Raw model output — the EXACT text DeepSeek generated (before any processing)
+    trace_log("MODEL_OUT_RAW", {
+        "n_tokens": len(generated_ids),
+        "max_tokens": max_tokens,
+        "hit_max": len(generated_ids) >= max_tokens,
+        "output_text": output_text,
+        "cache_hit": cache_hit,
+        "tokens_processed": len(tokens_to_process),
+    })
+
     # 5. Save FULL cache (input + output) so next request doesn't reprocess
     save_cache_to_disk(agent_id, kv_caches, tokens, generated_ids, request_type)
 
@@ -2026,6 +2204,16 @@ async def create_message(request_body: MessagesRequest, request: Request) -> JSO
 
     # Parse tool calls from output
     remaining_text, tool_uses = parse_tool_calls(output_text, request_body.tools)
+
+    # TRACE: What parse_tool_calls extracted
+    trace_log("TOOL_PARSE", {
+        "remaining_text": remaining_text,
+        "n_tool_uses": len(tool_uses),
+        "tool_uses": [
+            {"name": t.get("name"), "input": t.get("input")}
+            for t in tool_uses
+        ],
+    })
 
     # Build content blocks
     content_blocks: list[dict] = []
@@ -2059,14 +2247,17 @@ async def create_message(request_body: MessagesRequest, request: Request) -> JSO
     # Fires whenever the last user message has tool_results.
     # "end" only suppresses text — tool calls always pass through
     # (the model is actively working). Safety cap handles runaways.
+    action = "n/a"
     is_tool_rt = _is_tool_roundtrip(request_body.messages)
     if is_tool_rt:
         fwd_input = _build_forward_input(
             tool_uses, request_body.messages, output_text
         )
         logger.info(f"[FWD] State: {fwd_input}")
+        trace_log("FORWARD_IN", {"state": fwd_input})
         decision = _call_forward_translator(fwd_input)
         action = decision.get("action", "continue")
+        trace_log("FORWARD_OUT", {"action": action, "scores": decision})
 
         if action == "complete_and_end":
             pending = _extract_pending_todos(request_body.messages)
@@ -2098,6 +2289,16 @@ async def create_message(request_body: MessagesRequest, request: Request) -> JSO
                 logger.info("[FWD] end → Done.")
 
         # "continue" → use model's output as-is (already in content_blocks)
+
+    # TRACE: Final response sent to CLI — the EXACT content blocks the CLI will process
+    fwd_action = action if is_tool_rt else "n/a"
+    trace_log("CLI_OUT", {
+        "stop_reason": stop_reason,
+        "n_blocks": len(content_blocks) if content_blocks else 0,
+        "content_blocks": content_blocks if content_blocks else [],
+        "fwd_action": fwd_action,
+        "is_tool_roundtrip": is_tool_rt,
+    })
 
     response = MessagesResponse(
         id=f"msg_{agent_id}",
@@ -2216,5 +2417,6 @@ if __name__ == "__main__":
     logger.info(f"Cache directory: {CACHE_DIR}")
     logger.info(f"Model: {MODEL_ID}")
     logger.info(f"Test set log: {TEST_SET_PATH}")
+    logger.info(f"Trace log: {TRACE_PATH}")
 
     uvicorn.run(app, host="0.0.0.0", port=PORT, log_level="info")
