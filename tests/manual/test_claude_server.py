@@ -27,6 +27,7 @@ import gc
 import hashlib
 import json
 import logging
+import os
 import re
 import time
 from pathlib import Path
@@ -59,6 +60,82 @@ KV_GROUP_SIZE = 64
 CHUNKED_PREFILL_THRESHOLD = 2048
 MAX_CHUNK_SIZE = 4096
 MIN_CHUNK_SIZE = 512
+
+# Absolute safety cap: if processor always says "continue", stop here
+ABSOLUTE_SAFETY_CAP = 15
+
+# Two-way translator system prompts (cached in separate DeepSeek contexts).
+#
+# Reverse translator: CLI tool results → DeepSeek-native conversation text.
+# Forward translator: Turn management via constrained decoding.
+
+REVERSE_TRANSLATOR_SYSTEM = """You translate tool execution results into conversation text.
+Write as if the AI assistant performed the action. Be concise and factual.
+
+Input format:
+TOOL: <name>
+ARGS: <key arguments>
+RESULT: <execution output>
+ERROR: <true/false>
+
+Output: One or two sentences describing what happened. Include file paths, command output, or error messages verbatim.
+
+Examples:
+
+TOOL: Bash
+ARGS: command=echo $((1+2))
+RESULT: 3
+ERROR: false
+→ I ran `echo $((1+2))`. Output: 3
+
+TOOL: Write
+ARGS: file_path=/Users/dev/project/stack.py
+RESULT: File created successfully at /Users/dev/project/stack.py
+ERROR: false
+→ I created /Users/dev/project/stack.py with the requested content.
+
+TOOL: Read
+ARGS: file_path=/Users/dev/config.py
+RESULT: class Config:\\n    debug = True
+ERROR: false
+→ I read /Users/dev/config.py:
+class Config:
+    debug = True
+
+TOOL: Bash
+ARGS: command=pytest tests/
+RESULT: FAILED test_stack.py::test_push - AssertionError
+ERROR: true
+→ Error running tests: FAILED test_stack.py::test_push - AssertionError
+
+TOOL: TodoWrite
+ARGS: todos=[Create stack.py (pending), Add tests (pending)]
+RESULT: Todos have been modified.
+ERROR: false
+→ Updated task list: Create stack.py, Add tests (both pending).
+
+TOOL: Write
+ARGS: file_path=/readonly/hello.py
+RESULT: Permission denied: /readonly/hello.py
+ERROR: true
+→ Error: Permission denied writing to /readonly/hello.py
+
+TOOL: Bash
+ARGS: command=cd /Users/dev/other_project && ls
+RESULT: README.md src/ tests/ setup.py
+ERROR: false
+→ I ran `cd /Users/dev/other_project && ls`. Output: README.md src/ tests/ setup.py"""
+
+FORWARD_TRANSLATOR_SYSTEM = """Output exactly one word: end, complete_and_end, or continue.
+
+Decision rules (first match wins):
+1. HAS_ERROR = true → continue
+2. PENDING_TODOS not none AND FILES_WRITTEN not none → complete_and_end
+3. PENDING_TODOS not none AND FILES_WRITTEN = none → continue
+4. Otherwise → end"""
+
+# In-memory cache for reverse translations (deterministic: same input → same output)
+_reverse_translation_cache: dict[str, str] = {}
 
 # Create cache directory
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
@@ -214,25 +291,22 @@ def extract_content_blocks(content: Any) -> list[dict]:
 def extract_text(content: Any, role: str = "") -> str:
     """Extract text from content that may be string or list of blocks.
 
-    For assistant messages: drops text after tool_use blocks (narration that
-    confuses the model into thinking work is already done).
-    For user messages: separates tool_results from user text with a marker.
+    For assistant messages: brief tool_use summaries, drops post-tool narration.
+    Tool_result handling is done by the reverse translator in messages_to_prompt(),
+    so this function only provides a fallback for tool_results.
     """
     if isinstance(content, str):
         return content
     if isinstance(content, list):
-        tool_texts = []
-        user_texts = []
+        tool_texts: list[str] = []
+        user_texts: list[str] = []
         seen_tool_use = False
         for block in content:
             if isinstance(block, dict):
                 if block.get("type") == "text":
                     text = block.get("text", "")
-                    # For assistant: skip text after tool_use (it's narration)
                     if role == "assistant" and seen_tool_use:
                         continue
-                    # Skip CLI noise that confuses the model into
-                    # thinking "SUGGESTION MODE" is a tool name
                     if "SUGGESTION MODE" in text:
                         continue
                     user_texts.append(text)
@@ -241,43 +315,21 @@ def extract_text(content: Any, role: str = "") -> str:
                 elif block.get("type") == "tool_use":
                     seen_tool_use = True
                     name = block.get("name", "")
-                    args = block.get("input", {})
-                    if name == "Bash" and "command" in args:
-                        tool_texts.append(f"(I executed the bash command: {args['command']})")
-                    elif name == "Read" and "file_path" in args:
-                        tool_texts.append(f"(I read the file: {args['file_path']})")
-                    elif name == "Write" and "file_path" in args:
-                        tool_texts.append(f"(I wrote to the file: {args['file_path']})")
-                    elif name == "TodoWrite" and "todos" in args:
-                        todos = args["todos"]
-                        if isinstance(todos, list):
-                            items = [t.get("content", "") for t in todos if isinstance(t, dict)]
-                            tool_texts.append(f"(I updated the todo list: {', '.join(items)})")
-                        else:
-                            tool_texts.append("(I updated the todo list)")
-                    elif name == "Task" and "description" in args:
-                        tool_texts.append(f"(I launched a task: {args['description']})")
-                    else:
-                        tool_texts.append(f"(I called {name})")
+                    tool_texts.append(f"(Called {name})")
                 elif block.get("type") == "tool_result":
+                    # Fallback — normally handled by reverse translator
                     seen_tool_use = True
-                    result_content = block.get("content", "")
-                    if isinstance(result_content, list):
-                        result_text = "\n".join(
-                            b.get("text", str(b)) if isinstance(b, dict) else str(b)
-                            for b in result_content
-                        )
-                    else:
-                        result_text = str(result_content)
+                    rc = block.get("content", "")
+                    result_text = str(rc) if not isinstance(rc, list) else "\n".join(
+                        b.get("text", str(b)) if isinstance(b, dict) else str(b) for b in rc
+                    )
                     if block.get("is_error"):
-                        tool_texts.append(f"The command failed with error:\n{result_text}")
-                    elif "Todos have been modified" in result_text:
-                        tool_texts.append("Todo list updated. Now execute the first pending task. Use Write to create files or Bash to run commands. Do NOT call TodoWrite again.")
-                    else:
-                        tool_texts.append(f"The command output was:\n{result_text}")
+                        tool_texts.append(f"Error: {result_text}")
+                    elif result_text.strip():
+                        tool_texts.append(result_text)
             elif isinstance(block, str):
                 user_texts.append(block)
-        parts = []
+        parts: list[str] = []
         if tool_texts:
             parts.extend(tool_texts)
         if user_texts:
@@ -309,9 +361,11 @@ class ContentBlock(BaseModel):
 
 class MessagesResponse(BaseModel):
     id: str
+    type: str = "message"
     content: list[ContentBlock | dict]  # Allow dicts for flexibility
     model: str
     stop_reason: str
+    stop_sequence: str | None = None
     usage: Usage
     role: str = "assistant"
 
@@ -735,6 +789,313 @@ def find_best_prefix_match(tokens: list[int], request_type: str = "main") -> tup
     return best_agent, best_length
 
 
+def _extract_pending_todos(messages: list) -> list[str]:
+    """Find pending todo items from the most recent TodoWrite in the conversation."""
+    latest_todos: list[dict] = []
+    for msg in messages:
+        if msg.role == "assistant" and isinstance(msg.content, list):
+            for block in msg.content:
+                if isinstance(block, dict) and block.get("type") == "tool_use" and block.get("name") == "TodoWrite":
+                    latest_todos = block.get("input", {}).get("todos", [])
+    return [
+        t["content"] for t in latest_todos
+        if isinstance(t, dict) and t.get("status") != "completed" and t.get("content")
+    ]
+
+
+def _build_reverse_input(tool_use_block: dict, tool_result_block: dict) -> str:
+    """Build input for the reverse translator from a tool_use + tool_result pair."""
+    name = tool_use_block.get("name", "unknown")
+    args = tool_use_block.get("input", {})
+    is_error = tool_result_block.get("is_error", False)
+
+    result_content = tool_result_block.get("content", "")
+    if isinstance(result_content, list):
+        result_text = "\n".join(
+            b.get("text", str(b)) if isinstance(b, dict) else str(b)
+            for b in result_content
+        )
+    else:
+        result_text = str(result_content)
+
+    if name == "Bash":
+        args_str = f"command={args.get('command', '')}"
+    elif name in ("Write", "Read", "Edit"):
+        args_str = f"file_path={args.get('file_path', '')}"
+    elif name == "TodoWrite":
+        todos = args.get("todos", [])
+        items = [f"{t.get('content', '')} ({t.get('status', '')})" for t in todos if isinstance(t, dict)]
+        args_str = f"todos=[{', '.join(items)}]"
+    elif name in ("Glob", "Grep"):
+        args_str = f"pattern={args.get('pattern', '')}"
+    else:
+        args_str = str(args)[:200]
+
+    if len(result_text) > 500:
+        result_text = result_text[:500] + "...(truncated)"
+
+    return (
+        f"TOOL: {name}\n"
+        f"ARGS: {args_str}\n"
+        f"RESULT: {result_text}\n"
+        f"ERROR: {str(is_error).lower()}"
+    )
+
+
+def _call_reverse_translator(input_text: str) -> str:
+    """Translate a tool result into DeepSeek-native conversation text.
+
+    Uses a separate cached DeepSeek context (slot "rev"). System prompt +
+    few-shot example are cached; only the input varies per call.
+    Results are also cached in-memory for determinism (same input → same tokens
+    in main context, preserving prefix matching).
+    """
+    cache_key_hash = hashlib.md5(input_text.encode()).hexdigest()
+    if cache_key_hash in _reverse_translation_cache:
+        logger.info("[REV] In-memory cache hit")
+        return _reverse_translation_cache[cache_key_hash]
+
+    conv = [
+        {"role": "system", "content": REVERSE_TRANSLATOR_SYSTEM},
+        {"role": "user", "content": "TOOL: Bash\nARGS: command=echo hello\nRESULT: hello\nERROR: false"},
+        {"role": "assistant", "content": "I ran `echo hello`. Output: hello"},
+        {"role": "user", "content": input_text},
+    ]
+    try:
+        prompt = tokenizer.apply_chat_template(
+            conv, tokenize=False, add_generation_prompt=True,
+        )
+    except Exception:
+        prompt = f"{REVERSE_TRANSLATOR_SYSTEM}\n\n{input_text}\n\nTranslation:"
+
+    tokens = tokenizer.encode(prompt)
+
+    cache_key = "rev"
+    kv_caches = None
+    tokens_to_process = tokens
+
+    if cache_key in cache_index:
+        loaded = load_cache_from_disk(cache_key)
+        if loaded[0] is not None:
+            cached_kv, cached_total, _, cached_seq = loaded
+            common = 0
+            for a, b in zip(cached_seq, tokens):
+                if a != b:
+                    break
+                common += 1
+            if common >= 50:
+                usable = min(cached_total, common)
+                for c in cached_kv:
+                    c.offset = usable
+                kv_caches = cached_kv
+                tokens_to_process = tokens[usable:]
+                logger.info(f"[REV] Cache hit: {usable} cached, {len(tokens_to_process)} new")
+
+    if kv_caches is None:
+        kv_caches = [
+            QuantizedKVCache(group_size=KV_GROUP_SIZE, bits=KV_BITS)
+            for _ in range(N_LAYERS)
+        ]
+        tokens_to_process = tokens
+        logger.info(f"[REV] Cold start: {len(tokens)} tokens")
+
+    generated_ids, output_text = generate_tokens(
+        kv_caches, tokens_to_process, max_tokens=200,
+        temperature=0.0, top_p=1.0, top_k=0,
+    )
+
+    save_cache_to_disk(cache_key, kv_caches, tokens, generated_ids, "rev")
+    del kv_caches
+    gc.collect()
+    mx.clear_cache()
+
+    result = output_text.strip()
+    if "\n\n" in result:
+        result = result.split("\n\n")[0]
+
+    logger.info(f"[REV] Translated: {result[:200]}")
+    _reverse_translation_cache[cache_key_hash] = result
+    return result
+
+
+def _build_forward_input(
+    tool_uses: list[dict], messages: list, output_text: str
+) -> str:
+    """Build input for the forward translator (turn management)."""
+    pending_todos: list[str] = []
+    written_files: list[str] = []
+    tool_results: list[dict] = []
+
+    for msg in messages:
+        if msg.role == "assistant" and isinstance(msg.content, list):
+            for block in msg.content:
+                if isinstance(block, dict) and block.get("type") == "tool_use":
+                    if block.get("name") == "TodoWrite":
+                        for t in block.get("input", {}).get("todos", []):
+                            if isinstance(t, dict) and t.get("status") != "completed":
+                                pending_todos.append(t.get("content", ""))
+                    if block.get("name") == "Write":
+                        fp = block.get("input", {}).get("file_path", "")
+                        if fp:
+                            written_files.append(fp)
+        if msg.role == "user" and isinstance(msg.content, list):
+            for block in msg.content:
+                if isinstance(block, dict) and block.get("type") == "tool_result":
+                    tool_results.append({"error": block.get("is_error", False)})
+
+    for tu in tool_uses:
+        if tu.get("name") == "Write":
+            fp = tu.get("input", {}).get("file_path", "")
+            if fp:
+                written_files.append(fp)
+        if tu.get("name") == "TodoWrite":
+            for t in tu.get("input", {}).get("todos", []):
+                if isinstance(t, dict) and t.get("status") != "completed":
+                    pending_todos.append(t.get("content", ""))
+
+    has_error = any(r.get("error") for r in tool_results)
+    tools_called = [tu.get("name", "") for tu in tool_uses]
+    has_tool_call = len(tool_uses) > 0
+
+    return (
+        f"TOOLS_CALLED: {', '.join(tools_called) if tools_called else 'none'}\n"
+        f"FILES_WRITTEN: {', '.join(written_files) if written_files else 'none'}\n"
+        f"PENDING_TODOS: {', '.join(pending_todos) if pending_todos else 'none'}\n"
+        f"HAS_ERROR: {str(has_error).lower()}\n"
+        f"WORKING_DIR: {os.getcwd()}\n"
+        f"LATEST_OUTPUT: {'tool_use' if has_tool_call else 'text'}\n"
+        f"RESULT_COUNT: {len(tool_results)}"
+    )
+
+
+def _call_forward_translator(input_text: str) -> dict:
+    """Forward translator: validate tool calls and decide turn management.
+
+    Uses constrained decoding (logit comparison) for reliable classification.
+    Cache slot: "fwd".
+    """
+    conv = [
+        {"role": "system", "content": FORWARD_TRANSLATOR_SYSTEM},
+        # Example 1: error → continue
+        {"role": "user", "content": "TOOLS_CALLED: Bash\nFILES_WRITTEN: none\nPENDING_TODOS: none\nHAS_ERROR: true\nWORKING_DIR: /Users/dev\nLATEST_OUTPUT: text\nRESULT_COUNT: 1"},
+        {"role": "assistant", "content": "continue"},
+        # Example 2: files written + pending todos → complete_and_end
+        {"role": "user", "content": "TOOLS_CALLED: Write\nFILES_WRITTEN: stack.py\nPENDING_TODOS: Create stack.py\nHAS_ERROR: false\nWORKING_DIR: /Users/dev\nLATEST_OUTPUT: text\nRESULT_COUNT: 2"},
+        {"role": "assistant", "content": "complete_and_end"},
+        # Example 3: pending todos, no files → continue
+        {"role": "user", "content": "TOOLS_CALLED: TodoWrite\nFILES_WRITTEN: none\nPENDING_TODOS: Create stack.py, Add tests\nHAS_ERROR: false\nWORKING_DIR: /Users/dev\nLATEST_OUTPUT: tool_use\nRESULT_COUNT: 1"},
+        {"role": "assistant", "content": "continue"},
+        # Example 4: no todos, no error → end
+        {"role": "user", "content": "TOOLS_CALLED: Bash\nFILES_WRITTEN: none\nPENDING_TODOS: none\nHAS_ERROR: false\nWORKING_DIR: /Users/dev\nLATEST_OUTPUT: text\nRESULT_COUNT: 1"},
+        {"role": "assistant", "content": "end"},
+        # Example 5: read file, done → end
+        {"role": "user", "content": "TOOLS_CALLED: Read\nFILES_WRITTEN: none\nPENDING_TODOS: none\nHAS_ERROR: false\nWORKING_DIR: /Users/dev\nLATEST_OUTPUT: text\nRESULT_COUNT: 2"},
+        {"role": "assistant", "content": "end"},
+        # Example 6: multiple files + todos → complete_and_end
+        {"role": "user", "content": "TOOLS_CALLED: Write\nFILES_WRITTEN: stack.py, test_stack.py\nPENDING_TODOS: Create stack.py, Add tests\nHAS_ERROR: false\nWORKING_DIR: /Users/dev\nLATEST_OUTPUT: text\nRESULT_COUNT: 4"},
+        {"role": "assistant", "content": "complete_and_end"},
+        # Example 7: files written but NO todos → end (not complete_and_end)
+        {"role": "user", "content": "TOOLS_CALLED: Write\nFILES_WRITTEN: /Users/dev/hello.py\nPENDING_TODOS: none\nHAS_ERROR: false\nWORKING_DIR: /Users/dev\nLATEST_OUTPUT: text\nRESULT_COUNT: 2"},
+        {"role": "assistant", "content": "end"},
+        # Example 8: error → continue (reinforcement)
+        {"role": "user", "content": "TOOLS_CALLED: Write\nFILES_WRITTEN: none\nPENDING_TODOS: Create hello.py\nHAS_ERROR: true\nWORKING_DIR: /Users/dev\nLATEST_OUTPUT: text\nRESULT_COUNT: 1"},
+        {"role": "assistant", "content": "continue"},
+        {"role": "user", "content": input_text},
+    ]
+
+    try:
+        prompt = tokenizer.apply_chat_template(
+            conv, tokenize=False, add_generation_prompt=True,
+        )
+    except Exception:
+        prompt = f"{FORWARD_TRANSLATOR_SYSTEM}\n\n{input_text}\n\nDecision:"
+
+    tokens = tokenizer.encode(prompt)
+
+    cache_key = "fwd"
+    kv_caches = None
+    tokens_to_process = tokens
+
+    if cache_key in cache_index:
+        loaded = load_cache_from_disk(cache_key)
+        if loaded[0] is not None:
+            cached_kv, cached_total, _, cached_seq = loaded
+            common = 0
+            for a, b in zip(cached_seq, tokens):
+                if a != b:
+                    break
+                common += 1
+            if common >= 50:
+                usable = min(cached_total, common)
+                for c in cached_kv:
+                    c.offset = usable
+                kv_caches = cached_kv
+                tokens_to_process = tokens[usable:]
+
+    if kv_caches is None:
+        kv_caches = [
+            QuantizedKVCache(group_size=KV_GROUP_SIZE, bits=KV_BITS)
+            for _ in range(N_LAYERS)
+        ]
+        tokens_to_process = tokens
+
+    if tokens_to_process:
+        y = model(mx.array([tokens_to_process]), cache=kv_caches)
+        mx.eval(y)
+    else:
+        for c in kv_caches:
+            if c.offset > 0:
+                c.offset -= 1
+        y = model(mx.array([[tokens[-1]]]), cache=kv_caches)
+        mx.eval(y)
+
+    logits = y[:, -1, :].squeeze(0)
+    answer_tokens = {
+        "complete_and_end": tokenizer.encode("complete")[1],
+        "end": tokenizer.encode("end")[1],
+        "continue": tokenizer.encode("continue")[1],
+    }
+    scores = {action: logits[tid].item() for action, tid in answer_tokens.items()}
+    model_action = max(scores, key=scores.get)
+
+    save_cache_to_disk(cache_key, kv_caches, tokens, [], "fwd")
+    del kv_caches
+    gc.collect()
+    mx.clear_cache()
+
+    # Post-processing: deterministic overrides for edge cases the model
+    # gets wrong due to token-level bias (AND conditions are hard for
+    # single-token logit comparison).
+    best_action = model_action
+    fields = {}
+    for line in input_text.strip().split("\n"):
+        if ": " in line:
+            k, v = line.split(": ", 1)
+            fields[k.strip()] = v.strip()
+
+    has_error = fields.get("HAS_ERROR", "false") == "true"
+    pending_todos = fields.get("PENDING_TODOS", "none")
+    has_pending = pending_todos != "none" and pending_todos != ""
+    files_written = fields.get("FILES_WRITTEN", "none")
+    has_files = files_written != "none" and files_written != ""
+
+    # Rule 1: HAS_ERROR=true always means continue
+    if has_error:
+        best_action = "continue"
+    # Rule 2: complete_and_end requires BOTH files AND todos
+    elif model_action == "complete_and_end" and not has_pending:
+        best_action = "end"
+
+    override = "" if best_action == model_action else f" (override: {model_action}→{best_action})"
+    logger.info(
+        f"[FWD] Decision: {best_action}{override} "
+        f"(complete={scores['complete_and_end']:.1f}, "
+        f"end={scores['end']:.1f}, "
+        f"continue={scores['continue']:.1f})"
+    )
+    return {"action": best_action}
+
+
 def messages_to_prompt(messages: list[Message], system: Any = "", tools: list[Tool] | None = None) -> tuple[str, str]:
     """Convert messages to prompt string. Returns (prompt, prefill)."""
     lines = []
@@ -808,48 +1169,72 @@ def messages_to_prompt(messages: list[Message], system: Any = "", tools: list[To
     if variable_system:
         lines.append(variable_system.strip())
 
+    # Track whether this is a tool roundtrip (for processor call later).
+    # Track tool roundtrip state for the forward translator.
     has_tool_roundtrip = False
-    last_tool_name = ""
-    consecutive_todo_count = 0
+    last_user_is_new_turn = True
+    total_tool_results = 0
 
     for i, msg in enumerate(messages):
+        # For user messages with tool_results: use the reverse translator
+        # to produce DeepSeek-native text instead of hardcoded templates.
+        if msg.role == "user" and isinstance(msg.content, list):
+            tool_result_blocks = [
+                b for b in msg.content
+                if isinstance(b, dict) and b.get("type") == "tool_result"
+            ]
+            if tool_result_blocks:
+                # Find preceding assistant message to match tool_use blocks
+                prev_assistant = messages[i - 1] if i > 0 and messages[i - 1].role == "assistant" else None
+                tool_use_map: dict[str, dict] = {}
+                if prev_assistant and isinstance(prev_assistant.content, list):
+                    for b in prev_assistant.content:
+                        if isinstance(b, dict) and b.get("type") == "tool_use":
+                            tool_use_map[b.get("id", "")] = b
+
+                translated_parts: list[str] = []
+                for b in msg.content:
+                    if isinstance(b, dict) and b.get("type") == "tool_result":
+                        matched = tool_use_map.get(b.get("tool_use_id", ""))
+                        if matched:
+                            rev_input = _build_reverse_input(matched, b)
+                            translated = _call_reverse_translator(rev_input)
+                            translated_parts.append(translated)
+                        else:
+                            # Fallback: use raw result text
+                            rc = b.get("content", "")
+                            translated_parts.append(str(rc) if not isinstance(rc, list) else str(rc))
+                    elif isinstance(b, dict) and b.get("type") == "text":
+                        text = b.get("text", "")
+                        if text.strip():
+                            translated_parts.append(text)
+
+                content_text = "\n".join(translated_parts)
+                lines.append(f"User: {content_text}")
+                logger.info(f"[MSG {i} REV-TRANSLATED] user: {content_text[:300]}")
+
+                has_tool_roundtrip = True
+                last_user_is_new_turn = False
+                total_tool_results += len(tool_result_blocks)
+                continue
+
+            # Regular user message (no tool_results)
+            has_tool_roundtrip = False
+            last_user_is_new_turn = True
+            total_tool_results = 0
+
+        # Non-tool-result messages: use extract_text as before
         content_text = extract_text(msg.content, role=msg.role)
         lines.append(f"{msg.role.capitalize()}: {content_text}")
         logger.info(f"[MSG {i} CONVERTED] {msg.role}: {content_text[:300]}")
-        # Detect if conversation has had a tool call round-trip
-        if msg.role == "user" and isinstance(msg.content, list):
-            for block in msg.content:
-                if isinstance(block, dict) and block.get("type") == "tool_result":
-                    has_tool_roundtrip = True
-        # Track last assistant tool_use to detect TodoWrite loops
-        if msg.role == "assistant" and isinstance(msg.content, list):
-            for block in msg.content:
-                if isinstance(block, dict) and block.get("type") == "tool_use":
-                    name = block.get("name", "")
-                    if name:
-                        if name == "TodoWrite":
-                            consecutive_todo_count += 1
-                        else:
-                            consecutive_todo_count = 0
-                        last_tool_name = name
 
-    # After tool results, prefill assistant response to force tool-call mode.
-    # Without this, DeepSeek narrates ("I'll write a file...") instead of calling tools.
-    prefill = ""
-    if has_tool_roundtrip:
-        if last_tool_name == "TodoWrite":
-            # Prevent TodoWrite loop: model re-calls TodoWrite instead of executing tasks.
-            # Force Write immediately - the embedded example in the tool result
-            # biases the model toward completing a valid Write call.
-            lines.append("IMPORTANT: Do NOT call TodoWrite. Write the code now.")
-            prefill = ' ```json\n{"name": "Write", "arguments": {"file_path": "'
-            logger.info(f"[PREFILL] Forcing Write after TodoWrite (consecutive={consecutive_todo_count})")
-        else:
-            prefill = ' ```json\n{"name": "'
-        lines.append(f"Assistant:{prefill}")
-    else:
-        lines.append("Assistant:")
-    return "\n".join(lines), prefill
+        if msg.role == "assistant":
+            last_user_is_new_turn = False
+
+    logger.info(f"[LOOP STATE] tool_roundtrip={has_tool_roundtrip}, new_turn={last_user_is_new_turn}, results={total_tool_results}")
+
+    lines.append("Assistant:")
+    return "\n".join(lines), "", has_tool_roundtrip, last_user_is_new_turn, total_tool_results
 
 
 # ============================================================
@@ -1223,6 +1608,76 @@ async def health():
     return {"status": "ok"}
 
 
+async def _generate_sse_events(response: MessagesResponse):
+    """Convert a complete MessagesResponse into Anthropic SSE stream events.
+
+    Emits: message_start, content_block_start/delta/stop for each block,
+    message_delta (with stop_reason), message_stop.
+    """
+    def sse(event: str, data: dict) -> str:
+        return f"event: {event}\ndata: {json.dumps(data)}\n\n"
+
+    # message_start - initial message with empty content
+    msg_data = response.model_dump(exclude_none=True)
+    msg_data["content"] = []
+    msg_data["stop_reason"] = None
+    yield sse("message_start", {"type": "message_start", "message": msg_data})
+
+    # Emit each content block
+    for idx, block in enumerate(response.content):
+        block_data = block if isinstance(block, dict) else block.model_dump(exclude_none=True)
+        block_type = block_data.get("type", "text")
+
+        if block_type == "text":
+            text_content = block_data.get("text", "")
+            # content_block_start with empty text
+            yield sse("content_block_start", {
+                "type": "content_block_start",
+                "index": idx,
+                "content_block": {"type": "text", "text": ""},
+            })
+            # Send text in one delta
+            if text_content:
+                yield sse("content_block_delta", {
+                    "type": "content_block_delta",
+                    "index": idx,
+                    "delta": {"type": "text_delta", "text": text_content},
+                })
+            yield sse("content_block_stop", {"type": "content_block_stop", "index": idx})
+
+        elif block_type == "tool_use":
+            # content_block_start with tool info (empty input)
+            yield sse("content_block_start", {
+                "type": "content_block_start",
+                "index": idx,
+                "content_block": {
+                    "type": "tool_use",
+                    "id": block_data.get("id", ""),
+                    "name": block_data.get("name", ""),
+                    "input": {},
+                },
+            })
+            # Send input as JSON delta
+            input_data = block_data.get("input", {})
+            if input_data:
+                yield sse("content_block_delta", {
+                    "type": "content_block_delta",
+                    "index": idx,
+                    "delta": {"type": "input_json_delta", "partial_json": json.dumps(input_data)},
+                })
+            yield sse("content_block_stop", {"type": "content_block_stop", "index": idx})
+
+    # message_delta with stop_reason
+    yield sse("message_delta", {
+        "type": "message_delta",
+        "delta": {"stop_reason": response.stop_reason, "stop_sequence": None},
+        "usage": {"output_tokens": response.usage.output_tokens},
+    })
+
+    # message_stop
+    yield sse("message_stop", {"type": "message_stop"})
+
+
 @app.post("/v1/messages")
 async def create_message(request_body: MessagesRequest, request: Request) -> JSONResponse:
     """Anthropic Messages API endpoint."""
@@ -1311,7 +1766,28 @@ async def create_message(request_body: MessagesRequest, request: Request) -> JSO
 
     # 1. Convert to prompt and tokenize
     tokenize_start = time.time()
-    prompt, prefill = messages_to_prompt(request_body.messages, request_body.system, request_body.tools)
+    prompt, prefill, has_tool_roundtrip, last_user_is_new_turn, total_tool_results = messages_to_prompt(
+        request_body.messages, request_body.system, request_body.tools
+    )
+
+    # Absolute safety cap: if processor keeps saying "continue", hard-stop here
+    if total_tool_results >= ABSOLUTE_SAFETY_CAP:
+        logger.info(f"[ABSOLUTE SAFETY CAP] {total_tool_results} results, forcing end_turn")
+        cap_response = MessagesResponse(
+            id=f"msg_{int(time.time())}",
+            content=[{"type": "text", "text": "Done."}],
+            model=request_body.model,
+            stop_reason="end_turn",
+            usage=Usage(input_tokens=0, output_tokens=1),
+        )
+        if request_body.stream:
+            return StreamingResponse(
+                _generate_sse_events(cap_response),
+                media_type="text/event-stream",
+                headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
+            )
+        return JSONResponse(content=cap_response.model_dump(exclude_none=True))
+
     tokens = tokenizer.encode(prompt)
     tokenize_time = time.time() - tokenize_start
     logger.info(f"[TOKENIZE] {len(tokens)} tokens")
@@ -1445,11 +1921,6 @@ async def create_message(request_body: MessagesRequest, request: Request) -> JSO
     # Sanitize output to prevent terminal control sequence issues
     output_text = sanitize_terminal_output(output_text)
 
-    # Prepend prefill to output so tool call parsing sees the full JSON
-    if prefill:
-        output_text = prefill + output_text
-        logger.info(f"[PREFILL] Prepended: {prefill.strip()}")
-
     # Parse tool calls from output
     remaining_text, tool_uses = parse_tool_calls(output_text, request_body.tools)
 
@@ -1480,6 +1951,42 @@ async def create_message(request_body: MessagesRequest, request: Request) -> JSO
         stop_reason = "end_turn"
     else:
         stop_reason = "max_tokens"
+
+    # Forward translator: decide turn management.
+    # Only called during tool roundtrips (not on fresh user turns).
+    if has_tool_roundtrip and not last_user_is_new_turn:
+        fwd_input = _build_forward_input(
+            tool_uses, request_body.messages, output_text
+        )
+        logger.info(f"[FWD] State: {fwd_input}")
+        decision = _call_forward_translator(fwd_input)
+        action = decision.get("action", "continue")
+
+        if action == "complete_and_end":
+            pending = _extract_pending_todos(request_body.messages)
+            if pending:
+                completed = [
+                    {"content": item, "status": "completed", "activeForm": "Completed"}
+                    for item in pending
+                ]
+                tool_id = f"toolu_{hashlib.md5(f'proc{time.time()}'.encode()).hexdigest()[:24]}"
+                content_blocks = [{
+                    "type": "tool_use", "id": tool_id,
+                    "name": "TodoWrite", "input": {"todos": completed},
+                }]
+                stop_reason = "tool_use"
+                logger.info(f"[FWD] complete_and_end: TodoWrite(completed) for {len(completed)} items")
+            else:
+                content_blocks = [{"type": "text", "text": "Done."}]
+                stop_reason = "end_turn"
+                logger.info("[FWD] complete_and_end (no pending todos)")
+
+        elif action == "end":
+            content_blocks = [{"type": "text", "text": "Done."}]
+            stop_reason = "end_turn"
+            logger.info(f"[FWD] end (replaced {len(tool_uses)} tool calls)")
+
+        # "continue" → use model's output as-is (already in content_blocks)
 
     response = MessagesResponse(
         id=f"msg_{agent_id}",
@@ -1567,7 +2074,13 @@ async def create_message(request_body: MessagesRequest, request: Request) -> JSO
     except Exception as e:
         logger.warning(f"[TEST SET] Failed to save: {e}")
 
-    # Return JSON response with None fields excluded for Claude Code CLI compatibility
+    # Return response in the format the client expects
+    if request_body.stream:
+        return StreamingResponse(
+            _generate_sse_events(response),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "Connection": "keep-alive"},
+        )
     return JSONResponse(content=response.model_dump(exclude_none=True))
 
 
