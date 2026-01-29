@@ -1214,22 +1214,8 @@ def messages_to_prompt(messages: list[Message], system: Any = "", tools: list[To
                 logger.info(f"[MSG {i} REV-TRANSLATED] user: {content_text[:300]}")
 
                 has_tool_roundtrip = True
+                last_user_is_new_turn = False
                 total_tool_results += len(tool_result_blocks)
-
-                # Check if message also contains new user text (not just
-                # tool_results and system reminders). If so, this is a new
-                # turn — the user gave a new instruction alongside the
-                # tool result. The forward translator must NOT suppress
-                # tool calls made in response to the new instruction.
-                has_new_user_text = any(
-                    isinstance(b, dict)
-                    and b.get("type") == "text"
-                    and b.get("text", "").strip()
-                    and "<system-reminder>" not in b.get("text", "")
-                    and "SUGGESTION MODE" not in b.get("text", "")
-                    for b in msg.content
-                )
-                last_user_is_new_turn = has_new_user_text
                 continue
 
             # Regular user message (no tool_results)
@@ -1996,9 +1982,33 @@ async def create_message(request_body: MessagesRequest, request: Request) -> JSO
                 logger.info("[FWD] complete_and_end (no pending todos)")
 
         elif action == "end":
-            content_blocks = [{"type": "text", "text": "Done."}]
-            stop_reason = "end_turn"
-            logger.info(f"[FWD] end (replaced {len(tool_uses)} tool calls)")
+            if tool_uses:
+                # Model generated tool calls. Check if they're NEW tools
+                # (responding to new user instructions) or REPEATS (model
+                # looping). Compare against the previous assistant message.
+                prev_tool_names: set[str] = set()
+                for msg in reversed(request_body.messages):
+                    if msg.role == "assistant" and isinstance(msg.content, list):
+                        for b in msg.content:
+                            if isinstance(b, dict) and b.get("type") == "tool_use":
+                                prev_tool_names.add(b.get("name", ""))
+                        break
+
+                current_tool_names = {tu.get("name", "") for tu in tool_uses}
+                new_tools = current_tool_names - prev_tool_names
+
+                if new_tools:
+                    # New tool types not in previous assistant → pass through
+                    logger.info(f"[FWD] end but new tools {new_tools} — passing through")
+                else:
+                    # Same tools as before → model is repeating → suppress
+                    content_blocks = [{"type": "text", "text": "Done."}]
+                    stop_reason = "end_turn"
+                    logger.info(f"[FWD] end (repeat tools {current_tool_names} suppressed)")
+            else:
+                content_blocks = [{"type": "text", "text": "Done."}]
+                stop_reason = "end_turn"
+                logger.info("[FWD] end (text-only response)")
 
         # "continue" → use model's output as-is (already in content_blocks)
 
