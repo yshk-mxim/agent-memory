@@ -1198,6 +1198,15 @@ def messages_to_prompt(messages: list[Message], system: Any = "", tools: list[To
     if static_system:
         lines.append(f"System: {static_system}\n")
 
+    # Tool flow protocol — added to static prefix for cache stability.
+    # Explains to DeepSeek how tool results appear and how to signal completion.
+    if tools:
+        lines.append("## Tool Flow Protocol")
+        lines.append("When you call a tool, the result appears as the next User message.")
+        lines.append("After seeing the result, either call another tool or respond with text.")
+        lines.append("If the user's request is fulfilled, respond briefly (e.g. the result).")
+        lines.append("If a user message contains BOTH a tool result AND a new request, handle the new request.\n")
+
     # Add tool definitions in a format DeepSeek understands
     if tools:
         lines.append("\n## Available Functions\n")
@@ -1267,6 +1276,8 @@ def messages_to_prompt(messages: list[Message], system: Any = "", tools: list[To
 
                 translated_parts: list[str] = []
                 user_texts: list[str] = []
+                block_types = [(type(b).__name__, b.get("type") if isinstance(b, dict) else "?") for b in msg.content]
+                logger.info(f"[MSG {i} BLOCKS] {len(msg.content)} blocks: {block_types}")
                 for b in msg.content:
                     if isinstance(b, dict) and b.get("type") == "tool_result":
                         matched = tool_use_map.get(b.get("tool_use_id", ""))
@@ -1291,6 +1302,7 @@ def messages_to_prompt(messages: list[Message], system: Any = "", tools: list[To
 
                 # Only include the LAST user text (newest instruction).
                 # Earlier texts were already responded to in previous roundtrips.
+                logger.info(f"[MSG {i} DEBUG] user_texts={user_texts}, translated_parts={[p[:50] for p in translated_parts]}")
                 if user_texts:
                     translated_parts.append(user_texts[-1])
 
@@ -1369,6 +1381,14 @@ def parse_tool_calls(text: str, available_tools: list[Tool] | None = None) -> tu
         for t in available_tools:
             tool_name_map[t.name.lower()] = t.name
 
+    # Strip model echoing "(Called ToolName)" prefix from prompt pattern.
+    # DeepSeek sometimes copies this from the conversation history.
+    cleaned_text = re.sub(r'^\s*\(Called \w+\)\s*', '', remaining_text)
+    if cleaned_text != remaining_text:
+        logger.info("[TOOL PARSE] Stripped echoed '(Called ...)' prefix")
+        remaining_text = cleaned_text
+        text = cleaned_text
+
     # First, try JSON format (preferred) - handles nested objects/arrays
     try:
         # Find start of JSON with "name" key
@@ -1388,20 +1408,43 @@ def parse_tool_calls(text: str, available_tools: list[Tool] | None = None) -> tu
                         break
 
             # If bracket counting didn't reach depth 0, model may have
-            # omitted closing braces (common with forced prefill).
-            # Try appending missing braces.
-            if end_idx <= start_idx and 0 < depth <= 2:
+            # omitted closing braces or confused ) with } (common when
+            # the JSON content string contains Python code like "s.pop())").
+            if end_idx <= start_idx and 0 < depth <= 4:
                 json_str = text[start_idx:]
                 # Strip trailing markdown fences
                 json_str = re.sub(r'\s*```\s*$', '', json_str)
-                json_str = json_str.rstrip() + '}' * depth
-                logger.info(f"[TOOL PARSE] Bracket repair: added {depth} closing brace(s)")
+                json_str = json_str.rstrip()
+                # Fix ) → } confusion: model generates }) instead of }}
+                # when Python code inside content ends with )
+                json_str = re.sub(r'\)\s*$', '}', json_str)
+                # Ensure enough closing braces
                 try:
-                    obj = json.loads(json_str)
+                    test_parse = json.loads(json_str)
+                    obj = test_parse
                     if "name" in obj and "arguments" in obj:
-                        end_idx = len(text)  # Consumed everything
+                        end_idx = len(text)
+                        logger.info("[TOOL PARSE] Bracket repair: fixed ) → } confusion")
                 except json.JSONDecodeError:
-                    obj = None
+                    # Still broken — append missing braces
+                    json_str += '}' * depth
+                    logger.info(f"[TOOL PARSE] Bracket repair: added {depth} closing brace(s)")
+                    try:
+                        obj = json.loads(json_str)
+                        if "name" in obj and "arguments" in obj:
+                            end_idx = len(text)
+                    except json.JSONDecodeError:
+                        # Last resort: try replacing ALL trailing ) with }
+                        json_str2 = text[start_idx:]
+                        json_str2 = re.sub(r'\s*```\s*$', '', json_str2).rstrip()
+                        json_str2 = re.sub(r'[)]+\s*$', lambda m: '}' * len(m.group().strip()), json_str2)
+                        try:
+                            obj = json.loads(json_str2)
+                            if "name" in obj and "arguments" in obj:
+                                end_idx = len(text)
+                                logger.info("[TOOL PARSE] Bracket repair: replaced trailing )")
+                        except json.JSONDecodeError:
+                            obj = None
             elif end_idx > start_idx:
                 json_str = text[start_idx:end_idx]
                 try:
@@ -2045,9 +2088,10 @@ async def create_message(request_body: MessagesRequest, request: Request) -> JSO
                 logger.info("[FWD] complete_and_end (no pending todos)")
 
         elif action == "end":
-            if tool_uses and _last_message_has_user_text(request_body.messages):
-                # Model responding to bundled user instruction — let tool calls through
-                logger.info("[FWD] end but user text present → passing through tool calls")
+            if _last_message_has_user_text(request_body.messages):
+                # New user instruction bundled with tool_result — pass through
+                # whatever the model generated (tool calls or text)
+                logger.info("[FWD] end but user text present → passing through model output")
             else:
                 content_blocks = [{"type": "text", "text": "Done."}]
                 stop_reason = "end_turn"
@@ -2067,6 +2111,17 @@ async def create_message(request_body: MessagesRequest, request: Request) -> JSO
             cache_read_input_tokens=prefix_length if cache_hit else 0,
         ),
     )
+
+    # Log the actual response body for debugging CLI issues
+    resp_summary = {
+        "stop_reason": stop_reason,
+        "n_blocks": len(content_blocks),
+        "blocks": [
+            {"type": b.get("type"), "name": b.get("name"), "text": b.get("text", "")[:100]}
+            for b in (content_blocks if content_blocks else [])
+        ],
+    }
+    logger.info(f"[RESPONSE] {json.dumps(resp_summary)}")
 
     # 8. Save complete request/response log to timestamped test_set file
     request_log["processing"] = {
