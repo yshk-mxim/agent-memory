@@ -1214,8 +1214,22 @@ def messages_to_prompt(messages: list[Message], system: Any = "", tools: list[To
                 logger.info(f"[MSG {i} REV-TRANSLATED] user: {content_text[:300]}")
 
                 has_tool_roundtrip = True
-                last_user_is_new_turn = False
                 total_tool_results += len(tool_result_blocks)
+
+                # Check if message also contains new user text (not just
+                # tool_results and system reminders). If so, this is a new
+                # turn — the user gave a new instruction alongside the
+                # tool result. The forward translator must NOT suppress
+                # tool calls made in response to the new instruction.
+                has_new_user_text = any(
+                    isinstance(b, dict)
+                    and b.get("type") == "text"
+                    and b.get("text", "").strip()
+                    and "<system-reminder>" not in b.get("text", "")
+                    and "SUGGESTION MODE" not in b.get("text", "")
+                    for b in msg.content
+                )
+                last_user_is_new_turn = has_new_user_text
                 continue
 
             # Regular user message (no tool_results)
