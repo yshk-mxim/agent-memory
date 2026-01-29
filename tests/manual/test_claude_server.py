@@ -1218,17 +1218,18 @@ def messages_to_prompt(messages: list[Message], system: Any = "", tools: list[To
                 total_tool_results += len(tool_result_blocks)
                 continue
 
-            # Regular user message (no tool_results)
-            has_tool_roundtrip = False
-            last_user_is_new_turn = True
-            total_tool_results = 0
-
         # Non-tool-result messages: use extract_text as before
         content_text = extract_text(msg.content, role=msg.role)
         lines.append(f"{msg.role.capitalize()}: {content_text}")
         logger.info(f"[MSG {i} CONVERTED] {msg.role}: {content_text[:300]}")
 
-        if msg.role == "assistant":
+        # Track turn state: any user message without tool_results is a new turn.
+        # This covers BOTH string-content and list-content-without-tool_results.
+        if msg.role == "user":
+            has_tool_roundtrip = False
+            last_user_is_new_turn = True
+            total_tool_results = 0
+        elif msg.role == "assistant":
             last_user_is_new_turn = False
 
     logger.info(f"[LOOP STATE] tool_roundtrip={has_tool_roundtrip}, new_turn={last_user_is_new_turn}, results={total_tool_results}")
