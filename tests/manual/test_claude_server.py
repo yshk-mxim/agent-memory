@@ -918,6 +918,42 @@ def _call_reverse_translator(input_text: str) -> str:
     return result
 
 
+def _is_pure_tool_roundtrip(messages: list) -> bool:
+    """Stateless check: is the last user message a pure tool_result with no new user text?
+
+    Returns True only when the last user message contains tool_results
+    and NO new user instructions (ignoring system-reminders).
+    """
+    if not messages:
+        return False
+    last_msg = messages[-1]
+    if last_msg.role != "user":
+        return False
+    if not isinstance(last_msg.content, list):
+        return False
+
+    has_tool_result = False
+    has_user_text = False
+    for block in last_msg.content:
+        if not isinstance(block, dict):
+            continue
+        if block.get("type") == "tool_result":
+            has_tool_result = True
+        elif block.get("type") == "text":
+            text = block.get("text", "").strip()
+            # System-reminders are injected by CLI, not user instructions
+            cleaned = re.sub(
+                r"<system-reminder>.*?</system-reminder>",
+                "", text, flags=re.DOTALL,
+            ).strip()
+            if cleaned:
+                has_user_text = True
+
+    is_pure = has_tool_result and not has_user_text
+    logger.info(f"[GATE] pure_tool_roundtrip={is_pure} (tool_result={has_tool_result}, user_text={has_user_text})")
+    return is_pure
+
+
 def _build_forward_input(
     tool_uses: list[dict], messages: list, output_text: str
 ) -> str:
@@ -1169,10 +1205,6 @@ def messages_to_prompt(messages: list[Message], system: Any = "", tools: list[To
     if variable_system:
         lines.append(variable_system.strip())
 
-    # Track whether this is a tool roundtrip (for processor call later).
-    # Track tool roundtrip state for the forward translator.
-    has_tool_roundtrip = False
-    last_user_is_new_turn = True
     total_tool_results = 0
 
     for i, msg in enumerate(messages):
@@ -1201,7 +1233,6 @@ def messages_to_prompt(messages: list[Message], system: Any = "", tools: list[To
                             translated = _call_reverse_translator(rev_input)
                             translated_parts.append(translated)
                         else:
-                            # Fallback: use raw result text
                             rc = b.get("content", "")
                             translated_parts.append(str(rc) if not isinstance(rc, list) else str(rc))
                     elif isinstance(b, dict) and b.get("type") == "text":
@@ -1212,9 +1243,6 @@ def messages_to_prompt(messages: list[Message], system: Any = "", tools: list[To
                 content_text = "\n".join(translated_parts)
                 lines.append(f"User: {content_text}")
                 logger.info(f"[MSG {i} REV-TRANSLATED] user: {content_text[:300]}")
-
-                has_tool_roundtrip = True
-                last_user_is_new_turn = False
                 total_tool_results += len(tool_result_blocks)
                 continue
 
@@ -1223,19 +1251,10 @@ def messages_to_prompt(messages: list[Message], system: Any = "", tools: list[To
         lines.append(f"{msg.role.capitalize()}: {content_text}")
         logger.info(f"[MSG {i} CONVERTED] {msg.role}: {content_text[:300]}")
 
-        # Track turn state: any user message without tool_results is a new turn.
-        # This covers BOTH string-content and list-content-without-tool_results.
-        if msg.role == "user":
-            has_tool_roundtrip = False
-            last_user_is_new_turn = True
-            total_tool_results = 0
-        elif msg.role == "assistant":
-            last_user_is_new_turn = False
-
-    logger.info(f"[LOOP STATE] tool_roundtrip={has_tool_roundtrip}, new_turn={last_user_is_new_turn}, results={total_tool_results}")
+    logger.info(f"[PROMPT] total_tool_results={total_tool_results}")
 
     lines.append("Assistant:")
-    return "\n".join(lines), "", has_tool_roundtrip, last_user_is_new_turn, total_tool_results
+    return "\n".join(lines), "", total_tool_results
 
 
 # ============================================================
@@ -1767,7 +1786,7 @@ async def create_message(request_body: MessagesRequest, request: Request) -> JSO
 
     # 1. Convert to prompt and tokenize
     tokenize_start = time.time()
-    prompt, prefill, has_tool_roundtrip, last_user_is_new_turn, total_tool_results = messages_to_prompt(
+    prompt, prefill, total_tool_results = messages_to_prompt(
         request_body.messages, request_body.system, request_body.tools
     )
 
@@ -1953,9 +1972,10 @@ async def create_message(request_body: MessagesRequest, request: Request) -> JSO
     else:
         stop_reason = "max_tokens"
 
-    # Forward translator: decide turn management.
-    # Only called during tool roundtrips (not on fresh user turns).
-    if has_tool_roundtrip and not last_user_is_new_turn:
+    # Forward translator: stateless turn management.
+    # Fires ONLY when the last user message is a pure tool_result (no new user text).
+    # Checked fresh each exchange — no state carried across requests.
+    if _is_pure_tool_roundtrip(request_body.messages):
         fwd_input = _build_forward_input(
             tool_uses, request_body.messages, output_text
         )
@@ -1983,33 +2003,9 @@ async def create_message(request_body: MessagesRequest, request: Request) -> JSO
                 logger.info("[FWD] complete_and_end (no pending todos)")
 
         elif action == "end":
-            if tool_uses:
-                # Model generated tool calls. Check if they're NEW tools
-                # (responding to new user instructions) or REPEATS (model
-                # looping). Compare against the previous assistant message.
-                prev_tool_names: set[str] = set()
-                for msg in reversed(request_body.messages):
-                    if msg.role == "assistant" and isinstance(msg.content, list):
-                        for b in msg.content:
-                            if isinstance(b, dict) and b.get("type") == "tool_use":
-                                prev_tool_names.add(b.get("name", ""))
-                        break
-
-                current_tool_names = {tu.get("name", "") for tu in tool_uses}
-                new_tools = current_tool_names - prev_tool_names
-
-                if new_tools:
-                    # New tool types not in previous assistant → pass through
-                    logger.info(f"[FWD] end but new tools {new_tools} — passing through")
-                else:
-                    # Same tools as before → model is repeating → suppress
-                    content_blocks = [{"type": "text", "text": "Done."}]
-                    stop_reason = "end_turn"
-                    logger.info(f"[FWD] end (repeat tools {current_tool_names} suppressed)")
-            else:
-                content_blocks = [{"type": "text", "text": "Done."}]
-                stop_reason = "end_turn"
-                logger.info("[FWD] end (text-only response)")
+            content_blocks = [{"type": "text", "text": "Done."}]
+            stop_reason = "end_turn"
+            logger.info("[FWD] end")
 
         # "continue" → use model's output as-is (already in content_blocks)
 
