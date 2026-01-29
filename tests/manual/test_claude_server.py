@@ -30,6 +30,7 @@ import logging
 import os
 import re
 import time
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
@@ -147,7 +148,27 @@ TEST_SET_FILENAME = f"test_set_{time.strftime('%Y%m%d_%H%M%S')}.json"
 TEST_SET_PATH = Path("/tmp/claude") / TEST_SET_FILENAME
 
 # FastAPI app
-app = FastAPI(title="Minimal Semantic Cache Server")
+@asynccontextmanager
+async def lifespan(application: FastAPI):
+    """Load model on startup."""
+    global model, tokenizer
+
+    logger.info(f"Loading model: {MODEL_ID}")
+    log_memory("STARTUP")
+
+    model, tokenizer = load(MODEL_ID)
+
+    if hasattr(tokenizer, "model_max_length"):
+        if tokenizer.model_max_length < 100000:
+            tokenizer.model_max_length = 100000
+            logger.info("Set tokenizer.model_max_length = 100000")
+
+    log_memory("MODEL_LOADED")
+    logger.info("Model loaded successfully")
+    yield
+
+
+app = FastAPI(title="Minimal Semantic Cache Server", lifespan=lifespan)
 
 # Global state
 model = None
@@ -1245,6 +1266,7 @@ def messages_to_prompt(messages: list[Message], system: Any = "", tools: list[To
                             tool_use_map[b.get("id", "")] = b
 
                 translated_parts: list[str] = []
+                user_texts: list[str] = []
                 for b in msg.content:
                     if isinstance(b, dict) and b.get("type") == "tool_result":
                         matched = tool_use_map.get(b.get("tool_use_id", ""))
@@ -1257,8 +1279,20 @@ def messages_to_prompt(messages: list[Message], system: Any = "", tools: list[To
                             translated_parts.append(str(rc) if not isinstance(rc, list) else str(rc))
                     elif isinstance(b, dict) and b.get("type") == "text":
                         text = b.get("text", "")
-                        if text.strip():
-                            translated_parts.append(text)
+                        # Strip CLI metadata
+                        cleaned = re.sub(
+                            r"<system-reminder>.*?</system-reminder>", "",
+                            text, flags=re.DOTALL,
+                        ).strip()
+                        if cleaned.startswith("[SUGGESTION MODE"):
+                            continue
+                        if cleaned:
+                            user_texts.append(cleaned)
+
+                # Only include the LAST user text (newest instruction).
+                # Earlier texts were already responded to in previous roundtrips.
+                if user_texts:
+                    translated_parts.append(user_texts[-1])
 
                 content_text = "\n".join(translated_parts)
                 lines.append(f"User: {content_text}")
@@ -1620,26 +1654,6 @@ def _get_stop_sequences(request: MessagesRequest) -> list[str]:
             if marker not in stop_seqs:
                 stop_seqs.append(marker)
     return stop_seqs
-
-
-@app.on_event("startup")
-async def startup():
-    """Load model on startup."""
-    global model, tokenizer
-
-    logger.info(f"Loading model: {MODEL_ID}")
-    log_memory("STARTUP")
-
-    model, tokenizer = load(MODEL_ID)
-
-    # Fix tokenizer max length
-    if hasattr(tokenizer, "model_max_length"):
-        if tokenizer.model_max_length < 100000:
-            tokenizer.model_max_length = 100000
-            logger.info("Set tokenizer.model_max_length = 100000")
-
-    log_memory("MODEL_LOADED")
-    logger.info("Model loaded successfully")
 
 
 @app.get("/health")
