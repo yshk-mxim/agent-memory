@@ -516,6 +516,32 @@ class BenchmarkSuite:
         finally:
             await client.close()
 
+    # --- Cache cleanup ---
+
+    async def _delete_agent(self, session_id: str) -> bool:
+        """Delete a benchmark agent's cached KV data."""
+        agent_id = f"sess_{session_id}"
+        async with httpx.AsyncClient(timeout=10.0) as c:
+            resp = await c.delete(f"{self.base_url}/v1/agents/{agent_id}")
+            return resp.status_code == 204
+
+    async def _cleanup_scenario_caches(
+        self, scenario_name: str, sid_base: str, warm: bool = False
+    ) -> None:
+        """Delete all agent caches created by a scenario."""
+        sids = []
+        if warm:
+            sids.append(sid_base)  # prime + measurement share same sid
+        else:
+            sids.append(f"{sid_base}_warmup")
+            for i in range(self.runs):
+                sids.append(f"{sid_base}_run{i}")
+        for sid in sids:
+            try:
+                await self._delete_agent(sid)
+            except Exception:
+                pass
+
     # --- Single scenario runner ---
 
     async def _run_scenario(
@@ -731,18 +757,22 @@ class BenchmarkSuite:
 
         # Cold scenarios
         for label, tokens in sizes.items():
-            await self._run_scenario(
-                config_name, f"cold_{label}", tokens
-            )
+            scenario_name = f"cold_{label}"
+            sid = f"bench_{scenario_name}"
+            await self._run_scenario(config_name, scenario_name, tokens)
+            await self._cleanup_scenario_caches(scenario_name, sid)
             if not self.server.is_alive():
                 print(f"  [!] Server crashed — skipping remaining {config_name} scenarios")
                 return
 
         # Warm scenarios
         for label, tokens in sizes.items():
+            scenario_name = f"warm_{label}"
+            sid = f"bench_{scenario_name}"
             await self._run_scenario(
-                config_name, f"warm_{label}", tokens, warm=True
+                config_name, scenario_name, tokens, warm=True
             )
+            await self._cleanup_scenario_caches(scenario_name, sid, warm=True)
             if not self.server.is_alive():
                 print(f"  [!] Server crashed — skipping remaining {config_name} scenarios")
                 return
@@ -761,13 +791,26 @@ class BenchmarkSuite:
             await self._run_interleave_stall("batched")
 
     async def run_chunked_comparison(self) -> None:
-        """Compare chunked vs unchunked at 32K."""
-        # chunked_xl runs under config A (already started)
-        await self._run_scenario("single", "chunked_xl", 32000)
+        """Run chunked scenarios for later comparison with unchunked."""
+        for label, tokens in [("medium", 2000), ("long", 8000)]:
+            scenario = f"chunked_{label}"
+            await self._run_scenario("single", scenario, tokens)
+            await self._cleanup_scenario_caches(
+                scenario, f"bench_{scenario}"
+            )
+            if not self.server.is_alive():
+                return
 
     async def run_unchunked_comparison(self) -> None:
-        """Run unchunked 32K under config C."""
-        await self._run_scenario("unchunked", "unchunked_xl", 32000)
+        """Run unchunked at <10K contexts for comparison with chunked."""
+        for label, tokens in [("medium", 2000), ("long", 8000)]:
+            scenario = f"unchunked_{label}"
+            await self._run_scenario("unchunked", scenario, tokens)
+            await self._cleanup_scenario_caches(
+                scenario, f"bench_{scenario}"
+            )
+            if not self.server.is_alive():
+                return
 
     async def run_memory_pressure(self) -> None:
         """Memory pressure test: 32K → 64K single-threaded."""
