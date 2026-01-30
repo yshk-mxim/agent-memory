@@ -218,8 +218,13 @@ class MLXCacheAdapter:
             # We create QuantizedKVCache manually in batch_engine.py instead
         )
 
-    def create_sampler(self, temperature: float = 0.0) -> Any:
+    def create_sampler(
+        self,
+        temperature: float = 0.0,
+        top_p: float = 0.0,
+        top_k: int = 0,
+    ) -> Any:
         """Create an MLX sampler for token sampling."""
         from mlx_lm.sample_utils import make_sampler  # type: ignore[import-not-found]
 
-        return make_sampler(temp=temperature)
+        return make_sampler(temp=temperature, top_p=top_p, top_k=top_k)

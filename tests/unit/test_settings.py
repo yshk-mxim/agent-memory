@@ -24,11 +24,11 @@ class TestMLXSettings:
         settings = MLXSettings()
 
         assert settings.model_id == "mlx-community/DeepSeek-Coder-V2-Lite-Instruct-4bit-mlx"
-        assert settings.max_batch_size == 5
-        assert settings.prefill_step_size == 512
-        assert settings.kv_bits is None
+        assert settings.max_batch_size == 1
+        assert settings.prefill_step_size == 256
+        assert settings.kv_bits == 4
         assert settings.block_tokens == 256
-        assert settings.cache_budget_mb == 4096
+        assert settings.cache_budget_mb == 8192
         assert settings.default_max_tokens == 256
         assert settings.default_temperature == 0.7
 
@@ -62,10 +62,10 @@ class TestMLXSettings:
         assert MLXSettings(kv_bits=None).kv_bits is None
 
         # Invalid
-        with pytest.raises(ValueError, match="greater than or equal to 4"):
+        with pytest.raises(ValueError, match="kv_bits must be 4, 8, or None"):
             MLXSettings(kv_bits=3)
 
-        with pytest.raises(ValueError, match="less than or equal to 8"):
+        with pytest.raises(ValueError, match="kv_bits must be 4, 8, or None"):
             MLXSettings(kv_bits=16)
 
 

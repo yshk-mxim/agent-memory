@@ -31,6 +31,8 @@ from semantic.adapters.outbound.mlx_spec_extractor import get_extractor
 from semantic.adapters.outbound.safetensors_cache_adapter import SafetensorsCacheAdapter
 from semantic.application.agent_cache_store import AgentCacheStore, ModelTag
 from semantic.application.batch_engine import BlockPoolBatchEngine
+from semantic.application.scheduler import ConcurrentScheduler
+from semantic.application.shared_prefix_cache import SharedPrefixCache
 from semantic.domain.errors import (
     AgentNotFoundError,
     CacheCorruptionError,
@@ -58,6 +60,8 @@ class AppState:
         self.cache_store: AgentCacheStore | None = None
         self.mlx_adapter: MLXCacheAdapter | None = None
         self.cache_adapter: SafetensorsCacheAdapter | None = None
+        self.scheduler: "ConcurrentScheduler | None" = None
+        self.prefix_cache: SharedPrefixCache | None = None
 
 
 def _load_model_and_extract_spec(settings):
@@ -280,6 +284,36 @@ async def lifespan(app: FastAPI):
         app.state.semantic.cache_adapter = cache_adapter
         app.state.shutting_down = False
 
+        # Shared prefix cache (always enabled)
+        prefix_cache = SharedPrefixCache()
+        app.state.semantic.prefix_cache = prefix_cache
+        logger.info("prefix_cache_initialized")
+
+        # Conditionally start ConcurrentScheduler for interleaved prefill
+        scheduler = None
+        if settings.mlx.scheduler_enabled:
+            from semantic.adapters.outbound.mlx_prefill_adapter import MLXPrefillAdapter
+
+            prefill_adapter = MLXPrefillAdapter(
+                model=model,
+                kv_bits=settings.mlx.kv_bits or 4,
+                kv_group_size=settings.mlx.kv_group_size,
+                min_chunk=settings.mlx.chunked_prefill_min_chunk,
+                max_chunk=settings.mlx.chunked_prefill_max_chunk,
+            )
+            scheduler = ConcurrentScheduler(
+                engine=batch_engine,
+                prefill_adapter=prefill_adapter,
+                n_layers=model_spec.n_layers,
+                interleave_threshold=settings.mlx.scheduler_interleave_threshold,
+            )
+            scheduler.start()
+            app.state.semantic.scheduler = scheduler
+            logger.info(
+                "scheduler_started",
+                interleave_threshold=settings.mlx.scheduler_interleave_threshold,
+            )
+
         logger.info("server_ready")
 
         yield
@@ -287,6 +321,10 @@ async def lifespan(app: FastAPI):
         # Shutdown: cleanup resources
         logger.info("server_shutting_down")
         app.state.shutting_down = True
+
+        if scheduler is not None:
+            scheduler.stop()
+            logger.info("scheduler_stopped")
 
         await _drain_and_persist(batch_engine, cache_store)
         logger.info("server_shutdown_complete")

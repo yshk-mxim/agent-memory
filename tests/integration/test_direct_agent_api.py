@@ -63,8 +63,8 @@ class TestDirectAgentAPI:
 
         response = client.get("/v1/agents/test_agent")
 
-        # Endpoint exists (will return 404 if agent not found)
-        assert response.status_code in [404, 500]  # 404 not found or 500 no model
+        # Endpoint exists (404 not found, 500 no model, or 503 if lifespan not run)
+        assert response.status_code in [404, 500, 503]
 
     def test_generate_endpoint_exists(self):
         """POST /v1/agents/{agent_id}/generate endpoint should be registered."""
@@ -105,8 +105,8 @@ class TestDirectAgentAPI:
 
         response = client.delete("/v1/agents/test_agent")
 
-        # Endpoint exists (will return 404 if agent not found)
-        assert response.status_code in [404, 500]  # 404 not found or 500 no model
+        # Endpoint exists (404 not found, 500 no model, or 503 if lifespan not run)
+        assert response.status_code in [404, 500, 503]
 
     def test_temperature_validation(self):
         """Temperature should be validated to 0-2 range."""

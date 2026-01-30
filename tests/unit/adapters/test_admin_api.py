@@ -2,7 +2,7 @@
 
 import os
 import sys
-from unittest.mock import MagicMock, Mock, patch
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
 from fastapi import FastAPI, status
@@ -49,7 +49,7 @@ def mock_orchestrator():
     mock = Mock()
     mock._registry = Mock()
     mock._registry.get_current_id.return_value = "old-model"
-    mock.swap_model.return_value = Mock()  # Mock BatchEngine
+    mock.swap_model = AsyncMock(return_value=Mock())  # Async swap returns engine
     return mock
 
 

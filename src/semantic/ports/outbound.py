@@ -220,6 +220,57 @@ class CacheOperationsPort(Protocol):
         ...
 
 
+class PrefillChunkPort(Protocol):
+    """Port for processing one chunk of a sequence's prefill.
+
+    Used by ConcurrentScheduler to interleave prefill chunks with
+    decode steps. Each call processes a single chunk and updates
+    the PrefillState's kv_caches in place.
+    """
+
+    def init_prefill_caches(self, n_layers: int) -> Any:
+        """Create empty KV caches for a new prefill sequence.
+
+        Args:
+            n_layers: Number of transformer layers in the model.
+
+        Returns:
+            List of per-layer KV cache objects (opaque to application).
+        """
+        ...
+
+    def process_prefill_chunk(
+        self,
+        tokens: list[int],
+        start: int,
+        end: int,
+        kv_caches: Any,
+    ) -> None:
+        """Process one chunk of tokens through the model, updating kv_caches.
+
+        Args:
+            tokens: Full token sequence.
+            start: Start index of this chunk (inclusive).
+            end: End index of this chunk (exclusive).
+            kv_caches: KV cache state to update in place.
+        """
+        ...
+
+    def chunk_size_for_position(self, cache_pos: int) -> int:
+        """Return adaptive chunk size based on current cache position.
+
+        Larger chunks when cache is small (fast), smaller when large
+        (memory-efficient).
+
+        Args:
+            cache_pos: Number of tokens already in the cache.
+
+        Returns:
+            Chunk size in tokens.
+        """
+        ...
+
+
 class CacheStorePort(Protocol):
     """Port for in-memory cache management."""
 

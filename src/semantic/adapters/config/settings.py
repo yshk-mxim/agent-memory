@@ -118,6 +118,19 @@ class MLXSettings(BaseSettings):
         description="Maximum cache memory budget in MB",
     )
 
+    # Scheduler settings (interleaved prefill + decode)
+    scheduler_enabled: bool = Field(
+        default=False,
+        description="Enable ConcurrentScheduler for interleaved prefill/decode",
+    )
+
+    scheduler_interleave_threshold: int = Field(
+        default=2048,
+        ge=256,
+        le=32768,
+        description="Min prompt tokens to use chunked interleaved prefill",
+    )
+
     # Generation defaults
     default_max_tokens: int = Field(
         default=256,

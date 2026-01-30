@@ -131,28 +131,33 @@ class TestAgentBlocks:
 
     def test_create_agent_with_blocks(self) -> None:
         """Should create agent with pre-allocated blocks."""
-        block1 = KVBlock(
+        # All layers store the same sequence, so token counts must match
+        block_l0_a = KVBlock(
             block_id=1, layer_id=0, token_count=256, layer_data=None
         )
-        block2 = KVBlock(
+        block_l0_b = KVBlock(
             block_id=2, layer_id=0, token_count=128, layer_data=None
         )
-        block3 = KVBlock(
-            block_id=3, layer_id=1, token_count=64, layer_data=None
+        block_l1_a = KVBlock(
+            block_id=3, layer_id=1, token_count=256, layer_data=None
+        )
+        block_l1_b = KVBlock(
+            block_id=4, layer_id=1, token_count=128, layer_data=None
         )
 
         agent = AgentBlocks(
             agent_id="agent_1",
-            blocks={0: [block1, block2], 1: [block3]},
-            total_tokens=448,
+            blocks={0: [block_l0_a, block_l0_b], 1: [block_l1_a, block_l1_b]},
+            total_tokens=384,
         )
 
-        assert agent.num_blocks() == 3
+        assert agent.num_blocks() == 4
         assert agent.num_layers() == 2
-        assert agent.total_tokens == 448
+        assert agent.total_tokens == 384
 
     def test_num_blocks_counts_all_layers(self) -> None:
         """Should count blocks across all layers."""
+        # Each layer has one block with 256 tokens (same sequence replicated)
         block1 = KVBlock(
             block_id=1, layer_id=0, token_count=256, layer_data=None
         )
@@ -166,7 +171,7 @@ class TestAgentBlocks:
         agent = AgentBlocks(
             agent_id="agent_1",
             blocks={0: [block1], 1: [block2], 2: [block3]},
-            total_tokens=768,
+            total_tokens=256,
         )
 
         assert agent.num_blocks() == 3

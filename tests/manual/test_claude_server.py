@@ -23,6 +23,7 @@ Usage:
 Then configure Claude Code CLI to use http://localhost:8002
 """
 
+import asyncio
 import gc
 import hashlib
 import json
@@ -54,6 +55,7 @@ logger = logging.getLogger(__name__)
 # Configuration
 MODEL_ID = "mlx-community/DeepSeek-Coder-V2-Lite-Instruct-4bit-mlx"
 CACHE_DIR = Path("/tmp/semantic_test_cache")
+PREFIX_CACHE_DIR = CACHE_DIR / "prefix"
 PORT = 8002
 N_LAYERS = 27
 KV_BITS = 4
@@ -132,16 +134,21 @@ FORWARD_TRANSLATOR_SYSTEM = """Output exactly one word: end, complete_and_end, o
 Decision rules (first match wins):
 1. CONSECUTIVE_ERRORS >= 3 → end (stop retrying, report failure)
 2. CONSECUTIVE_ERRORS 1-2 → continue (let model try a different approach)
-3. PENDING_TODOS not none AND FILES_WRITTEN not none → complete_and_end
-4. PENDING_TODOS not none AND FILES_WRITTEN = none → continue
-5. RESULT_COUNT >= 8 AND PENDING_TODOS = none → end (long chain, wrap up)
-6. Otherwise → end"""
+3. USER_REQUEST mentions test/run/execute AND TOOLS_CALLED = none → continue (user wants action)
+4. PENDING_TODOS not none AND FILES_WRITTEN not none → complete_and_end
+5. PENDING_TODOS not none AND FILES_WRITTEN = none → continue
+6. RESULT_COUNT >= 8 AND PENDING_TODOS = none → end (long chain, wrap up)
+7. Otherwise → end"""
 
 # In-memory cache for reverse translations (deterministic: same input → same output)
 _reverse_translation_cache: dict[str, str] = {}
 
-# Create cache directory
+# Create cache directories
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
+PREFIX_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+
+# Shared prefix cache: hash → {path, n_tokens, token_sequence}
+prefix_cache_store: dict[str, dict] = {}
 
 # Create timestamped test_set filename (set once at module load)
 TEST_SET_FILENAME = f"test_set_{time.strftime('%Y%m%d_%H%M%S')}.json"
@@ -681,6 +688,13 @@ def save_cache_to_disk(
     input_tokens: list[int],
     generated_tokens: list[int],
     request_type: str = "main",
+    *,
+    running_prompt: str | None = None,
+    last_output_text: str | None = None,
+    last_tool_uses: list[dict] | None = None,
+    n_messages_consumed: int = 0,
+    static_prefix_hash: str = "",
+    total_tool_results: int = 0,
 ) -> Path:
     """Save Q4 cache to safetensors file.
 
@@ -728,7 +742,14 @@ def save_cache_to_disk(
         "input_token_count": len(input_tokens),
         "total_tokens": total_tokens,
         "input_sequence": input_tokens,
-        "request_type": request_type,  # Track request type for better matching
+        "request_type": request_type,
+        # Append-only prompt state (set by create_message, None for translator caches)
+        "running_prompt": running_prompt,
+        "last_output_text": last_output_text,
+        "last_tool_uses": last_tool_uses or [],
+        "n_messages_consumed": n_messages_consumed,
+        "static_prefix_hash": static_prefix_hash,
+        "total_tool_results": total_tool_results,
     }
 
     logger.info(f"[SAVE] Complete: {len(tensors)} tensors")
@@ -797,6 +818,115 @@ def load_cache_from_disk(agent_id: str) -> tuple[list[QuantizedKVCache] | None, 
     logger.info(f"[LOAD] Complete: total={total_tokens}, input={input_token_count}, {N_LAYERS} layers")
 
     return kv_caches, total_tokens, input_token_count, input_sequence
+
+
+def save_prefix_cache(
+    prefix_hash: str,
+    kv_caches: list[QuantizedKVCache],
+    n_prefix_tokens: int,
+    token_sequence: list[int],
+) -> Path | None:
+    """Save the system+tools KV prefix to disk for cross-session reuse.
+
+    Slices each layer's KV tensors to prefix length only.
+    """
+    path = PREFIX_CACHE_DIR / f"prefix_{prefix_hash}.safetensors"
+    if path.exists():
+        return path
+
+    tensors = {}
+    for layer_id, cache in enumerate(kv_caches):
+        if cache.keys is None:
+            continue
+        k_w, k_s, k_b = cache.keys
+        v_w, v_s, v_b = cache.values
+
+        tensors[f"layer_{layer_id}_k_weights"] = k_w[..., :n_prefix_tokens, :]
+        tensors[f"layer_{layer_id}_k_scales"] = k_s[..., :n_prefix_tokens, :]
+        tensors[f"layer_{layer_id}_k_biases"] = k_b[..., :n_prefix_tokens, :]
+        tensors[f"layer_{layer_id}_v_weights"] = v_w[..., :n_prefix_tokens, :]
+        tensors[f"layer_{layer_id}_v_scales"] = v_s[..., :n_prefix_tokens, :]
+        tensors[f"layer_{layer_id}_v_biases"] = v_b[..., :n_prefix_tokens, :]
+
+    if not tensors:
+        return None
+
+    metadata = {
+        "n_prefix_tokens": str(n_prefix_tokens),
+        "token_sequence": json.dumps(token_sequence),
+    }
+    save_file(tensors, str(path), metadata=metadata)
+
+    prefix_cache_store[prefix_hash] = {
+        "path": str(path),
+        "n_tokens": n_prefix_tokens,
+        "token_sequence": token_sequence,
+    }
+    logger.info(f"[PREFIX SAVE] {prefix_hash[:12]}...: {n_prefix_tokens} tokens, {len(tensors)} tensors")
+    return path
+
+
+def load_prefix_cache(
+    prefix_hash: str,
+) -> tuple[list[QuantizedKVCache] | None, int, list[int]]:
+    """Load a shared prefix KV cache from disk.
+
+    Returns (kv_caches, n_prefix_tokens, token_sequence) or (None, 0, []).
+    """
+    # Check in-memory index first
+    info = prefix_cache_store.get(prefix_hash)
+    if not info:
+        # Try loading from disk
+        path = PREFIX_CACHE_DIR / f"prefix_{prefix_hash}.safetensors"
+        if not path.exists():
+            return None, 0, []
+        # Populate index from file metadata
+        try:
+            with safe_open(str(path), framework="mlx") as f:
+                meta = f.metadata()
+            info = {
+                "path": str(path),
+                "n_tokens": int(meta.get("n_prefix_tokens", "0")),
+                "token_sequence": json.loads(meta.get("token_sequence", "[]")),
+            }
+            prefix_cache_store[prefix_hash] = info
+        except Exception as e:
+            logger.warning(f"[PREFIX LOAD] Failed to read {path}: {e}")
+            return None, 0, []
+
+    path = Path(info["path"])
+    if not path.exists():
+        prefix_cache_store.pop(prefix_hash, None)
+        return None, 0, []
+
+    n_tokens = info["n_tokens"]
+    token_seq = info["token_sequence"]
+
+    kv_caches = []
+    with safe_open(str(path), framework="mlx") as f:
+        for layer_id in range(N_LAYERS):
+            cache = QuantizedKVCache(group_size=KV_GROUP_SIZE, bits=KV_BITS)
+            try:
+                k_w = f.get_tensor(f"layer_{layer_id}_k_weights")
+                k_s = f.get_tensor(f"layer_{layer_id}_k_scales")
+                k_b = f.get_tensor(f"layer_{layer_id}_k_biases")
+                v_w = f.get_tensor(f"layer_{layer_id}_v_weights")
+                v_s = f.get_tensor(f"layer_{layer_id}_v_scales")
+                v_b = f.get_tensor(f"layer_{layer_id}_v_biases")
+
+                cache.keys = (k_w, k_s, k_b)
+                cache.values = (v_w, v_s, v_b)
+                cache.offset = n_tokens
+            except Exception as e:
+                logger.warning(f"[PREFIX LOAD] Layer {layer_id} missing: {e}")
+            kv_caches.append(cache)
+
+    for cache in kv_caches:
+        if cache.keys is not None:
+            mx.eval(cache.keys[0])
+
+    logger.info(f"[PREFIX HIT] {prefix_hash[:12]}...: loaded {n_tokens} prefix tokens")
+    return kv_caches, n_tokens, token_seq
 
 
 def generate_agent_id(tokens: list[int]) -> str:
@@ -877,6 +1007,95 @@ def find_best_prefix_match(tokens: list[int], request_type: str = "main") -> tup
                     logger.info(f"[DIVERGE] {agent_id}: cached_len={cached_len} but should have matched!")
 
     return best_agent, best_length
+
+
+def find_conversation_match(
+    messages: list, static_prefix_hash: str, request_type: str,
+) -> tuple[str | None, int]:
+    """Find a cache entry from the same conversation via static prefix hash.
+
+    The static prefix hash is the MD5 of the system+tools prompt text, which
+    is constant across all turns of one CLI session. We pick the entry with
+    the most messages consumed (most context already accumulated).
+
+    Returns (agent_id, n_messages_consumed) or (None, 0).
+    """
+    best_agent: str | None = None
+    best_consumed = 0
+    for agent_id, info in cache_index.items():
+        if info.get("request_type") != request_type:
+            continue
+        if info.get("static_prefix_hash") != static_prefix_hash:
+            continue
+        if not info.get("running_prompt"):
+            continue
+        n = info.get("n_messages_consumed", 0)
+        if n < len(messages) and n > best_consumed:
+            best_consumed = n
+            best_agent = agent_id
+    if best_agent:
+        logger.info(f"[CONV MATCH] {best_agent}: {best_consumed}/{len(messages)} msgs consumed")
+    return best_agent, best_consumed
+
+
+CAN_RESUME_MIN_TOKENS = 100
+CAN_RESUME_MIN_RATIO = 0.5
+
+
+def can_resume_conversation(conv_agent: str, new_tokens: list[int]) -> bool:
+    """Permissive token-level sanity check for the append path.
+
+    Counts the common prefix length between stored and new tokens.
+    Only rejects truly broken cases (completely different prompt).
+    Minor BPE drift in old turns is OK — find_best_prefix_match
+    will truncate the KV cache to the actual common prefix.
+    """
+    info = cache_index.get(conv_agent)
+    if not info:
+        return False
+    stored_seq = info.get("input_sequence", [])
+    if not stored_seq:
+        return False
+
+    common = 0
+    limit = min(len(stored_seq), len(new_tokens))
+    for i in range(limit):
+        if stored_seq[i] != new_tokens[i]:
+            break
+        common += 1
+
+    ratio = common / len(stored_seq) if stored_seq else 0
+
+    if common < CAN_RESUME_MIN_TOKENS and ratio < CAN_RESUME_MIN_RATIO:
+        logger.warning(
+            f"[CAN_RESUME] {conv_agent}: FAIL — only {common}/{len(stored_seq)} tokens match "
+            f"(ratio={ratio:.2f}, need >={CAN_RESUME_MIN_TOKENS} or >={CAN_RESUME_MIN_RATIO:.0%})"
+        )
+        return False
+
+    if common < len(stored_seq):
+        logger.info(
+            f"[CAN_RESUME] {conv_agent}: partial match {common}/{len(stored_seq)} "
+            f"(ratio={ratio:.2f}) — OK, prefix match will handle truncation"
+        )
+    else:
+        logger.info(f"[CAN_RESUME] {conv_agent}: full match {common} tokens")
+    return True
+
+
+def format_assistant_for_prompt(output_text: str, tool_uses: list[dict]) -> str:
+    """Format model output as a prompt line for the running prompt.
+
+    Tool calls → "Assistant: [Used Write, Bash]" (compact, matches extract_text format).
+    Text → "Assistant: <text>" (truncated to 500 chars).
+    """
+    if tool_uses:
+        names = list(dict.fromkeys(t.get("name", "tool") for t in tool_uses))
+        return f"Assistant: [Used {', '.join(names)}]"
+    text = output_text.strip()
+    if len(text) > 500:
+        text = text[:500]
+    return f"Assistant: {text}"
 
 
 def _extract_pending_todos(messages: list) -> list[str]:
@@ -1132,6 +1351,23 @@ def _build_forward_input(
         else:
             break
 
+    # Extract the last user instruction text (if any) — used by forward
+    # translator to decide whether the user's request was fulfilled.
+    last_user_text = ""
+    if messages:
+        last_msg = messages[-1]
+        if last_msg.role == "user" and isinstance(last_msg.content, list):
+            for block in reversed(last_msg.content):
+                if isinstance(block, dict) and block.get("type") == "text":
+                    text = block.get("text", "")
+                    cleaned = re.sub(
+                        r"<system-reminder>.*?</system-reminder>", "",
+                        text, flags=re.DOTALL,
+                    ).strip()
+                    if cleaned:
+                        last_user_text = cleaned[:100]
+                        break
+
     return (
         f"TOOLS_CALLED: {', '.join(tools_called) if tools_called else 'none'}\n"
         f"FILES_WRITTEN: {', '.join(written_files) if written_files else 'none'}\n"
@@ -1140,7 +1376,8 @@ def _build_forward_input(
         f"CONSECUTIVE_ERRORS: {consecutive_errors}\n"
         f"WORKING_DIR: {os.getcwd()}\n"
         f"LATEST_OUTPUT: {'tool_use' if has_tool_call else 'text'}\n"
-        f"RESULT_COUNT: {len(tool_results)}"
+        f"RESULT_COUNT: {len(tool_results)}\n"
+        f"USER_REQUEST: {last_user_text if last_user_text else 'none'}"
     )
 
 
@@ -1152,27 +1389,30 @@ def _call_forward_translator(input_text: str) -> dict:
     """
     conv = [
         {"role": "system", "content": FORWARD_TRANSLATOR_SYSTEM},
-        # Example 1: first error → continue (let model try different approach)
-        {"role": "user", "content": "TOOLS_CALLED: Bash\nFILES_WRITTEN: none\nPENDING_TODOS: none\nHAS_ERROR: true\nCONSECUTIVE_ERRORS: 1\nWORKING_DIR: /Users/dev\nLATEST_OUTPUT: text\nRESULT_COUNT: 1"},
+        # Example 1: first error → continue
+        {"role": "user", "content": "TOOLS_CALLED: Bash\nFILES_WRITTEN: none\nPENDING_TODOS: none\nHAS_ERROR: true\nCONSECUTIVE_ERRORS: 1\nWORKING_DIR: /Users/dev\nLATEST_OUTPUT: text\nRESULT_COUNT: 1\nUSER_REQUEST: none"},
         {"role": "assistant", "content": "continue"},
-        # Example 2: 3 consecutive errors → end (stop retrying)
-        {"role": "user", "content": "TOOLS_CALLED: Bash\nFILES_WRITTEN: none\nPENDING_TODOS: none\nHAS_ERROR: true\nCONSECUTIVE_ERRORS: 3\nWORKING_DIR: /Users/dev\nLATEST_OUTPUT: text\nRESULT_COUNT: 3"},
+        # Example 2: 3 consecutive errors → end
+        {"role": "user", "content": "TOOLS_CALLED: Bash\nFILES_WRITTEN: none\nPENDING_TODOS: none\nHAS_ERROR: true\nCONSECUTIVE_ERRORS: 3\nWORKING_DIR: /Users/dev\nLATEST_OUTPUT: text\nRESULT_COUNT: 3\nUSER_REQUEST: none"},
         {"role": "assistant", "content": "end"},
         # Example 3: files written + pending todos → complete_and_end
-        {"role": "user", "content": "TOOLS_CALLED: Write\nFILES_WRITTEN: stack.py\nPENDING_TODOS: Create stack.py\nHAS_ERROR: false\nCONSECUTIVE_ERRORS: 0\nWORKING_DIR: /Users/dev\nLATEST_OUTPUT: text\nRESULT_COUNT: 2"},
+        {"role": "user", "content": "TOOLS_CALLED: Write\nFILES_WRITTEN: stack.py\nPENDING_TODOS: Create stack.py\nHAS_ERROR: false\nCONSECUTIVE_ERRORS: 0\nWORKING_DIR: /Users/dev\nLATEST_OUTPUT: text\nRESULT_COUNT: 2\nUSER_REQUEST: none"},
         {"role": "assistant", "content": "complete_and_end"},
         # Example 4: pending todos, no files → continue
-        {"role": "user", "content": "TOOLS_CALLED: TodoWrite\nFILES_WRITTEN: none\nPENDING_TODOS: Create stack.py, Add tests\nHAS_ERROR: false\nCONSECUTIVE_ERRORS: 0\nWORKING_DIR: /Users/dev\nLATEST_OUTPUT: tool_use\nRESULT_COUNT: 1"},
+        {"role": "user", "content": "TOOLS_CALLED: TodoWrite\nFILES_WRITTEN: none\nPENDING_TODOS: Create stack.py, Add tests\nHAS_ERROR: false\nCONSECUTIVE_ERRORS: 0\nWORKING_DIR: /Users/dev\nLATEST_OUTPUT: tool_use\nRESULT_COUNT: 1\nUSER_REQUEST: none"},
         {"role": "assistant", "content": "continue"},
         # Example 5: no todos, no error → end
-        {"role": "user", "content": "TOOLS_CALLED: Bash\nFILES_WRITTEN: none\nPENDING_TODOS: none\nHAS_ERROR: false\nCONSECUTIVE_ERRORS: 0\nWORKING_DIR: /Users/dev\nLATEST_OUTPUT: text\nRESULT_COUNT: 1"},
+        {"role": "user", "content": "TOOLS_CALLED: Bash\nFILES_WRITTEN: none\nPENDING_TODOS: none\nHAS_ERROR: false\nCONSECUTIVE_ERRORS: 0\nWORKING_DIR: /Users/dev\nLATEST_OUTPUT: text\nRESULT_COUNT: 1\nUSER_REQUEST: none"},
         {"role": "assistant", "content": "end"},
         # Example 6: long chain done → end
-        {"role": "user", "content": "TOOLS_CALLED: Bash\nFILES_WRITTEN: hello.py\nPENDING_TODOS: none\nHAS_ERROR: false\nCONSECUTIVE_ERRORS: 0\nWORKING_DIR: /Users/dev\nLATEST_OUTPUT: text\nRESULT_COUNT: 8"},
+        {"role": "user", "content": "TOOLS_CALLED: Bash\nFILES_WRITTEN: hello.py\nPENDING_TODOS: none\nHAS_ERROR: false\nCONSECUTIVE_ERRORS: 0\nWORKING_DIR: /Users/dev\nLATEST_OUTPUT: text\nRESULT_COUNT: 8\nUSER_REQUEST: none"},
         {"role": "assistant", "content": "end"},
         # Example 7: multiple files + todos → complete_and_end
-        {"role": "user", "content": "TOOLS_CALLED: Write\nFILES_WRITTEN: stack.py, test_stack.py\nPENDING_TODOS: Create stack.py, Add tests\nHAS_ERROR: false\nCONSECUTIVE_ERRORS: 0\nWORKING_DIR: /Users/dev\nLATEST_OUTPUT: text\nRESULT_COUNT: 4"},
+        {"role": "user", "content": "TOOLS_CALLED: Write\nFILES_WRITTEN: stack.py, test_stack.py\nPENDING_TODOS: Create stack.py, Add tests\nHAS_ERROR: false\nCONSECUTIVE_ERRORS: 0\nWORKING_DIR: /Users/dev\nLATEST_OUTPUT: text\nRESULT_COUNT: 4\nUSER_REQUEST: none"},
         {"role": "assistant", "content": "complete_and_end"},
+        # Example 8: user asked to "test" but model produced text only → continue
+        {"role": "user", "content": "TOOLS_CALLED: none\nFILES_WRITTEN: stack.py\nPENDING_TODOS: none\nHAS_ERROR: false\nCONSECUTIVE_ERRORS: 0\nWORKING_DIR: /Users/dev\nLATEST_OUTPUT: text\nRESULT_COUNT: 3\nUSER_REQUEST: test"},
+        {"role": "assistant", "content": "continue"},
         {"role": "user", "content": input_text},
     ]
 
@@ -1257,6 +1497,19 @@ def _call_forward_translator(input_text: str) -> dict:
     if model_action == "complete_and_end" and not has_pending:
         best_action = "end"
 
+    # USER_REQUEST override: if user asked for action (test/run/execute) but
+    # model produced only text (no tool calls), force continue so model retries
+    user_req = fields.get("USER_REQUEST", "none").lower()
+    tools_called = fields.get("TOOLS_CALLED", "none")
+    action_words = ("test", "run", "execute", "try", "check", "build", "install")
+    if (
+        best_action == "end"
+        and user_req != "none"
+        and tools_called == "none"
+        and any(w in user_req for w in action_words)
+    ):
+        best_action = "continue"
+
     override = "" if best_action == model_action else f" (override: {model_action}→{best_action})"
     logger.info(
         f"[FWD] Decision: {best_action}{override} "
@@ -1267,20 +1520,46 @@ def _call_forward_translator(input_text: str) -> dict:
     return {"action": best_action}
 
 
-def messages_to_prompt(messages: list[Message], system: Any = "", tools: list[Tool] | None = None) -> tuple[str, str]:
-    """Convert messages to prompt string. Returns (prompt, prefill)."""
-    lines = []
+def _sanitize_tool_description(desc: str) -> str:
+    """Remove <example> blocks and turn markers from tool descriptions.
+
+    Claude Code tool descriptions contain <example> blocks with "User:" and
+    "Assistant:" markers identical to our conversation turn markers. Including
+    them verbatim confuses the model into thinking they are real conversation
+    turns, breaking tool calling entirely.
+    """
+    # Strip <example>...</example> blocks (contains User:/Assistant: markers)
+    cleaned = re.sub(r"<example>.*?</example>", "", desc, flags=re.DOTALL)
+    # Strip any remaining lines that look like turn markers
+    cleaned_lines = []
+    for line in cleaned.split("\n"):
+        stripped = line.strip()
+        if stripped.startswith("User:") or stripped.startswith("Assistant:"):
+            continue
+        if stripped.startswith("user:") or stripped.startswith("assistant:"):
+            continue
+        cleaned_lines.append(line)
+    cleaned = "\n".join(cleaned_lines)
+    # Collapse multiple blank lines into one
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+    return cleaned.strip()[:2000]
+
+
+def build_static_prefix(system: Any = "", tools: list[Tool] | None = None) -> str:
+    """Build the system + tools prefix of the prompt.
+
+    This text is constant across all turns of one conversation. Used both
+    by messages_to_prompt() (cold start) and create_message() (for hashing
+    to identify conversations in append mode).
+    """
+    lines: list[str] = []
     system_text = extract_text(system)
 
-    # Split system text into static and variable parts for better cache prefix matching.
-    # The <env> section contains working directory which changes per session.
-    # Put static system text first, then tools (static), then variable env, then messages.
     env_marker = "<env>"
     static_system = system_text
     variable_system = ""
     if env_marker in system_text:
         env_idx = system_text.index(env_marker)
-        # Find the text before <env> - may include intro line
         intro_end = system_text.rfind("\n", 0, env_idx)
         if intro_end > 0:
             static_system = system_text[:intro_end]
@@ -1292,8 +1571,6 @@ def messages_to_prompt(messages: list[Message], system: Any = "", tools: list[To
     if static_system:
         lines.append(f"System: {static_system}\n")
 
-    # Tool flow protocol — added to static prefix for cache stability.
-    # Explains to DeepSeek how tool results appear and how to signal completion.
     if tools:
         lines.append("## Tool Flow Protocol")
         lines.append("When you call a tool, the result appears as the next User message.")
@@ -1302,7 +1579,6 @@ def messages_to_prompt(messages: list[Message], system: Any = "", tools: list[To
         lines.append("If a User message contains '[New user request]', the text after that marker is the user's NEW instruction.")
         lines.append("Always prioritize the NEW instruction over prior tool result context.\n")
 
-    # Add tool definitions in a format DeepSeek understands
     if tools:
         lines.append("\n## Available Functions\n")
         lines.append("You can call these functions when needed. To call a function, use this exact JSON format:")
@@ -1327,7 +1603,7 @@ def messages_to_prompt(messages: list[Message], system: Any = "", tools: list[To
         for tool in tools:
             lines.append(f"### {tool.name}")
             if tool.description:
-                lines.append(f"{tool.description[:2000]}")
+                lines.append(_sanitize_tool_description(tool.description))
             if tool.input_schema and tool.input_schema.get("properties"):
                 props = tool.input_schema["properties"]
                 required = tool.input_schema.get("required", [])
@@ -1337,7 +1613,6 @@ def messages_to_prompt(messages: list[Message], system: Any = "", tools: list[To
                     desc = spec.get("description", "")[:300]
                     param_type = spec.get('type', 'any')
                     lines.append(f"  - {name}: {param_type}{req_marker} - {desc}")
-                    # Show nested structure for arrays/objects
                     if param_type == "array" and "items" in spec:
                         items = spec["items"]
                         if items.get("type") == "object" and "properties" in items:
@@ -1346,90 +1621,193 @@ def messages_to_prompt(messages: list[Message], system: Any = "", tools: list[To
                         lines.append(f"    Object must have: {list(spec['properties'].keys())}")
             lines.append("")
 
-    # Append variable system parts (env section) after static prefix
     if variable_system:
         lines.append(variable_system.strip())
+
+    return "\n".join(lines)
+
+
+# CLI meta-messages to filter out of user text
+_CLI_META_PATTERNS = [
+    "Your response was cut off",
+    "output token limit",
+    "Please break your work into smaller pieces",
+    "Continue from where you left off",
+]
+
+
+def _process_tool_result_message(
+    msg: Message,
+    prev_assistant: Message | None,
+    out_lines: list[str],
+) -> int:
+    """Process a user message containing tool_results into prompt lines.
+
+    Handles reverse translation and round expansion for compacted messages.
+    Appends to out_lines in place. Returns count of tool_result blocks processed.
+
+    Shared by both messages_to_prompt() (cold start) and build_prompt_delta() (append).
+    """
+    tool_result_blocks = [
+        b for b in msg.content
+        if isinstance(b, dict) and b.get("type") == "tool_result"
+    ]
+    if not tool_result_blocks:
+        return 0
+
+    # Build tool_use map from preceding assistant message
+    tool_use_map: dict[str, dict] = {}
+    if prev_assistant and isinstance(prev_assistant.content, list):
+        for b in prev_assistant.content:
+            if isinstance(b, dict) and b.get("type") == "tool_use":
+                tool_use_map[b.get("id", "")] = b
+
+    # Collect and filter user text blocks
+    user_texts: list[str] = []
+    n_results = len(tool_result_blocks)
+    max_translated_chars = 500 if n_results <= 1 else (200 if n_results <= 3 else 100)
+
+    for b in msg.content:
+        if isinstance(b, dict) and b.get("type") == "text":
+            text = b.get("text", "")
+            cleaned = re.sub(
+                r"<system-reminder>.*?</system-reminder>", "",
+                text, flags=re.DOTALL,
+            ).strip()
+            if cleaned.startswith("[SUGGESTION MODE"):
+                continue
+            if cleaned:
+                user_texts.append(cleaned)
+
+    filtered_user_texts = [
+        t for t in user_texts
+        if not any(pat in t for pat in _CLI_META_PATTERNS)
+    ]
+
+    # EXPAND compacted rounds: each tool_result gets its own
+    # Assistant: [Used X] / User: <translated result> pair.
+    if n_results > 1:
+        for result_idx, tr_block in enumerate(tool_result_blocks):
+            matched = tool_use_map.get(tr_block.get("tool_use_id", ""))
+            tool_name = matched.get("name", "tool") if matched else "tool"
+            out_lines.append(f"Assistant: [Used {tool_name}]")
+
+            if matched:
+                rev_input = _build_reverse_input(matched, tr_block, n_results=n_results)
+                translated = _call_reverse_translator(rev_input)
+                if len(translated) > max_translated_chars:
+                    translated = translated[:max_translated_chars].rstrip() + "..."
+            else:
+                rc = tr_block.get("content", "")
+                translated = str(rc)[:max_translated_chars]
+
+            if result_idx == n_results - 1 and filtered_user_texts:
+                out_lines.append(f"User: {translated}\n[New user request]\n" + "\n".join(filtered_user_texts))
+            else:
+                out_lines.append(f"User: {translated}")
+    else:
+        # Single round
+        translated_parts: list[str] = []
+        for tr_block in tool_result_blocks:
+            matched = tool_use_map.get(tr_block.get("tool_use_id", ""))
+            if matched:
+                rev_input = _build_reverse_input(matched, tr_block, n_results=n_results)
+                translated = _call_reverse_translator(rev_input)
+                if len(translated) > max_translated_chars:
+                    translated = translated[:max_translated_chars].rstrip() + "..."
+                translated_parts.append(translated)
+            else:
+                rc = tr_block.get("content", "")
+                translated_parts.append(str(rc)[:max_translated_chars])
+
+        if filtered_user_texts:
+            translated_parts.append("\n[New user request]")
+            translated_parts.extend(filtered_user_texts)
+        elif user_texts:
+            translated_parts.append(user_texts[0])
+
+        content_text = "\n".join(translated_parts)
+        out_lines.append(f"User: {content_text}")
+
+    return n_results
+
+
+def build_prompt_delta(
+    messages: list[Message],
+    n_consumed: int,
+    last_output_text: str,
+    last_tool_uses: list[dict],
+    tools: list[Tool] | None = None,
+) -> tuple[str, int]:
+    """Build prompt delta from unconsumed messages only.
+
+    Instead of rebuilding the entire prompt from compacted CLI messages,
+    this function processes only the NEW messages (those beyond n_consumed).
+    The assistant's previous output is formatted from server-side state
+    (not from the CLI's compacted representation).
+
+    Returns (delta_text, n_tool_results_in_delta).
+    """
+    delta_lines: list[str] = []
+    new_messages = messages[n_consumed:]
+    tool_result_count = 0
+
+    for i, msg in enumerate(new_messages):
+        global_idx = n_consumed + i
+
+        if msg.role == "assistant":
+            # CLI sends its compacted version of what the model said.
+            # IGNORE it — use our stored formatted output instead.
+            # This ensures token-level consistency with the running prompt.
+            formatted = format_assistant_for_prompt(last_output_text, last_tool_uses)
+            delta_lines.append(formatted)
+            continue
+
+        if msg.role == "user" and isinstance(msg.content, list):
+            has_tool_results = any(
+                isinstance(b, dict) and b.get("type") == "tool_result"
+                for b in msg.content
+            )
+            if has_tool_results:
+                prev_assistant = (
+                    messages[global_idx - 1]
+                    if global_idx > 0 and messages[global_idx - 1].role == "assistant"
+                    else None
+                )
+                n = _process_tool_result_message(msg, prev_assistant, delta_lines)
+                tool_result_count += n
+                continue
+
+        # Plain user text or simple content
+        content_text = extract_text(msg.content, role=msg.role)
+        delta_lines.append(f"{msg.role.capitalize()}: {content_text}")
+
+    return "\n".join(delta_lines), tool_result_count
+
+
+def messages_to_prompt(messages: list[Message], system: Any = "", tools: list[Tool] | None = None) -> tuple[str, str]:
+    """Convert messages to prompt string (cold start path).
+
+    Used when no conversation state exists (first request or state miss).
+    Returns (prompt, prefill, total_tool_results).
+    """
+    prefix = build_static_prefix(system, tools)
+    lines = [prefix] if prefix else []
 
     total_tool_results = 0
 
     for i, msg in enumerate(messages):
-        # For user messages with tool_results: use the reverse translator
-        # to produce DeepSeek-native text instead of hardcoded templates.
+        # User messages with tool_results: delegate to shared helper
         if msg.role == "user" and isinstance(msg.content, list):
-            tool_result_blocks = [
-                b for b in msg.content
-                if isinstance(b, dict) and b.get("type") == "tool_result"
-            ]
-            if tool_result_blocks:
-                # Find preceding assistant message to match tool_use blocks
+            has_tool_results = any(
+                isinstance(b, dict) and b.get("type") == "tool_result"
+                for b in msg.content
+            )
+            if has_tool_results:
                 prev_assistant = messages[i - 1] if i > 0 and messages[i - 1].role == "assistant" else None
-                tool_use_map: dict[str, dict] = {}
-                if prev_assistant and isinstance(prev_assistant.content, list):
-                    for b in prev_assistant.content:
-                        if isinstance(b, dict) and b.get("type") == "tool_use":
-                            tool_use_map[b.get("id", "")] = b
-
-                translated_parts: list[str] = []
-                user_texts: list[str] = []
-                block_types = [(type(b).__name__, b.get("type") if isinstance(b, dict) else "?") for b in msg.content]
-                logger.info(f"[MSG {i} BLOCKS] {len(msg.content)} blocks: {block_types}")
-                n_results = len(tool_result_blocks)
-                # Cap translated output length per result based on total count.
-                # Prevents prompt overload when many results (especially errors).
-                max_translated_chars = 500 if n_results <= 1 else (200 if n_results <= 3 else 100)
-                for b in msg.content:
-                    if isinstance(b, dict) and b.get("type") == "tool_result":
-                        matched = tool_use_map.get(b.get("tool_use_id", ""))
-                        if matched:
-                            rev_input = _build_reverse_input(matched, b, n_results=n_results)
-                            translated = _call_reverse_translator(rev_input)
-                            if len(translated) > max_translated_chars:
-                                translated = translated[:max_translated_chars].rstrip() + "..."
-                                logger.info(f"[REV] Capped translation to {max_translated_chars} chars ({n_results} results)")
-                            translated_parts.append(translated)
-                        else:
-                            rc = b.get("content", "")
-                            translated_parts.append(str(rc)[:max_translated_chars] if not isinstance(rc, list) else str(rc)[:max_translated_chars])
-                    elif isinstance(b, dict) and b.get("type") == "text":
-                        text = b.get("text", "")
-                        # Strip CLI metadata
-                        cleaned = re.sub(
-                            r"<system-reminder>.*?</system-reminder>", "",
-                            text, flags=re.DOTALL,
-                        ).strip()
-                        if cleaned.startswith("[SUGGESTION MODE"):
-                            continue
-                        if cleaned:
-                            user_texts.append(cleaned)
-
-                # Include ALL user texts, filtering out CLI meta-messages
-                # (token limit warnings, continuation prompts, etc.).
-                # Bug fix: previously took user_texts[-1] which picked the CLI
-                # "cut off" warning instead of the actual user instruction.
-                CLI_META_PATTERNS = [
-                    "Your response was cut off",
-                    "output token limit",
-                    "Please break your work into smaller pieces",
-                    "Continue from where you left off",
-                ]
-                filtered_user_texts = [
-                    t for t in user_texts
-                    if not any(pat in t for pat in CLI_META_PATTERNS)
-                ]
-                logger.info(f"[MSG {i} DEBUG] user_texts={user_texts}, filtered={filtered_user_texts}, translated_parts={[p[:50] for p in translated_parts]}")
-                if filtered_user_texts:
-                    # Clear boundary so model distinguishes tool context
-                    # from new user instructions.
-                    translated_parts.append("\n[New user request]")
-                    translated_parts.extend(filtered_user_texts)
-                elif user_texts:
-                    # All texts were CLI meta — still include at least one
-                    translated_parts.append(user_texts[0])
-
-                content_text = "\n".join(translated_parts)
-                lines.append(f"User: {content_text}")
-                logger.info(f"[MSG {i} REV-TRANSLATED] user: {content_text[:300]}")
-                total_tool_results += len(tool_result_blocks)
+                n = _process_tool_result_message(msg, prev_assistant, lines)
+                total_tool_results += n
+                logger.info(f"[MSG {i}] Processed {n} tool results")
                 continue
 
         # Non-tool-result messages: use extract_text as before
@@ -1830,10 +2208,27 @@ async def health():
     return {"status": "ok"}
 
 
+def _chunk_text(text: str, max_words: int = 3) -> list[str]:
+    """Split text into word-group chunks for progressive SSE emission."""
+    if not text:
+        return []
+    words = text.split(" ")
+    chunks = []
+    for i in range(0, len(words), max_words):
+        chunk = " ".join(words[i:i + max_words])
+        if i + max_words < len(words):
+            chunk += " "
+        chunks.append(chunk)
+    return chunks
+
+
 async def _generate_sse_events(response: MessagesResponse):
     """Convert a complete MessagesResponse into Anthropic SSE stream events.
 
-    Emits: message_start, content_block_start/delta/stop for each block,
+    Batch-then-stream: inference is already complete, but we emit events
+    progressively with small delays so the CLI renders text naturally.
+
+    Emits: message_start, ping, content_block_start/delta/stop for each block,
     message_delta (with stop_reason), message_stop.
     """
     def sse(event: str, data: dict) -> str:
@@ -1845,30 +2240,34 @@ async def _generate_sse_events(response: MessagesResponse):
     msg_data["stop_reason"] = None
     yield sse("message_start", {"type": "message_start", "message": msg_data})
 
-    # Emit each content block
+    # ping event (matches real Anthropic API)
+    yield sse("ping", {"type": "ping"})
+
+    # Emit each content block with progressive pacing
     for idx, block in enumerate(response.content):
         block_data = block if isinstance(block, dict) else block.model_dump(exclude_none=True)
         block_type = block_data.get("type", "text")
 
         if block_type == "text":
             text_content = block_data.get("text", "")
-            # content_block_start with empty text
             yield sse("content_block_start", {
                 "type": "content_block_start",
                 "index": idx,
                 "content_block": {"type": "text", "text": ""},
             })
-            # Send text in one delta
-            if text_content:
+            # Progressive text emission: 3-word chunks with ~15ms delay
+            chunks = _chunk_text(text_content)
+            for chunk in chunks:
                 yield sse("content_block_delta", {
                     "type": "content_block_delta",
                     "index": idx,
-                    "delta": {"type": "text_delta", "text": text_content},
+                    "delta": {"type": "text_delta", "text": chunk},
                 })
+                if len(chunks) > 1:
+                    await asyncio.sleep(0.015)
             yield sse("content_block_stop", {"type": "content_block_stop", "index": idx})
 
         elif block_type == "tool_use":
-            # content_block_start with tool info (empty input)
             yield sse("content_block_start", {
                 "type": "content_block_start",
                 "index": idx,
@@ -1879,7 +2278,7 @@ async def _generate_sse_events(response: MessagesResponse):
                     "input": {},
                 },
             })
-            # Send input as JSON delta
+            # Send complete JSON in one shot — CLI parses partial_json immediately
             input_data = block_data.get("input", {})
             if input_data:
                 yield sse("content_block_delta", {
@@ -1954,12 +2353,17 @@ async def create_message(request_body: MessagesRequest, request: Request) -> JSO
     }
 
     # Cap max_tokens to prevent runaway generation (context window is 100K)
+    # Floor at 1000 when tools are present — CLI sometimes sends 500 which is
+    # too short for tool call JSON (especially Write with file content).
     max_tokens = min(request_body.max_tokens, 16000)
+    n_tools = len(request_body.tools) if request_body.tools else 0
+    if n_tools > 0 and max_tokens < 1000:
+        logger.info(f"[MAX_TOKENS] Raised {max_tokens} → 1000 (tools present)")
+        max_tokens = 1000
 
     # Log headers and request parameters for debugging
     session_id = request.headers.get("X-Session-ID")
     anthropic_beta = request.headers.get("anthropic-beta", "")
-    n_tools = len(request_body.tools) if request_body.tools else 0
 
     # Resolve generation parameters
     # ALWAYS use greedy (temp=0) for this DeepSeek model - random sampling produces garbage
@@ -2015,23 +2419,61 @@ async def create_message(request_body: MessagesRequest, request: Request) -> JSO
 
     # 1. Convert to prompt and tokenize
     tokenize_start = time.time()
-    prompt, prefill, total_tool_results = messages_to_prompt(
-        request_body.messages, request_body.system, request_body.tools
+
+    # Determine request type early — needed for conversation matching
+    system_len = len(str(request_body.system)) if request_body.system else 0
+    if system_len > 10000 and n_tools > 0:
+        request_type = "main"
+    elif system_len > 0 and n_tools == 0:
+        request_type = "title"
+    elif n_tools > 0 and system_len == 0:
+        request_type = "count"
+    else:
+        request_type = "other"
+
+    # Check for conversation continuation (append-only path)
+    static_prefix = build_static_prefix(request_body.system, request_body.tools)
+    static_prefix_hash = hashlib.md5(static_prefix.encode()).hexdigest()
+
+    conv_agent, n_consumed = find_conversation_match(
+        request_body.messages, static_prefix_hash, request_type,
     )
 
+    if conv_agent and n_consumed > 0:
+        info = cache_index[conv_agent]
+        delta, delta_results = build_prompt_delta(
+            request_body.messages, n_consumed,
+            info.get("last_output_text", ""),
+            info.get("last_tool_uses", []),
+            request_body.tools,
+        )
+        stored = info["running_prompt"]
+        base = stored.rstrip()
+        if base.endswith("Assistant:"):
+            base = base[:-len("Assistant:")]
+        prompt = base.rstrip() + "\n" + delta + "\nAssistant:"
+        total_tool_results = info.get("total_tool_results", 0) + delta_results
+        logger.info(
+            f"[APPEND] {n_consumed}→{len(request_body.messages)} msgs, "
+            f"delta={len(delta)} chars, total_results={total_tool_results}"
+        )
+    else:
+        prompt, _, total_tool_results = messages_to_prompt(
+            request_body.messages, request_body.system, request_body.tools
+        )
+        logger.info(f"[COLD START] Full prompt rebuild, {total_tool_results} tool results")
+
     # TRACE: Full prompt that will be sent to model (the EXACT text DeepSeek sees)
-    # Split into sections for readability: system, tools, messages
-    prompt_lines = prompt.split("\n")
-    msg_start = next(
-        (i for i, l in enumerate(prompt_lines) if l.startswith("User:") or l.startswith("Assistant:")),
-        len(prompt_lines),
-    )
+    # Use static prefix length to split — naive "User:" scan is confused by
+    # turn markers inside tool descriptions
+    prefix_len = len(static_prefix)
+    messages_section = prompt[prefix_len:].lstrip("\n")
     trace_log("PROMPT_BUILT", {
         "total_chars": len(prompt),
-        "total_lines": len(prompt_lines),
+        "total_lines": prompt.count("\n") + 1,
         "total_tool_results": total_tool_results,
-        "system_and_tools_chars": len("\n".join(prompt_lines[:msg_start])),
-        "messages_section": "\n".join(prompt_lines[msg_start:]),
+        "system_and_tools_chars": prefix_len,
+        "messages_section": messages_section,
         "full_prompt_hash": hashlib.md5(prompt.encode()).hexdigest(),
     })
 
@@ -2064,6 +2506,18 @@ async def create_message(request_body: MessagesRequest, request: Request) -> JSO
     logger.info(f"[TOKENIZE] {len(tokens)} tokens")
     logger.info(f"[PROMPT] {prompt[:500]}...")  # Log first 500 chars of prompt
 
+    # CanResume guard: verify token-level compatibility for append path
+    if conv_agent and n_consumed > 0:
+        if not can_resume_conversation(conv_agent, tokens):
+            logger.warning("[CAN_RESUME FAIL] Falling back to cold start")
+            conv_agent = None
+            n_consumed = 0
+            prompt, _, total_tool_results = messages_to_prompt(
+                request_body.messages, request_body.system, request_body.tools
+            )
+            tokens = tokenizer.encode(prompt)
+            logger.info(f"[COLD START] Rebuilt {len(tokens)} tokens after CanResume failure")
+
     # Capture token data for semantic analysis
     request_log["tokens"] = {
         "total_input": len(tokens),
@@ -2074,16 +2528,6 @@ async def create_message(request_body: MessagesRequest, request: Request) -> JSO
     }
     request_log["timing"]["tokenize_ms"] = round(tokenize_time * 1000, 2)
 
-    # Determine request type for cache segregation
-    system_len = len(str(request_body.system)) if request_body.system else 0
-    if system_len > 10000 and n_tools > 0:
-        request_type = "main"  # Full conversation with tools
-    elif system_len > 0 and n_tools == 0:
-        request_type = "title"  # Title generation
-    elif n_tools > 0 and system_len == 0:
-        request_type = "count"  # Token counting
-    else:
-        request_type = "other"
     logger.info(f"[REQUEST TYPE] {request_type} (system={system_len}, tools={n_tools})")
 
     # 2. Find best prefix match among cached agents OF SAME TYPE
@@ -2150,8 +2594,13 @@ async def create_message(request_body: MessagesRequest, request: Request) -> JSO
     if not cache_hit:
         logger.info(f"[CACHE MISS] agent={agent_id}")
 
-        # Cold start: use chunked prefill for long prompts
-        if len(tokens) >= CHUNKED_PREFILL_THRESHOLD:
+        # Try shared prefix cache before full cold start
+        prefix_kv, prefix_n, prefix_seq = load_prefix_cache(static_prefix_hash)
+        if prefix_kv and len(tokens) > prefix_n and tokens[:prefix_n] == prefix_seq:
+            kv_caches = prefix_kv
+            tokens_to_process = tokens[prefix_n:]
+            logger.info(f"[PREFIX HIT] Reusing {prefix_n} prefix tokens, processing {len(tokens_to_process)} remaining")
+        elif len(tokens) >= CHUNKED_PREFILL_THRESHOLD:
             kv_caches = chunked_prefill(tokens)
             tokens_to_process = []  # All tokens already processed
         else:
@@ -2189,6 +2638,14 @@ async def create_message(request_body: MessagesRequest, request: Request) -> JSO
     # 5. Save FULL cache (input + output) so next request doesn't reprocess
     save_cache_to_disk(agent_id, kv_caches, tokens, generated_ids, request_type)
 
+    # Save shared prefix cache for future cold starts (once per unique system+tools)
+    if static_prefix_hash and static_prefix_hash not in prefix_cache_store:
+        prefix_tokens = tokenizer.encode(
+            build_static_prefix(request_body.system, request_body.tools)
+        )
+        if len(prefix_tokens) > 100:
+            save_prefix_cache(static_prefix_hash, kv_caches, len(prefix_tokens), prefix_tokens)
+
     # 6. Cleanup
     del kv_caches
     gc.collect()
@@ -2215,24 +2672,21 @@ async def create_message(request_body: MessagesRequest, request: Request) -> JSO
         ],
     })
 
-    # Build content blocks
+    # Build content blocks — text THEN tool_use (matches real Anthropic API).
+    # The model can say "Let me check that file." then emit a Read tool call.
     content_blocks: list[dict] = []
 
-    # When tool_uses exist, return ONLY the tool_use - no text
-    # Text was causing confusion and infinite loops
-    if tool_uses:
-        for tool_use in tool_uses:
-            content_blocks.append(tool_use)
-    else:
-        # No tool uses - include text normally
-        if remaining_text:
-            clean_text = sanitize_terminal_output(remaining_text.strip())
-            # Filter out empty JSON code blocks
-            clean_text = re.sub(r'```json\s*```', '', clean_text)
-            clean_text = re.sub(r'```\s*```', '', clean_text)
-            clean_text = clean_text.strip()
-            if clean_text:
-                content_blocks.append({"type": "text", "text": clean_text})
+    if remaining_text:
+        clean_text = sanitize_terminal_output(remaining_text.strip())
+        clean_text = re.sub(r'```json\s*```', '', clean_text)
+        clean_text = re.sub(r'```\s*```', '', clean_text)
+        clean_text = clean_text.strip()
+        # Only emit text when it's meaningful context, not noise
+        if clean_text and len(clean_text) > 3 and not clean_text.startswith("{"):
+            content_blocks.append({"type": "text", "text": clean_text})
+
+    for tool_use in tool_uses:
+        content_blocks.append(tool_use)
 
     # Determine stop reason
     if tool_uses:
@@ -2289,6 +2743,19 @@ async def create_message(request_body: MessagesRequest, request: Request) -> JSO
                 logger.info("[FWD] end → Done.")
 
         # "continue" → use model's output as-is (already in content_blocks)
+
+    # Update conversation state for append-only path.
+    # Store the INPUT prompt (ends with \nAssistant:) — not the model output.
+    # build_prompt_delta will reconstruct the assistant turn from last_output/last_tool_uses.
+    if agent_id in cache_index:
+        cache_index[agent_id].update({
+            "running_prompt": prompt,
+            "last_output_text": output_text,
+            "last_tool_uses": tool_uses,
+            "n_messages_consumed": len(request_body.messages),
+            "static_prefix_hash": static_prefix_hash,
+            "total_tool_results": total_tool_results,
+        })
 
     # TRACE: Final response sent to CLI — the EXACT content blocks the CLI will process
     fwd_action = action if is_tool_rt else "n/a"

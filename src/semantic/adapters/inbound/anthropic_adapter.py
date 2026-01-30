@@ -42,6 +42,7 @@ from semantic.adapters.inbound.request_models import (
 )
 from semantic.application.agent_cache_store import AgentCacheStore
 from semantic.application.batch_engine import BlockPoolBatchEngine
+from semantic.application.shared_prefix_cache import SharedPrefixCache
 from semantic.domain.errors import PoolExhaustedError, SemanticError
 
 logger = logging.getLogger(__name__)
@@ -395,6 +396,8 @@ async def create_message(request_body: MessagesRequest, request: Request):  # no
     semantic_state = get_semantic_state(request)
     batch_engine: BlockPoolBatchEngine = semantic_state.batch_engine
     cache_store: AgentCacheStore = semantic_state.cache_store
+    scheduler = getattr(semantic_state, "scheduler", None)
+    prefix_cache: SharedPrefixCache | None = getattr(semantic_state, "prefix_cache", None)
 
     try:
         # 1. Convert messages to prompt (including tools if present)
@@ -423,10 +426,35 @@ async def create_message(request_body: MessagesRequest, request: Request):  # no
 
         # 4. Check cache store for existing cache
         cached_blocks = cache_store.load(agent_id)
+        prefix_hash: str | None = None
         if cached_blocks:
             logger.info(f"Cache hit: {agent_id} ({cached_blocks.total_tokens} tokens)")
         else:
             logger.info(f"Cache miss: {agent_id}")
+
+            # 4b. Compute shared prefix hash for system+tools reuse
+            if prefix_cache is not None:
+                system_text = ""
+                if request_body.system:
+                    system_text = (
+                        request_body.system
+                        if isinstance(request_body.system, str)
+                        else json.dumps(request_body.system)
+                    )
+                tools_text = ""
+                if request_body.tools:
+                    tools_text = json.dumps(
+                        [{"name": t.name, "description": t.description}
+                         for t in request_body.tools]
+                    )
+                if system_text or tools_text:
+                    prefix_hash = SharedPrefixCache.compute_hash(system_text, tools_text)
+                    prefix_entry = prefix_cache.get(prefix_hash)
+                    if prefix_entry is not None:
+                        logger.info(
+                            f"Prefix cache hit: hash={prefix_hash[:8]}, "
+                            f"tokens={prefix_entry.n_tokens}"
+                        )
 
         # 5. Handle streaming vs non-streaming
         if request_body.stream:
@@ -438,23 +466,47 @@ async def create_message(request_body: MessagesRequest, request: Request):  # no
                 )
             )
 
-        # 6. Submit to batch engine (run in executor to avoid blocking)
-        uid = await asyncio.to_thread(
-            batch_engine.submit,
-            agent_id=agent_id,
-            prompt=prompt,
-            cache=cached_blocks,
-            max_tokens=request_body.max_tokens,
-        )
-        logger.debug(f"Submitted generation: uid={uid}")
+        # Resolve sampling parameters from request
+        temperature = request_body.temperature
+        top_p = request_body.top_p
+        top_k = request_body.top_k
 
-        # Invalidate hot cache entry if we passed in a cache
-        # batch_engine clears Q4 blocks after reconstruction
-        if cached_blocks is not None:
-            cache_store.invalidate_hot(agent_id)
+        # 6. Route through scheduler (interleaved) or direct engine path
+        if scheduler is not None:
+            # Scheduler path: interleaved prefill + decode
+            logger.info(f"Routing through scheduler: agent={agent_id}, tokens={len(tokens)}")
+            completion = await scheduler.submit_and_wait(
+                agent_id=agent_id,
+                prompt_tokens=tokens,
+                cache=cached_blocks,
+                max_tokens=request_body.max_tokens,
+            )
 
-        # 7. Execute generation (step until complete - run in executor)
-        completion = await asyncio.to_thread(run_step_for_uid, batch_engine, uid)
+            # Invalidate hot cache if we passed one in
+            if cached_blocks is not None:
+                cache_store.invalidate_hot(agent_id)
+        else:
+            # Legacy direct path: single-request engine
+            uid = await asyncio.to_thread(
+                batch_engine.submit,
+                agent_id=agent_id,
+                prompt=prompt,
+                cache=cached_blocks,
+                max_tokens=request_body.max_tokens,
+                temperature=temperature,
+                top_p=top_p,
+                top_k=top_k,
+            )
+            logger.debug(f"Submitted generation: uid={uid}")
+
+            # Invalidate hot cache entry if we passed in a cache
+            # batch_engine clears Q4 blocks after reconstruction
+            if cached_blocks is not None:
+                cache_store.invalidate_hot(agent_id)
+
+            # 7. Execute generation (step until complete - run in executor)
+            completion = await asyncio.to_thread(run_step_for_uid, batch_engine, uid)
+
         if completion:
             logger.debug(
                 f"Generation complete: {completion.token_count} tokens, "

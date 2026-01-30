@@ -7,6 +7,7 @@ Full implementation tests added in Days 5-7.
 import tempfile
 import time
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -41,8 +42,23 @@ def model_tag(spec: ModelCacheSpec) -> ModelTag:
 
 @pytest.fixture
 def agent_blocks() -> AgentBlocks:
-    """Create test agent blocks (empty for now)."""
-    return AgentBlocks(agent_id="test_agent", blocks={}, total_tokens=0)
+    """Create test agent blocks with non-empty layer data."""
+    from semantic.domain.entities import KVBlock
+
+    block = KVBlock(block_id=0, layer_id=0, token_count=256, layer_data="fake_kv")
+    return AgentBlocks(
+        agent_id="test_agent",
+        blocks={0: [block]},
+        total_tokens=256,
+    )
+
+
+@pytest.fixture
+def mock_cache_adapter() -> MagicMock:
+    """Create a mock cache adapter for disk persistence."""
+    adapter = MagicMock()
+    adapter.save.return_value = Path("/tmp/claude/fake_cache.safetensors")
+    return adapter
 
 
 class TestModelTag:
@@ -190,7 +206,7 @@ class TestAgentCacheStoreSave:
     """Tests for AgentCacheStore.save()."""
 
     def test_save_adds_to_hot_tier(
-        self, agent_blocks: AgentBlocks, model_tag: ModelTag
+        self, agent_blocks: AgentBlocks, model_tag: ModelTag, mock_cache_adapter: MagicMock
     ) -> None:
         """Should add cache entry to hot tier."""
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -198,6 +214,7 @@ class TestAgentCacheStoreSave:
                 cache_dir=Path(tmpdir),
                 max_hot_agents=5,
                 model_tag=model_tag,
+                cache_adapter=mock_cache_adapter,
             )
 
             store.save("agent_1", agent_blocks)
@@ -209,7 +226,7 @@ class TestAgentCacheStoreSave:
             assert entry.blocks is agent_blocks
 
     def test_save_marks_entry_accessed(
-        self, agent_blocks: AgentBlocks, model_tag: ModelTag
+        self, agent_blocks: AgentBlocks, model_tag: ModelTag, mock_cache_adapter: MagicMock
     ) -> None:
         """Should mark entry as accessed on save."""
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -217,6 +234,7 @@ class TestAgentCacheStoreSave:
                 cache_dir=Path(tmpdir),
                 max_hot_agents=5,
                 model_tag=model_tag,
+                cache_adapter=mock_cache_adapter,
             )
 
             store.save("agent_1", agent_blocks)
@@ -240,7 +258,7 @@ class TestAgentCacheStoreSave:
                 store.save("", agent_blocks)
 
     def test_save_triggers_eviction_when_full(
-        self, agent_blocks: AgentBlocks, model_tag: ModelTag
+        self, agent_blocks: AgentBlocks, model_tag: ModelTag, mock_cache_adapter: MagicMock
     ) -> None:
         """Should trigger LRU eviction when hot tier exceeds max."""
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -248,6 +266,7 @@ class TestAgentCacheStoreSave:
                 cache_dir=Path(tmpdir),
                 max_hot_agents=3,  # Small limit
                 model_tag=model_tag,
+                cache_adapter=mock_cache_adapter,
             )
 
             # Add 4 agents (exceeds limit of 3)
@@ -264,7 +283,7 @@ class TestAgentCacheStoreLoad:
     """Tests for AgentCacheStore.load()."""
 
     def test_load_from_hot_tier(
-        self, agent_blocks: AgentBlocks, model_tag: ModelTag
+        self, agent_blocks: AgentBlocks, model_tag: ModelTag, mock_cache_adapter: MagicMock
     ) -> None:
         """Should load cache from hot tier."""
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -272,6 +291,7 @@ class TestAgentCacheStoreLoad:
                 cache_dir=Path(tmpdir),
                 max_hot_agents=5,
                 model_tag=model_tag,
+                cache_adapter=mock_cache_adapter,
             )
 
             store.save("agent_1", agent_blocks)
@@ -280,7 +300,7 @@ class TestAgentCacheStoreLoad:
             assert loaded is agent_blocks
 
     def test_load_updates_access_time(
-        self, agent_blocks: AgentBlocks, model_tag: ModelTag
+        self, agent_blocks: AgentBlocks, model_tag: ModelTag, mock_cache_adapter: MagicMock
     ) -> None:
         """Should update access time on load."""
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -288,6 +308,7 @@ class TestAgentCacheStoreLoad:
                 cache_dir=Path(tmpdir),
                 max_hot_agents=5,
                 model_tag=model_tag,
+                cache_adapter=mock_cache_adapter,
             )
 
             store.save("agent_1", agent_blocks)
@@ -317,7 +338,7 @@ class TestAgentCacheStoreEviction:
     """Tests for AgentCacheStore LRU eviction."""
 
     def test_evict_lru_removes_oldest(
-        self, agent_blocks: AgentBlocks, model_tag: ModelTag
+        self, agent_blocks: AgentBlocks, model_tag: ModelTag, mock_cache_adapter: MagicMock
     ) -> None:
         """Should evict least-recently-used entry."""
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -325,6 +346,7 @@ class TestAgentCacheStoreEviction:
                 cache_dir=Path(tmpdir),
                 max_hot_agents=5,
                 model_tag=model_tag,
+                cache_adapter=mock_cache_adapter,
             )
 
             # Add 3 agents
@@ -342,7 +364,7 @@ class TestAgentCacheStoreEviction:
             assert "agent_3" in store._hot_cache
 
     def test_evict_lru_returns_count(
-        self, agent_blocks: AgentBlocks, model_tag: ModelTag
+        self, agent_blocks: AgentBlocks, model_tag: ModelTag, mock_cache_adapter: MagicMock
     ) -> None:
         """Should return number of evicted entries."""
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -350,6 +372,7 @@ class TestAgentCacheStoreEviction:
                 cache_dir=Path(tmpdir),
                 max_hot_agents=5,
                 model_tag=model_tag,
+                cache_adapter=mock_cache_adapter,
             )
 
             store.save("agent_1", agent_blocks)
@@ -378,7 +401,7 @@ class TestAgentCacheStorePrefixMatching:
             assert result is None
 
     def test_find_prefix_returns_longest_match(
-        self, agent_blocks: AgentBlocks, model_tag: ModelTag
+        self, agent_blocks: AgentBlocks, model_tag: ModelTag, mock_cache_adapter: MagicMock
     ) -> None:
         """find_prefix() should return cache with longest prefix."""
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -386,6 +409,7 @@ class TestAgentCacheStorePrefixMatching:
                 cache_dir=Path(tmpdir),
                 max_hot_agents=5,
                 model_tag=model_tag,
+                cache_adapter=mock_cache_adapter,
             )
 
             # Save two agents with different cache sizes

@@ -1,16 +1,12 @@
 """Integration tests for model hot-swap end-to-end flow."""
 
 import os
-import sys
-from unittest.mock import MagicMock, Mock, patch
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
 from fastapi.testclient import TestClient
 
-# Mock MLX modules
-sys.modules["mlx"] = MagicMock()
-sys.modules["mlx.core"] = MagicMock()
-sys.modules["mlx_lm"] = MagicMock()
+# MLX modules are mocked in conftest.py — do not override here
 
 from semantic.adapters.inbound.admin_api import get_old_engine, get_orchestrator, router
 from semantic.application.agent_cache_store import AgentCacheStore, ModelTag
@@ -82,8 +78,8 @@ def mock_components(tmp_path):
 class TestFullHotSwapFlow:
     """Test complete hot-swap sequence integration."""
 
-    def test_successful_swap_preserves_caches(self, mock_components, tmp_path):
-        """Full swap flow: drain → evict → unload → load → reconfigure → reinit."""
+    async def test_successful_swap_preserves_caches(self, mock_components, tmp_path):
+        """Full swap flow: drain -> evict -> unload -> load -> reconfigure -> reinit."""
         orchestrator = ModelSwapOrchestrator(
             model_registry=mock_components["registry"],
             block_pool=mock_components["pool"],
@@ -98,18 +94,19 @@ class TestFullHotSwapFlow:
             blocks = AgentBlocks(agent_id=f"agent_{i}", blocks={}, total_tokens=0)
             mock_components["cache_store"].save(f"agent_{i}", blocks)
 
-        # Create mock old engine
+        # Create mock old engine with async drain
         old_engine = Mock()
+        old_engine.drain = AsyncMock()
 
         # Execute swap
-        new_engine = orchestrator.swap_model(
+        new_engine = await orchestrator.swap_model(
             old_engine=old_engine,
             new_model_id="large-model",
             timeout_seconds=30.0,
         )
 
         # Verify all phases executed
-        old_engine.drain.assert_called_once()
+        old_engine.drain.assert_awaited_once()
         old_engine.shutdown.assert_called_once()
         mock_components["registry"].unload_model.assert_called_once()
         mock_components["registry"].load_model.assert_called_with("large-model")
@@ -117,7 +114,7 @@ class TestFullHotSwapFlow:
         # Verify new engine created
         assert new_engine is not None
 
-    def test_swap_with_active_requests_drains_first(self, mock_components):
+    async def test_swap_with_active_requests_drains_first(self, mock_components):
         """Swap with active requests waits for drain before proceeding."""
         orchestrator = ModelSwapOrchestrator(
             model_registry=mock_components["registry"],
@@ -126,20 +123,20 @@ class TestFullHotSwapFlow:
             cache_adapter=mock_components["cache_adapter"],
         )
 
-        # Mock engine with active requests
+        # Mock engine with async drain
         old_engine = Mock()
-        old_engine.drain.return_value = None  # Simulates successful drain
+        old_engine.drain = AsyncMock()
 
         # Execute swap
-        new_engine = orchestrator.swap_model(
+        new_engine = await orchestrator.swap_model(
             old_engine=old_engine,
             new_model_id="large-model",
         )
 
         # Verify drain called with default timeout
-        old_engine.drain.assert_called_once_with(timeout_seconds=30.0)
+        old_engine.drain.assert_awaited_once_with(timeout_seconds=30.0)
 
-    def test_swap_failure_rolls_back_to_old_model(self, mock_components):
+    async def test_swap_failure_rolls_back_to_old_model(self, mock_components):
         """Failed swap triggers rollback to previous model."""
         # Setup registry to fail on new model load
         mock_components["registry"].load_model.side_effect = [
@@ -156,10 +153,11 @@ class TestFullHotSwapFlow:
         )
 
         old_engine = Mock()
+        old_engine.drain = AsyncMock()
 
         # Execute swap (should fail and rollback)
-        with pytest.raises(Exception) as exc_info:
-            orchestrator.swap_model(
+        with pytest.raises(Exception):
+            await orchestrator.swap_model(
                 old_engine=old_engine,
                 new_model_id="large-model",
             )
@@ -174,17 +172,16 @@ class TestAdminAPIIntegration:
     @patch.dict(os.environ, {"SEMANTIC_ADMIN_KEY": "test-admin-key"})
     def test_swap_endpoint_triggers_orchestrator(self, test_app, mock_components):
         """POST /admin/models/swap triggers full orchestration."""
-        orchestrator = ModelSwapOrchestrator(
-            model_registry=mock_components["registry"],
-            block_pool=mock_components["pool"],
-            cache_store=mock_components["cache_store"],
-            cache_adapter=mock_components["cache_adapter"],
-        )
+        # Use a mock orchestrator with AsyncMock swap_model
+        mock_orchestrator = Mock()
+        mock_orchestrator._registry = mock_components["registry"]
+        mock_orchestrator.swap_model = AsyncMock(return_value=Mock())
 
         old_engine = Mock()
+        old_engine.drain = AsyncMock()
 
         # Override dependencies
-        test_app.dependency_overrides[get_orchestrator] = lambda: orchestrator
+        test_app.dependency_overrides[get_orchestrator] = lambda: mock_orchestrator
         test_app.dependency_overrides[get_old_engine] = lambda: old_engine
 
         client = TestClient(test_app)
@@ -203,23 +200,18 @@ class TestAdminAPIIntegration:
         assert data["new_model_id"] == "large-model"
 
         # Verify orchestrator was called
-        mock_components["registry"].load_model.assert_called()
+        mock_orchestrator.swap_model.assert_awaited_once()
 
     @patch.dict(os.environ, {"SEMANTIC_ADMIN_KEY": "test-admin-key"})
     def test_swap_endpoint_handles_orchestrator_failure(self, test_app, mock_components):
         """Failed swap returns 500 with error details."""
-        mock_components["registry"].load_model.side_effect = Exception("Model not found")
-
-        orchestrator = ModelSwapOrchestrator(
-            model_registry=mock_components["registry"],
-            block_pool=mock_components["pool"],
-            cache_store=mock_components["cache_store"],
-            cache_adapter=mock_components["cache_adapter"],
-        )
+        mock_orchestrator = Mock()
+        mock_orchestrator._registry = mock_components["registry"]
+        mock_orchestrator.swap_model = AsyncMock(side_effect=Exception("Model not found"))
 
         old_engine = Mock()
 
-        test_app.dependency_overrides[get_orchestrator] = lambda: orchestrator
+        test_app.dependency_overrides[get_orchestrator] = lambda: mock_orchestrator
         test_app.dependency_overrides[get_old_engine] = lambda: old_engine
 
         client = TestClient(test_app)
@@ -239,7 +231,7 @@ class TestAdminAPIIntegration:
 class TestCachePreservationAcrossSwap:
     """Test that agent caches survive model swaps."""
 
-    def test_caches_evicted_before_swap(self, mock_components, tmp_path):
+    async def test_caches_evicted_before_swap(self, mock_components, tmp_path):
         """All hot caches evicted to disk before model swap."""
         orchestrator = ModelSwapOrchestrator(
             model_registry=mock_components["registry"],
@@ -258,15 +250,16 @@ class TestCachePreservationAcrossSwap:
         assert len(mock_components["cache_store"]._hot_cache) == 3
 
         old_engine = Mock()
+        old_engine.drain = AsyncMock()
 
         # Execute swap
-        orchestrator.swap_model(old_engine=old_engine, new_model_id="large-model")
+        await orchestrator.swap_model(old_engine=old_engine, new_model_id="large-model")
 
         # Verify all caches evicted to disk (hot tier should be empty)
         assert len(mock_components["cache_store"]._hot_cache) == 0
         assert len(mock_components["cache_store"]._warm_cache) == 3
 
-    def test_model_tag_updated_after_swap(self, mock_components):
+    async def test_model_tag_updated_after_swap(self, mock_components):
         """Cache store model tag updated to new model after swap."""
         orchestrator = ModelSwapOrchestrator(
             model_registry=mock_components["registry"],
@@ -279,9 +272,10 @@ class TestCachePreservationAcrossSwap:
         assert old_tag.model_id == "small-model"
 
         old_engine = Mock()
+        old_engine.drain = AsyncMock()
 
         # Execute swap
-        orchestrator.swap_model(old_engine=old_engine, new_model_id="large-model")
+        await orchestrator.swap_model(old_engine=old_engine, new_model_id="large-model")
 
         # Verify tag updated
         new_tag = mock_components["cache_store"].model_tag

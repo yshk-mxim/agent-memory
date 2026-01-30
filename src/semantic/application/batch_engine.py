@@ -420,6 +420,10 @@ class BlockPoolBatchEngine:
         prompt: str,
         cache: "AgentBlocksType | None" = None,  #Proper type annotation
         max_tokens: int = 256,
+        prompt_tokens: list[int] | None = None,
+        temperature: float = 0.0,
+        top_p: float = 0.0,
+        top_k: int = 0,
     ) -> str:
         """Submit a generation request to the batch queue.
 
@@ -428,6 +432,10 @@ class BlockPoolBatchEngine:
             prompt: Input text to continue.
             cache: Optional pre-built cache (AgentBlocks from previous generation).
             max_tokens: Maximum tokens to generate.
+            prompt_tokens: Pre-tokenized prompt (skips tokenization if provided).
+            temperature: Sampling temperature (0.0 = greedy).
+            top_p: Nucleus sampling threshold (0.0 = disabled).
+            top_k: Top-k sampling (0 = disabled).
 
         Returns:
             Request UID for tracking this generation.
@@ -759,7 +767,11 @@ class BlockPoolBatchEngine:
             # Create sampler via adapter if using real MLX (not fake for testing)
             samplers = None
             if self._batch_gen_factory is None:
-                sampler = self._cache_adapter.create_sampler(temperature=0.0)
+                sampler = self._cache_adapter.create_sampler(
+                    temperature=temperature,
+                    top_p=top_p,
+                    top_k=top_k,
+                )
                 samplers = [sampler]
 
             # Build insert kwargs
@@ -936,6 +948,114 @@ class BlockPoolBatchEngine:
             # Store: (agent_id, generated_tokens, detokenizer, prompt_tokens)
             # prompt_tokens needed to save full token_sequence for prefix matching
             self._active_requests[actual_uid] = (agent_id, [], detokenizer, list(prompt_tokens))
+
+        return actual_uid
+
+    def has_active_batch(self) -> bool:
+        """Check if BatchGenerator has active sequences (thread-safe).
+
+        Used by ConcurrentScheduler to decide whether to run a decode step.
+        """
+        with self._lock:
+            if self._batch_gen is None:
+                return False
+            return len(self._active_requests) > 0
+
+    def submit_with_cache(
+        self,
+        agent_id: str,
+        prompt_tokens: list[int],
+        kv_caches: list[Any],
+        max_tokens: int = 256,
+        temperature: float = 0.0,
+        top_p: float = 0.0,
+        top_k: int = 0,
+    ) -> str:
+        """Insert a pre-prefilled sequence into BatchGenerator for decode only.
+
+        Called by ConcurrentScheduler after chunked prefill completes.
+        The kv_caches already contain the full prompt's KV state, so
+        BatchGenerator receives an empty prompt and jumps straight to decode.
+
+        Args:
+            agent_id: Unique identifier for the agent.
+            prompt_tokens: Full prompt token sequence (for cache extraction).
+            kv_caches: Pre-built KV caches from MLXPrefillAdapter.
+            max_tokens: Maximum tokens to generate.
+            temperature: Sampling temperature (0.0 = greedy).
+            top_p: Nucleus sampling threshold (0.0 = disabled).
+            top_k: Top-k sampling (0 = disabled).
+
+        Returns:
+            Request UID for tracking this generation.
+        """
+        with self._lock:
+            if self._draining:
+                raise PoolExhaustedError(
+                    "Engine is draining - not accepting new requests."
+                )
+
+        if not prompt_tokens:
+            raise InvalidRequestError("prompt_tokens cannot be empty")
+        if max_tokens <= 0:
+            raise InvalidRequestError(f"max_tokens must be positive, got {max_tokens}")
+        if not agent_id:
+            raise InvalidRequestError("agent_id cannot be empty")
+        if not kv_caches:
+            raise InvalidRequestError("kv_caches cannot be empty")
+
+        # Create BatchGenerator lazily (thread-safe)
+        with self._lock:
+            if self._batch_gen is None:
+                if self._batch_gen_factory is not None:
+                    self._batch_gen = self._batch_gen_factory(self._model, self._tokenizer)
+                else:
+                    self._batch_gen = self._cache_adapter.create_batch_generator(
+                        model=self._model,
+                        stop_tokens={self._tokenizer.eos_token_id},
+                        kv_bits=self._spec.kv_bits,
+                        kv_group_size=self._spec.kv_group_size,
+                    )
+
+        # Insert with empty prompt — cache already has all KV state
+        try:
+            samplers = None
+            if self._batch_gen_factory is None:
+                sampler = self._cache_adapter.create_sampler(
+                    temperature=temperature,
+                    top_p=top_p,
+                    top_k=top_k,
+                )
+                samplers = [sampler]
+
+            insert_kwargs: dict[str, Any] = {
+                "prompts": [[]],
+                "max_tokens": [max_tokens],
+                "caches": [kv_caches],
+            }
+            if samplers is not None:
+                insert_kwargs["samplers"] = samplers
+
+            cached_tokens = kv_caches[0].offset if hasattr(kv_caches[0], 'offset') else 0
+            logger.info(
+                f"[SUBMIT_WITH_CACHE] agent={agent_id}, "
+                f"cache_tokens={cached_tokens}, max_tokens={max_tokens}"
+            )
+
+            uids = self._batch_gen.insert(**insert_kwargs)
+        except Exception as e:
+            raise InvalidRequestError(
+                f"Failed to insert pre-prefilled sequence: {e}"
+            ) from e
+
+        actual_uid: str = uids[0]
+
+        detokenizer_class = type(self._tokenizer.detokenizer)
+        detokenizer = detokenizer_class(self._tokenizer)
+        with self._lock:
+            self._active_requests[actual_uid] = (
+                agent_id, [], detokenizer, list(prompt_tokens)
+            )
 
         return actual_uid
 

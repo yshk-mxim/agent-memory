@@ -155,13 +155,14 @@ class TestModelCacheSpec:
             )
 
     def test_bytes_per_block_per_layer_computation(self) -> None:
-        """Should compute bytes per block correctly."""
+        """Should compute bytes per block correctly for FP16."""
         spec = ModelCacheSpec(
             n_layers=48,
             n_kv_heads=8,
             head_dim=256,
             block_tokens=256,
             layer_types=["global"] * 48,
+            kv_bits=None,  # FP16
         )
 
         # Formula: n_kv_heads * head_dim * 2 (K+V) * 2 (float16) * block_tokens

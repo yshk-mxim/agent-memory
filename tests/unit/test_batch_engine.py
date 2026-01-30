@@ -4,9 +4,18 @@ Tests the batch inference engine with mocked dependencies.
 No MLX required - uses fake models and tokenizers.
 """
 
+import sys
 from typing import Any
+from unittest.mock import MagicMock
 
 import pytest
+
+# Mock MLX modules before importing batch_engine
+sys.modules["mlx"] = MagicMock()
+sys.modules["mlx.core"] = MagicMock()
+sys.modules["mlx_lm"] = MagicMock()
+sys.modules["mlx_lm.models"] = MagicMock()
+sys.modules["mlx_lm.models.cache"] = MagicMock()
 
 from semantic.application.batch_engine import BlockPoolBatchEngine
 from semantic.domain.errors import InvalidRequestError, ModelNotFoundError
@@ -354,6 +363,7 @@ def spec() -> ModelCacheSpec:
         block_tokens=256,
         layer_types=["global"] * 12,
         sliding_window_size=None,
+        kv_bits=None,  # FP16 mode — avoids mx.quantize() on FakeTensors
     )
 
 
