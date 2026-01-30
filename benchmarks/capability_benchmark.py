@@ -304,6 +304,10 @@ class ServerManager:
             time.sleep(2.0)
         raise TimeoutError(f"Server did not start within {timeout}s")
 
+    def is_alive(self) -> bool:
+        """Check if server process is still running."""
+        return self.proc is not None and self.proc.poll() is None
+
     def stop(self) -> None:
         """Gracefully stop server."""
         if self.proc and self.proc.poll() is None:
@@ -537,21 +541,46 @@ class BenchmarkSuite:
             # If warm scenario, do a cold prime first
             if warm:
                 print(f"  [{scenario_name}] Priming cache...")
-                await sse.send_and_measure(body, session_id=sid)
+                try:
+                    await sse.send_and_measure(body, session_id=sid)
+                except (httpx.ConnectError, httpx.RemoteProtocolError) as e:
+                    print(f"  [{scenario_name}] PRIME CRASHED: {type(e).__name__}")
+                    return results
                 # Build follow-up request for warm measurement
                 body = self.prompt.build_request(target_tokens, max_tokens)
 
             # Warmup run (not measured)
             if not warm:
                 print(f"  [{scenario_name}] Warmup run...")
-                await sse.send_and_measure(body, session_id=f"{sid}_warmup")
+                try:
+                    await sse.send_and_measure(
+                        body, session_id=f"{sid}_warmup"
+                    )
+                except (httpx.ConnectError, httpx.RemoteProtocolError) as e:
+                    print(f"  [{scenario_name}] WARMUP CRASHED: {type(e).__name__}")
+                    return results
 
             for i in range(self.runs):
-                mem_before = await self.memory.snapshot()
-                run_sid = sid if warm else f"{sid}_run{i}"
-                result = await sse.send_and_measure(body, session_id=run_sid)
+                try:
+                    mem_before = await self.memory.snapshot()
+                except Exception:
+                    mem_before = {}
 
-                mem_after = await self.memory.snapshot()
+                run_sid = sid if warm else f"{sid}_run{i}"
+                try:
+                    result = await sse.send_and_measure(body, session_id=run_sid)
+                except (httpx.ConnectError, httpx.RemoteProtocolError) as e:
+                    print(
+                        f"  [{scenario_name}] run {i + 1}/{self.runs} "
+                        f"SERVER CRASHED: {type(e).__name__}"
+                    )
+                    break
+
+                try:
+                    mem_after = await self.memory.snapshot()
+                except Exception:
+                    mem_after = {}
+
                 result.scenario = scenario_name
                 result.config = config_name
                 result.memory_before_mb = mem_before.get("active_memory_mb", 0)
@@ -594,13 +623,20 @@ class BenchmarkSuite:
                 body = self.prompt.build_request(target_tokens, max_tokens)
                 t_wall_start = time.perf_counter()
 
-                tasks = [
+                coros = [
                     sse.send_and_measure(
                         body, session_id=f"{scenario_name}_r{run_i}_c{j}"
                     )
                     for j in range(n_concurrent)
                 ]
-                results = await asyncio.gather(*tasks)
+                try:
+                    results = await asyncio.gather(*coros)
+                except (httpx.ConnectError, httpx.RemoteProtocolError) as e:
+                    print(
+                        f"  [{scenario_name}] run {run_i + 1}/{self.runs} "
+                        f"SERVER CRASHED: {type(e).__name__}"
+                    )
+                    break
                 t_wall_end = time.perf_counter()
                 wall_s = t_wall_end - t_wall_start
 
@@ -656,7 +692,14 @@ class BenchmarkSuite:
                         body_b, session_id=f"stall_b_{run_i}"
                     )
                 )
-                result_a, result_b = await asyncio.gather(task_a, task_b)
+                try:
+                    result_a, result_b = await asyncio.gather(task_a, task_b)
+                except (httpx.ConnectError, httpx.RemoteProtocolError) as e:
+                    print(
+                        f"  [{scenario_name}] run {run_i + 1}/{self.runs} "
+                        f"SERVER CRASHED: {type(e).__name__}"
+                    )
+                    break
                 result_a.scenario = scenario_name
                 result_a.config = config_name
                 all_results.append(result_a)
@@ -691,20 +734,30 @@ class BenchmarkSuite:
             await self._run_scenario(
                 config_name, f"cold_{label}", tokens
             )
+            if not self.server.is_alive():
+                print(f"  [!] Server crashed — skipping remaining {config_name} scenarios")
+                return
 
         # Warm scenarios
         for label, tokens in sizes.items():
             await self._run_scenario(
                 config_name, f"warm_{label}", tokens, warm=True
             )
+            if not self.server.is_alive():
+                print(f"  [!] Server crashed — skipping remaining {config_name} scenarios")
+                return
 
     async def run_config_b_extras(self) -> None:
         """Batch-only concurrent scenarios."""
         print("\n  --- Batch concurrent scenarios ---")
         await self._run_concurrent("batched", "concurrent_2x_medium", 2000)
+        if not self.server.is_alive():
+            return
 
         if not self.quick:
             await self._run_concurrent("batched", "concurrent_2x_long", 8000)
+            if not self.server.is_alive():
+                return
             await self._run_interleave_stall("batched")
 
     async def run_chunked_comparison(self) -> None:
@@ -731,11 +784,21 @@ class BenchmarkSuite:
             sse = RequestClient(self.base_url)
             try:
                 body = self.prompt.build_request(tokens, max_tokens=16)
-                mem_before = await self.memory.snapshot()
-                result = await sse.send_and_measure(
-                    body, session_id=f"pressure_{tokens}"
-                )
-                mem_after = await self.memory.snapshot()
+                try:
+                    mem_before = await self.memory.snapshot()
+                except Exception:
+                    mem_before = {}
+                try:
+                    result = await sse.send_and_measure(
+                        body, session_id=f"pressure_{tokens}"
+                    )
+                except (httpx.ConnectError, httpx.RemoteProtocolError) as e:
+                    print(f"  [{scenario}] SERVER CRASHED: {type(e).__name__}")
+                    break
+                try:
+                    mem_after = await self.memory.snapshot()
+                except Exception:
+                    mem_after = {}
 
                 result.scenario = scenario
                 result.config = "pressure"
@@ -767,12 +830,14 @@ class BenchmarkSuite:
             await self.warmup_and_stabilize()
             await self.run_config("single", CONFIG_A)
 
-            if not self.quick:
+            if not self.quick and self.server.is_alive():
                 await self.run_chunked_comparison()
+            if not self.quick and self.server.is_alive():
                 await self.run_memory_pressure()
         finally:
             self.server.stop()
             print("[CONFIG A] Server stopped.\n")
+            self._save_results()
 
         # Config B: Batched
         print("[CONFIG B] Starting server (batched, batch=2, scheduler=on)...")
@@ -783,14 +848,19 @@ class BenchmarkSuite:
             try:
                 body = self.prompt.build_request(2000, 16)
                 await sse.send_and_measure(body, session_id="warmup_b")
+            except (httpx.ConnectError, httpx.RemoteProtocolError):
+                print("  [!] Warmup failed — server may have crashed")
             finally:
                 await sse.close()
 
-            await self.run_config("batched", CONFIG_B)
-            await self.run_config_b_extras()
+            if self.server.is_alive():
+                await self.run_config("batched", CONFIG_B)
+            if self.server.is_alive():
+                await self.run_config_b_extras()
         finally:
             self.server.stop()
             print("[CONFIG B] Server stopped.\n")
+            self._save_results()
 
         # Config C: Unchunked (only 32K comparison)
         if not self.quick:
@@ -803,10 +873,13 @@ class BenchmarkSuite:
                 try:
                     body = self.prompt.build_request(2000, 16)
                     await sse.send_and_measure(body, session_id="warmup_c")
+                except (httpx.ConnectError, httpx.RemoteProtocolError):
+                    print("  [!] Warmup failed — server may have crashed")
                 finally:
                     await sse.close()
 
-                await self.run_unchunked_comparison()
+                if self.server.is_alive():
+                    await self.run_unchunked_comparison()
             finally:
                 self.server.stop()
                 print("[CONFIG C] Server stopped.\n")
