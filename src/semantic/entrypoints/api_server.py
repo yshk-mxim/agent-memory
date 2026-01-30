@@ -459,6 +459,31 @@ def _register_metrics_endpoint(app: FastAPI):
         )
 
 
+def _register_debug_endpoints(app: FastAPI):
+    """Register debug endpoints for benchmarking and diagnostics.
+
+    Args:
+        app: FastAPI application
+    """
+    @app.get("/debug/memory")
+    async def debug_memory():
+        """MLX memory statistics for benchmarking."""
+        import mlx.core as mx
+
+        semantic = getattr(app.state, "semantic", None)
+        pool = semantic.block_pool if semantic else None
+
+        return {
+            "active_memory_mb": round(mx.get_active_memory() / (1024 ** 2), 1),
+            "peak_memory_mb": round(mx.get_peak_memory() / (1024 ** 2), 1),
+            "cache_memory_mb": round(mx.get_cache_memory() / (1024 ** 2), 1),
+            "pool_used_blocks": (
+                pool.total_blocks - pool.available_blocks()
+            ) if pool else 0,
+            "pool_total_blocks": pool.total_blocks if pool else 0,
+        }
+
+
 def _is_openai_request(request: Request) -> bool:
     """Check if request is to OpenAI-style endpoint."""
     return "/chat/completions" in request.url.path
@@ -668,6 +693,7 @@ def create_app() -> FastAPI:
     _register_middleware(app, settings)
     _register_health_endpoints(app)
     _register_metrics_endpoint(app)
+    _register_debug_endpoints(app)
     _register_error_handlers(app)
     _register_routes(app)
 
