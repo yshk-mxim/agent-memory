@@ -341,7 +341,7 @@ CONFIG_B: dict[str, str] = {
 CONFIG_C: dict[str, str] = {
     **CONFIG_A,
     "SEMANTIC_MLX_CHUNKED_PREFILL_ENABLED": "false",
-    "SEMANTIC_MLX_CHUNKED_PREFILL_THRESHOLD": "999999",
+    "SEMANTIC_MLX_CHUNKED_PREFILL_THRESHOLD": "16384",
 }
 
 CONTEXT_SIZES = {
@@ -795,7 +795,7 @@ class BenchmarkSuite:
         # Config C: Unchunked (only 32K comparison)
         if not self.quick:
             print(
-                "[CONFIG C] Starting server (unchunked, threshold=999999)..."
+                "[CONFIG C] Starting server (unchunked, chunked_prefill=disabled)..."
             )
             self.server.start(CONFIG_C)
             try:

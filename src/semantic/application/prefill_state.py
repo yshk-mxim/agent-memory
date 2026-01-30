@@ -38,8 +38,20 @@ class PrefillState:
     _request_ref: Any = field(default=None, repr=False)
 
     @property
+    def prefill_end(self) -> int:
+        """Position up to which chunked prefill should process.
+
+        We stop one token before the end because BatchGenerator
+        needs at least one unprocessed token to produce initial
+        logits for generation. Processing all tokens leaves
+        BatchGenerator with an empty prompt, which corrupts the
+        MoE routing indices.
+        """
+        return max(0, len(self.tokens) - 1)
+
+    @property
     def is_done(self) -> bool:
-        return self.pos >= len(self.tokens)
+        return self.pos >= self.prefill_end
 
     @property
     def total_tokens(self) -> int:
@@ -47,7 +59,7 @@ class PrefillState:
 
     @property
     def remaining_tokens(self) -> int:
-        return max(0, len(self.tokens) - self.pos)
+        return max(0, self.prefill_end - self.pos)
 
     def next_chunk_range(self, chunk_size: int) -> tuple[int, int]:
         """Return (start, end) for the next chunk without advancing pos.
@@ -58,7 +70,7 @@ class PrefillState:
         Returns:
             Tuple of (start_index, end_index) into self.tokens.
         """
-        end = min(self.pos + chunk_size, len(self.tokens))
+        end = min(self.pos + chunk_size, self.prefill_end)
         return (self.pos, end)
 
     def advance(self, n_tokens: int) -> None:

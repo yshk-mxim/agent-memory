@@ -170,21 +170,19 @@ class BatchQuantizedKVCache(_BaseCache):
     ) -> None:
         """Prepare cache for batch generation.
 
-        Called by BatchGenerator before generation starts. Configures
-        padding and length metadata for proper attention masking.
+        Called by BatchGenerator._process_prompts() before processing
+        continuation tokens. The ``lengths`` parameter describes how many
+        NEW tokens remain to process (prompt_len - 1), NOT the total cache
+        size. We must NOT overwrite self.offset, self._idx, or
+        self._lengths which were set correctly by merge().
 
         Args:
             left_padding: Left padding for each sequence (optional)
-            lengths: Sequence lengths for each batch element (optional)
+            lengths: New token counts to process (NOT total cache size)
             right_padding: Right padding for each batch element (optional)
         """
         if left_padding is not None:
             self._left_padding = left_padding
-        if lengths is not None:
-            self._lengths = lengths
-            # Update offset based on max length
-            self.offset = max(lengths) + 1 if lengths else self.offset
-            self._idx = self.offset
         if right_padding is not None:
             self._right_padding = right_padding
 
@@ -265,6 +263,10 @@ class BatchQuantizedKVCache(_BaseCache):
 
         # Update offset
         self.offset = prev + n_tokens
+
+        # Keep per-element lengths in sync with offset so extract() works
+        if self._lengths is not None:
+            self._lengths = [l + n_tokens for l in self._lengths]
 
         # Update cache with quantized data - slice both to exact size
         for i in range(len(self.keys)):

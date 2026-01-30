@@ -265,17 +265,23 @@ class BlockPoolBatchEngine:
         # Track memory for logging
         mem_start = mx.get_active_memory() / (1024**3)
 
-        # Process tokens in adaptive chunks
+        # Process all tokens EXCEPT the last one in chunks.
+        # BatchGenerator needs at least one unprocessed token to produce
+        # initial logits for generation. If we process all tokens here,
+        # BatchGenerator receives an empty prompt with a non-empty cache,
+        # which triggers negative-length prepare() and corrupts MoE routing.
+        prefill_len = seq_len - 1
+
         pos = 0
         chunk_count = 0
         total_time = 0.0
 
-        while pos < seq_len:
+        while pos < prefill_len:
             chunk_start_time = time.time()
 
             # Calculate adaptive chunk size based on current cache position
             chunk_size = adaptive_chunk_size(pos, min_chunk, max_chunk)
-            end = min(pos + chunk_size, seq_len)
+            end = min(pos + chunk_size, prefill_len)
 
             # Extract chunk of tokens
             chunk_tokens = tokens_array[:, pos:end]
@@ -308,7 +314,8 @@ class BlockPoolBatchEngine:
 
         logger.info(
             f"[CHUNKED PREFILL DONE] Agent: {agent_id}, Chunks: {chunk_count}, "
-            f"Total time: {total_time:.1f}s, Tokens/s: {seq_len/total_time:.0f}, "
+            f"Prefilled: {prefill_len}/{seq_len} tokens (last token reserved for BatchGenerator), "
+            f"Total time: {total_time:.1f}s, Tokens/s: {prefill_len/total_time:.0f}, "
             f"Memory: {mem_start:.2f}GB -> {mem_end:.2f}GB (peak: {mem_peak:.2f}GB)"
         )
 
@@ -784,14 +791,16 @@ class BlockPoolBatchEngine:
 
             # CASE 1: kv_cache from chunked prefill (cache is None on cold start)
             if kv_cache is not None and cache is None:
-                # Chunked prefill already processed all prompt tokens
-                # Pass empty list - BatchGenerator just needs to generate
+                # Chunked prefill processed all tokens EXCEPT the last one.
+                # BatchGenerator requires at least one token to produce initial
+                # logits. Pass the last prompt token so BatchGenerator runs one
+                # forward pass (last token + prefilled cache) to seed generation.
                 first_cache = kv_cache[0] if isinstance(kv_cache, list) else kv_cache
                 cached_tokens = getattr(first_cache, 'offset', 0) or 0
-                tokens_to_process = []  # All tokens already in cache
+                tokens_to_process = [prompt_tokens[-1]]
                 logger.info(
                     f"[CHUNKED PREFILL INSERT] Cache has {cached_tokens} tokens from prefill, "
-                    f"passing empty prompt to BatchGenerator for generation only"
+                    f"passing last prompt token to BatchGenerator for generation"
                 )
 
             # CASE 2: kv_cache from loaded cache (cache is not None)
@@ -972,11 +981,11 @@ class BlockPoolBatchEngine:
         top_p: float = 0.0,
         top_k: int = 0,
     ) -> str:
-        """Insert a pre-prefilled sequence into BatchGenerator for decode only.
+        """Insert a pre-prefilled sequence into BatchGenerator for decode.
 
         Called by ConcurrentScheduler after chunked prefill completes.
-        The kv_caches already contain the full prompt's KV state, so
-        BatchGenerator receives an empty prompt and jumps straight to decode.
+        The kv_caches contain all-but-last prompt token KV state. We pass
+        the last prompt token so BatchGenerator can produce initial logits.
 
         Args:
             agent_id: Unique identifier for the agent.
@@ -1018,7 +1027,8 @@ class BlockPoolBatchEngine:
                         kv_group_size=self._spec.kv_group_size,
                     )
 
-        # Insert with empty prompt — cache already has all KV state
+        # Insert with last prompt token — cache has all-but-last token KV.
+        # BatchGenerator requires at least one token to produce initial logits.
         try:
             samplers = None
             if self._batch_gen_factory is None:
@@ -1030,7 +1040,7 @@ class BlockPoolBatchEngine:
                 samplers = [sampler]
 
             insert_kwargs: dict[str, Any] = {
-                "prompts": [[]],
+                "prompts": [[prompt_tokens[-1]]],
                 "max_tokens": [max_tokens],
                 "caches": [kv_caches],
             }
