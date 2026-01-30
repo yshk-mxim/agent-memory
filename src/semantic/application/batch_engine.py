@@ -457,14 +457,15 @@ class BlockPoolBatchEngine:
                     "Server is shutting down gracefully."
                 )
 
-        if not prompt:
+        if not prompt and not prompt_tokens:
             raise InvalidRequestError("Prompt cannot be empty")
         if max_tokens <= 0:
             raise InvalidRequestError(f"max_tokens must be positive, got {max_tokens}")
         if not agent_id:
             raise InvalidRequestError("agent_id cannot be empty")
 
-        prompt_tokens = self._tokenizer.encode(prompt)
+        if not prompt_tokens:
+            prompt_tokens = self._tokenizer.encode(prompt)
         kv_cache: Any | None = None
 
         if cache is not None:
@@ -1101,11 +1102,13 @@ class BlockPoolBatchEngine:
                 batch_response = self._batch_gen.next()  # type: ignore[no-untyped-call]
             except MemoryError as e:
                 logger.error(f"OOM during batch generation step: {e}")
-                # Clean up batch generator to allow recovery
                 self._batch_gen = None
                 raise GenerationError(f"Out of memory during generation: {e}") from e
             except Exception as e:
                 logger.error(f"Batch generation step failed: {e}", exc_info=True)
+                # Reset batch generator to prevent corrupted state from
+                # poisoning subsequent requests (sequences stuck in generator)
+                self._batch_gen = None
                 raise GenerationError(f"Generation step failed: {e}") from e
 
             # Check for termination: empty list means all sequences done

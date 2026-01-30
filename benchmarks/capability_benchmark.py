@@ -146,11 +146,15 @@ class PromptFactory:
 
 
 # ---------------------------------------------------------------------------
-# SSE timing client
+# Request client (non-streaming — server generates all tokens before response)
 # ---------------------------------------------------------------------------
 
-class SSETimingClient:
-    """Async HTTP client that measures TTFT, ITL, E2E from SSE stream."""
+class RequestClient:
+    """Async HTTP client that measures E2E latency from non-streaming requests.
+
+    The server generates all tokens in a single blocking call before returning,
+    so streaming does not provide real ITL. Non-streaming gives cleaner metrics.
+    """
 
     def __init__(self, base_url: str) -> None:
         self.base = base_url
@@ -159,67 +163,27 @@ class SSETimingClient:
     async def close(self) -> None:
         await self.client.aclose()
 
-    async def stream_and_measure(
+    async def send_and_measure(
         self,
         body: dict,
         session_id: str | None = None,
     ) -> ScenarioResult:
-        """Stream a request and measure all timing metrics."""
+        """Send a non-streaming request and measure E2E latency."""
         headers: dict[str, str] = {}
         if session_id:
             headers["X-Session-ID"] = session_id
 
+        # Ensure non-streaming
+        request_body = {**body}
+        request_body.pop("stream", None)
+
         t_start = time.perf_counter()
-        t_first_token: float | None = None
-        token_timestamps: list[float] = []
-        text_chunks: list[str] = []
-        output_tokens = 0
-        input_tokens = 0
-        cache_created = 0
-        cache_read = 0
-
         try:
-            async with self.client.stream(
-                "POST",
+            resp = await self.client.post(
                 f"{self.base}/v1/messages",
-                json={**body, "stream": True},
+                json=request_body,
                 headers=headers,
-            ) as resp:
-                async for line in resp.aiter_lines():
-                    if not line.startswith("data: "):
-                        continue
-                    payload = line[6:].strip()
-                    if not payload or payload == "[DONE]":
-                        continue
-                    try:
-                        data = json.loads(payload)
-                    except json.JSONDecodeError:
-                        continue
-
-                    evt = data.get("type", "")
-
-                    if evt == "content_block_delta":
-                        now = time.perf_counter()
-                        if t_first_token is None:
-                            t_first_token = now
-                        token_timestamps.append(now)
-                        delta = data.get("delta", {})
-                        if delta.get("type") == "text_delta":
-                            text_chunks.append(delta.get("text", ""))
-
-                    elif evt == "message_delta":
-                        usage = data.get("usage", {})
-                        output_tokens = usage.get("output_tokens", output_tokens)
-
-                    elif evt == "message_start":
-                        msg = data.get("message", {})
-                        usage = msg.get("usage", {})
-                        input_tokens = usage.get("input_tokens", 0)
-                        cache_created = usage.get(
-                            "cache_creation_input_tokens", 0
-                        )
-                        cache_read = usage.get("cache_read_input_tokens", 0)
-
+            )
         except Exception as exc:
             t_end = time.perf_counter()
             return ScenarioResult(
@@ -230,30 +194,41 @@ class SSETimingClient:
             )
 
         t_end = time.perf_counter()
-        ttft_s = (t_first_token - t_start) if t_first_token else (t_end - t_start)
         e2e_s = t_end - t_start
-        decode_s = e2e_s - ttft_s
 
-        raw_output = "".join(text_chunks)
+        if resp.status_code != 200:
+            return ScenarioResult(
+                scenario="",
+                config="",
+                e2e_ms=e2e_s * 1000,
+                error=f"HTTP {resp.status_code}: {resp.text[:200]}",
+            )
 
-        itl_values = [
-            token_timestamps[i] - token_timestamps[i - 1]
-            for i in range(1, len(token_timestamps))
-        ]
+        data = resp.json()
+        usage = data.get("usage", {})
+        output_tokens = usage.get("output_tokens", 0)
+        input_tokens = usage.get("input_tokens", 0)
+        cache_created = usage.get("cache_creation_input_tokens", 0)
+        cache_read = usage.get("cache_read_input_tokens", 0)
+
+        # Extract raw output text
+        content = data.get("content", [])
+        raw_output = ""
+        for block in content:
+            if block.get("type") == "text":
+                raw_output += block.get("text", "")
+
+        # Compute TPS (all time is E2E since non-streaming)
+        tps = (output_tokens / e2e_s) if e2e_s > 0 and output_tokens > 0 else 0
 
         return ScenarioResult(
             scenario="",
             config="",
-            ttft_ms=ttft_s * 1000,
             e2e_ms=e2e_s * 1000,
-            itl_mean_ms=(
-                (sum(itl_values) / len(itl_values) * 1000) if itl_values else 0
-            ),
-            itl_p95_ms=percentile(itl_values, 95) * 1000 if itl_values else 0,
-            itl_p99_ms=percentile(itl_values, 99) * 1000 if itl_values else 0,
-            tpot_ms=(decode_s / output_tokens * 1000) if output_tokens else 0,
-            decode_tps=(output_tokens / decode_s) if decode_s > 0 else 0,
-            overall_tps=(output_tokens / e2e_s) if e2e_s > 0 else 0,
+            ttft_ms=e2e_s * 1000,  # No streaming granularity
+            tpot_ms=(e2e_s / output_tokens * 1000) if output_tokens else 0,
+            decode_tps=tps,
+            overall_tps=tps,
             output_tokens=output_tokens,
             input_tokens=input_tokens,
             cache_created=cache_created,
@@ -308,7 +283,7 @@ class ServerManager:
             env=env,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            cwd=str(Path(__file__).resolve().parents[1] / "src"),
+            cwd=str(Path(__file__).resolve().parents[1]),
         )
         self._wait_for_startup()
 
@@ -485,31 +460,57 @@ class BenchmarkSuite:
     # --- Warmup ---
 
     async def warmup_and_stabilize(self) -> None:
-        """Memory warmup: pressure fill, stabilize, clear."""
-        sse = SSETimingClient(self.base_url)
+        """Memory warmup: pressure fill, stabilize, clear.
+
+        Sends progressively larger requests to exercise the MLX compute
+        path and push unified memory toward operating pressure.  Failures
+        are non-fatal — the benchmark continues with whatever pressure
+        was achieved.
+        """
+        client = RequestClient(self.base_url)
+        warmup_sizes = [2000, 8000, 16000]
+        if self.quick:
+            warmup_sizes = [2000]
+
         try:
-            print("[WARMUP] Pressuring memory to ~16GB...")
-            body = self.prompt.build_request(target_tokens=40000, max_tokens=16)
-            await sse.stream_and_measure(body, session_id="warmup_pressure")
+            for tokens in warmup_sizes:
+                label = f"{tokens // 1000}K"
+                print(f"[WARMUP] Sending {label}-token request...")
+                body = self.prompt.build_request(
+                    target_tokens=tokens, max_tokens=16
+                )
+                result = await client.send_and_measure(
+                    body, session_id=f"warmup_{tokens}"
+                )
+                if result.error:
+                    print(f"[WARMUP] {label} failed: {result.error[:120]}")
+                    break
+                print(f"[WARMUP] {label} OK — E2E={result.e2e_ms:.0f}ms")
 
             mem = await self.memory.snapshot()
             peak = mem.get("peak_memory_mb", 0)
             print(f"[WARMUP] Peak memory: {peak:.0f} MB")
-            print("[WARMUP] Stabilizing for 60s (OS memory compressor)...")
-            await asyncio.sleep(60)
 
-            # Clear warmup cache via agent delete
+            if not self.quick:
+                print("[WARMUP] Stabilizing for 60s (OS memory compressor)...")
+                await asyncio.sleep(60)
+            else:
+                print("[WARMUP] Quick mode — skipping stabilization wait")
+                await asyncio.sleep(2)
+
+            # Clear warmup caches
             async with httpx.AsyncClient(timeout=10.0) as c:
-                await c.delete(
-                    f"{self.base_url}/v1/agents/sess_warmup_pressure"
-                )
+                for tokens in warmup_sizes:
+                    await c.delete(
+                        f"{self.base_url}/v1/agents/sess_warmup_{tokens}"
+                    )
 
             mem_after = await self.memory.snapshot()
             active = mem_after.get("active_memory_mb", 0)
             print(f"[WARMUP] Post-clear memory: {active:.0f} MB")
             print("[WARMUP] Baseline established. Starting benchmarks.\n")
         finally:
-            await sse.close()
+            await client.close()
 
     # --- Single scenario runner ---
 
@@ -527,7 +528,7 @@ class BenchmarkSuite:
             print(f"  [{scenario_name}] Already completed, skipping")
             return []
 
-        sse = SSETimingClient(self.base_url)
+        sse = RequestClient(self.base_url)
         results: list[ScenarioResult] = []
         body = self.prompt.build_request(target_tokens, max_tokens)
         sid = session_id or f"bench_{scenario_name}"
@@ -536,19 +537,19 @@ class BenchmarkSuite:
             # If warm scenario, do a cold prime first
             if warm:
                 print(f"  [{scenario_name}] Priming cache...")
-                await sse.stream_and_measure(body, session_id=sid)
+                await sse.send_and_measure(body, session_id=sid)
                 # Build follow-up request for warm measurement
                 body = self.prompt.build_request(target_tokens, max_tokens)
 
             # Warmup run (not measured)
             if not warm:
                 print(f"  [{scenario_name}] Warmup run...")
-                await sse.stream_and_measure(body, session_id=f"{sid}_warmup")
+                await sse.send_and_measure(body, session_id=f"{sid}_warmup")
 
             for i in range(self.runs):
                 mem_before = await self.memory.snapshot()
                 run_sid = sid if warm else f"{sid}_run{i}"
-                result = await sse.stream_and_measure(body, session_id=run_sid)
+                result = await sse.send_and_measure(body, session_id=run_sid)
 
                 mem_after = await self.memory.snapshot()
                 result.scenario = scenario_name
@@ -585,7 +586,7 @@ class BenchmarkSuite:
             print(f"  [{scenario_name}] Already completed, skipping")
             return []
 
-        sse = SSETimingClient(self.base_url)
+        sse = RequestClient(self.base_url)
         all_results: list[ScenarioResult] = []
 
         try:
@@ -594,7 +595,7 @@ class BenchmarkSuite:
                 t_wall_start = time.perf_counter()
 
                 tasks = [
-                    sse.stream_and_measure(
+                    sse.send_and_measure(
                         body, session_id=f"{scenario_name}_r{run_i}_c{j}"
                     )
                     for j in range(n_concurrent)
@@ -636,7 +637,7 @@ class BenchmarkSuite:
             print(f"  [{scenario_name}] Already completed, skipping")
             return []
 
-        sse = SSETimingClient(self.base_url)
+        sse = RequestClient(self.base_url)
         all_results: list[ScenarioResult] = []
 
         try:
@@ -645,13 +646,13 @@ class BenchmarkSuite:
 
             for run_i in range(self.runs):
                 task_a = asyncio.create_task(
-                    sse.stream_and_measure(
+                    sse.send_and_measure(
                         body_a, session_id=f"stall_a_{run_i}"
                     )
                 )
                 await asyncio.sleep(0.5)  # Let A begin decoding
                 task_b = asyncio.create_task(
-                    sse.stream_and_measure(
+                    sse.send_and_measure(
                         body_b, session_id=f"stall_b_{run_i}"
                     )
                 )
@@ -727,11 +728,11 @@ class BenchmarkSuite:
                 print(f"  [{scenario}] Already completed, skipping")
                 continue
 
-            sse = SSETimingClient(self.base_url)
+            sse = RequestClient(self.base_url)
             try:
                 body = self.prompt.build_request(tokens, max_tokens=16)
                 mem_before = await self.memory.snapshot()
-                result = await sse.stream_and_measure(
+                result = await sse.send_and_measure(
                     body, session_id=f"pressure_{tokens}"
                 )
                 mem_after = await self.memory.snapshot()
@@ -765,9 +766,9 @@ class BenchmarkSuite:
         try:
             await self.warmup_and_stabilize()
             await self.run_config("single", CONFIG_A)
-            await self.run_chunked_comparison()
 
             if not self.quick:
+                await self.run_chunked_comparison()
                 await self.run_memory_pressure()
         finally:
             self.server.stop()
@@ -778,10 +779,10 @@ class BenchmarkSuite:
         self.server.start(CONFIG_B)
         try:
             # Brief warmup (no full stabilization needed — OS already warmed)
-            sse = SSETimingClient(self.base_url)
+            sse = RequestClient(self.base_url)
             try:
                 body = self.prompt.build_request(2000, 16)
-                await sse.stream_and_measure(body, session_id="warmup_b")
+                await sse.send_and_measure(body, session_id="warmup_b")
             finally:
                 await sse.close()
 
@@ -798,10 +799,10 @@ class BenchmarkSuite:
             )
             self.server.start(CONFIG_C)
             try:
-                sse = SSETimingClient(self.base_url)
+                sse = RequestClient(self.base_url)
                 try:
                     body = self.prompt.build_request(2000, 16)
-                    await sse.stream_and_measure(body, session_id="warmup_c")
+                    await sse.send_and_measure(body, session_id="warmup_c")
                 finally:
                     await sse.close()
 
@@ -871,16 +872,16 @@ class BenchmarkSuite:
             print(f"  Config: {config_name}")
             print(f"{'═' * 90}")
             print(
-                f"{'Scenario':<22} │ {'Prompt':>6} │ {'TTFT':>8} │ "
-                f"{'ITL':>7} │ {'TPOT':>7} │ {'E2E':>8} │ "
-                f"{'Decode':>7} │ {'Peak':>8}"
+                f"{'Scenario':<22} │ {'Input':>6} │ {'Output':>6} │ "
+                f"{'E2E':>9} │ {'TPOT':>7} │ "
+                f"{'TPS':>7} │ {'CacheR':>6} │ {'Peak':>8}"
             )
             print(
-                f"{'':22} │ {'(tok)':>6} │ {'med(ms)':>8} │ "
-                f"{'med(ms)':>7} │ {'(ms)':>7} │ {'med(ms)':>8} │ "
-                f"{'(tok/s)':>7} │ {'Mem(MB)':>8}"
+                f"{'':22} │ {'(tok)':>6} │ {'(tok)':>6} │ "
+                f"{'med(ms)':>9} │ {'(ms)':>7} │ "
+                f"{'(tok/s)':>7} │ {'(tok)':>6} │ {'Mem(MB)':>8}"
             )
-            print(f"{'─' * 22}┼{'─' * 8}┼{'─' * 10}┼{'─' * 9}┼{'─' * 9}┼{'─' * 10}┼{'─' * 9}┼{'─' * 10}")
+            print(f"{'─' * 22}┼{'─' * 8}┼{'─' * 8}┼{'─' * 11}┼{'─' * 9}┼{'─' * 9}┼{'─' * 8}┼{'─' * 10}")
 
             for sc_name, sc_data in scenarios.items():
                 stats = sc_data.get("stats", {})
@@ -889,17 +890,17 @@ class BenchmarkSuite:
                     continue
 
                 input_tok = runs[0].get("input_tokens", 0)
+                output_tok = runs[0].get("output_tokens", 0)
                 peak_mem = max(r.get("peak_memory_mb", 0) for r in runs)
-                ttft_med = stats.get("ttft_ms", {}).get("median", 0)
-                itl_med = stats.get("itl_mean_ms", {}).get("median", 0)
                 tpot_med = stats.get("tpot_ms", {}).get("median", 0)
                 e2e_med = stats.get("e2e_ms", {}).get("median", 0)
                 tps_med = stats.get("decode_tps", {}).get("median", 0)
+                cache_read = runs[0].get("cache_read", 0)
 
                 print(
-                    f"{sc_name:<22} │ {input_tok:>6} │ {ttft_med:>8.0f} │ "
-                    f"{itl_med:>7.1f} │ {tpot_med:>7.1f} │ {e2e_med:>8.0f} │ "
-                    f"{tps_med:>7.1f} │ {peak_mem:>8.0f}"
+                    f"{sc_name:<22} │ {input_tok:>6} │ {output_tok:>6} │ "
+                    f"{e2e_med:>9.0f} │ {tpot_med:>7.1f} │ "
+                    f"{tps_med:>7.1f} │ {cache_read:>6} │ {peak_mem:>8.0f}"
                 )
 
     def _print_pressure_table(self) -> None:
