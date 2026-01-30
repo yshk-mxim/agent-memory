@@ -144,6 +144,29 @@ class PromptFactory:
             "top_p": 1.0,
         }
 
+    def build_followup_request(
+        self,
+        original_messages: list[dict],
+        assistant_response: str,
+        max_tokens: int = 128,
+    ) -> dict:
+        """Build a multi-turn follow-up that extends the conversation.
+
+        The server detects that the new prompt's token prefix matches the
+        cached sequence and skips re-prefilling the cached portion.
+        """
+        messages = list(original_messages) + [
+            {"role": "assistant", "content": assistant_response},
+            {"role": "user", "content": "Continue explaining in more detail."},
+        ]
+        return {
+            "model": "default",
+            "max_tokens": max_tokens,
+            "messages": messages,
+            "temperature": 0.0,
+            "top_p": 1.0,
+        }
+
 
 # ---------------------------------------------------------------------------
 # Request client (non-streaming — server generates all tokens before response)
@@ -564,16 +587,25 @@ class BenchmarkSuite:
         sid = session_id or f"bench_{scenario_name}"
 
         try:
-            # If warm scenario, do a cold prime first
+            # If warm scenario, do a cold prime first, then build follow-up
             if warm:
                 print(f"  [{scenario_name}] Priming cache...")
                 try:
-                    await sse.send_and_measure(body, session_id=sid)
+                    prime_result = await sse.send_and_measure(
+                        body, session_id=sid
+                    )
                 except (httpx.ConnectError, httpx.RemoteProtocolError) as e:
                     print(f"  [{scenario_name}] PRIME CRASHED: {type(e).__name__}")
                     return results
-                # Build follow-up request for warm measurement
-                body = self.prompt.build_request(target_tokens, max_tokens)
+                # Build multi-turn follow-up that extends the conversation.
+                # The server matches the cached token prefix and skips
+                # re-prefilling the original prompt — only new tokens
+                # (assistant response + follow-up question) need processing.
+                original_messages = self.prompt.build_messages(target_tokens)
+                assistant_text = prime_result.raw_output or "Understood."
+                body = self.prompt.build_followup_request(
+                    original_messages, assistant_text, max_tokens
+                )
 
             # Warmup run (not measured)
             if not warm:
