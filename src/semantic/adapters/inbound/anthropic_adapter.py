@@ -6,6 +6,14 @@ Implements the Anthropic Messages API with:
 - Tool use support
 - Extended thinking
 - Prompt caching
+
+TODO: Wire ConcurrentScheduler for interleaved prefill/decode.
+      Currently routes directly to batch_engine.submit().
+      See openai_adapter.py for scheduler integration pattern:
+      - Non-streaming: scheduler.submit_and_wait()
+      - Streaming: scheduler.submit_and_stream() → StreamDelta
+      Requires: get scheduler from semantic_state.scheduler,
+      route through it when not None, fall back to batch_engine.
 """
 
 import asyncio

@@ -173,7 +173,104 @@ def openai_messages_to_prompt(  # noqa: C901, PLR0912
     return "\n".join(lines)
 
 
-async def stream_chat_completion(  # noqa: C901, PLR0912
+async def _stream_via_scheduler(  # noqa: C901, PLR0912
+    request_body: ChatCompletionsRequest,
+    batch_engine: Any,
+    cache_store: Any,
+    tokens: list[int],
+    agent_id: str,
+    cached_blocks: Any,
+    prompt: str,
+    max_tokens: int,
+    scheduler: Any,
+) -> AsyncIterator[dict[str, Any]]:
+    """Stream via ConcurrentScheduler for true per-token streaming.
+
+    Uses scheduler.submit_and_stream() which yields StreamDelta objects
+    as each token is decoded, enabling interleaved prefill/decode.
+    """
+    completion_id = f"chatcmpl-{uuid.uuid4().hex[:24]}"
+    created = int(time.time())
+    model = request_body.model
+
+    yield {
+        "data": json.dumps({
+            "id": completion_id, "object": "chat.completion.chunk",
+            "created": created, "model": model,
+            "choices": [{"index": 0, "delta": {"role": "assistant", "content": ""}, "finish_reason": None}],
+        })
+    }
+
+    accumulated_text = ""
+    token_count = 0
+    finish_reason_raw = None
+
+    async for delta in scheduler.submit_and_stream(
+        agent_id=agent_id,
+        prompt_tokens=tokens,
+        cache=cached_blocks,
+        max_tokens=max_tokens,
+        prompt_text=prompt,
+    ):
+        new_text = delta.text[len(accumulated_text):]
+        accumulated_text = delta.text
+        token_count = delta.token_count
+        if new_text:
+            yield {
+                "data": json.dumps({
+                    "id": completion_id, "object": "chat.completion.chunk",
+                    "created": created, "model": model,
+                    "choices": [{"index": 0, "delta": {"content": new_text}, "finish_reason": None}],
+                })
+            }
+        if delta.finish_reason is not None:
+            finish_reason_raw = delta.finish_reason
+
+    # Parse function calls from accumulated output
+    _remaining_text, function_calls = parse_function_calls(accumulated_text)
+
+    if function_calls:
+        for func_call in function_calls:
+            tool_call_id = f"call_{uuid.uuid4().hex[:24]}"
+            arguments = func_call["arguments"]
+            if isinstance(arguments, dict):
+                arguments = json.dumps(arguments)
+            yield {
+                "data": json.dumps({
+                    "id": completion_id, "object": "chat.completion.chunk",
+                    "created": created, "model": model,
+                    "choices": [{"index": 0, "delta": {
+                        "tool_calls": [{"index": 0, "id": tool_call_id, "type": "function",
+                                        "function": {"name": func_call["name"], "arguments": arguments}}],
+                    }, "finish_reason": None}],
+                })
+            }
+
+    # Save updated cache
+    updated_blocks = batch_engine.get_agent_blocks(agent_id)
+    if updated_blocks:
+        cache_store.save(agent_id, updated_blocks)
+        logger.debug(f"Saved cache: {agent_id} ({updated_blocks.total_tokens} tokens)")
+
+    if function_calls:
+        finish_reason = "tool_calls"
+    elif finish_reason_raw == "stop":
+        finish_reason = "stop"
+    else:
+        finish_reason = "length"
+
+    yield {
+        "data": json.dumps({
+            "id": completion_id, "object": "chat.completion.chunk",
+            "created": created, "model": model,
+            "choices": [{"index": 0, "delta": {}, "finish_reason": finish_reason}],
+        })
+    }
+    yield {"data": "[DONE]"}
+    logger.info(f"Scheduler streaming complete: {token_count} tokens, finish_reason={finish_reason}")
+
+
+async def stream_chat_completion(  # noqa: C901, PLR0912, PLR0915
     request_body: ChatCompletionsRequest,
     batch_engine: Any,
     cache_store: Any,
@@ -181,6 +278,7 @@ async def stream_chat_completion(  # noqa: C901, PLR0912
     agent_id: str,
     cached_blocks: Any,
     prompt: str,
+    scheduler: Any | None = None,
 ) -> AsyncIterator[dict[str, Any]]:
     """Stream chat completion results as SSE events (OpenAI format).
 
@@ -192,8 +290,21 @@ async def stream_chat_completion(  # noqa: C901, PLR0912
         SSE events in OpenAI Chat Completions format
     """
     try:
-        # Submit to batch engine
         max_tokens = request_body.max_tokens or 256
+
+        if cached_blocks is not None:
+            cache_store.invalidate_hot(agent_id)
+
+        # --- Scheduler path: true per-token streaming ---
+        if scheduler is not None:
+            async for event in _stream_via_scheduler(
+                request_body, batch_engine, cache_store, _tokens,
+                agent_id, cached_blocks, prompt, max_tokens, scheduler,
+            ):
+                yield event
+            return
+
+        # --- Direct batch engine path (no scheduler) ---
         uid = batch_engine.submit(
             agent_id=agent_id,
             prompt=prompt,
@@ -201,11 +312,6 @@ async def stream_chat_completion(  # noqa: C901, PLR0912
             max_tokens=max_tokens,
         )
         logger.debug(f"Submitted streaming generation: uid={uid}")
-
-        # Invalidate hot cache entry if we passed in a cache
-        # batch_engine clears Q4 blocks after reconstruction
-        if cached_blocks is not None:
-            cache_store.invalidate_hot(agent_id)
 
         completion_id = f"chatcmpl-{uuid.uuid4().hex[:24]}"
         created_timestamp = int(time.time())
@@ -411,28 +517,38 @@ async def create_chat_completion(  # noqa: C901, PLR0912, PLR0915
             logger.info("Returning OpenAI SSE stream")
             return EventSourceResponse(
                 stream_chat_completion(
-                    request_body, batch_engine, cache_store, tokens, agent_id, cached_blocks, prompt
+                    request_body, batch_engine, cache_store, tokens,
+                    agent_id, cached_blocks, prompt,
+                    scheduler=semantic_state.scheduler,
                 )
             )
 
-        # 5. Submit to batch engine (non-streaming, run in executor)
-        max_tokens = request_body.max_tokens or 256  # Default if not specified
-        uid = await asyncio.to_thread(
-            batch_engine.submit,
-            agent_id=agent_id,
-            prompt=prompt,
-            cache=cached_blocks,
-            max_tokens=max_tokens,
-        )
-        logger.debug(f"Submitted generation: uid={uid}")
+        # 5. Generate (scheduler or direct batch engine)
+        max_tokens = request_body.max_tokens or 256
+        scheduler = semantic_state.scheduler
 
-        # Invalidate hot cache entry if we passed in a cache
-        # batch_engine clears Q4 blocks after reconstruction
         if cached_blocks is not None:
             cache_store.invalidate_hot(agent_id)
 
-        # 6. Execute generation (step until complete - run in executor)
-        completion = await asyncio.to_thread(run_step_for_uid, batch_engine, uid)
+        if scheduler is not None:
+            completion = await scheduler.submit_and_wait(
+                agent_id=agent_id,
+                prompt_tokens=tokens,
+                cache=cached_blocks,
+                max_tokens=max_tokens,
+                prompt_text=prompt,
+            )
+        else:
+            uid = await asyncio.to_thread(
+                batch_engine.submit,
+                agent_id=agent_id,
+                prompt=prompt,
+                cache=cached_blocks,
+                max_tokens=max_tokens,
+            )
+            logger.debug(f"Submitted generation: uid={uid}")
+            completion = await asyncio.to_thread(run_step_for_uid, batch_engine, uid)
+
         if completion:
             logger.debug(
                 f"Generation complete: {completion.token_count} tokens, "
