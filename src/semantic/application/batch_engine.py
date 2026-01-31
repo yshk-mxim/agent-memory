@@ -553,7 +553,7 @@ class BlockPoolBatchEngine:
                                 f"offset ({first_offset}). BatchGenerator won't recognize cache."
                             )
 
-                    logger.info(f"[RECONSTRUCT COMPLETE] Loaded {cache.total_tokens} tokens across {len(cache.blocks)} layers, now in FP16 KVCache")
+                    logger.info(f"[RECONSTRUCT COMPLETE] Loaded {cache.total_tokens} tokens across {len(cache.blocks)} layers as QuantizedKVCache (Q4)")
 
                     # Free Q4 GPU memory by clearing layer_data references.
                     # IMPORTANT: Do NOT call cache.blocks.clear() here!
@@ -575,7 +575,7 @@ class BlockPoolBatchEngine:
                     cache_after_free = mx.get_cache_memory() / (1024**3)
                     peak_after_free = mx.get_peak_memory() / (1024**3)
                     logger.info(f"[MEMORY POST-FREE] Active: {mem_after_free:.2f}GB, Cache: {cache_after_free:.2f}GB, Peak: {peak_after_free:.2f}GB")
-                    logger.info(f"[MEMORY DELTA] Active: +{(mem_after_free - mem_before):.2f}GB (Q4 freed, FP16 remains)")
+                    logger.info(f"[MEMORY DELTA] Active: +{(mem_after_free - mem_before):.2f}GB (Q4 block data freed, QuantizedKVCache remains)")
 
                 except Exception as e:
                     logger.error(f"Cache reconstruction failed for {agent_id}: {e}", exc_info=True)
