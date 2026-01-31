@@ -173,7 +173,13 @@ class ConcurrentScheduler:
             count += 1
             n_tokens = len(req.prompt_tokens)
 
-            if n_tokens < self._interleave_threshold:
+            # Warm requests with cached state: always use direct path.
+            # engine.submit() handles character-level prefix matching and
+            # only processes new tokens. _enqueue_prefill() creates fresh
+            # caches, ignoring the stored KV state entirely.
+            if req.cache is not None:
+                self._submit_direct(req)
+            elif n_tokens < self._interleave_threshold:
                 self._submit_direct(req)
             else:
                 self._enqueue_prefill(req)
