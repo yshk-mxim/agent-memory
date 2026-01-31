@@ -324,7 +324,7 @@ class BlockPoolBatchEngine:
         logger.info(
             f"[CHUNKED PREFILL DONE] Agent: {agent_id}, Chunks: {chunk_count}, "
             f"Prefilled: {prefill_len}/{seq_len} tokens (last token reserved for BatchGenerator), "
-            f"Total time: {total_time:.1f}s, Tokens/s: {prefill_len / total_time:.0f if total_time > 0 else 0}, "
+            f"Total time: {total_time:.1f}s, Tokens/s: {(prefill_len / total_time) if total_time > 0 else 0:.0f}, "
             f"Memory: {mem_start:.2f}GB -> {mem_end:.2f}GB (peak: {mem_peak:.2f}GB)"
         )
 
