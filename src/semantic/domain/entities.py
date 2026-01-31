@@ -114,6 +114,7 @@ class AgentBlocks:
     blocks: dict[int, list[KVBlock]]
     total_tokens: int
     token_sequence: list[int] = field(default_factory=list)  # Actual tokens for prefix matching
+    prompt_text: str = ""  # Raw prompt text for character-level prefix matching
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def num_blocks(self) -> int:
@@ -167,6 +168,27 @@ class AgentBlocks:
         prefix_len = 0
         for cached_tok, query_tok in zip(self.token_sequence, query_tokens):
             if cached_tok != query_tok:
+                break
+            prefix_len += 1
+        return prefix_len
+
+    def common_prefix_chars(self, query_text: str) -> int:
+        """Find length of common character prefix between stored and query text.
+
+        Compares raw prompt text character-by-character to avoid BPE tokenization
+        boundary mismatches that cause false cache misses.
+
+        Args:
+            query_text: The new prompt text to compare against.
+
+        Returns:
+            Number of matching characters from the start (0 if no match).
+        """
+        if not self.prompt_text or not query_text:
+            return 0
+        prefix_len = 0
+        for c1, c2 in zip(self.prompt_text, query_text):
+            if c1 != c2:
                 break
             prefix_len += 1
         return prefix_len

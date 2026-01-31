@@ -38,6 +38,7 @@ class SchedulerRequest:
     prompt_tokens: list[int]
     cache: Any | None
     max_tokens: int
+    prompt_text: str
     future: asyncio.Future[CompletedGeneration]
     loop: asyncio.AbstractEventLoop
 
@@ -82,6 +83,7 @@ class ConcurrentScheduler:
         prompt_tokens: list[int],
         cache: Any | None,
         max_tokens: int,
+        prompt_text: str = "",
     ) -> CompletedGeneration:
         """Submit a request and await its completion.
 
@@ -94,6 +96,7 @@ class ConcurrentScheduler:
             prompt_tokens=prompt_tokens,
             cache=cache,
             max_tokens=max_tokens,
+            prompt_text=prompt_text,
             future=future,
             loop=loop,
         )
@@ -182,7 +185,7 @@ class ConcurrentScheduler:
         try:
             uid = self._engine.submit(
                 agent_id=req.agent_id,
-                prompt=None,
+                prompt=req.prompt_text,
                 cache=req.cache,
                 max_tokens=req.max_tokens,
                 prompt_tokens=req.prompt_tokens,
@@ -258,6 +261,7 @@ class ConcurrentScheduler:
                 prompt_tokens=state.tokens,
                 kv_caches=state.kv_caches,
                 max_tokens=state.max_tokens,
+                prompt_text=req.prompt_text,
             )
             self._uid_to_request[uid] = req
             logger.info(

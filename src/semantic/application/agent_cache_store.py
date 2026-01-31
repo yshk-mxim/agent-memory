@@ -1,5 +1,6 @@
 """Agent cache storage with trie-based prefix matching and LRU eviction."""
 
+import json
 import logging
 import threading
 import time
@@ -479,6 +480,7 @@ class AgentCacheStore:
             "block_tokens": self.model_tag.block_tokens,
             "total_tokens": entry.blocks.total_tokens,
             "token_sequence": entry.blocks.token_sequence,
+            "prompt_text": entry.blocks.prompt_text,
         }
 
         if self._cache_adapter is None:
@@ -519,12 +521,23 @@ class AgentCacheStore:
                 return None
 
             total_tokens = int(metadata.get("total_tokens", 0))
-            token_sequence = metadata.get("token_sequence", [])
+            token_seq_raw = metadata.get("token_sequence", "[]")
+            if isinstance(token_seq_raw, str):
+                try:
+                    token_sequence = json.loads(token_seq_raw)
+                    if not isinstance(token_sequence, list):
+                        token_sequence = []
+                except (json.JSONDecodeError, ValueError):
+                    token_sequence = []
+            else:
+                token_sequence = token_seq_raw if isinstance(token_seq_raw, list) else []
+            prompt_text = str(metadata.get("prompt_text", ""))
             blocks = AgentBlocks(
                 agent_id=agent_id,
                 blocks=blocks_dict,
                 total_tokens=total_tokens,
                 token_sequence=token_sequence,
+                prompt_text=prompt_text,
             )
 
             # Promote to hot tier

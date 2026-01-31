@@ -480,6 +480,7 @@ async def create_message(request_body: MessagesRequest, request: Request):  # no
                 prompt_tokens=tokens,
                 cache=cached_blocks,
                 max_tokens=request_body.max_tokens,
+                prompt_text=prompt,
             )
 
             # Invalidate hot cache if we passed one in
