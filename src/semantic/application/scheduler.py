@@ -2,12 +2,12 @@
 
 The scheduler runs a dedicated worker thread that alternates between:
 1. Draining the request queue for new submissions.
-2. Running one decode step on the BatchGenerator (active sequences).
+2. Running ONE decode step (one token per active sequence).
 3. Processing one prefill chunk for the next queued long-prompt request.
 
 This ensures that a long prefill (e.g. 40K tokens) does not stall an
-active generation stream.  Decode-first priority minimises inter-token
-latency for sequences already generating.
+active generation stream.  Per-token decode granularity enables true
+streaming and responsive prefill interleaving.
 
 Architecture layer: application service.
 No MLX / infrastructure imports — interacts with adapters through ports.
@@ -18,12 +18,13 @@ import logging
 import queue
 import threading
 from collections import deque
-from dataclasses import dataclass, field
+from collections.abc import AsyncIterator
+from dataclasses import dataclass
 from typing import Any
 
 from semantic.application.prefill_state import PrefillState
 from semantic.domain.errors import InvalidRequestError, PoolExhaustedError
-from semantic.domain.value_objects import CompletedGeneration
+from semantic.domain.value_objects import CompletedGeneration, StreamDelta
 
 logger = logging.getLogger(__name__)
 
@@ -41,14 +42,16 @@ class SchedulerRequest:
     prompt_text: str
     future: asyncio.Future[CompletedGeneration]
     loop: asyncio.AbstractEventLoop
+    token_queue: asyncio.Queue[StreamDelta | None] | None = None
 
 
 class ConcurrentScheduler:
     """Interleaves chunked prefill with decode on a single worker thread.
 
     Public API (async, called from HTTP layer):
-        submit_and_wait() — enqueue request, return when generation completes.
-        start() / stop()  — lifecycle management.
+        submit_and_wait()   — enqueue request, return when generation completes.
+        submit_and_stream() — enqueue request, yield per-token streaming deltas.
+        start() / stop()    — lifecycle management.
 
     The scheduling loop runs in a daemon thread so the asyncio event loop
     remains free for HTTP requests.
@@ -103,6 +106,42 @@ class ConcurrentScheduler:
         self._request_queue.put(request)
         return await future
 
+    async def submit_and_stream(
+        self,
+        agent_id: str,
+        prompt_tokens: list[int],
+        cache: Any | None,
+        max_tokens: int,
+        prompt_text: str = "",
+    ) -> AsyncIterator[StreamDelta]:
+        """Submit a request and yield per-token streaming deltas.
+
+        Yields StreamDelta objects as tokens are generated, enabling
+        true SSE streaming through the scheduler's batch=2 path.
+
+        The final delta has finish_reason set. After that, the iterator ends.
+        """
+        loop = asyncio.get_running_loop()
+        future: asyncio.Future[CompletedGeneration] = loop.create_future()
+        token_queue: asyncio.Queue[StreamDelta | None] = asyncio.Queue()
+        request = SchedulerRequest(
+            agent_id=agent_id,
+            prompt_tokens=prompt_tokens,
+            cache=cache,
+            max_tokens=max_tokens,
+            prompt_text=prompt_text,
+            future=future,
+            loop=loop,
+            token_queue=token_queue,
+        )
+        self._request_queue.put(request)
+
+        while True:
+            delta = await token_queue.get()
+            if delta is None:
+                break
+            yield delta
+
     def start(self) -> None:
         """Start the scheduling loop in a daemon thread."""
         if self._running:
@@ -147,7 +186,7 @@ class ConcurrentScheduler:
             if accepted:
                 did_work = True
 
-            # 2. DECODE-FIRST: one step for active sequences
+            # 2. DECODE-FIRST: one token per active sequence
             if self._engine.has_active_batch():
                 self._run_decode_step()
                 did_work = True
@@ -222,17 +261,55 @@ class ConcurrentScheduler:
         )
 
     def _run_decode_step(self) -> None:
-        """Execute one decode step and dispatch completions."""
+        """Execute ONE batch_gen.next() and dispatch tokens/completions.
+
+        Uses step_once() for per-token granularity. Each call generates
+        one token per active sequence, enabling:
+        - True streaming: push tokens to client as generated
+        - Responsive interleaving: prefill chunks between tokens
+        """
         try:
-            completions = list(self._engine.step())
+            results = self._engine.step_once()
         except Exception:
             logger.exception("[SCHEDULER] Decode step failed")
             return
 
-        for completion in completions:
-            req = self._uid_to_request.pop(completion.uid, None)
-            if req is not None:
-                self._resolve_future(req, completion)
+        for result in results:
+            req = self._uid_to_request.get(result.uid)
+            if req is None:
+                continue
+
+            if result.finish_reason is not None:
+                # Sequence complete
+                self._uid_to_request.pop(result.uid, None)
+
+                if req.token_queue is not None:
+                    # Streaming: push final delta then sentinel
+                    delta = StreamDelta(
+                        text=result.text,
+                        token_count=result.token_count,
+                        finish_reason=result.finish_reason,
+                    )
+                    req.loop.call_soon_threadsafe(
+                        req.token_queue.put_nowait, delta
+                    )
+                    req.loop.call_soon_threadsafe(
+                        req.token_queue.put_nowait, None
+                    )
+
+                # Resolve future (used by submit_and_wait, ignored if streaming)
+                if result.completion is not None:
+                    self._resolve_future(req, result.completion)
+            else:
+                # In-progress token — only push to streaming queues
+                if req.token_queue is not None:
+                    delta = StreamDelta(
+                        text=result.text,
+                        token_count=result.token_count,
+                    )
+                    req.loop.call_soon_threadsafe(
+                        req.token_queue.put_nowait, delta
+                    )
 
     def _process_one_chunk(self) -> None:
         """Process one prefill chunk, round-robin across queued sequences.
@@ -306,4 +383,7 @@ class ConcurrentScheduler:
     def _reject_request(self, req: SchedulerRequest, exc: Exception) -> None:
         """Set an exception on the asyncio Future (thread-safe)."""
         logger.warning(f"[SCHEDULER] Rejecting request: {exc}")
+        # Unblock streaming queue if present (avoids hanging async generator)
+        if req.token_queue is not None:
+            req.loop.call_soon_threadsafe(req.token_queue.put_nowait, None)
         req.loop.call_soon_threadsafe(req.future.set_exception, exc)

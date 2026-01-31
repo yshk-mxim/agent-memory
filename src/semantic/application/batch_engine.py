@@ -20,7 +20,7 @@ from semantic.domain.errors import (
     PoolExhaustedError,
 )
 from semantic.domain.services import BlockPool
-from semantic.domain.value_objects import CompletedGeneration, ModelCacheSpec
+from semantic.domain.value_objects import CompletedGeneration, ModelCacheSpec, StepOneResult
 
 # Import Q4 extensions to enable QuantizedKVCache.merge() for batching
 from semantic.adapters.outbound import mlx_quantized_extensions  # noqa: F401
@@ -1184,6 +1184,154 @@ class BlockPoolBatchEngine:
                     # Yield completion
                     yield completion
 
+    def _clean_text(self, text: str) -> str:
+        """Remove BPE artifacts and normalize whitespace."""
+        text = text.replace('Ġ', ' ')
+        text = text.replace('Ċ', '\n')
+        text = text.replace('ċ', '\n')
+        text = text.replace('▁', ' ')
+        text = re.sub(r' {3,}', '  ', text)
+        text = re.sub(r'\n\n\n+', '\n\n', text)
+        return text
+
+    def _finalize_sequence(
+        self,
+        uid: str,
+        response: Any,
+        agent_id: str,
+        tokens: list[int],
+        prompt_tokens: list[int],
+        prompt_text: str,
+    ) -> CompletedGeneration:
+        """Handle cache extraction and text processing for a completed sequence."""
+        # Free old blocks BEFORE allocating new ones
+        with self._lock:
+            if agent_id in self._agent_blocks:
+                old_blocks = self._agent_blocks[agent_id]
+                for layer_blocks in old_blocks.blocks.values():
+                    for block in layer_blocks:
+                        block.layer_data = None
+                    self._pool.free(layer_blocks, agent_id)
+                del self._agent_blocks[agent_id]
+
+        full_token_sequence = list(prompt_tokens)
+
+        cache = response.prompt_cache
+        if cache:
+            first = cache[0] if cache else None
+            logger.info(
+                f"[BATCH EXTRACT] uid={uid}, cache_len={len(cache)}, "
+                f"first_type={type(first).__name__}, "
+                f"offset={getattr(first, 'offset', 'N/A')}"
+            )
+
+        blocks = self._extract_cache(uid, cache, full_token_sequence, prompt_text=prompt_text)
+
+        with self._lock:
+            self._agent_blocks[agent_id] = blocks
+
+        text = self._tokenizer.decode(tokens)
+        text = self._clean_text(text)
+
+        logger.info(f"Finalized {uid}: '{text[:80]}...' ({len(tokens)} tokens)")
+
+        completion = CompletedGeneration(
+            uid=uid,
+            text=text,
+            blocks=blocks,
+            finish_reason=response.finish_reason,
+            token_count=len(tokens),
+        )
+
+        with self._lock:
+            del self._active_requests[uid]
+
+        return completion
+
+    def step_once(self) -> list[StepOneResult]:
+        """Execute one batch_gen.next() call and return per-sequence results.
+
+        Unlike step() which runs all tokens to completion, this processes
+        exactly one token per active sequence. The scheduler calls this
+        once per loop iteration, interleaving with prefill and request
+        acceptance for responsive scheduling.
+
+        Returns:
+            List of StepOneResult, one per active sequence. Empty if no
+            active sequences or batch generator is not initialized.
+        """
+        results: list[StepOneResult] = []
+
+        # Handle pre-computed native path completions
+        with self._lock:
+            native_uids = list(self._native_completions.keys())
+        for uid in native_uids:
+            with self._lock:
+                completion = self._native_completions.pop(uid, None)
+            if completion is not None:
+                results.append(StepOneResult(
+                    uid=uid,
+                    text=completion.text,
+                    token_count=completion.token_count,
+                    finish_reason=completion.finish_reason,
+                    completion=completion,
+                ))
+
+        if self._batch_gen is None:
+            return results
+
+        try:
+            batch_response = self._batch_gen.next()
+        except MemoryError as e:
+            logger.error(f"OOM during batch generation step: {e}")
+            self._batch_gen = None
+            raise GenerationError(f"Out of memory during generation: {e}") from e
+        except Exception as e:
+            logger.error(f"Batch generation step failed: {e}", exc_info=True)
+            self._batch_gen = None
+            raise GenerationError(f"Generation step failed: {e}") from e
+
+        if not batch_response:
+            return results
+
+        for response in batch_response:
+            uid = response.uid
+
+            with self._lock:
+                if uid not in self._active_requests:
+                    logger.error(f"Untracked UID {uid} in step_once")
+                    continue
+                agent_id, tokens, detokenizer, prompt_tokens, prompt_text = self._active_requests[uid]
+
+            if response.finish_reason != "stop":
+                tokens.append(response.token)
+                detokenizer.add_token(response.token)
+                if len(tokens) <= 5:
+                    logger.info(f"Token {len(tokens)}: {response.token} -> '{detokenizer.text}'")
+
+            if response.finish_reason is not None:
+                completion = self._finalize_sequence(
+                    uid, response, agent_id, tokens, prompt_tokens, prompt_text
+                )
+                results.append(StepOneResult(
+                    uid=uid,
+                    text=completion.text,
+                    token_count=completion.token_count,
+                    finish_reason=completion.finish_reason,
+                    completion=completion,
+                ))
+            else:
+                text = self._clean_text(detokenizer.text)
+                results.append(StepOneResult(
+                    uid=uid,
+                    text=text,
+                    token_count=len(tokens),
+                    finish_reason=None,
+                    completion=None,
+                ))
+
+        return results
+
     def _slice_cache_to_length(self, kv_cache: list[Any], target_length: int) -> None:
         """Slice cache tensors to exact target length (in-place).
 
@@ -1250,6 +1398,7 @@ class BlockPoolBatchEngine:
             QuantizedKVCache = None  # type: ignore[assignment]  # noqa: N806
 
         cache: list[Any] = []
+        deferred_eval: list[Any] = []  # Collect tensors for single batched mx.eval
 
         # For each layer in the model
         for layer_id in range(self._spec.n_layers):
@@ -1324,79 +1473,41 @@ class BlockPoolBatchEngine:
             )
 
             if use_kv_cache:
-                # Q4 DIRECT INJECTION: Keep Q4 format end-to-end (75% memory savings)
-                # We inject QuantizedKVCache directly - MLX routes to quantized attention
-                if isinstance(k_full, tuple) and len(k_full) == 3:
-                    from mlx_lm.models.cache import QuantizedKVCache
+                actual_tokens = agent_blocks.total_tokens
 
+                if isinstance(k_full, tuple) and len(k_full) == 3:
                     k_weights, k_scales, k_biases = k_full
                     v_weights, v_scales, v_biases = v_full
 
-                    # Q4 data detected - get quantization params from spec
-                    # Default to 4 bits if spec doesn't specify (Q4 is the standard)
                     kv_bits = getattr(self._spec, 'kv_bits', 4) or 4
                     kv_group_size = getattr(self._spec, 'kv_group_size', 64) or 64
 
-                    # Calculate Q4 size
-                    q4_size_mb = (k_weights.nbytes + k_scales.nbytes + (k_biases.nbytes if k_biases is not None else 0) +
-                                  v_weights.nbytes + v_scales.nbytes + (v_biases.nbytes if v_biases is not None else 0)) / (1024**2)
-
-                    # Create QuantizedKVCache directly (NO dequantization!)
                     kv_cache = QuantizedKVCache(group_size=kv_group_size, bits=kv_bits)
                     kv_cache.keys = (k_weights, k_scales, k_biases)
                     kv_cache.values = (v_weights, v_scales, v_biases)
-
-                    # CRITICAL FIX: Use actual sequence length, NOT tensor buffer size!
-                    # Tensor shape[2] may be rounded up to 256-token blocks (e.g., 2048)
-                    # but actual tokens may be fewer (e.g., 2031). offset MUST be actual tokens
-                    # or BatchGenerator will process wrong token counts on continuation.
-                    buffer_size = k_weights.shape[2]
-                    actual_tokens = agent_blocks.total_tokens
                     kv_cache.offset = actual_tokens
 
-                    # CRITICAL: Force evaluation to materialize tensors and prevent
-                    # lazy graph accumulation that causes OOM
-                    import mlx.core as mx
-                    mx.eval(k_weights, k_scales, v_weights, v_scales)
+                    # Collect tensors for batched eval (avoid per-layer GPU sync)
+                    deferred_eval.extend([k_weights, k_scales, v_weights, v_scales])
                     if k_biases is not None:
-                        mx.eval(k_biases, v_biases)
-
-                    logger = logging.getLogger(__name__)
-                    if buffer_size != actual_tokens:
-                        logger.info(
-                            f"[Q4 INJECT L{layer_id}] Q4: {q4_size_mb:.1f}MB | "
-                            f"offset={actual_tokens} (buffer={buffer_size}, delta={buffer_size - actual_tokens})"
-                        )
-                    else:
-                        logger.info(
-                            f"[Q4 INJECT L{layer_id}] Q4: {q4_size_mb:.1f}MB | {actual_tokens} tokens"
-                        )
+                        deferred_eval.extend([k_biases, v_biases])
                 else:
-                    # Float format (FP16) - use regular KVCache
-                    import mlx.core as mx
-
                     kv_cache = KVCache()
                     kv_cache.state = (k_full, v_full)
-
-                    # CRITICAL FIX: Set offset to actual sequence length for continuation
-                    actual_tokens = agent_blocks.total_tokens
                     kv_cache.offset = actual_tokens
-
-                    # Force evaluation for FP16 as well
-                    mx.eval(k_full, v_full)
-
-                    fp16_size_mb = (k_full.nbytes + v_full.nbytes) / (1024**2)
-                    buffer_size = k_full.shape[2] if hasattr(k_full, 'shape') else 0
-                    logger = logging.getLogger(__name__)
-                    logger.info(
-                        f"[FP16 INJECT L{layer_id}] FP16: {fp16_size_mb:.1f}MB | "
-                        f"offset={actual_tokens} tokens"
-                    )
+                    deferred_eval.extend([k_full, v_full])
 
                 cache.append(kv_cache)
             else:
-                # Test environment: Use tuple format
                 cache.append((k_full, v_full))
+
+        # Single batched GPU sync for ALL layers (was ~54 separate mx.eval calls)
+        if use_kv_cache and deferred_eval:
+            mx.eval(*deferred_eval)
+            logger.info(
+                f"[RECONSTRUCT] Evaluated {len(deferred_eval)} tensors across "
+                f"{len(cache)} layers in single batch"
+            )
 
         return cache
 
@@ -1455,35 +1566,32 @@ class BlockPoolBatchEngine:
             if not isinstance(k_sample, tuple) and kv_bits is not None:
                 import mlx.core as mx
 
-                # Quantize each layer's K and V tensors
                 quantized_cache = []
+                deferred_quant_eval: list[Any] = []
                 for layer_id, (k, v) in enumerate(cache):
                     if k is None:
                         quantized_cache.append((None, None))
                         continue
 
-                    # Quantize K and V tensors
-                    # mx.quantize returns list [weights, scales, biases], convert to tuple
                     k_quant = tuple(mx.quantize(k, group_size=kv_group_size, bits=kv_bits))
                     v_quant = tuple(mx.quantize(v, group_size=kv_group_size, bits=kv_bits))
 
-                    # CRITICAL FIX: Force evaluation to prevent lazy graph accumulation
-                    # Without this, MLX builds deferred computation graphs that hold ALL
-                    # intermediate tensors in memory → OOM during long generation sessions
-                    mx.eval(k_quant[0], k_quant[1], k_quant[2],
-                            v_quant[0], v_quant[1], v_quant[2])
-
+                    deferred_quant_eval.extend([
+                        k_quant[0], k_quant[1], k_quant[2],
+                        v_quant[0], v_quant[1], v_quant[2],
+                    ])
                     quantized_cache.append((k_quant, v_quant))
 
-                cache = quantized_cache
+                # Single batched eval for all layers (was ~27 separate calls)
+                if deferred_quant_eval:
+                    mx.eval(*deferred_quant_eval)
 
-                # Clear MLX cache to release intermediate memory from quantization
+                cache = quantized_cache
                 mx.clear_cache()
 
                 logger.info(
                     f"Quantized cache for {agent_id}: {len(cache)} layers, "
-                    f"bits={kv_bits}, group_size={kv_group_size} "
-                    f"(75% memory savings!)"
+                    f"bits={kv_bits}, group_size={kv_group_size}"
                 )
             elif not isinstance(k_sample, tuple):
                 logger.info(

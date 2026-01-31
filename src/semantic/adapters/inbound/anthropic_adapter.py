@@ -373,6 +373,158 @@ async def stream_generation(  # noqa: C901, PLR0912
         }
 
 
+async def stream_generation_via_scheduler(  # noqa: C901, PLR0912
+    request_body: MessagesRequest,
+    scheduler: Any,
+    cache_store: Any,
+    batch_engine: Any,
+    tokens: list[int],
+    prompt: str,
+    agent_id: str,
+    cached_blocks: Any,
+) -> AsyncIterator[dict[str, Any]]:
+    """Stream generation via scheduler (supports batch=2).
+
+    Uses scheduler.submit_and_stream() for per-token streaming
+    through the scheduler's interleaved decode loop.
+    """
+    try:
+        # Invalidate hot cache before streaming
+        if cached_blocks is not None:
+            cache_store.invalidate_hot(agent_id)
+
+        message_id = f"msg_{uuid.uuid4().hex[:24]}"
+        yield {
+            "event": "message_start",
+            "data": json.dumps(
+                MessageStartEvent(
+                    message=MessagesResponse(
+                        id=message_id,
+                        content=[],
+                        model=request_body.model,
+                        stop_reason=None,
+                        usage=Usage(
+                            input_tokens=len(tokens),
+                            output_tokens=0,
+                            cache_creation_input_tokens=0 if cached_blocks else len(tokens),
+                            cache_read_input_tokens=len(tokens) if cached_blocks else 0,
+                        ),
+                    )
+                ).model_dump()
+            ),
+        }
+
+        yield {
+            "event": "content_block_start",
+            "data": json.dumps(
+                ContentBlockStartEvent(
+                    index=0, content_block=TextContentBlock(text="")
+                ).model_dump()
+            ),
+        }
+
+        accumulated_text = ""
+        final_text = ""
+        final_token_count = 0
+        final_finish_reason = "end_turn"
+
+        async for delta in scheduler.submit_and_stream(
+            agent_id=agent_id,
+            prompt_tokens=tokens,
+            cache=cached_blocks,
+            max_tokens=request_body.max_tokens,
+            prompt_text=prompt,
+        ):
+            new_text = delta.text[len(accumulated_text):]
+            accumulated_text = delta.text
+
+            if new_text:
+                yield {
+                    "event": "content_block_delta",
+                    "data": json.dumps(
+                        ContentBlockDeltaEvent(
+                            index=0, delta={"type": "text_delta", "text": new_text}
+                        ).model_dump()
+                    ),
+                }
+
+            if delta.finish_reason is not None:
+                final_text = delta.text
+                final_token_count = delta.token_count
+                if delta.finish_reason == "stop":
+                    final_finish_reason = "end_turn"
+                else:
+                    final_finish_reason = "max_tokens"
+
+        yield {
+            "event": "content_block_stop",
+            "data": json.dumps(ContentBlockStopEvent(index=0).model_dump()),
+        }
+
+        # Parse for tool calls
+        remaining_text, tool_calls = parse_tool_calls(final_text)
+
+        content_block_index = 1
+        for tool_call in tool_calls:
+            tool_use_block = ToolUseContentBlock(
+                id=f"toolu_{uuid.uuid4().hex[:24]}",
+                name=tool_call["name"],
+                input=tool_call["input"],
+            )
+            yield {
+                "event": "content_block_start",
+                "data": json.dumps(
+                    ContentBlockStartEvent(
+                        index=content_block_index,
+                        content_block=tool_use_block,
+                    ).model_dump()
+                ),
+            }
+            yield {
+                "event": "content_block_stop",
+                "data": json.dumps(
+                    ContentBlockStopEvent(index=content_block_index).model_dump()
+                ),
+            }
+            content_block_index += 1
+
+        # Save cache
+        updated_blocks = batch_engine.get_agent_blocks(agent_id)
+        if updated_blocks:
+            cache_store.save(agent_id, updated_blocks)
+
+        if tool_calls:
+            final_finish_reason = "tool_use"
+
+        yield {
+            "event": "message_delta",
+            "data": json.dumps(
+                MessageDeltaEvent(
+                    delta={"stop_reason": final_finish_reason},
+                    usage=Usage(
+                        input_tokens=0,
+                        output_tokens=final_token_count,
+                    ),
+                ).model_dump()
+            ),
+        }
+
+        yield {
+            "event": "message_stop",
+            "data": json.dumps(MessageStopEvent().model_dump()),
+        }
+
+    except asyncio.CancelledError:
+        logger.info(f"Streaming cancelled for agent {agent_id} (client disconnect)")
+        raise
+    except Exception as e:
+        logger.error(f"Scheduler streaming error: {e}", exc_info=True)
+        yield {
+            "event": "error",
+            "data": json.dumps({"error": {"type": "internal_error", "message": str(e)}}),
+        }
+
+
 @router.post("/messages", status_code=status.HTTP_200_OK)
 async def create_message(request_body: MessagesRequest, request: Request):  # noqa: C901, PLR0912, PLR0915
     """Create a message (POST /v1/messages).
@@ -458,8 +610,17 @@ async def create_message(request_body: MessagesRequest, request: Request):  # no
 
         # 5. Handle streaming vs non-streaming
         if request_body.stream:
-            # Return SSE stream
-            logger.info("Returning SSE stream")
+            if scheduler is not None:
+                # Batched streaming via scheduler (supports batch=2)
+                logger.info("Returning SSE stream via scheduler")
+                return EventSourceResponse(
+                    stream_generation_via_scheduler(
+                        request_body, scheduler, cache_store, batch_engine,
+                        tokens, prompt, agent_id, cached_blocks,
+                    )
+                )
+            # Legacy direct streaming (batch=1 only)
+            logger.info("Returning SSE stream (direct)")
             return EventSourceResponse(
                 stream_generation(
                     request_body, batch_engine, cache_store, tokens, agent_id, cached_blocks

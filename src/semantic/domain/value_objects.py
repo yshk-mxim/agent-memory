@@ -122,3 +122,23 @@ class CompletedGeneration:
     blocks: "AgentBlocks"
     finish_reason: str
     token_count: int
+
+
+@dataclass(frozen=True)
+class StreamDelta:
+    """Single token delta pushed to streaming clients."""
+
+    text: str  # Full accumulated text so far
+    token_count: int
+    finish_reason: str | None = None
+
+
+@dataclass
+class StepOneResult:
+    """Result from a single decode step for one sequence."""
+
+    uid: str
+    text: str
+    token_count: int
+    finish_reason: str | None = None
+    completion: CompletedGeneration | None = None
