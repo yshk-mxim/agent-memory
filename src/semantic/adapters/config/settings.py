@@ -39,17 +39,17 @@ class MLXSettings(BaseSettings):
     )
 
     max_batch_size: int = Field(
-        default=1,
+        default=2,
         ge=1,
         le=20,
         description="Maximum number of concurrent sequences in batch",
     )
 
     prefill_step_size: int = Field(
-        default=512,
+        default=256,
         ge=128,
         le=2048,
-        description="Tokens per prefill step (larger = faster prefill, more memory)",
+        description="Tokens per prefill step (smaller = lower TTFT for queued requests)",
     )
 
     # Adaptive chunked prefill settings (memory-efficient long context)

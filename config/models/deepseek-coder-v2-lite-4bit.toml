@@ -1,7 +1,7 @@
 # Optimal configuration for DeepSeek-Coder-V2-Lite-Instruct-4bit-mlx
 # Model: mlx-community/DeepSeek-Coder-V2-Lite-Instruct-4bit-mlx
 # Platform: Apple Silicon (M-series)
-# Profiled: 2026-01-31
+# Profiled: 2026-01-31 (corrected metrics)
 #
 # To regenerate: python benchmarks/profiling_benchmark.py --quick
 # To auto-tune for your hardware: semantic tune --quick
@@ -14,76 +14,73 @@ head_dim = 128
 kv_bytes_per_token = 62208  # Q4 (4-bit, group_size=64), all 27 layers
 
 [optimal]
-# Core inference parameters (validated by profiling experiments A, C, I)
-max_batch_size = 1          # Exp C: batch=1 optimal on Apple Silicon (1322 TPS vs 59 TPS at batch=2)
-prefill_step_size = 512     # Exp A: best TTFT (883ms) and TPS (1822 at 2K, 1597 at 8K input)
-kv_bits = 4                 # Exp I: Q4 beats Q8 (1531 vs 1424 TPS, 2.6% better TTFT)
+# Core inference parameters (validated by profiling experiments A, C, E)
+max_batch_size = 2          # Exp C: batch=2 gives 48.1 sys TPS vs 39.9 single (21% gain)
+prefill_step_size = 256     # Exp A: minimal single-request impact; smaller steps reduce
+                            # TTFT for queued requests in interleaved scheduling
+kv_bits = 4
 kv_group_size = 64
 
-# Chunked prefill (validated by experiment B)
+# Chunked prefill
 chunked_prefill_enabled = true
 chunked_prefill_threshold = 2048
-chunked_prefill_min_chunk = 512     # Exp B: [512, 2048] beats [512, 4096]
-chunked_prefill_max_chunk = 2048    # Exp B: lower peak memory (10202 vs 10674 MB), better TPS
+chunked_prefill_min_chunk = 512
+chunked_prefill_max_chunk = 2048
 
 # Batching and scheduling
 batch_window_ms = 10
-scheduler_enabled = false   # Exp C: single-request mode optimal (memory-bandwidth-bound)
+scheduler_enabled = true    # Exp C: batch=2 with scheduler gives 21% throughput gain
 
-# Agent cache management (validated by experiment G)
-max_agents_in_memory = 5    # Exp G: 229MB overhead for 5 agents, reload latency ~765ms
+# Agent cache management
+max_agents_in_memory = 5    # Exp G: 229MB overhead for 5 agents, reload ~765ms from disk
 evict_to_disk = true
 
 [thresholds]
 # Adaptive runtime thresholds (used by AdaptiveConfig)
-# When avg input tokens exceeds this, reduce prefill_step_size to 256
-long_context_threshold = 4000   # Exp A: step=256 TTFT similar at 8K but more memory-safe
-
-# When active batch >= this, use conservative chunk sizes
+long_context_threshold = 4000
 high_batch_threshold = 3
-
-# When peak memory (MB) exceeds this, reduce batch size to 1
-memory_pressure_mb = 10500  # Exp B: peak at 16K input with max_chunk=2048 was 10202MB
-
-# Minimum cache hit ratio before disabling warm cache optimizations
+memory_pressure_mb = 10500
 min_cache_benefit_ratio = 0.8
 
 [memory]
 # Calculated memory footprint per token (all layers)
-# Q4: 16 heads * 128 dim * 2 (K+V) * 0.5 bytes * 27 layers = 55,296 bytes + scales/biases
 q4_bytes_per_token = 62208
 q8_bytes_per_token = 110592
 fp16_bytes_per_token = 221184
-# Compression ratios: Q4=28.1%, Q8=50%, FP16=100%
 
 [profiling_results]
-# Benchmark data for publishable statistics (2026-01-31)
-# All numbers are medians across 2 runs, quick mode
+# Corrected benchmark data (2026-01-31, quick mode, 2 runs per scenario)
+# Previous run had broken token counting (SSE event count instead of API usage)
+# Pure decode rate: ~114 TPS (from Experiment E: 120 tokens / 1.054s decode)
 
-# Experiment A: Prefill Step Size Sweep
-# step=256: input200=891ms/1481tps, input2000=2318ms/1590tps, input8000=8929ms/693tps
-# step=512: input200=883ms/1468tps, input2000=2315ms/1822tps, input8000=8959ms/1598tps (BEST)
-# step=1024: input200=950ms/1457tps, input2000=2331ms/1639tps, input8000=8918ms/1227tps
+# Experiment A: Prefill Step Size (E2E TPS, includes prefill time)
+# step=256: input200=894ms/71.6tps, input2000=2315ms/27.6tps, input8000=8923ms/7.2tps
+# step=512: input200=947ms/68.0tps, input2000=2323ms/27.6tps, input8000=9002ms/7.1tps
+# step=1024: input200=958ms/67.4tps, input2000=2309ms/27.7tps, input8000=9108ms/7.0tps
+# Verdict: Minimal impact for single requests; step=256 marginally best for short inputs
+# NOTE: Prefill step size matters for interleaved scheduling — smaller steps reduce
+# TTFT for queued decode requests behind a long prefill operation
 
-# Experiment C: Batch Size vs Throughput
-# batch=1: E2E=1595ms, TPS=1322 (BEST)
-# batch=2: E2E=2700ms, TPS=59.5 (memory bandwidth bottleneck)
-# batch=3: E2E=4193ms, TPS=43.5
+# Experiment C: Batch Size vs System Throughput (total output / wall time)
+# batch=1: E2E=1608ms, 64 tokens, 39.9 TPS
+# batch=2: wall=2663ms, 128 tokens, 48.1 sys TPS (+21% throughput, +200MB peak)
+# batch=3: wall=3769ms, 192 tokens, 51.0 sys TPS (+28% throughput, +372MB peak)
+# Verdict: batch=2 is sweet spot (significant gain, moderate memory cost)
 
-# Experiment E: Output Length Scaling (decode throughput stability)
-# output16: TTFT=1132ms, TPS=1647
-# output64: TTFT=1524ms, TPS=1580
-# output256: TTFT=2064ms, TPS=1633
+# Experiment E: Output Length Scaling (E2E TPS)
+# output16:  E2E=1070ms, 15.0 TPS (prefill-dominated)
+# output64:  E2E=1523ms, 42.0 TPS
+# output256: E2E=2067ms, 58.0 TPS (120 tokens generated)
+# Approx prefill time: ~1000ms for 1K input tokens
+# Pure decode rate: ~114 TPS
 
 # Experiment F: Cache Hit Ratio Impact
-# cold_only: E2E=2347ms
-# warm_only: E2E=2289ms (2.5% improvement)
-# hot_path (10 turns): E2E=905ms (2.6x speedup)
+# cold_only: E2E=2364ms, 27.1 TPS
+# warm_only: E2E=2340ms, 30.0 TPS (1% E2E improvement, 11% TPS improvement)
+# hot_path (10 turns): E2E=914ms, 21.3 TPS (2.6x E2E speedup)
+# Verdict: Multi-turn hot path yields massive gains; warm single follow-up marginal
 
 # Experiment G: LRU Eviction Pressure
 # max_agents=1: fill=1271ms, reload=762ms, peak=9197MB
 # max_agents=5: fill=1247ms, reload=769ms, peak=9426MB (+229MB)
-
-# Experiment I: KV Bits Comparison
-# Q4: TTFT=2339ms, TPS=1531, peak=9251MB
-# Q8: TTFT=2401ms, TPS=1424, peak=9251MB
+# Verdict: Disk reload penalty ~765ms; 5 agents costs 229MB additional memory

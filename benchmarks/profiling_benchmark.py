@@ -94,7 +94,11 @@ class StreamingClient:
         body: dict,
         session_id: str | None = None,
     ) -> ScenarioResult:
-        """Send a streaming request and measure TTFT and E2E."""
+        """Send a streaming request and measure TTFT and E2E.
+
+        Token counts come from the server's message_delta usage field,
+        NOT from counting SSE events.
+        """
         headers: dict[str, str] = {}
         if session_id:
             headers["X-Session-ID"] = session_id
@@ -102,7 +106,11 @@ class StreamingClient:
         request_body = {**body, "stream": True}
         t_start = time.perf_counter()
         ttft = 0.0
-        output_tokens = 0
+        delta_count = 0  # SSE text_delta events (for TTFT only)
+        output_tokens = 0  # Authoritative count from message_delta
+        input_tokens = 0
+        cache_created = 0
+        cache_read = 0
         text = ""
 
         try:
@@ -128,7 +136,9 @@ class StreamingClient:
                     async for chunk in resp.aiter_text():
                         buffer += chunk.replace("\r\n", "\n")
                         while "\n\n" in buffer:
-                            event_str, buffer = buffer.split("\n\n", 1)
+                            event_str, buffer = buffer.split(
+                                "\n\n", 1
+                            )
                             event_type = None
                             event_data = None
                             for line in event_str.strip().split("\n"):
@@ -137,19 +147,41 @@ class StreamingClient:
                                 elif line.startswith("data:"):
                                     event_data = line[5:].strip()
 
-                            if (
-                                event_type == "content_block_delta"
-                                and event_data
-                            ):
+                            if not event_data:
+                                continue
+
+                            if event_type == "content_block_delta":
                                 parsed = json.loads(event_data)
                                 delta = parsed.get("delta", {})
                                 if delta.get("type") == "text_delta":
                                     if ttft == 0.0:
                                         ttft = (
-                                            time.perf_counter() - t_start
+                                            time.perf_counter()
+                                            - t_start
                                         ) * 1000
-                                    output_tokens += 1
+                                    delta_count += 1
                                     text += delta.get("text", "")
+
+                            elif event_type == "message_start":
+                                parsed = json.loads(event_data)
+                                msg = parsed.get("message", {})
+                                usage = msg.get("usage", {})
+                                input_tokens = usage.get(
+                                    "input_tokens", 0
+                                )
+                                cache_created = usage.get(
+                                    "cache_creation_input_tokens", 0
+                                )
+                                cache_read = usage.get(
+                                    "cache_read_input_tokens", 0
+                                )
+
+                            elif event_type == "message_delta":
+                                parsed = json.loads(event_data)
+                                usage = parsed.get("usage", {})
+                                out = usage.get("output_tokens", 0)
+                                if out > 0:
+                                    output_tokens = out
 
         except Exception as exc:
             t_end = time.perf_counter()
@@ -164,7 +196,9 @@ class StreamingClient:
         e2e_ms = (t_end - t_start) * 1000
         decode_ms = e2e_ms - ttft if ttft > 0 else e2e_ms
         decode_tps = (
-            (output_tokens / (decode_ms / 1000)) if decode_ms > 0 else 0
+            (output_tokens / (decode_ms / 1000))
+            if decode_ms > 0 and output_tokens > 0
+            else 0
         )
 
         return ScenarioResult(
@@ -172,10 +206,15 @@ class StreamingClient:
             config="",
             ttft_ms=ttft,
             e2e_ms=e2e_ms,
-            tpot_ms=(e2e_ms / output_tokens) if output_tokens else 0,
+            tpot_ms=(e2e_ms / output_tokens * 1000)
+            if output_tokens
+            else 0,
             decode_tps=decode_tps,
             overall_tps=decode_tps,
             output_tokens=output_tokens,
+            input_tokens=input_tokens,
+            cache_created=cache_created,
+            cache_read=cache_read,
             raw_output=text,
         )
 
@@ -541,13 +580,12 @@ class ProfilingBenchmark:
         scenario: ExperimentScenario,
         run_idx: int,
     ) -> ScenarioResult:
-        """Run a single scenario once."""
+        """Run a single scenario once using non-streaming API."""
         sid = scenario.session_id or f"prof_{scenario.name}_r{run_idx}"
 
         # Clean previous cache for this session
         await self._delete_agent(sid)
 
-        streaming = StreamingClient(self.base_url)
         client = RequestClient(self.base_url)
         body = self.prompt.build_request(
             scenario.target_tokens, scenario.max_tokens
@@ -560,7 +598,6 @@ class ProfilingBenchmark:
 
         try:
             if scenario.warm:
-                # Prime cache first
                 prime = await client.send_and_measure(body, session_id=sid)
                 if prime.error:
                     return ScenarioResult(
@@ -568,7 +605,6 @@ class ProfilingBenchmark:
                         config="",
                         error=f"Prime failed: {prime.error}",
                     )
-                # Build follow-up
                 original_messages = self.prompt.build_messages(
                     scenario.target_tokens
                 )
@@ -583,7 +619,7 @@ class ProfilingBenchmark:
                     scenario, body, run_idx
                 )
             else:
-                result = await streaming.send_and_measure(
+                result = await client.send_and_measure(
                     body, session_id=sid
                 )
 
@@ -606,7 +642,6 @@ class ProfilingBenchmark:
         result.memory_after_mb = mem_after.get("active_memory_mb", 0)
         result.peak_memory_mb = mem_after.get("peak_memory_mb", 0)
 
-        # Cleanup
         await self._delete_agent(sid)
         return result
 
@@ -616,12 +651,11 @@ class ProfilingBenchmark:
         body: dict,
         run_idx: int,
     ) -> ScenarioResult:
-        """Run concurrent requests and return system-level metrics."""
+        """Run concurrent requests and return total system throughput."""
         n = scenario.concurrent
-        clients = [StreamingClient(self.base_url) for _ in range(n)]
 
         # For asymmetric experiments, vary input lengths
-        bodies = []
+        bodies: list[dict] = []
         if "asym_" in scenario.name:
             parts = scenario.name.split("_")
             short_tok = int(parts[1])
@@ -633,9 +667,10 @@ class ProfilingBenchmark:
         else:
             bodies = [body] * n
 
-        async def send_with_stagger(
-            idx: int,
-        ) -> ScenarioResult:
+        # Each concurrent request gets its own RequestClient
+        clients = [RequestClient(self.base_url) for _ in range(n)]
+
+        async def send_with_stagger(idx: int) -> ScenarioResult:
             if scenario.stagger_ms > 0 and idx > 0:
                 await asyncio.sleep(scenario.stagger_ms / 1000)
             sid = f"prof_{scenario.name}_r{run_idx}_c{idx}"
@@ -651,13 +686,19 @@ class ProfilingBenchmark:
         t_wall_end = time.perf_counter()
         wall_ms = (t_wall_end - t_wall_start) * 1000
 
+        # Close all clients
+        for c in clients:
+            await c.close()
+
         total_output = sum(r.output_tokens for r in results)
         wall_s = wall_ms / 1000
         system_tps = total_output / wall_s if wall_s > 0 else 0
 
-        # Aggregate into a single result
+        # Build result with system-level metrics
         main = results[0]
+        main.output_tokens = total_output
         main.overall_tps = system_tps
+        main.decode_tps = system_tps
         main.e2e_ms = wall_ms
 
         # Cleanup concurrent sessions
@@ -674,24 +715,26 @@ class ProfilingBenchmark:
         """Special handler for Experiment F (cache hit ratio)."""
         results: list[ScenarioResult] = []
         client = RequestClient(self.base_url)
-        streaming = StreamingClient(self.base_url)
 
         try:
             # Scenario 1: 100% cold (5 different agents)
-            cold_times = []
+            cold_results: list[ScenarioResult] = []
             for i in range(5):
                 sid = f"cold_only_{run_idx}_{i}"
                 await self._delete_agent(sid)
                 body = self.prompt.build_request(2000, OUTPUT_TOKENS)
-                r = await streaming.send_and_measure(body, session_id=sid)
-                cold_times.append(r.e2e_ms)
+                r = await client.send_and_measure(body, session_id=sid)
+                cold_results.append(r)
                 await self._delete_agent(sid)
 
+            cold_e2e = [r.e2e_ms for r in cold_results]
+            cold_tps = [r.decode_tps for r in cold_results if r.decode_tps > 0]
             results.append(ScenarioResult(
                 scenario="F_cold_only",
                 config=exp.name,
-                e2e_ms=sum(cold_times) / len(cold_times),
-                ttft_ms=sum(cold_times) / len(cold_times),
+                e2e_ms=sum(cold_e2e) / len(cold_e2e),
+                decode_tps=sum(cold_tps) / len(cold_tps) if cold_tps else 0,
+                output_tokens=sum(r.output_tokens for r in cold_results),
             ))
 
             # Scenario 2: 100% warm (same agent, multi-turn)
@@ -699,10 +742,9 @@ class ProfilingBenchmark:
             await self._delete_agent(sid)
             body = self.prompt.build_request(2000, OUTPUT_TOKENS)
 
-            # Prime
             prime = await client.send_and_measure(body, session_id=sid)
             if not prime.error:
-                warm_times = []
+                warm_results: list[ScenarioResult] = []
                 for i in range(5):
                     msgs = self.prompt.build_messages(2000)
                     followup = self.prompt.build_followup_request(
@@ -710,16 +752,19 @@ class ProfilingBenchmark:
                         prime.raw_output or "Understood.",
                         OUTPUT_TOKENS,
                     )
-                    r = await streaming.send_and_measure(
+                    r = await client.send_and_measure(
                         followup, session_id=sid
                     )
-                    warm_times.append(r.e2e_ms)
+                    warm_results.append(r)
 
+                warm_e2e = [r.e2e_ms for r in warm_results]
+                warm_tps = [r.decode_tps for r in warm_results if r.decode_tps > 0]
                 results.append(ScenarioResult(
                     scenario="F_warm_only",
                     config=exp.name,
-                    e2e_ms=sum(warm_times) / len(warm_times),
-                    ttft_ms=sum(warm_times) / len(warm_times),
+                    e2e_ms=sum(warm_e2e) / len(warm_e2e),
+                    decode_tps=sum(warm_tps) / len(warm_tps) if warm_tps else 0,
+                    output_tokens=sum(r.output_tokens for r in warm_results),
                 ))
             await self._delete_agent(sid)
 
@@ -727,13 +772,13 @@ class ProfilingBenchmark:
             sid = f"hot_path_{run_idx}"
             await self._delete_agent(sid)
             body = self.prompt.build_request(2000, 16)
-            hot_times = []
+            hot_results: list[ScenarioResult] = []
             prev_response = ""
             msgs = self.prompt.build_messages(2000)
 
             for i in range(10):
                 if i == 0:
-                    r = await streaming.send_and_measure(
+                    r = await client.send_and_measure(
                         body, session_id=sid
                     )
                 else:
@@ -742,17 +787,21 @@ class ProfilingBenchmark:
                         prev_response or "Continue.",
                         16,
                     )
-                    r = await streaming.send_and_measure(
+                    r = await client.send_and_measure(
                         followup, session_id=sid
                     )
-                hot_times.append(r.e2e_ms)
+                hot_results.append(r)
                 prev_response = r.raw_output or "Continue."
 
+            hot_e2e = [r.e2e_ms for r in hot_results]
+            hot_tps = [r.decode_tps for r in hot_results if r.decode_tps > 0]
             results.append(ScenarioResult(
                 scenario="F_hot_path",
                 config=exp.name,
-                e2e_ms=sum(hot_times) / len(hot_times),
-                ttft_ms=hot_times[0] if hot_times else 0,
+                e2e_ms=sum(hot_e2e) / len(hot_e2e),
+                ttft_ms=hot_e2e[0] if hot_e2e else 0,
+                decode_tps=sum(hot_tps) / len(hot_tps) if hot_tps else 0,
+                output_tokens=sum(r.output_tokens for r in hot_results),
             ))
             await self._delete_agent(sid)
 
@@ -890,10 +939,12 @@ class ProfilingBenchmark:
                                 break
                             r = await self._run_single(scenario, run_i)
                             scenario_runs.append(asdict(r))
+                            tps_label = "TPS" if scenario.concurrent <= 1 else "sysTPS"
                             status = (
                                 f"TTFT={r.ttft_ms:.0f}ms "
                                 f"E2E={r.e2e_ms:.0f}ms "
-                                f"TPS={r.decode_tps:.1f} "
+                                f"{tps_label}={r.decode_tps:.1f} "
+                                f"out={r.output_tokens} "
                                 f"peak={r.peak_memory_mb:.0f}MB"
                             )
                             if r.error:
@@ -929,7 +980,9 @@ class ProfilingBenchmark:
                         runs = scenario_results[key]["runs"]
                         stats = {}
                         for metric in [
-                            "e2e_ms", "ttft_ms", "peak_memory_mb",
+                            "e2e_ms", "ttft_ms", "decode_tps",
+                            "overall_tps", "peak_memory_mb",
+                            "output_tokens",
                         ]:
                             values = [
                                 r.get(metric, 0) for r in runs
