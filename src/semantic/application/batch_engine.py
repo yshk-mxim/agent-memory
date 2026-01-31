@@ -1101,88 +1101,9 @@ class BlockPoolBatchEngine:
                     if len(tokens) <= 5:
                         logger.info(f"Token {len(tokens)}: {response.token} -> '{detokenizer.text}'")
                 if response.finish_reason is not None:
-                    # Sequence complete - process completion
-
-                    # CRITICAL: Free old blocks BEFORE allocating new ones to avoid pool exhaustion
-                    # Old code allocated first, then freed - this could exhaust pool on large caches
-                    with self._lock:
-                        if agent_id in self._agent_blocks:
-                            old_blocks = self._agent_blocks[agent_id]
-                            # Free all blocks from all layers BEFORE allocating new ones
-                            for layer_blocks in old_blocks.blocks.values():
-                                # Clear layer_data BEFORE freeing
-                                for block in layer_blocks:
-                                    block.layer_data = None
-                                self._pool.free(layer_blocks, agent_id)
-                            # Remove from tracking while still under lock
-                            del self._agent_blocks[agent_id]
-
-                    # Store PROMPT tokens only (not generated) for prefix matching.
-                    # This avoids BPE boundary mismatch: tokenize(A+B) != tokenize(A) + tokenize(B)
-                    #
-                    # When client sends back "prompt + response + new_query":
-                    # - Re-tokenized "prompt" portion matches stored prompt_tokens
-                    # - We use the cache (which has KV for prompt + response)
-                    # - Only process the truly new tokens
-                    #
-                    # Note: We store total_tokens separately in AgentBlocks to know cache size
-                    full_token_sequence = list(prompt_tokens)  # Prompt only, not generated
-
-                    # Extract cache and convert to blocks (allocates for ALL layers)
-                    cache = response.prompt_cache
-
-                    # DEBUG: Log cache details before extraction
-                    if cache:
-                        first = cache[0] if cache else None
-                        logger.info(
-                            f"[BATCH EXTRACT] uid={uid}, cache_len={len(cache)}, "
-                            f"first_type={type(first).__name__}, "
-                            f"has_state={hasattr(first, 'state')}, "
-                            f"has_offset={hasattr(first, 'offset')}, "
-                            f"offset={getattr(first, 'offset', 'N/A')}, "
-                            f"callable={callable(cache)}"
-                        )
-                    else:
-                        logger.warning(f"[BATCH EXTRACT] uid={uid}, cache is None or empty!")
-
-                    blocks = self._extract_cache(uid, cache, full_token_sequence, prompt_text=prompt_text)
-
-                    # Store new blocks (thread-safe)
-                    with self._lock:
-                        self._agent_blocks[agent_id] = blocks
-
-                    # CRITICAL FIX: Use tokenizer.decode() for proper spacing
-                    # The streaming detokenizer.text doesn't handle spacing correctly
-                    # when the model generates tokens without space prefixes
-                    text = self._tokenizer.decode(tokens)
-
-                    # Post-processing to remove any remaining BPE markers
-                    # (DeepSeek tokenizer sometimes leaves these in)
-                    text = text.replace('Ġ', ' ')  # BPE space marker (U+0120)
-                    text = text.replace('Ċ', '\n')  # BPE newline marker (U+010A)
-                    text = text.replace('ċ', '\n')  # Lowercase variant
-                    text = text.replace('▁', ' ')  # SentencePiece space marker
-
-                    text = re.sub(r' {3,}', '  ', text)  # Preserve double space (indentation)
-                    text = re.sub(r'\n\n\n+', '\n\n', text)  # Max 2 newlines
-
-                    logger.info(f"Detokenizer finalized for {uid}: '{text}' ({len(tokens)} tokens)")
-
-                    # Create CompletedGeneration
-                    completion = CompletedGeneration(
-                        uid=uid,
-                        text=text,
-                        blocks=blocks,
-                        finish_reason=response.finish_reason,
-                        token_count=len(tokens),  # Generated tokens only
+                    yield self._finalize_sequence(
+                        uid, response, agent_id, tokens, prompt_tokens, prompt_text
                     )
-
-                    # Clean up tracking (thread-safe)
-                    with self._lock:
-                        del self._active_requests[uid]
-
-                    # Yield completion
-                    yield completion
 
     def _clean_text(self, text: str) -> str:
         """Remove BPE artifacts and normalize whitespace."""

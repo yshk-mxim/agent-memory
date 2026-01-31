@@ -462,7 +462,7 @@ async def stream_generation_via_scheduler(  # noqa: C901, PLR0912
         }
 
         # Parse for tool calls
-        remaining_text, tool_calls = parse_tool_calls(final_text)
+        _remaining_text, tool_calls = parse_tool_calls(final_text)
 
         content_block_index = 1
         for tool_call in tool_calls:
