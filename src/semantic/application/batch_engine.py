@@ -254,6 +254,11 @@ class BlockPoolBatchEngine:
             f"Chunk range: {min_chunk}-{max_chunk}, Mode: {cache_mode}"
         )
 
+        # Import generation_stream to route model calls through the same GPU
+        # command stream that BatchGenerator uses. This prevents Metal command
+        # buffer conflicts when the scheduler interleaves prefill with decode.
+        from mlx_lm.generate import generation_stream
+
         # Convert tokens to mx.array with batch dimension [1, seq_len]
         tokens_array = mx.array([tokens])
         seq_len = len(tokens)
@@ -292,17 +297,12 @@ class BlockPoolBatchEngine:
             chunk_size = adaptive_chunk_size(pos, min_chunk, max_chunk)
             end = min(pos + chunk_size, prefill_len)
 
-            # Extract chunk of tokens
-            chunk_tokens = tokens_array[:, pos:end]
-
-            # Forward pass through model with cache
-            # The model updates kv_caches in-place during forward pass
-            y = self._model(chunk_tokens, cache=kv_caches)
-
-            # CRITICAL: Force evaluation to materialize tensors and release intermediates
-            mx.eval(y)
-
-            # CRITICAL: Clear MLX cache to release intermediate attention memory
+            # Run model forward pass on generation_stream — the same stream
+            # BatchGenerator uses — to prevent Metal command buffer conflicts.
+            with mx.stream(generation_stream):
+                chunk_tokens = tokens_array[:, pos:end]
+                y = self._model(chunk_tokens, cache=kv_caches)
+                mx.eval(y)
             mx.clear_cache()
 
             chunk_time = time.time() - chunk_start_time

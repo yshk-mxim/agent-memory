@@ -412,41 +412,45 @@ class BatchQuantizedKVCache(_BaseCache):
     ) -> Any | None:
         """Generate attention mask for the batched cache.
 
+        The mask must cover the full KV length AFTER update_and_fetch()
+        appends n new tokens. The model calls make_mask(n) once before
+        the layer loop, then each layer's update_and_fetch() extends the
+        cache by n tokens. The returned KV length = offset + n, so the
+        mask must match: (B, 1, offset + n).
+
         Args:
-            n: Number of new tokens (optional)
-            return_array: If True, always return an array (not None)
-            window_size: Sliding window size for attention (optional)
+            n: Number of new query tokens about to be processed.
+            return_array: If True, always return an array (not None).
+            window_size: Sliding window size for attention (optional).
 
         Returns:
-            Attention mask tensor or None if no masking needed
+            Attention mask tensor or None if no masking needed.
         """
+        # Total KV length after update_and_fetch adds the new tokens
+        total_len = self.offset + (n or 0)
+
         if not self._left_padding or all(p == 0 for p in self._left_padding):
             if return_array:
-                # Return a mask of all True (attend to everything)
                 B = len(self._left_padding) if self._left_padding else 1
-                seq_len = self.offset
-                return mx.ones((B, 1, seq_len), dtype=mx.bool_)
+                return mx.ones((B, 1, 1, total_len), dtype=mx.bool_)
             return None
 
-        # Create mask where padded positions are masked out
         B = len(self._left_padding)
-        seq_len = self.offset
 
-        # Create causal mask with left padding masked out
-        # Shape: (B, 1, seq_len) for broadcasting with attention
-        mask = mx.ones((B, 1, seq_len), dtype=mx.bool_)
+        # Shape: (B, 1, 1, total_len) for broadcasting with 4D attention
+        # scores of shape (B, n_heads, query_len, kv_len).
+        mask = mx.ones((B, 1, 1, total_len), dtype=mx.bool_)
 
         # Mask out left padding for each sequence
         for i, pad in enumerate(self._left_padding):
             if pad > 0:
-                mask[i, 0, :pad] = False
+                mask[i, 0, 0, :pad] = False
 
         # Apply window size if specified (sliding window attention)
         if window_size is not None and n is not None:
-            # For sliding window, only attend to last window_size positions
-            start_pos = max(0, seq_len - window_size)
-            window_mask = mx.zeros((B, 1, seq_len), dtype=mx.bool_)
-            window_mask[:, :, start_pos:] = True
+            start_pos = max(0, total_len - window_size)
+            window_mask = mx.zeros((B, 1, 1, total_len), dtype=mx.bool_)
+            window_mask[:, :, :, start_pos:] = True
             mask = mx.logical_and(mask, window_mask)
 
         return mask

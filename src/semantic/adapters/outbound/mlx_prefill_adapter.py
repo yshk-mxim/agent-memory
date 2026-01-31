@@ -12,6 +12,7 @@ import time
 from typing import Any
 
 import mlx.core as mx
+from mlx_lm.generate import generation_stream
 from mlx_lm.models.cache import QuantizedKVCache
 
 logger = logging.getLogger(__name__)
@@ -81,17 +82,22 @@ class MLXPrefillAdapter:
         updating kv_caches in place. After the forward pass, forces
         evaluation and clears the MLX compute cache to bound memory.
 
+        The forward pass runs on generation_stream (the same Metal command
+        stream that BatchGenerator uses for decode). This prevents command
+        buffer conflicts when the scheduler interleaves prefill with decode.
+
         Args:
             tokens: Full token sequence.
             start: Start index of this chunk (inclusive).
             end: End index of this chunk (exclusive).
             kv_caches: KV cache list to update in place.
         """
-        chunk_tokens = mx.array([tokens[start:end]])
         t0 = time.time()
 
-        y = self._model(chunk_tokens, cache=kv_caches)
-        mx.eval(y)
+        with mx.stream(generation_stream):
+            chunk_tokens = mx.array([tokens[start:end]])
+            y = self._model(chunk_tokens, cache=kv_caches)
+            mx.eval(y)
         mx.clear_cache()
 
         elapsed_ms = (time.time() - t0) * 1000

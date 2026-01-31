@@ -235,7 +235,12 @@ class ConcurrentScheduler:
                 self._resolve_future(req, completion)
 
     def _process_one_chunk(self) -> None:
-        """Process exactly one prefill chunk for the front of the queue."""
+        """Process one prefill chunk, round-robin across queued sequences.
+
+        When multiple sequences are prefilling, rotates the queue after each
+        chunk so each sequence gets fair GPU time. This prevents a single
+        long prefill from starving shorter ones that arrive later.
+        """
         state, req = self._prefill_queue[0]
 
         chunk_size = self._prefill_adapter.chunk_size_for_position(state.pos)
@@ -258,6 +263,9 @@ class ConcurrentScheduler:
         if state.is_done:
             self._promote_to_decode(state, req)
             self._prefill_queue.popleft()
+        elif len(self._prefill_queue) > 1:
+            # Round-robin: rotate current sequence to back of queue
+            self._prefill_queue.rotate(-1)
 
     def _promote_to_decode(self, state: PrefillState, req: SchedulerRequest) -> None:
         """Prefill complete — insert into BatchGenerator for decode."""
