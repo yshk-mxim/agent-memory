@@ -236,9 +236,9 @@ class ConcurrentScheduler:
                 prompt_tokens=req.prompt_tokens,
             )
             self._uid_to_request[uid] = req
-            logger.info(
-                f"[SCHEDULER] Direct submit: agent={req.agent_id}, "
-                f"tokens={len(req.prompt_tokens)}, uid={uid}"
+            logger.debug(
+                "[SCHEDULER] Direct submit: agent=%s, tokens=%d, uid=%s",
+                req.agent_id, len(req.prompt_tokens), uid,
             )
         except (PoolExhaustedError, InvalidRequestError) as exc:
             self._reject_request(req, exc)
@@ -255,9 +255,9 @@ class ConcurrentScheduler:
         )
         state._request_ref = req
         self._prefill_queue.append((state, req))
-        logger.info(
-            f"[SCHEDULER] Enqueue prefill: agent={req.agent_id}, "
-            f"tokens={len(req.prompt_tokens)}"
+        logger.debug(
+            "[SCHEDULER] Enqueue prefill: agent=%s, tokens=%d",
+            req.agent_id, len(req.prompt_tokens),
         )
 
     def _run_decode_step(self) -> None:
@@ -355,9 +355,9 @@ class ConcurrentScheduler:
                 prompt_text=req.prompt_text,
             )
             self._uid_to_request[uid] = req
-            logger.info(
-                f"[SCHEDULER] Prefill done, promoted: agent={state.agent_id}, "
-                f"chunks={state.chunk_count}, uid={uid}"
+            logger.debug(
+                "[SCHEDULER] Prefill done, promoted: agent=%s, chunks=%d, uid=%s",
+                state.agent_id, state.chunk_count, uid,
             )
         except (PoolExhaustedError, InvalidRequestError) as exc:
             self._reject_request(req, exc)
