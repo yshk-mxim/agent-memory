@@ -114,6 +114,11 @@ Continuous batching combined with persistent per-agent KV caches for multi-agent
 
 Replaces token-level prefix matching with character-level text comparison to fix BPE tokenization boundary mismatches that caused warm TTFT to equal cold TTFT. Only the new portion of a conversation is tokenized, eliminating false cache misses from tokenizer non-compositionality.
 
+### 7. MLX/UMA System-Level Novelty (Unified)
+**File**: `mlx_uma_system_novelty.md`
+
+Unified document tying all five techniques together around the Apple Silicon Unified Memory Architecture thesis. Covers why UMA fundamentally changes the design space for persistent KV cache management: zero-copy disk↔GPU, compute-bound prefill making cache reuse 10-50x more valuable than datacenter, MLX lazy evaluation discipline, three-step memory reclamation, and the co-designed system synergy across all techniques.
+
 ---
 
 ## Related Documentation
@@ -124,4 +129,4 @@ Replaces token-level prefix matching with character-level text comparison to fix
 
 ---
 
-**Last Updated**: January 23, 2026
+**Last Updated**: January 30, 2026
