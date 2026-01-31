@@ -1,0 +1,261 @@
+{
+  "metadata": {
+    "timestamp": "2026-01-31T23:07:04.862172+00:00",
+    "server": "lmstudio",
+    "base_url": "http://127.0.0.1:1234",
+    "context_mode": "full",
+    "api": "openai",
+    "endpoint": "/v1/chat/completions",
+    "machine": {
+      "os": "Darwin",
+      "os_version": "25.2.0",
+      "chip": "arm64"
+    },
+    "git_sha": "de0e204",
+    "runs_per_scenario": 1,
+    "quick": true
+  },
+  "experiments": {
+    "1_cold_start": {
+      "cold_short": {
+        "runs": [
+          {
+            "scenario": "cold_short",
+            "config": "lmstudio",
+            "ttft_ms": 290.23762501310557,
+            "e2e_ms": 771.5440840111114,
+            "itl_mean_ms": 0.0,
+            "itl_p95_ms": 0.0,
+            "itl_p99_ms": 0.0,
+            "tpot_ms": 7.63978506346041,
+            "decode_tps": 130.89373479665068,
+            "overall_tps": 130.89373479665068,
+            "output_tokens": 63,
+            "input_tokens": 0,
+            "cache_created": 0,
+            "cache_read": 0,
+            "memory_before_mb": 0.0,
+            "memory_after_mb": 0.0,
+            "peak_memory_mb": 0,
+            "raw_output": "The system's block-based KV (Key-Value) cache architecture is designed to efficiently manage memory usage by storing data in fixed-size blocks. Each block contains a specific number of token key-value pairs, which are used to store and retrieve data during the execution of a model. These blocks are allocated",
+            "error": null
+          }
+        ],
+        "stats": {
+          "ttft_ms": {
+            "mean": 290.23762501310557,
+            "median": 290.23762501310557,
+            "p95": 290.23762501310557,
+            "p99": 290.23762501310557
+          },
+          "e2e_ms": {
+            "mean": 771.5440840111114,
+            "median": 771.5440840111114,
+            "p95": 771.5440840111114,
+            "p99": 771.5440840111114
+          },
+          "decode_tps": {
+            "mean": 130.89373479665068,
+            "median": 130.89373479665068,
+            "p95": 130.89373479665068,
+            "p99": 130.89373479665068
+          },
+          "peak_memory_mb": {
+            "mean": 0.0,
+            "median": 0,
+            "p95": 0,
+            "p99": 0
+          }
+        }
+      },
+      "cold_medium": {
+        "runs": [
+          {
+            "scenario": "cold_medium",
+            "config": "lmstudio",
+            "ttft_ms": 1546.6347920009866,
+            "e2e_ms": 2127.3737500305288,
+            "itl_mean_ms": 0.0,
+            "itl_p95_ms": 0.0,
+            "itl_p99_ms": 0.0,
+            "tpot_ms": 9.218078698881621,
+            "decode_tps": 108.48247586791861,
+            "overall_tps": 108.48247586791861,
+            "output_tokens": 63,
+            "input_tokens": 0,
+            "cache_created": 0,
+            "cache_read": 0,
+            "memory_before_mb": 0.0,
+            "memory_after_mb": 0.0,
+            "peak_memory_mb": 0,
+            "raw_output": "a block-based KV cache architecture where each block stores a fixed number of token key-value pairs. Blocks are allocated from a shared pool and assigned per-layer per-agent. When an agent's cache exceeds the hot tier capacity, the least recently used agent is evicted to disk via safetensors",
+            "error": null
+          }
+        ],
+        "stats": {
+          "ttft_ms": {
+            "mean": 1546.6347920009866,
+            "median": 1546.6347920009866,
+            "p95": 1546.6347920009866,
+            "p99": 1546.6347920009866
+          },
+          "e2e_ms": {
+            "mean": 2127.3737500305288,
+            "median": 2127.3737500305288,
+            "p95": 2127.3737500305288,
+            "p99": 2127.3737500305288
+          },
+          "decode_tps": {
+            "mean": 108.48247586791861,
+            "median": 108.48247586791861,
+            "p95": 108.48247586791861,
+            "p99": 108.48247586791861
+          },
+          "peak_memory_mb": {
+            "mean": 0.0,
+            "median": 0,
+            "p95": 0,
+            "p99": 0
+          }
+        }
+      }
+    },
+    "4_output_scaling": {
+      "output_16": {
+        "runs": [
+          {
+            "scenario": "output_16",
+            "config": "lmstudio",
+            "ttft_ms": 219.82758300146088,
+            "e2e_ms": 219.82758300146088,
+            "itl_mean_ms": 0.0,
+            "itl_p95_ms": 0.0,
+            "itl_p99_ms": 0.0,
+            "tpot_ms": 14.655172200097393,
+            "decode_tps": 68.23529511262613,
+            "overall_tps": 68.23529511262613,
+            "output_tokens": 15,
+            "input_tokens": 729,
+            "cache_created": 0,
+            "cache_read": 0,
+            "memory_before_mb": 0.0,
+            "memory_after_mb": 0.0,
+            "peak_memory_mb": 0.0,
+            "raw_output": "implements a block-based KV cache architecture where each block stores a fixed number",
+            "error": null
+          }
+        ],
+        "stats": {
+          "e2e_ms": {
+            "mean": 219.82758300146088,
+            "median": 219.82758300146088,
+            "p95": 219.82758300146088,
+            "p99": 219.82758300146088
+          },
+          "tpot_ms": {
+            "mean": 14.655172200097393,
+            "median": 14.655172200097393,
+            "p95": 14.655172200097393,
+            "p99": 14.655172200097393
+          },
+          "decode_tps": {
+            "mean": 68.23529511262613,
+            "median": 68.23529511262613,
+            "p95": 68.23529511262613,
+            "p99": 68.23529511262613
+          }
+        }
+      },
+      "output_64": {
+        "runs": [
+          {
+            "scenario": "output_64",
+            "config": "lmstudio",
+            "ttft_ms": 0.0,
+            "e2e_ms": 771.397624979727,
+            "itl_mean_ms": 0.0,
+            "itl_p95_ms": 0.0,
+            "itl_p99_ms": 0.0,
+            "tpot_ms": 0.0,
+            "decode_tps": 0.0,
+            "overall_tps": 0.0,
+            "output_tokens": 0,
+            "input_tokens": 0,
+            "cache_created": 0,
+            "cache_read": 0,
+            "memory_before_mb": 0.0,
+            "memory_after_mb": 0.0,
+            "peak_memory_mb": 0.0,
+            "raw_output": "",
+            "error": "HTTP 400: {\"error\":\"The model has crashed without additional information. (Exit code: null)\"}"
+          }
+        ],
+        "stats": {
+          "e2e_ms": {
+            "mean": 0,
+            "median": 0,
+            "p95": 0,
+            "p99": 0
+          },
+          "tpot_ms": {
+            "mean": 0,
+            "median": 0,
+            "p95": 0,
+            "p99": 0
+          },
+          "decode_tps": {
+            "mean": 0,
+            "median": 0,
+            "p95": 0,
+            "p99": 0
+          }
+        }
+      },
+      "output_256": {
+        "runs": [
+          {
+            "scenario": "output_256",
+            "config": "lmstudio",
+            "ttft_ms": 0.0,
+            "e2e_ms": 3.994832979515195,
+            "itl_mean_ms": 0.0,
+            "itl_p95_ms": 0.0,
+            "itl_p99_ms": 0.0,
+            "tpot_ms": 0.0,
+            "decode_tps": 0.0,
+            "overall_tps": 0.0,
+            "output_tokens": 0,
+            "input_tokens": 0,
+            "cache_created": 0,
+            "cache_read": 0,
+            "memory_before_mb": 0.0,
+            "memory_after_mb": 0.0,
+            "peak_memory_mb": 0.0,
+            "raw_output": "",
+            "error": "HTTP 400: {\n    \"error\": {\n        \"message\": \"No models loaded. Please load a model in the developer page or use the 'lms load' command.\",\n        \"type\": \"invalid_request_error\",\n        \"param\": \"model\",\n   "
+          }
+        ],
+        "stats": {
+          "e2e_ms": {
+            "mean": 0,
+            "median": 0,
+            "p95": 0,
+            "p99": 0
+          },
+          "tpot_ms": {
+            "mean": 0,
+            "median": 0,
+            "p95": 0,
+            "p99": 0
+          },
+          "decode_tps": {
+            "mean": 0,
+            "median": 0,
+            "p95": 0,
+            "p99": 0
+          }
+        }
+      }
+    }
+  }
+}
