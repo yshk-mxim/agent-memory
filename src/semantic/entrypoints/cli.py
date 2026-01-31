@@ -173,6 +173,40 @@ def version() -> None:
 
 
 @app.command()
+def tune(
+    quick: bool = typer.Option(
+        False,
+        "--quick",
+        help="Quick mode: fewer scenarios, faster results (~5 min)",
+    ),
+    output: str = typer.Option(
+        None,
+        "--output",
+        "-o",
+        help="Output TOML path (default: config/models/tuned.toml)",
+    ),
+    port: int = typer.Option(
+        8399,
+        "--port",
+        "-p",
+        help="Server port for benchmarking (default: 8399)",
+    ),
+) -> None:
+    """Auto-tune inference parameters for your hardware.
+
+    Runs profiling experiments to find optimal prefill step size,
+    batch size, and other parameters. Writes a per-model TOML
+    config profile.
+
+    Example:
+        $ semantic tune --quick
+        $ semantic tune --output config/models/my-machine.toml
+    """
+    from semantic.entrypoints.tune import _run_tune
+    _run_tune(quick=quick, output=output, port=port)
+
+
+@app.command()
 def config() -> None:
     """Show current configuration."""
     settings = get_settings()

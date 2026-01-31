@@ -1,12 +1,15 @@
 """Configuration management using Pydantic Settings."""
 
-
-from typing import Literal
+import logging
+from pathlib import Path
+from typing import Any, Literal
 
 from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from semantic.domain.entities import BLOCK_SIZE_TOKENS
+
+_logger = logging.getLogger(__name__)
 
 
 class MLXSettings(BaseSettings):
@@ -43,7 +46,7 @@ class MLXSettings(BaseSettings):
     )
 
     prefill_step_size: int = Field(
-        default=256,
+        default=512,
         ge=128,
         le=2048,
         description="Tokens per prefill step (larger = faster prefill, more memory)",
@@ -70,7 +73,7 @@ class MLXSettings(BaseSettings):
     )
 
     chunked_prefill_max_chunk: int = Field(
-        default=4096,
+        default=2048,
         ge=1024,
         le=8192,
         description="Maximum chunk size for chunked prefill (used for small cache positions)",
@@ -332,3 +335,72 @@ def reload_settings() -> Settings:
     global _settings
     _settings = Settings()
     return _settings
+
+
+def _find_model_profile_path(model_id: str) -> Path | None:
+    """Locate model profile TOML by model_id.
+
+    Searches config/models/ for a TOML file whose filename matches
+    a slug derived from the model_id.
+    """
+    # settings.py is at src/semantic/adapters/config/ → parents[4] = project root
+    config_dir = Path(__file__).resolve().parents[4] / "config" / "models"
+    if not config_dir.is_dir():
+        return None
+
+    # Slug: last part of model_id, lowercased
+    slug = model_id.rsplit("/", 1)[-1].lower()
+    slug_parts = set(slug.split("-"))
+
+    best_match: Path | None = None
+    best_score = 0
+
+    for toml_file in config_dir.glob("*.toml"):
+        stem = toml_file.stem.lower()
+        if slug == stem or slug in stem or stem in slug:
+            return toml_file
+        # Score by number of matching dash-separated parts
+        stem_parts = set(stem.split("-"))
+        overlap = len(slug_parts & stem_parts)
+        if overlap > best_score and overlap >= 3:
+            best_score = overlap
+            best_match = toml_file
+
+    return best_match
+
+
+def load_model_profile(
+    model_id: str | None = None,
+    profile_path: str | None = None,
+) -> dict[str, Any]:
+    """Load a per-model configuration profile from TOML.
+
+    Args:
+        model_id: HuggingFace model ID (used to auto-discover profile).
+        profile_path: Explicit path to a TOML profile file.
+
+    Returns:
+        Dict with 'model', 'optimal', 'thresholds', 'memory' sections.
+        Empty dict if no profile found.
+    """
+    try:
+        import tomllib
+    except ImportError:
+        import tomli as tomllib  # type: ignore[no-redef]
+
+    path: Path | None = None
+
+    if profile_path:
+        path = Path(profile_path)
+    elif model_id:
+        path = _find_model_profile_path(model_id)
+
+    if path is None or not path.exists():
+        _logger.debug(f"No model profile found for {model_id}")
+        return {}
+
+    with open(path, "rb") as f:
+        profile = tomllib.load(f)
+
+    _logger.info(f"Loaded model profile from {path}")
+    return profile

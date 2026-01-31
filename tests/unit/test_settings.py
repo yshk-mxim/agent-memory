@@ -25,7 +25,7 @@ class TestMLXSettings:
 
         assert settings.model_id == "mlx-community/DeepSeek-Coder-V2-Lite-Instruct-4bit-mlx"
         assert settings.max_batch_size == 1
-        assert settings.prefill_step_size == 256
+        assert settings.prefill_step_size == 512
         assert settings.kv_bits == 4
         assert settings.block_tokens == 256
         assert settings.cache_budget_mb == 8192

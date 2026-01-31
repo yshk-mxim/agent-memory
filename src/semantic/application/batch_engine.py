@@ -89,6 +89,7 @@ class BlockPoolBatchEngine:
         spec: ModelCacheSpec,
         cache_adapter: Any,  # CacheOperationsPort (MLXCacheAdapter)
         batch_gen_factory: Callable[[Any, Any], Any] | None = None,  # For testing
+        adaptive_config: Any | None = None,  # AdaptiveConfig (optional)
     ) -> None:
         """Initialize batch engine."""
         if model is None:
@@ -108,6 +109,7 @@ class BlockPoolBatchEngine:
         self._spec = spec
         self._cache_adapter = cache_adapter
         self._batch_gen_factory = batch_gen_factory
+        self._adaptive_config = adaptive_config
 
         self._batch_gen: Any | None = None  # Lazy - created on first submit
         self._lock = threading.RLock()
@@ -123,7 +125,11 @@ class BlockPoolBatchEngine:
         self._chunked_prefill_max_chunk: int | None = None
 
     def _get_chunked_prefill_settings(self) -> tuple[bool, int, int, int]:
-        """Lazily load chunked prefill settings."""
+        """Lazily load chunked prefill settings.
+
+        If adaptive_config is set, chunk sizes are adjusted dynamically
+        based on workload (memory pressure, batch depth).
+        """
         if self._chunked_prefill_enabled is None:
             try:
                 from semantic.adapters.config.settings import get_settings
@@ -133,25 +139,30 @@ class BlockPoolBatchEngine:
                 self._chunked_prefill_min_chunk = settings.mlx.chunked_prefill_min_chunk
                 self._chunked_prefill_max_chunk = settings.mlx.chunked_prefill_max_chunk
             except ImportError:
-                # Settings module not available (e.g., in tests) - use defaults
                 logger.debug("Settings module not available, using chunked prefill defaults")
                 self._chunked_prefill_enabled = True
                 self._chunked_prefill_threshold = 2048
                 self._chunked_prefill_min_chunk = 512
                 self._chunked_prefill_max_chunk = 4096
             except AttributeError as e:
-                # Settings exist but missing required fields - log and use defaults
                 logger.warning(f"Chunked prefill settings incomplete: {e}, using defaults")
                 self._chunked_prefill_enabled = True
                 self._chunked_prefill_threshold = 2048
                 self._chunked_prefill_min_chunk = 512
                 self._chunked_prefill_max_chunk = 4096
 
+        min_chunk = self._chunked_prefill_min_chunk or 512
+        max_chunk = self._chunked_prefill_max_chunk or 4096
+
+        # Override chunk sizes from adaptive config if available
+        if self._adaptive_config is not None:
+            min_chunk, max_chunk = self._adaptive_config.effective_chunk_sizes
+
         return (
             self._chunked_prefill_enabled,
             self._chunked_prefill_threshold or 2048,
-            self._chunked_prefill_min_chunk or 512,
-            self._chunked_prefill_max_chunk or 4096,
+            min_chunk,
+            max_chunk,
         )
 
     def _log_memory(self, label: str) -> tuple[float, float, float]:
