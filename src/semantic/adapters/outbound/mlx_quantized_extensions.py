@@ -1,19 +1,25 @@
 """MLX QuantizedKVCache extensions for batching support.
 
 Adds merge() method to QuantizedKVCache to enable direct Q4 cache injection.
-This allows us to keep Q4 format end-to-end (storage → injection → generation)
+This allows us to keep Q4 format end-to-end (storage -> injection -> generation)
 without dequantizing to FP16, maintaining 75% memory savings.
+
+Patches applied on import:
+  1. QuantizedKVCache.merge()  -> delegates to BatchQuantizedKVCache.merge()
+  2. QuantizedKVCache.size()   -> returns offset (not 0)
+  3. BatchKVCache.merge()      -> delegates to Q4 merge for QuantizedKVCache inputs
+  4. _make_cache()             -> creates BatchQuantizedKVCache for cold starts
 """
 
 import mlx.core as mx
+from mlx.utils import tree_map
 from typing import Any
 import logging
 
-# Import MLX's base cache class so model recognizes our cache
 try:
     from mlx_lm.models.cache import _BaseCache
 except ImportError:
-    _BaseCache = object  # Fallback if not available
+    _BaseCache = object
 
 logger = logging.getLogger(__name__)
 
@@ -21,68 +27,73 @@ logger = logging.getLogger(__name__)
 class BatchQuantizedKVCache(_BaseCache):
     """Batched quantized KV cache for multiple sequences.
 
-    This class provides a batched version of QuantizedKVCache that can be
-    used with BatchGenerator. It maintains the Q4 quantized format to
-    save 75% memory compared to FP16.
+    Drop-in replacement for BatchKVCache that keeps data in Q4 format.
+    Used by BatchGenerator for both cold starts (via patched _make_cache)
+    and warm starts (via patched merge).
 
-    Implements the full interface expected by BatchGenerator:
-    - prepare(): Configure cache before generation
-    - update_and_fetch(): Update with new tokens and return for attention
-    - finalize(): Post-generation cleanup
-    - filter(): Batch filtering
-    - empty(): Check if initialized
-    - make_mask(): Generate attention masks
+    Matches upstream BatchKVCache convention:
+      - offset: per-batch mx.array tracking logical token count per sequence.
+                Starts negative for left-padded seqs. Used by model for RoPE.
+      - _idx:   scalar int tracking shared buffer write position.
+                Used for mask generation and buffer management.
+      - left_padding: mx.array tracking left-padding amount per sequence.
+                Used by make_mask for attention masking.
     """
 
     step = 256
 
-    def __init__(self, padding: list[int] | None = None, group_size: int = 64, bits: int = 4):
-        """Initialize batched quantized cache.
-
-        Args:
-            padding: List of padding lengths for each sequence (optional)
-            group_size: Quantization group size (default: 64)
-            bits: Number of bits for quantization (default: 4)
-        """
+    def __init__(
+        self,
+        left_padding: list[int] | None = None,
+        group_size: int = 64,
+        bits: int = 4,
+    ):
         self.keys: tuple[Any, Any, Any] | None = None
         self.values: tuple[Any, Any, Any] | None = None
-        self.offset = 0
-        self._idx = 0
-        self._left_padding: list[int] = []
-        self._right_padding: list[int] = padding or []
-        self._lengths: list[int] = []
         self.group_size = group_size
         self.bits = bits
+        self._right_padding: mx.array | None = None
 
+        if left_padding:
+            self.left_padding = mx.array(left_padding)
+            self.offset = mx.array([-l for l in left_padding])
+        else:
+            self.left_padding = mx.array([0])
+            self.offset = mx.array([0])
+        self._idx = 0
+
+    # ------------------------------------------------------------------
+    # merge: combine per-sequence QuantizedKVCache -> batched Q4
+    # ------------------------------------------------------------------
     @classmethod
     def merge(cls, caches: list[Any]) -> "BatchQuantizedKVCache":
-        """Merge multiple QuantizedKVCache instances into batched cache.
-
-        This is the key method that enables Q4 direct injection. Instead of
-        dequantizing Q4→FP16 (10GB spike), we keep Q4 format throughout.
-
-        Args:
-            caches: List of QuantizedKVCache instances to merge
-
-        Returns:
-            BatchQuantizedKVCache with merged Q4 data
-
-        Raises:
-            ValueError: If caches list is empty
-        """
         if not caches:
             raise ValueError("Cannot merge empty cache list")
 
-        first_cache = caches[0]
-        group_size = first_cache.group_size
-        bits = first_cache.bits
+        # Find Q4 params from any quantized cache in the list.
+        # In mixed warm+cold batches, some entries may be plain KVCache
+        # (no bits/group_size) while others are QuantizedKVCache.
+        q4_source = next(
+            (c for c in caches if hasattr(c, 'bits') and hasattr(c, 'group_size')),
+            None,
+        )
+        if q4_source is None:
+            raise ValueError("No QuantizedKVCache found in merge list")
+        group_size = q4_source.group_size
+        bits = q4_source.bits
 
         lengths = [c.offset for c in caches]
         max_length = max(lengths)
-        left_padding = [max_length - l for l in lengths]
+        lp = [max_length - length for length in lengths]
         B = len(caches)
 
-        # Get dimensions from first non-empty cache
+        if max_length == 0:
+            batch_cache = cls(group_size=group_size, bits=bits)
+            batch_cache.left_padding = mx.array([0] * B)
+            batch_cache.offset = mx.array([0] * B)
+            logger.info(f"[Q4 MERGE] Cold start batch of {B} empty caches")
+            return batch_cache
+
         sample_cache = next(c for c in caches if c.keys is not None)
         k_quant, k_scales, k_zeros = sample_cache.keys
         v_quant, v_scales, v_zeros = sample_cache.values
@@ -92,75 +103,56 @@ class BatchQuantizedKVCache(_BaseCache):
         Dv_packed = v_quant.shape[-1]
         Dk_scales = k_scales.shape[-1]
         Dv_scales = v_scales.shape[-1]
-
         dt = k_scales.dtype
 
-        # Allocate batched tensors (stays Q4!)
         keys_quant = mx.zeros((B, H, max_length, Dk_packed), dtype=mx.uint32)
         keys_scales = mx.zeros((B, H, max_length, Dk_scales), dtype=dt)
         keys_zeros = mx.zeros((B, H, max_length, Dk_scales), dtype=dt)
-
         values_quant = mx.zeros((B, H, max_length, Dv_packed), dtype=mx.uint32)
         values_scales = mx.zeros((B, H, max_length, Dv_scales), dtype=dt)
         values_zeros = mx.zeros((B, H, max_length, Dv_scales), dtype=dt)
 
-        # Copy each cache with left padding (stays Q4!)
-        for i, (p, c) in enumerate(zip(left_padding, caches)):
+        for i, (p, c) in enumerate(zip(lp, caches)):
             if c.keys is None:
                 continue
-
             k_q, k_s, k_z = c.keys
             v_q, v_s, v_z = c.values
 
-            # Validate source tensor bounds before slicing
             source_len = k_q.shape[-2] if len(k_q.shape) >= 3 else k_q.shape[-1]
-            if c.offset > source_len:
-                logger.warning(
-                    f"[Q4 MERGE] Cache {i} offset ({c.offset}) > tensor size ({source_len}), "
-                    f"clamping to tensor size"
-                )
-                actual_offset = source_len
-            else:
-                actual_offset = c.offset
-
-            # Validate destination bounds
+            actual_offset = min(c.offset, source_len)
             dest_end = p + actual_offset
             if dest_end > max_length:
                 raise ValueError(
-                    f"Merge bounds error: cache {i} would write to position {dest_end} "
-                    f"but max_length is {max_length}"
+                    f"Merge bounds error: cache {i} writes to {dest_end} "
+                    f"but max_length={max_length}"
                 )
 
             keys_quant[i:i+1, :, p:dest_end, :] = k_q[..., :actual_offset, :]
-            values_quant[i:i+1, :, p:dest_end, :] = v_q[..., :actual_offset, :]
-
             keys_scales[i:i+1, :, p:dest_end, :] = k_s[..., :actual_offset, :]
-            values_scales[i:i+1, :, p:dest_end, :] = v_s[..., :actual_offset, :]
-
             keys_zeros[i:i+1, :, p:dest_end, :] = k_z[..., :actual_offset, :]
+            values_quant[i:i+1, :, p:dest_end, :] = v_q[..., :actual_offset, :]
+            values_scales[i:i+1, :, p:dest_end, :] = v_s[..., :actual_offset, :]
             values_zeros[i:i+1, :, p:dest_end, :] = v_z[..., :actual_offset, :]
 
-        # CRITICAL: Force evaluation to prevent lazy graph accumulation
-        # Without this, MLX builds a deferred computation graph that
-        # holds ALL intermediate tensors in memory → OOM
         mx.eval(keys_quant, keys_scales, keys_zeros,
                 values_quant, values_scales, values_zeros)
 
         batch_cache = cls(group_size=group_size, bits=bits)
         batch_cache.keys = (keys_quant, keys_scales, keys_zeros)
         batch_cache.values = (values_quant, values_scales, values_zeros)
-        batch_cache.offset = max_length
+        batch_cache.offset = mx.array(lengths)
+        batch_cache.left_padding = mx.array(lp)
         batch_cache._idx = max_length
-        batch_cache._left_padding = left_padding
-        batch_cache._lengths = lengths
 
         logger.info(
-            f"[Q4 MERGE] Merged {B} caches: max_len={max_length}, "
-            f"group_size={group_size}, bits={bits} (NO DEQUANTIZATION!)"
+            f"[Q4 MERGE] Merged {B} caches: lengths={lengths}, "
+            f"padding={lp}, gs={group_size}, bits={bits}"
         )
-
         return batch_cache
 
+    # ------------------------------------------------------------------
+    # prepare / finalize — match upstream BatchKVCache interface
+    # ------------------------------------------------------------------
     def prepare(
         self,
         *,
@@ -168,60 +160,51 @@ class BatchQuantizedKVCache(_BaseCache):
         lengths: list[int] | None = None,
         right_padding: list[int] | None = None,
     ) -> None:
-        """Prepare cache for batch generation.
-
-        Called by BatchGenerator._process_prompts() before processing
-        continuation tokens. The ``lengths`` parameter describes how many
-        NEW tokens remain to process (prompt_len - 1), NOT the total cache
-        size. We must NOT overwrite self.offset, self._idx, or
-        self._lengths which were set correctly by merge().
-
-        Args:
-            left_padding: Left padding for each sequence (optional)
-            lengths: New token counts to process (NOT total cache size)
-            right_padding: Right padding for each batch element (optional)
-        """
         if left_padding is not None:
-            self._left_padding = left_padding
-        if right_padding is not None:
-            self._right_padding = right_padding
+            if self.keys is not None:
+                raise ValueError(
+                    "Left padding can only be added to an empty "
+                    "BatchQuantizedKVCache"
+                )
+            lp = mx.array(left_padding)
+            self.left_padding = self.left_padding + lp
+            self.offset = self.offset - lp
 
-    def update_and_fetch(self, keys: Any, values: Any) -> tuple[tuple[Any, Any, Any], tuple[Any, Any, Any]]:
-        """Update cache with new keys/values and return full cache for attention.
+        if right_padding is not None and max(right_padding) > 0:
+            self._right_padding = mx.array(right_padding)
 
-        CRITICAL: This must quantize new K/V tokens and append them to the cache.
-        Without this, new tokens during generation are ignored!
+    def finalize(self) -> None:
+        if self._right_padding is not None:
+            padding = self._right_padding
+            if self.keys is not None:
+                self.keys = _q4_dynamic_roll(self.keys, padding[:, None])
+                self.values = _q4_dynamic_roll(self.values, padding[:, None])
+            self.offset = self.offset - padding
+            self.left_padding = self.left_padding + padding
+            self._right_padding = None
 
-        Args:
-            keys: New keys tensor (for current token, FP16) shape [B, n_kv_heads, num_steps, head_dim]
-            values: New values tensor (for current token, FP16)
-
-        Returns:
-            Tuple of (keys_tuple, values_tuple) in Q4 format for quantized attention
-        """
-        import time
-        start_time = time.time()
-
+    # ------------------------------------------------------------------
+    # update_and_fetch: quantize new tokens and append to buffer
+    # ------------------------------------------------------------------
+    def update_and_fetch(
+        self, keys: Any, values: Any,
+    ) -> tuple[tuple[Any, Any, Any], tuple[Any, Any, Any]]:
         B, n_kv_heads, num_steps, k_head_dim = keys.shape
         v_head_dim = values.shape[-1]
-        prev = self.offset
+        prev = self._idx
 
         expanded = False
-        # Check if we need to expand cache capacity
-        # Add +1 to account for potential rounding issues
         required_capacity = prev + num_steps + 1
         if self.keys is None or required_capacity > self.keys[0].shape[-2]:
             expanded = True
             el_per_int = 8 * mx.uint32.size // self.bits
-            # Conservative headroom to avoid massive memory spikes
-            # Old value (16K tokens) caused 162 tensor allocations across 27 layers
-            # which triggered OOM during single-sequence cache hits
-            # Cap at 1024 tokens max to prevent OOM even with large prefill chunks
-            headroom = min(max(num_steps + 256, 512), 1024)  # Capped at 1K tokens
-            new_capacity = ((prev + headroom + self.step - 1) // self.step) * self.step
+            extra = min(256, 1024)
+            new_capacity = (
+                (required_capacity + extra + self.step - 1)
+                // self.step * self.step
+            )
             new_steps = new_capacity - prev if self.keys is not None else new_capacity
             shape = (B, n_kv_heads, new_steps)
-            logger.info(f"[Q4 EXPAND] Allocating {new_steps} new slots (headroom={headroom})")
 
             def init_quant(dim):
                 return (
@@ -235,151 +218,150 @@ class BatchQuantizedKVCache(_BaseCache):
                 return mx.concatenate([x, new_x], axis=-2)
 
             if self.keys is not None:
-                # Trim and expand existing cache
                 if prev % self.step != 0:
-                    from mlx.utils import tree_map
                     self.keys, self.values = tree_map(
                         lambda x: x[..., :prev, :], (self.keys, self.values)
                     )
-                from mlx.utils import tree_map
                 self.keys, self.values = tree_map(
                     expand_quant, (self.keys, self.values)
                 )
-                # CRITICAL: Force evaluation after expansion to prevent lazy graph accumulation
-                mx.eval(self.keys[0], self.keys[1], self.keys[2],
-                       self.values[0], self.values[1], self.values[2])
+                mx.eval(*self.keys, *self.values)
             else:
-                self.keys, self.values = init_quant(k_head_dim), init_quant(v_head_dim)
+                self.keys = init_quant(k_head_dim)
+                self.values = init_quant(v_head_dim)
 
-        # Quantize new keys/values and append to cache
         q_keys = mx.quantize(keys, group_size=self.group_size, bits=self.bits)
         q_values = mx.quantize(values, group_size=self.group_size, bits=self.bits)
 
-        # Use num_steps directly - quantization preserves token dimension
-        # Calculate available space in cache and clamp to avoid overflow
         cache_seq_len = self.keys[0].shape[-2]
         available_space = cache_seq_len - prev
         n_tokens = min(num_steps, available_space)
 
-        # Update offset
-        self.offset = prev + n_tokens
+        self._idx += n_tokens
+        self.offset = self.offset + n_tokens
 
-        # Keep per-element lengths in sync with offset so extract() works
-        if self._lengths is not None:
-            self._lengths = [l + n_tokens for l in self._lengths]
-
-        # Update cache with quantized data - slice both to exact size
         for i in range(len(self.keys)):
-            self.keys[i][..., prev:prev + n_tokens, :] = q_keys[i][..., :n_tokens, :]
-            self.values[i][..., prev:prev + n_tokens, :] = q_values[i][..., :n_tokens, :]
-
-        # Return trimmed cache up to current offset
-        from mlx.utils import tree_map
-        result = tree_map(lambda x: x[..., :self.offset, :], (self.keys, self.values))
-
-        elapsed = (time.time() - start_time) * 1000
-        if elapsed > 100 or expanded:  # Log if slow or if we expanded
-            logger.info(
-                f"[Q4 UPDATE] offset: {prev}->{self.offset}, expanded={expanded}, "
-                f"time={elapsed:.0f}ms"
+            self.keys[i][..., prev:prev + n_tokens, :] = (
+                q_keys[i][..., :n_tokens, :]
+            )
+            self.values[i][..., prev:prev + n_tokens, :] = (
+                q_values[i][..., :n_tokens, :]
             )
 
+        result = tree_map(
+            lambda x: x[..., :self._idx, :], (self.keys, self.values)
+        )
+
+        if expanded:
+            logger.info(
+                f"[Q4 UPDATE] _idx: {prev}->{self._idx}, expanded={expanded}"
+            )
         return result
 
-    def finalize(self) -> None:
-        """Finalize cache after generation completes.
-
-        Called by BatchGenerator for cleanup after generation is done.
-        """
-        # No cleanup needed for quantized cache
-        pass
-
+    # ------------------------------------------------------------------
+    # filter: keep only specified batch indices
+    # ------------------------------------------------------------------
     def filter(self, batch_indices: Any) -> None:
-        """Filter cache to keep only specified batch indices (in-place).
-
-        Called when sequences complete to remove their cache data.
-        CRITICAL: Must properly release memory for filtered-out sequences.
-
-        Args:
-            batch_indices: Indices of batch elements to keep (mx.array or list)
-        """
         if self.keys is None:
             return
 
-        k_quant, k_scales, k_zeros = self.keys
-        v_quant, v_scales, v_zeros = self.values
+        self.keys = tuple(k[batch_indices] for k in self.keys)
+        self.values = tuple(v[batch_indices] for v in self.values)
+        mx.eval(*self.keys, *self.values)
 
-        # Create new tensors with only kept indices
-        self.keys = (
-            k_quant[batch_indices],
-            k_scales[batch_indices],
-            k_zeros[batch_indices],
-        )
-        self.values = (
-            v_quant[batch_indices],
-            v_scales[batch_indices],
-            v_zeros[batch_indices],
-        )
+        self.offset = self.offset[batch_indices]
+        self.left_padding = self.left_padding[batch_indices]
 
-        # Force evaluation to materialize new tensors and allow old ones to be freed
-        mx.eval(self.keys[0], self.keys[1], self.keys[2],
-                self.values[0], self.values[1], self.values[2])
+        min_pad = self.left_padding.min().item()
+        if min_pad > 0:
+            self.keys = tuple(k[..., min_pad:, :] for k in self.keys)
+            self.values = tuple(v[..., min_pad:, :] for v in self.values)
+            self._idx -= min_pad
+            self.left_padding = self.left_padding - min_pad
 
-        # Convert mx.array to list for Python list indexing
-        if hasattr(batch_indices, 'tolist'):
-            indices_list = batch_indices.tolist()
-        else:
-            indices_list = list(batch_indices)
-
-        self._left_padding = [self._left_padding[i] for i in indices_list]
-        self._lengths = [self._lengths[i] for i in indices_list]
-
+    # ------------------------------------------------------------------
+    # extend: merge another batch cache into this one (staggered arrival)
+    # ------------------------------------------------------------------
     def extend(self, other: "BatchQuantizedKVCache") -> None:
-        """Extend this cache with another cache (in-place merge).
-
-        Args:
-            other: Another BatchQuantizedKVCache to merge into this one
-        """
         if other.keys is None:
+            self.offset = mx.concatenate([self.offset, other.offset])
+            self.left_padding = mx.concatenate(
+                [self.left_padding, other.left_padding]
+            )
             return
 
         if self.keys is None:
             self.keys = other.keys
             self.values = other.values
-            self._left_padding = other._left_padding
-            self._lengths = other._lengths
-            self.offset = other.offset
+            self.offset = mx.concatenate([self.offset, other.offset])
+            self.left_padding = mx.concatenate(
+                [self.left_padding, other.left_padding]
+            )
+            self._idx = other._idx
             return
 
-        # Concatenate along batch dimension
-        sk_q, sk_s, sk_z = self.keys
-        ok_q, ok_s, ok_z = other.keys
-        sv_q, sv_s, sv_z = self.values
-        ov_q, ov_s, ov_z = other.values
+        max_idx = max(self._idx, other._idx)
 
-        self.keys = (
-            mx.concatenate([sk_q, ok_q], axis=0),
-            mx.concatenate([sk_s, ok_s], axis=0),
-            mx.concatenate([sk_z, ok_z], axis=0),
+        def _pad_cache(cache: "BatchQuantizedKVCache"):
+            """Trim to _idx and left-pad to max_idx."""
+            k_q, k_s, k_z = cache.keys
+            v_q, v_s, v_z = cache.values
+
+            idx = cache._idx
+            k_q = k_q[..., :idx, :]
+            k_s = k_s[..., :idx, :]
+            k_z = k_z[..., :idx, :]
+            v_q = v_q[..., :idx, :]
+            v_s = v_s[..., :idx, :]
+            v_z = v_z[..., :idx, :]
+
+            left = max_idx - idx
+            if left > 0:
+                B_loc, H_loc = k_q.shape[0], k_q.shape[1]
+                pad_kq = mx.zeros((B_loc, H_loc, left, k_q.shape[-1]), dtype=k_q.dtype)
+                pad_ks = mx.zeros((B_loc, H_loc, left, k_s.shape[-1]), dtype=k_s.dtype)
+                pad_kz = mx.zeros((B_loc, H_loc, left, k_z.shape[-1]), dtype=k_z.dtype)
+                pad_vq = mx.zeros((B_loc, H_loc, left, v_q.shape[-1]), dtype=v_q.dtype)
+                pad_vs = mx.zeros((B_loc, H_loc, left, v_s.shape[-1]), dtype=v_s.dtype)
+                pad_vz = mx.zeros((B_loc, H_loc, left, v_z.shape[-1]), dtype=v_z.dtype)
+
+                k_q = mx.concatenate([pad_kq, k_q], axis=-2)
+                k_s = mx.concatenate([pad_ks, k_s], axis=-2)
+                k_z = mx.concatenate([pad_kz, k_z], axis=-2)
+                v_q = mx.concatenate([pad_vq, v_q], axis=-2)
+                v_s = mx.concatenate([pad_vs, v_s], axis=-2)
+                v_z = mx.concatenate([pad_vz, v_z], axis=-2)
+
+            new_lp = cache.left_padding + left
+            return (k_q, k_s, k_z), (v_q, v_s, v_z), cache.offset, new_lp
+
+        self_k, self_v, self_off, self_lp = _pad_cache(self)
+        other_k, other_v, other_off, other_lp = _pad_cache(other)
+
+        self.keys = tuple(
+            mx.concatenate([sk, ok], axis=0)
+            for sk, ok in zip(self_k, other_k)
         )
-        self.values = (
-            mx.concatenate([sv_q, ov_q], axis=0),
-            mx.concatenate([sv_s, ov_s], axis=0),
-            mx.concatenate([sv_z, ov_z], axis=0),
+        self.values = tuple(
+            mx.concatenate([sv, ov], axis=0)
+            for sv, ov in zip(self_v, other_v)
+        )
+        mx.eval(*self.keys, *self.values)
+
+        self.offset = mx.concatenate([self_off, other_off])
+        self.left_padding = mx.concatenate([self_lp, other_lp])
+        self._idx = max_idx
+
+        logger.info(
+            f"[Q4 EXTEND] Merged batches: "
+            f"offset={self.offset.tolist()}, "
+            f"padding={self.left_padding.tolist()}, _idx={self._idx}"
         )
 
-        self._left_padding.extend(other._left_padding)
-        self._lengths.extend(other._lengths)
-
+    # ------------------------------------------------------------------
+    # extract: pull out a single sequence as QuantizedKVCache
+    # ------------------------------------------------------------------
     def extract(self, idx: int) -> Any:
-        """Extract a single batch entry as a new QuantizedKVCache.
-
-        Args:
-            idx: Index of batch element to extract
-
-        Returns:
-            QuantizedKVCache for the single sequence
-        """
         from mlx_lm.models.cache import QuantizedKVCache
 
         cache = QuantizedKVCache(group_size=self.group_size, bits=self.bits)
@@ -388,141 +370,134 @@ class BatchQuantizedKVCache(_BaseCache):
             k_quant, k_scales, k_zeros = self.keys
             v_quant, v_scales, v_zeros = self.values
 
-            # Extract single batch element
+            pad = self.left_padding[idx].item()
+            end = self._idx
+
             cache.keys = (
-                k_quant[idx:idx+1],
-                k_scales[idx:idx+1],
-                k_zeros[idx:idx+1],
+                mx.contiguous(k_quant[idx:idx+1, :, pad:end, :]),
+                mx.contiguous(k_scales[idx:idx+1, :, pad:end, :]),
+                mx.contiguous(k_zeros[idx:idx+1, :, pad:end, :]),
             )
             cache.values = (
-                v_quant[idx:idx+1],
-                v_scales[idx:idx+1],
-                v_zeros[idx:idx+1],
+                mx.contiguous(v_quant[idx:idx+1, :, pad:end, :]),
+                mx.contiguous(v_scales[idx:idx+1, :, pad:end, :]),
+                mx.contiguous(v_zeros[idx:idx+1, :, pad:end, :]),
             )
-            cache.offset = self._lengths[idx] if idx < len(self._lengths) else self.offset
+            # Force eval so extracted data is independent of batch tensors.
+            # Without this, lazy contiguous ops can reference batch cache
+            # tensors that get freed when active_batch = None in _next().
+            mx.eval(*cache.keys, *cache.values)
+            cache.offset = end - pad
 
         return cache
 
+    # ------------------------------------------------------------------
+    # make_mask: delegate to MLX's create_causal_mask
+    # ------------------------------------------------------------------
     def make_mask(
         self,
-        n: int | None = None,
-        *,
+        N: int = 1,
         return_array: bool = False,
-        window_size: int | None = None,
+        **kwargs: Any,
     ) -> Any | None:
-        """Generate attention mask for the batched cache.
+        from mlx_lm.models.base import create_causal_mask
+        return create_causal_mask(
+            N, offset=self._idx, left_padding=self.left_padding, **kwargs
+        )
 
-        The mask must cover the full KV length AFTER update_and_fetch()
-        appends n new tokens. The model calls make_mask(n) once before
-        the layer loop, then each layer's update_and_fetch() extends the
-        cache by n tokens. The returned KV length = offset + n, so the
-        mask must match: (B, 1, offset + n).
-
-        Args:
-            n: Number of new query tokens about to be processed.
-            return_array: If True, always return an array (not None).
-            window_size: Sliding window size for attention (optional).
-
-        Returns:
-            Attention mask tensor or None if no masking needed.
-        """
-        # Total KV length after update_and_fetch adds the new tokens
-        total_len = self.offset + (n or 0)
-
-        if not self._left_padding or all(p == 0 for p in self._left_padding):
-            if return_array:
-                B = len(self._left_padding) if self._left_padding else 1
-                return mx.ones((B, 1, 1, total_len), dtype=mx.bool_)
-            return None
-
-        B = len(self._left_padding)
-
-        # Shape: (B, 1, 1, total_len) for broadcasting with 4D attention
-        # scores of shape (B, n_heads, query_len, kv_len).
-        mask = mx.ones((B, 1, 1, total_len), dtype=mx.bool_)
-
-        # Mask out left padding for each sequence
-        for i, pad in enumerate(self._left_padding):
-            if pad > 0:
-                mask[i, 0, 0, :pad] = False
-
-        # Apply window size if specified (sliding window attention)
-        if window_size is not None and n is not None:
-            start_pos = max(0, total_len - window_size)
-            window_mask = mx.zeros((B, 1, 1, total_len), dtype=mx.bool_)
-            window_mask[:, :, :, start_pos:] = True
-            mask = mx.logical_and(mask, window_mask)
-
-        return mask
-
+    # ------------------------------------------------------------------
+    # empty / size / state / trim
+    # ------------------------------------------------------------------
     def empty(self) -> bool:
-        """Check if cache is empty/uninitialized.
-
-        Returns:
-            True if cache has no data, False otherwise
-        """
         return self.keys is None
 
     def size(self) -> int:
-        """Return current sequence length in the cache.
+        return self._idx
 
-        CRITICAL: BatchGenerator uses this to determine cache hit vs miss.
-        If this returns 0, BatchGenerator treats it as empty and passes
-        the FULL prompt through, causing shape mismatch errors.
+    def is_trimmable(self) -> bool:
+        return True
 
-        Returns:
-            Number of tokens currently in cache (self.offset)
-        """
-        return self.offset
+    def trim(self, n: int) -> int:
+        n = min(self._idx, n)
+        self._idx -= n
+        self.offset = self.offset - n
+        return n
 
     @property
-    def state(self) -> tuple[Any, Any]:
-        """Get cache state as (keys, values) tuple."""
-        return (self.keys, self.values)
+    def state(self) -> tuple[Any, ...]:
+        k, v = self.keys, self.values
+        if self.keys is not None and self._idx < self.keys[0].shape[-2]:
+            k, v = tree_map(
+                lambda x: x[..., :self._idx, :], (k, v)
+            )
+        return k, v, self.offset, self.left_padding
 
     @state.setter
-    def state(self, new_state: tuple[Any, Any]) -> None:
-        """Set cache state from (keys, values) tuple."""
-        self.keys, self.values = new_state
+    def state(self, new_state: tuple[Any, ...]) -> None:
+        self.keys, self.values, self.offset, self.left_padding = new_state
+        if self.keys is not None:
+            self._idx = self.keys[0].shape[-2]
+        else:
+            self._idx = 0
 
+
+# ======================================================================
+# Helper: Q4 dynamic roll for finalize (right-pad -> left-pad conversion)
+# ======================================================================
+
+def _q4_dynamic_roll(q4_tuple: tuple[Any, Any, Any], shifts: Any) -> tuple:
+    """Roll each batch element in a Q4 tuple by its shift amount.
+
+    Used by finalize() to convert right-padded data back to left-padded
+    format after processing continuation tokens in _process_prompts.
+    """
+    try:
+        from mlx_lm.models.cache import dynamic_roll
+        return tuple(dynamic_roll(t, shifts, axis=2) for t in q4_tuple)
+    except ImportError:
+        rolled = []
+        for t in q4_tuple:
+            B = t.shape[0]
+            parts = []
+            for b in range(B):
+                s = shifts[b, 0].item()
+                if s > 0:
+                    row = mx.concatenate(
+                        [t[b:b+1, :, -s:, :], t[b:b+1, :, :-s, :]],
+                        axis=2,
+                    )
+                else:
+                    row = t[b:b+1]
+                parts.append(row)
+            rolled.append(mx.concatenate(parts, axis=0))
+        return tuple(rolled)
+
+
+# ======================================================================
+# Monkey-patches applied at import time
+# ======================================================================
 
 def add_quantized_merge_method():
-    """Add merge() to QuantizedKVCache via monkey-patching.
-
-    This patches the mlx_lm QuantizedKVCache class to add a merge() method,
-    which enables us to use Q4 caches with BatchGenerator.
-    """
+    """Override merge() and size() on QuantizedKVCache."""
     try:
         from mlx_lm.models.cache import QuantizedKVCache
 
-        if hasattr(QuantizedKVCache, 'merge'):
-            logger.debug("[Q4 EXT] QuantizedKVCache.merge() already exists")
-            return
-
-        @classmethod
-        def merge(cls, caches):
+        # Always override merge to route directly to Q4 batch merge.
+        # The upstream QuantizedKVCache.merge delegates to BatchKVCache.merge
+        # which doesn't handle Q4 tuples. We replace it unconditionally.
+        @classmethod  # type: ignore[misc]
+        def merge(cls, caches):  # type: ignore[no-redef]
             return BatchQuantizedKVCache.merge(caches)
-
         QuantizedKVCache.merge = merge
+        logger.info("[Q4 EXT] Overrode QuantizedKVCache.merge()")
 
-        logger.info("[Q4 EXT] Added QuantizedKVCache.merge() successfully")
-
-        # CRITICAL FIX: Add size() method to QuantizedKVCache
-        # MLX's QuantizedKVCache inherits from _BaseCache which returns 0 for size()
-        # This breaks BatchGenerator's cache continuation logic - it can't tell
-        # the difference between a 19K token cache hit and a cold start!
-        def size(self) -> int:
-            """Return actual sequence length (offset), not buffer capacity."""
-            return self.offset
-
-        # Only patch if size() is missing or returns 0 for a non-empty cache
         test_cache = QuantizedKVCache()
         test_cache.offset = 100
-        if not hasattr(QuantizedKVCache, 'size') or test_cache.size() == 0:
+        if test_cache.size() == 0:
+            def size(self) -> int:
+                return self.offset
             QuantizedKVCache.size = size
-            logger.info("[Q4 EXT] Added QuantizedKVCache.size() method (returns offset)")
-        else:
-            logger.debug("[Q4 EXT] QuantizedKVCache.size() already works correctly")
+            logger.info("[Q4 EXT] Added QuantizedKVCache.size()")
 
     except ImportError as e:
         logger.warning(f"[Q4 EXT] Could not import QuantizedKVCache: {e}")
@@ -531,42 +506,31 @@ def add_quantized_merge_method():
 
 
 def patch_batch_kv_cache_merge():
-    """Patch BatchKVCache.merge() to handle QuantizedKVCache objects.
-
-    The BatchGenerator calls BatchKVCache.merge(caches) which doesn't know
-    how to handle QuantizedKVCache. This patch intercepts that call and
-    delegates to BatchQuantizedKVCache.merge() when needed.
-    """
+    """Patch BatchKVCache.merge() to delegate to Q4 merge for quantized caches."""
     try:
         from mlx_lm.models.cache import BatchKVCache, QuantizedKVCache
 
-        # Store original merge method
         original_merge = BatchKVCache.merge
 
         @classmethod
         def patched_merge(cls, caches):
-            """Merge caches, delegating to Q4 merge if caches are quantized."""
             if not caches:
                 return original_merge.__func__(cls, caches)
 
-            # Check if first cache is QuantizedKVCache
-            first_cache = caches[0]
-            if isinstance(first_cache, QuantizedKVCache):
-                logger.debug(f"[BatchKVCache.merge] Delegating to Q4 merge for {len(caches)} caches")
+            first = caches[0]
+            if isinstance(first, QuantizedKVCache):
                 return BatchQuantizedKVCache.merge(caches)
-
-            # Check if first cache's keys are tuples (quantized format)
-            if hasattr(first_cache, 'keys') and first_cache.keys is not None:
-                if isinstance(first_cache.keys, tuple) and len(first_cache.keys) == 3:
-                    logger.debug(f"[BatchKVCache.merge] Detected Q4 tuples, delegating to Q4 merge")
+            # Fallback: detect Q4 cache by structural check (bits attr or tuple keys)
+            if hasattr(first, 'bits') and hasattr(first, 'group_size'):
+                return BatchQuantizedKVCache.merge(caches)
+            if hasattr(first, 'keys') and isinstance(getattr(first, 'keys', None), tuple):
+                if len(first.keys) == 3:
                     return BatchQuantizedKVCache.merge(caches)
 
-            # Otherwise use original merge
             return original_merge.__func__(cls, caches)
 
         BatchKVCache.merge = patched_merge
-
-        logger.info("[Q4 EXT] Patched BatchKVCache.merge() to handle QuantizedKVCache")
+        logger.info("[Q4 EXT] Patched BatchKVCache.merge()")
 
     except ImportError as e:
         logger.warning(f"[Q4 EXT] Could not import BatchKVCache: {e}")
@@ -574,6 +538,74 @@ def patch_batch_kv_cache_merge():
         logger.error(f"[Q4 EXT] Failed to patch BatchKVCache.merge(): {e}")
 
 
-# Auto-patch on module import
+def patch_make_cache_for_q4(group_size: int = 64, bits: int = 4):
+    """Patch _make_cache and _merge_caches in mlx_lm.generate for Q4."""
+    try:
+        import importlib
+        gen_module = importlib.import_module("mlx_lm.generate")
+        from mlx_lm.models.cache import CacheList, ArraysCache
+
+        original_make_cache = gen_module._make_cache
+
+        def patched_make_cache(model, left_padding):
+            if hasattr(model, "make_cache"):
+                sample_caches = model.make_cache()
+                for c in sample_caches:
+                    if isinstance(c, (CacheList, ArraysCache)):
+                        return original_make_cache(model, left_padding)
+                n_layers = len(sample_caches)
+            else:
+                n_layers = len(model.layers)
+
+            logger.info(
+                f"[Q4 _make_cache] Creating {n_layers} Q4 batch caches "
+                f"(gs={group_size}, bits={bits}, padding={left_padding})"
+            )
+            return [
+                BatchQuantizedKVCache(left_padding, group_size=group_size, bits=bits)
+                for _ in range(n_layers)
+            ]
+
+        gen_module._make_cache = patched_make_cache
+
+        # Patch _merge_caches to route Q4 caches to our merge.
+        # The upstream _merge_caches calls QuantizedKVCache.merge which
+        # delegates to BatchKVCache.merge — but the isinstance check in our
+        # patched BatchKVCache.merge can fail. Patching _merge_caches directly
+        # is the most reliable interception point.
+        original_merge_caches = gen_module._merge_caches
+
+        def patched_merge_caches(caches):
+            if not caches or not caches[0]:
+                return original_merge_caches(caches)
+            # Check ANY prompt's first-layer cache for Q4 format.
+            # In warm+cold batches the cold prompt may have a plain
+            # KVCache (no bits attr) while the warm prompt has Q4.
+            has_q4 = any(
+                hasattr(c[0], 'bits') and hasattr(c[0], 'group_size')
+                for c in caches if c and len(c) > 0
+            )
+            if has_q4:
+                batch_cache = []
+                for i in range(len(caches[0])):
+                    layer_caches = [c[i] for c in caches]
+                    batch_cache.append(BatchQuantizedKVCache.merge(layer_caches))
+                return batch_cache
+            return original_merge_caches(caches)
+
+        gen_module._merge_caches = patched_merge_caches
+        logger.info(
+            f"[Q4 EXT] Patched _make_cache and _merge_caches for Q4 "
+            f"(gs={group_size}, bits={bits})"
+        )
+
+    except ImportError as e:
+        logger.warning(f"[Q4 EXT] Could not patch _make_cache: {e}")
+    except Exception as e:
+        logger.error(f"[Q4 EXT] Failed to patch _make_cache: {e}")
+
+
+# Apply all patches on import
 add_quantized_merge_method()
 patch_batch_kv_cache_merge()
+patch_make_cache_for_q4()

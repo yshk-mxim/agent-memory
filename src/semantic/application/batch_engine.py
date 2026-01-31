@@ -880,6 +880,10 @@ class BlockPoolBatchEngine:
                     f"processing={len(tokens_to_process)}"
                 )
 
+            # Cold starts: kv_cache=None is fine — the patched _make_cache in
+            # mlx_quantized_extensions creates BatchQuantizedKVCache directly,
+            # keeping Q4 end-to-end without needing empty per-sequence caches.
+
             insert_kwargs = {
                 "prompts": [tokens_to_process],
                 "max_tokens": [max_tokens],
@@ -1232,7 +1236,7 @@ class BlockPoolBatchEngine:
 
             if response.finish_reason is not None:
                 completion = self._finalize_sequence(
-                    uid, response, agent_id, tokens, prompt_tokens, prompt_text
+                    uid, response, agent_id, tokens, prompt_tokens, prompt_text,
                 )
                 results.append(StepOneResult(
                     uid=uid,
@@ -1447,6 +1451,8 @@ class BlockPoolBatchEngine:
             token_sequence: Full token sequence (prompt + generated) for prefix matching
             prompt_text: Raw prompt text for character-level prefix matching
         """
+        import mlx.core as mx  # noqa: PLC0415
+
         if uid not in self._active_requests:
             raise GenerationError(f"UID {uid} not found in active requests")
         agent_id, _, _, _, _ = self._active_requests[uid]
@@ -1508,7 +1514,6 @@ class BlockPoolBatchEngine:
                     mx.eval(*deferred_quant_eval)
 
                 cache = quantized_cache
-                mx.clear_cache()
 
                 logger.info(
                     f"Quantized cache for {agent_id}: {len(cache)} layers, "
