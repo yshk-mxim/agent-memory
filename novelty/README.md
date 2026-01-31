@@ -94,6 +94,28 @@ Previous research direction (semantic KV cache isolation within single session) 
 
 ---
 
+### 3. Q4 Direct Injection
+**File**: `q4_direct_injection.md`
+
+Q4 (4-bit quantized) direct injection for KV cache reconstruction, eliminating unnecessary dequantization. Memory savings of ~72% during inference.
+
+### 4. Adaptive Chunked Prefill
+**File**: `adaptive_chunked_prefill.md`
+
+Adaptive chunked prefill achieving ~80% of FlashAttention benefits without custom Metal kernels. Extended context capacity from ~20K → 80K+ tokens on 24GB systems.
+
+### 5. Continuous Batching with Persistent Caches
+**File**: `continuous_batching.md`
+
+Continuous batching combined with persistent per-agent KV caches for multi-agent LLM inference on Apple Silicon.
+
+### 6. Character-Level Prefix Matching
+**File**: `character_level_prefix_matching.md`
+
+Replaces token-level prefix matching with character-level text comparison to fix BPE tokenization boundary mismatches that caused warm TTFT to equal cold TTFT. Only the new portion of a conversation is tokenized, eliminating false cache misses from tokenizer non-compositionality.
+
+---
+
 ## Related Documentation
 
 - **POC Plan**: `/Users/dev_user/semantic/plans/POC_PLAN.md`
