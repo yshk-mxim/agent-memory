@@ -269,35 +269,38 @@ class TestOpenAIFunctionCallingStreaming:
         """Function calls should work in streaming mode."""
         app = create_app()
 
-        with TestClient(app) as client, client.stream(
-            "POST",
-            "/v1/chat/completions",
-            json={
-                "model": "test",
-                "messages": [
-                    {
-                        "role": "user",
-                        "content": 'Calculate 5+3. Use {"function_call": {"name": "calculate", "arguments": {"expression": "5+3"}}}',
-                    }
-                ],
-                "tools": [
-                    {
-                        "type": "function",
-                        "function": {
-                            "name": "calculate",
-                            "description": "Perform calculation",
-                            "parameters": {
-                                "type": "object",
-                                "properties": {"expression": {"type": "string"}},
-                                "required": ["expression"],
+        with (
+            TestClient(app) as client,
+            client.stream(
+                "POST",
+                "/v1/chat/completions",
+                json={
+                    "model": "test",
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": 'Calculate 5+3. Use {"function_call": {"name": "calculate", "arguments": {"expression": "5+3"}}}',
+                        }
+                    ],
+                    "tools": [
+                        {
+                            "type": "function",
+                            "function": {
+                                "name": "calculate",
+                                "description": "Perform calculation",
+                                "parameters": {
+                                    "type": "object",
+                                    "properties": {"expression": {"type": "string"}},
+                                    "required": ["expression"],
+                                },
                             },
-                        },
-                    }
-                ],
-                "stream": True,
-                "max_tokens": 100,
-            },
-        ) as response:
+                        }
+                    ],
+                    "stream": True,
+                    "max_tokens": 100,
+                },
+            ) as response,
+        ):
             assert response.status_code == 200
 
             # Collect all chunks
@@ -329,16 +332,19 @@ class TestOpenAIFunctionCallingStreaming:
         """Streaming without tools should work normally."""
         app = create_app()
 
-        with TestClient(app) as client, client.stream(
-            "POST",
-            "/v1/chat/completions",
-            json={
-                "model": "test",
-                "messages": [{"role": "user", "content": "Hello"}],
-                "stream": True,
-                "max_tokens": 50,
-            },
-        ) as response:
+        with (
+            TestClient(app) as client,
+            client.stream(
+                "POST",
+                "/v1/chat/completions",
+                json={
+                    "model": "test",
+                    "messages": [{"role": "user", "content": "Hello"}],
+                    "stream": True,
+                    "max_tokens": 50,
+                },
+            ) as response,
+        ):
             assert response.status_code == 200
 
             # Should receive chunks

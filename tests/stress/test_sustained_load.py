@@ -62,23 +62,26 @@ async def test_one_hour_sustained_load(live_server, cleanup_after_stress, memory
 
         try:
             timeout = aiohttp.ClientTimeout(total=60.0)
-            async with aiohttp.ClientSession(timeout=timeout) as session, session.post(
-                f"{base_url}/v1/messages",
-                json={
-                    "model": "test-model",
-                    "messages": [
-                        {
-                            "role": "user",
-                            "content": "Sustained load test - 1 hour stability",
-                        }
-                    ],
-                    "max_tokens": 50,
-                },
-                headers={
-                    "Content-Type": "application/json",
-                    "X-API-Key": "test-key-sustained",
-                },
-            ) as response:
+            async with (
+                aiohttp.ClientSession(timeout=timeout) as session,
+                session.post(
+                    f"{base_url}/v1/messages",
+                    json={
+                        "model": "test-model",
+                        "messages": [
+                            {
+                                "role": "user",
+                                "content": "Sustained load test - 1 hour stability",
+                            }
+                        ],
+                        "max_tokens": 50,
+                    },
+                    headers={
+                        "Content-Type": "application/json",
+                        "X-API-Key": "test-key-sustained",
+                    },
+                ) as response,
+            ):
                 latency_ms = (time.time() - request_start) * 1000
 
                 all_results.append(
@@ -115,7 +118,7 @@ async def test_one_hour_sustained_load(live_server, cleanup_after_stress, memory
                     memory_samples.append(memory)
                     elapsed = current_time - start_time
                     print(
-                        f"🔍 Memory at {elapsed/60:.0f}min: {memory:.1f} MB "
+                        f"🔍 Memory at {elapsed / 60:.0f}min: {memory:.1f} MB "
                         f"(+{((memory - initial_memory) / initial_memory * 100):.1f}%)"
                     )
                     last_sample_time = current_time
@@ -140,19 +143,13 @@ async def test_one_hour_sustained_load(live_server, cleanup_after_stress, memory
 
     # Verify memory stability (<5% growth)
     memory_growth_pct = memory_analysis["growth_pct"]
-    assert (
-        memory_growth_pct < 5.0
-    ), f"Memory growth too high: {memory_growth_pct:.1f}% (target <5%)"
+    assert memory_growth_pct < 5.0, f"Memory growth too high: {memory_growth_pct:.1f}% (target <5%)"
 
     # Verify error rate <1%
-    assert (
-        metrics.error_rate < 0.01
-    ), f"Error rate too high: {metrics.error_rate:.2%} (target <1%)"
+    assert metrics.error_rate < 0.01, f"Error rate too high: {metrics.error_rate:.2%} (target <1%)"
 
     # No crashes
-    status_5xx = sum(
-        count for status, count in metrics.status_codes.items() if 500 <= status < 600
-    )
+    status_5xx = sum(count for status, count in metrics.status_codes.items() if 500 <= status < 600)
     assert status_5xx == 0, f"Server crashed {status_5xx} times"
 
     print(
@@ -189,8 +186,7 @@ async def test_10_requests_per_minute_across_5_agents(live_server, cleanup_after
     harness = StressTestHarness(
         base_url=base_url,
         num_workers=num_agents,
-        rate_limit=requests_per_minute_per_agent
-        / 60,  # Convert to requests per second
+        rate_limit=requests_per_minute_per_agent / 60,  # Convert to requests per second
         timeout=60.0,
     )
 
@@ -249,9 +245,7 @@ async def test_10_requests_per_minute_across_5_agents(live_server, cleanup_after
         return agent_results
 
     # Run all agents concurrently
-    tasks = [
-        agent_sustained_workload(f"agent_{i}") for i in range(num_agents)
-    ]
+    tasks = [agent_sustained_workload(f"agent_{i}") for i in range(num_agents)]
     agent_results_list = await asyncio.gather(*tasks)
 
     # Collect all results
@@ -263,18 +257,14 @@ async def test_10_requests_per_minute_across_5_agents(live_server, cleanup_after
     metrics = collector.analyze(all_results)
 
     # Verify ~10 requests/minute (over 10 minutes = ~100 total requests)
-    expected_requests = int(
-        (duration_seconds / 60) * num_agents * requests_per_minute_per_agent
-    )
+    expected_requests = int((duration_seconds / 60) * num_agents * requests_per_minute_per_agent)
     # Allow 20% variance (rate limiting not perfect)
-    assert (
-        abs(metrics.total_requests - expected_requests) / expected_requests < 0.20
-    ), f"Request rate off: {metrics.total_requests} vs {expected_requests} expected"
+    assert abs(metrics.total_requests - expected_requests) / expected_requests < 0.20, (
+        f"Request rate off: {metrics.total_requests} vs {expected_requests} expected"
+    )
 
     # Error rate <1%
-    assert (
-        metrics.error_rate < 0.01
-    ), f"Error rate too high: {metrics.error_rate:.2%}"
+    assert metrics.error_rate < 0.01, f"Error rate too high: {metrics.error_rate:.2%}"
 
     print(
         f"\n✅ Realistic sustained traffic test passed:"
@@ -302,9 +292,7 @@ async def test_memory_stable_no_leaks(live_server, cleanup_after_stress, memory_
     duration_seconds = 1800  # 30 minutes
     sample_interval_seconds = 120  # 2 minutes
 
-    harness = StressTestHarness(
-        base_url=base_url, num_workers=3, rate_limit=1.0, timeout=60.0
-    )
+    harness = StressTestHarness(base_url=base_url, num_workers=3, rate_limit=1.0, timeout=60.0)
 
     all_results = []
     memory_samples = []
@@ -325,20 +313,21 @@ async def test_memory_stable_no_leaks(live_server, cleanup_after_stress, memory_
 
         try:
             timeout = aiohttp.ClientTimeout(total=60.0)
-            async with aiohttp.ClientSession(timeout=timeout) as session, session.post(
-                f"{base_url}/v1/messages",
-                json={
-                    "model": "test-model",
-                    "messages": [
-                        {"role": "user", "content": "Memory leak detection test"}
-                    ],
-                    "max_tokens": 50,
-                },
-                headers={
-                    "Content-Type": "application/json",
-                    "X-API-Key": "test-key-memory",
-                },
-            ) as response:
+            async with (
+                aiohttp.ClientSession(timeout=timeout) as session,
+                session.post(
+                    f"{base_url}/v1/messages",
+                    json={
+                        "model": "test-model",
+                        "messages": [{"role": "user", "content": "Memory leak detection test"}],
+                        "max_tokens": 50,
+                    },
+                    headers={
+                        "Content-Type": "application/json",
+                        "X-API-Key": "test-key-memory",
+                    },
+                ) as response,
+            ):
                 all_results.append(
                     RequestResult(
                         status_code=response.status,
@@ -363,7 +352,7 @@ async def test_memory_stable_no_leaks(live_server, cleanup_after_stress, memory_
             memory_samples.append(memory)
             elapsed = current_time - start_time
             print(
-                f"🔍 Memory at {elapsed/60:.0f}min: {memory:.1f} MB "
+                f"🔍 Memory at {elapsed / 60:.0f}min: {memory:.1f} MB "
                 f"(+{((memory - initial_memory) / initial_memory * 100):.1f}%)"
             )
             last_sample = current_time
@@ -391,9 +380,9 @@ async def test_memory_stable_no_leaks(live_server, cleanup_after_stress, memory_
     memory_analysis = collector.analyze_memory_growth()
 
     # Memory growth <5%
-    assert (
-        memory_analysis["growth_pct"] < 5.0
-    ), f"Memory growth too high: {memory_analysis['growth_pct']:.1f}%"
+    assert memory_analysis["growth_pct"] < 5.0, (
+        f"Memory growth too high: {memory_analysis['growth_pct']:.1f}%"
+    )
 
     print(
         f"\n✅ Memory stability test passed:"
@@ -421,9 +410,7 @@ async def test_no_performance_degradation_over_time(live_server, cleanup_after_s
     duration_seconds = 600  # 10 minutes
     measurement_window = 60  # Measure over 60s windows
 
-    harness = StressTestHarness(
-        base_url=base_url, num_workers=5, rate_limit=2.0, timeout=60.0
-    )
+    harness = StressTestHarness(base_url=base_url, num_workers=5, rate_limit=2.0, timeout=60.0)
 
     # Collect results for different time periods
     early_results = []
@@ -439,23 +426,26 @@ async def test_no_performance_degradation_over_time(live_server, cleanup_after_s
 
         try:
             timeout = aiohttp.ClientTimeout(total=60.0)
-            async with aiohttp.ClientSession(timeout=timeout) as session, session.post(
-                f"{base_url}/v1/messages",
-                json={
-                    "model": "test-model",
-                    "messages": [
-                        {
-                            "role": "user",
-                            "content": "Performance degradation test",
-                        }
-                    ],
-                    "max_tokens": 50,
-                },
-                headers={
-                    "Content-Type": "application/json",
-                    "X-API-Key": "test-key-perf",
-                },
-            ) as response:
+            async with (
+                aiohttp.ClientSession(timeout=timeout) as session,
+                session.post(
+                    f"{base_url}/v1/messages",
+                    json={
+                        "model": "test-model",
+                        "messages": [
+                            {
+                                "role": "user",
+                                "content": "Performance degradation test",
+                            }
+                        ],
+                        "max_tokens": 50,
+                    },
+                    headers={
+                        "Content-Type": "application/json",
+                        "X-API-Key": "test-key-perf",
+                    },
+                ) as response,
+            ):
                 latency_ms = (time.time() - request_start) * 1000
 
                 result = RequestResult(
@@ -510,9 +500,9 @@ async def test_no_performance_degradation_over_time(live_server, cleanup_after_s
 
     degradation_pct = ((late_p95 - early_p95) / early_p95) * 100
 
-    assert (
-        degradation_pct < 20
-    ), f"Performance degraded by {degradation_pct:.1f}% (early p95: {early_p95:.0f}ms, late p95: {late_p95:.0f}ms)"
+    assert degradation_pct < 20, (
+        f"Performance degraded by {degradation_pct:.1f}% (early p95: {early_p95:.0f}ms, late p95: {late_p95:.0f}ms)"
+    )
 
     print(
         f"\n✅ No performance degradation test passed:"

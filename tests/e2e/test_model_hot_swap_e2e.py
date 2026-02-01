@@ -4,7 +4,6 @@ Tests verify that the server can swap models at runtime while maintaining
 system stability and preserving agent caches.
 """
 
-
 import httpx
 import pytest
 

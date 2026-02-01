@@ -102,8 +102,7 @@ class MLXPrefillAdapter:
 
         elapsed_ms = (time.time() - t0) * 1000
         logger.info(
-            f"[PREFILL CHUNK] pos {start}->{end} "
-            f"({end - start} tokens, {elapsed_ms:.0f}ms)"
+            f"[PREFILL CHUNK] pos {start}->{end} ({end - start} tokens, {elapsed_ms:.0f}ms)"
         )
 
     def chunk_size_for_position(self, cache_pos: int) -> int:

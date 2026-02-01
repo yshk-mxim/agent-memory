@@ -238,7 +238,9 @@ class ConcurrentScheduler:
             self._uid_to_request[uid] = req
             logger.debug(
                 "[SCHEDULER] Direct submit: agent=%s, tokens=%d, uid=%s",
-                req.agent_id, len(req.prompt_tokens), uid,
+                req.agent_id,
+                len(req.prompt_tokens),
+                uid,
             )
         except (PoolExhaustedError, InvalidRequestError) as exc:
             self._reject_request(req, exc)
@@ -250,14 +252,13 @@ class ConcurrentScheduler:
             tokens=req.prompt_tokens,
             max_tokens=req.max_tokens,
         )
-        state.kv_caches = self._prefill_adapter.init_prefill_caches(
-            self._n_layers
-        )
+        state.kv_caches = self._prefill_adapter.init_prefill_caches(self._n_layers)
         state._request_ref = req
         self._prefill_queue.append((state, req))
         logger.debug(
             "[SCHEDULER] Enqueue prefill: agent=%s, tokens=%d",
-            req.agent_id, len(req.prompt_tokens),
+            req.agent_id,
+            len(req.prompt_tokens),
         )
 
     def _run_decode_step(self) -> None:
@@ -290,12 +291,8 @@ class ConcurrentScheduler:
                         token_count=result.token_count,
                         finish_reason=result.finish_reason,
                     )
-                    req.loop.call_soon_threadsafe(
-                        req.token_queue.put_nowait, delta
-                    )
-                    req.loop.call_soon_threadsafe(
-                        req.token_queue.put_nowait, None
-                    )
+                    req.loop.call_soon_threadsafe(req.token_queue.put_nowait, delta)
+                    req.loop.call_soon_threadsafe(req.token_queue.put_nowait, None)
 
                 # Resolve future (used by submit_and_wait, ignored if streaming)
                 if result.completion is not None:
@@ -307,9 +304,7 @@ class ConcurrentScheduler:
                         text=result.text,
                         token_count=result.token_count,
                     )
-                    req.loop.call_soon_threadsafe(
-                        req.token_queue.put_nowait, delta
-                    )
+                    req.loop.call_soon_threadsafe(req.token_queue.put_nowait, delta)
 
     def _process_one_chunk(self) -> None:
         """Process one prefill chunk, round-robin across queued sequences.
@@ -325,12 +320,13 @@ class ConcurrentScheduler:
 
         try:
             self._prefill_adapter.process_prefill_chunk(
-                state.tokens, start, end, state.kv_caches,
+                state.tokens,
+                start,
+                end,
+                state.kv_caches,
             )
         except Exception:
-            logger.exception(
-                f"[SCHEDULER] Prefill chunk failed: agent={state.agent_id}"
-            )
+            logger.exception(f"[SCHEDULER] Prefill chunk failed: agent={state.agent_id}")
             self._prefill_queue.popleft()
             self._reject_request(req, RuntimeError("Prefill chunk failed"))
             return
@@ -357,7 +353,9 @@ class ConcurrentScheduler:
             self._uid_to_request[uid] = req
             logger.debug(
                 "[SCHEDULER] Prefill done, promoted: agent=%s, chunks=%d, uid=%s",
-                state.agent_id, state.chunk_count, uid,
+                state.agent_id,
+                state.chunk_count,
+                uid,
             )
         except (PoolExhaustedError, InvalidRequestError) as exc:
             self._reject_request(req, exc)
@@ -374,9 +372,7 @@ class ConcurrentScheduler:
     # Future resolution helpers
     # ------------------------------------------------------------------
 
-    def _resolve_future(
-        self, req: SchedulerRequest, completion: CompletedGeneration
-    ) -> None:
+    def _resolve_future(self, req: SchedulerRequest, completion: CompletedGeneration) -> None:
         """Set the result on the asyncio Future (thread-safe)."""
         req.loop.call_soon_threadsafe(req.future.set_result, completion)
 

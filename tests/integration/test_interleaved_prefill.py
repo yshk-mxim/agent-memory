@@ -25,6 +25,7 @@ from semantic.application.shared_prefix_cache import SharedPrefixCache
 # Fakes (self-contained — no MLX dependency)
 # -------------------------------------------------------------------
 
+
 @dataclass
 class FakeCompletion:
     uid: str
@@ -106,6 +107,7 @@ class FakePrefillAdapter:
 # Integration tests
 # -------------------------------------------------------------------
 
+
 class TestInterleavedPrefillDecode:
     """End-to-end tests for scheduler interleaving."""
 
@@ -113,12 +115,11 @@ class TestInterleavedPrefillDecode:
         """Short request (direct) + long request (prefill) both complete."""
         engine = FakeEngine(steps_to_complete=1)
         adapter = FakePrefillAdapter(chunk_size=300)
-        scheduler = ConcurrentScheduler(
-            engine, adapter, n_layers=4, interleave_threshold=100
-        )
+        scheduler = ConcurrentScheduler(engine, adapter, n_layers=4, interleave_threshold=100)
         scheduler.start()
 
         try:
+
             async def run():
                 short_task = asyncio.create_task(
                     scheduler.submit_and_wait("agent_short", list(range(50)), None, 10)
@@ -158,12 +159,11 @@ class TestInterleavedPrefillDecode:
         """Two long prompts: both go through prefill queue (FIFO order)."""
         engine = FakeEngine(steps_to_complete=1)
         adapter = FakePrefillAdapter(chunk_size=500)
-        scheduler = ConcurrentScheduler(
-            engine, adapter, n_layers=2, interleave_threshold=100
-        )
+        scheduler = ConcurrentScheduler(engine, adapter, n_layers=2, interleave_threshold=100)
         scheduler.start()
 
         try:
+
             async def run():
                 t1 = asyncio.create_task(
                     scheduler.submit_and_wait("a1", list(range(1000)), None, 10)
@@ -195,21 +195,16 @@ class TestInterleavedPrefillDecode:
         engine = FakeEngine(steps_to_complete=1)
         adapter = FakePrefillAdapter(chunk_size=200)
         threshold = 500
-        scheduler = ConcurrentScheduler(
-            engine, adapter, n_layers=2, interleave_threshold=threshold
-        )
+        scheduler = ConcurrentScheduler(engine, adapter, n_layers=2, interleave_threshold=threshold)
         scheduler.start()
 
         try:
+
             async def run():
                 # Below threshold → direct
-                r1 = await scheduler.submit_and_wait(
-                    "below", list(range(499)), None, 5
-                )
+                r1 = await scheduler.submit_and_wait("below", list(range(499)), None, 5)
                 # At threshold → prefill
-                r2 = await scheduler.submit_and_wait(
-                    "at", list(range(500)), None, 5
-                )
+                r2 = await scheduler.submit_and_wait("at", list(range(500)), None, 5)
                 return r1, r2
 
             loop = asyncio.new_event_loop()
@@ -227,12 +222,11 @@ class TestInterleavedPrefillDecode:
         """Engine.step() called while prefill is in progress (interleaving)."""
         engine = FakeEngine(steps_to_complete=3)  # Needs 3 steps to complete
         adapter = FakePrefillAdapter(chunk_size=100)
-        scheduler = ConcurrentScheduler(
-            engine, adapter, n_layers=2, interleave_threshold=50
-        )
+        scheduler = ConcurrentScheduler(engine, adapter, n_layers=2, interleave_threshold=50)
         scheduler.start()
 
         try:
+
             async def run():
                 # Submit short first (enters decode immediately)
                 t_short = asyncio.create_task(

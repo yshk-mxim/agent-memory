@@ -59,9 +59,7 @@ class ModelCacheSpec:
 
         # Validate kv_group_size is positive
         if self.kv_group_size <= 0:
-            raise ModelSpecValidationError(
-                f"kv_group_size must be > 0, got {self.kv_group_size}"
-            )
+            raise ModelSpecValidationError(f"kv_group_size must be > 0, got {self.kv_group_size}")
 
     def bytes_per_block_per_layer(self) -> int:
         """Calculate memory bytes required for one block at one layer.

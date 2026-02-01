@@ -101,8 +101,7 @@ class MLXCacheAdapter:
                     )
                 if k_t.shape[:2] != v_t.shape[:2]:
                     raise GenerationError(
-                        f"K/V shape mismatch in block {i}: "
-                        f"K={k_t.shape[:2]}, V={v_t.shape[:2]}"
+                        f"K/V shape mismatch in block {i}: K={k_t.shape[:2]}, V={v_t.shape[:2]}"
                     )
 
         # Concatenate along sequence axis to form shape [n_kv_heads, head_dim, total_seq_len]

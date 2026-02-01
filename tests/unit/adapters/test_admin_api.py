@@ -31,6 +31,7 @@ def app():
 
     # Initialize app.state.semantic (required for admin API)
     from types import SimpleNamespace
+
     app.state.semantic = SimpleNamespace()
     app.state.semantic.batch_engine = None  # Will be updated by swap
 

@@ -82,7 +82,7 @@ def _load_model_and_extract_spec(settings):
     # CRITICAL: Override tokenizer max length for long context support
     tokenizer_config = {
         "model_max_length": settings.mlx.max_context_length,
-        "truncation_side": "left",   # Keep recent tokens if needed
+        "truncation_side": "left",  # Keep recent tokens if needed
         "trust_remote_code": True,
     }
 
@@ -101,7 +101,7 @@ def _load_model_and_extract_spec(settings):
             "tokenizer_limit_warning",
             actual=actual_max,
             target=expected_max,
-            message="Tokenizer max length less than target, requests may be truncated"
+            message="Tokenizer max length less than target, requests may be truncated",
         )
 
     spec_extractor = get_extractor()
@@ -109,6 +109,7 @@ def _load_model_and_extract_spec(settings):
 
     # Add quantization settings from config
     from dataclasses import replace
+
     model_spec = replace(
         base_spec,
         kv_bits=settings.mlx.kv_bits,
@@ -121,7 +122,7 @@ def _load_model_and_extract_spec(settings):
         n_kv_heads=model_spec.n_kv_heads,
         head_dim=model_spec.head_dim,
         kv_bits=model_spec.kv_bits,
-        kv_group_size=model_spec.kv_group_size
+        kv_group_size=model_spec.kv_group_size,
     )
 
     return model, tokenizer, model_spec
@@ -143,9 +144,7 @@ def _initialize_block_pool(settings, model_spec):
     total_blocks = (settings.mlx.cache_budget_mb * 1024 * 1024) // bytes_per_block
     mb_per_block = bytes_per_block / 1024 / 1024
     logger.info(
-        "block_budget_calculated",
-        total_blocks=total_blocks,
-        mb_per_block=round(mb_per_block, 2)
+        "block_budget_calculated", total_blocks=total_blocks, mb_per_block=round(mb_per_block, 2)
     )
 
     block_pool = BlockPool(spec=model_spec, total_blocks=total_blocks)
@@ -177,10 +176,7 @@ def _initialize_cache_store(settings, model_spec):
         model_tag=model_tag,
         cache_adapter=cache_adapter,
     )
-    logger.info(
-        "cache_store_initialized",
-        max_hot_agents=settings.agent.max_agents_in_memory
-    )
+    logger.info("cache_store_initialized", max_hot_agents=settings.agent.max_agents_in_memory)
 
     return cache_store, cache_adapter
 
@@ -211,7 +207,7 @@ def _initialize_batch_engine(model, tokenizer, block_pool, model_spec, settings)
     logger.info(
         "batch_engine_initialized",
         max_batch_size=settings.mlx.max_batch_size,
-        prefill_step_size=settings.mlx.prefill_step_size
+        prefill_step_size=settings.mlx.prefill_step_size,
     )
 
     return batch_engine, mlx_adapter
@@ -348,8 +344,7 @@ def _register_middleware(app: FastAPI, settings):
 
     # Request logging middleware
     app.add_middleware(
-        RequestLoggingMiddleware,
-        skip_paths={"/health/live", "/health/ready", "/health/startup"}
+        RequestLoggingMiddleware, skip_paths={"/health/live", "/health/ready", "/health/startup"}
     )
     logger.info("middleware_registered", middleware="RequestLoggingMiddleware")
 
@@ -359,9 +354,11 @@ def _register_middleware(app: FastAPI, settings):
 
     # CORS middleware
     cors_origins_str = settings.server.cors_origins
-    cors_origins = ["*"] if cors_origins_str == "*" else [
-        origin.strip() for origin in cors_origins_str.split(",")
-    ]
+    cors_origins = (
+        ["*"]
+        if cors_origins_str == "*"
+        else [origin.strip() for origin in cors_origins_str.split(",")]
+    )
     app.add_middleware(
         CORSMiddleware,
         allow_origins=cors_origins,
@@ -389,6 +386,7 @@ def _register_health_endpoints(app: FastAPI):
     Args:
         app: FastAPI application
     """
+
     @app.get("/health")
     async def health():
         """Basic health check - alias for /health/live."""
@@ -450,13 +448,11 @@ def _register_metrics_endpoint(app: FastAPI):
     Args:
         app: FastAPI application
     """
+
     @app.get("/metrics")
     async def metrics():
         """Prometheus metrics endpoint."""
-        return Response(
-            content=generate_latest(registry),
-            media_type="text/plain; version=0.0.4"
-        )
+        return Response(content=generate_latest(registry), media_type="text/plain; version=0.0.4")
 
 
 def _register_debug_endpoints(app: FastAPI):
@@ -465,6 +461,7 @@ def _register_debug_endpoints(app: FastAPI):
     Args:
         app: FastAPI application
     """
+
     @app.get("/debug/memory")
     async def debug_memory():
         """MLX memory statistics for benchmarking."""
@@ -474,12 +471,10 @@ def _register_debug_endpoints(app: FastAPI):
         pool = semantic.block_pool if semantic else None
 
         return {
-            "active_memory_mb": round(mx.get_active_memory() / (1024 ** 2), 1),
-            "peak_memory_mb": round(mx.get_peak_memory() / (1024 ** 2), 1),
-            "cache_memory_mb": round(mx.get_cache_memory() / (1024 ** 2), 1),
-            "pool_used_blocks": (
-                pool.total_blocks - pool.available_blocks()
-            ) if pool else 0,
+            "active_memory_mb": round(mx.get_active_memory() / (1024**2), 1),
+            "peak_memory_mb": round(mx.get_peak_memory() / (1024**2), 1),
+            "cache_memory_mb": round(mx.get_cache_memory() / (1024**2), 1),
+            "pool_used_blocks": (pool.total_blocks - pool.available_blocks()) if pool else 0,
             "pool_total_blocks": pool.total_blocks if pool else 0,
         }
 
@@ -529,7 +524,7 @@ def _format_error_response(
             "error": {
                 "type": error_type,
                 "message": message,
-            }
+            },
         }
     else:
         # Default format for other endpoints
@@ -589,7 +584,7 @@ def _register_error_handlers(app: FastAPI):
             error_type=exc.__class__.__name__,
             http_status=status_code,
             message=str(exc),
-            exc_info=True
+            exc_info=True,
         )
         return _format_error_response(request, status_code, error_type, str(exc))
 
@@ -614,10 +609,7 @@ def _register_error_handlers(app: FastAPI):
     async def general_error_handler(request: Request, exc: Exception):
         """Handle unexpected errors."""
         logger.error(
-            "unexpected_error",
-            error_type=type(exc).__name__,
-            message=str(exc),
-            exc_info=True
+            "unexpected_error", error_type=type(exc).__name__, message=str(exc), exc_info=True
         )
         return _format_error_response(
             request,

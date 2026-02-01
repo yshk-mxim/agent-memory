@@ -52,7 +52,6 @@ class FakeModel:
     """Fake MLX model for testing."""
 
 
-
 class FakeDetokenizer:
     """Fake detokenizer for streaming token-to-text conversion."""
 
@@ -403,11 +402,9 @@ class TestBlockPoolBatchEngineInit:
 
     def test_reject_none_model(self, tokenizer, pool, spec, cache_adapter) -> None:
         """Should raise ModelNotFoundError if model is None."""
-        with pytest.raises(
-            ModelNotFoundError, match="Model must be loaded before creating engine"
-        ):
+        with pytest.raises(ModelNotFoundError, match="Model must be loaded before creating engine"):
             BlockPoolBatchEngine(
-            cache_adapter=cache_adapter,
+                cache_adapter=cache_adapter,
                 model=None,
                 tokenizer=tokenizer,
                 pool=pool,
@@ -420,7 +417,7 @@ class TestBlockPoolBatchEngineInit:
             ModelNotFoundError, match="Tokenizer must be loaded before creating engine"
         ):
             BlockPoolBatchEngine(
-            cache_adapter=cache_adapter,
+                cache_adapter=cache_adapter,
                 model=model,
                 tokenizer=None,
                 pool=pool,
@@ -431,7 +428,7 @@ class TestBlockPoolBatchEngineInit:
         """Should raise InvalidRequestError if pool is None."""
         with pytest.raises(InvalidRequestError, match="BlockPool is required"):
             BlockPoolBatchEngine(
-            cache_adapter=cache_adapter,
+                cache_adapter=cache_adapter,
                 model=model,
                 tokenizer=tokenizer,
                 pool=None,  # type: ignore[arg-type]
@@ -442,7 +439,7 @@ class TestBlockPoolBatchEngineInit:
         """Should raise InvalidRequestError if spec is None."""
         with pytest.raises(InvalidRequestError, match="ModelCacheSpec is required"):
             BlockPoolBatchEngine(
-            cache_adapter=cache_adapter,
+                cache_adapter=cache_adapter,
                 model=model,
                 tokenizer=tokenizer,
                 pool=pool,
@@ -568,7 +565,6 @@ class TestBlockPoolBatchEngineStep:
 
         # Verify tracking cleaned up
         assert uid not in engine._active_requests
-
 
     def test_step_with_multiple_submissions(self, engine) -> None:
         """Should handle multiple concurrent submissions."""

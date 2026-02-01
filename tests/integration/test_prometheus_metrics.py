@@ -24,11 +24,15 @@ def test_app():
     class MockAppState:
         def __init__(self):
             self.shutting_down = False
-            self.semantic = type('obj', (object,), {
-                'block_pool': None,
-                'batch_engine': None,
-                'cache_store': None,
-            })()
+            self.semantic = type(
+                "obj",
+                (object,),
+                {
+                    "block_pool": None,
+                    "batch_engine": None,
+                    "cache_store": None,
+                },
+            )()
 
     app.state = MockAppState()
     return app
@@ -110,10 +114,10 @@ def test_request_histogram_records(test_app):
     content = metrics_response.text
 
     # Should have recorded histogram
-    assert 'semantic_request_duration_seconds_bucket' in content
+    assert "semantic_request_duration_seconds_bucket" in content
     assert 'method="GET",path="/"' in content
-    assert 'semantic_request_duration_seconds_count' in content
-    assert 'semantic_request_duration_seconds_sum' in content
+    assert "semantic_request_duration_seconds_count" in content
+    assert "semantic_request_duration_seconds_sum" in content
 
     print("\n✅ request_duration histogram working")
 

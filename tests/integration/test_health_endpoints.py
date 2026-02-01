@@ -24,11 +24,15 @@ def test_app():
     class MockAppState:
         def __init__(self):
             self.shutting_down = False
-            self.semantic = type('obj', (object,), {
-                'block_pool': None,
-                'batch_engine': None,
-                'cache_store': None,
-            })()
+            self.semantic = type(
+                "obj",
+                (object,),
+                {
+                    "block_pool": None,
+                    "batch_engine": None,
+                    "cache_store": None,
+                },
+            )()
 
     app.state = MockAppState()
 
@@ -173,8 +177,10 @@ def test_health_startup_503_until_model_loaded(test_app):
         class FakeBatchGen:
             def insert(self, prompts, max_tokens, caches=None, samplers=None):
                 return ["fake-uid"]
+
             def next(self):
                 return []
+
         return FakeBatchGen()
 
     batch_engine = BlockPoolBatchEngine(
@@ -182,10 +188,14 @@ def test_health_startup_503_until_model_loaded(test_app):
         tokenizer={"encode": lambda x: [1, 2, 3], "eos_token_id": 0},
         pool=pool,
         spec=spec,
-        cache_adapter=type('obj', (object,), {
-            'create_batch_generator': lambda *args, **kwargs: None,
-            'create_sampler': lambda *args, **kwargs: None,
-        })(),
+        cache_adapter=type(
+            "obj",
+            (object,),
+            {
+                "create_batch_generator": lambda *args, **kwargs: None,
+                "create_sampler": lambda *args, **kwargs: None,
+            },
+        )(),
         batch_gen_factory=fake_batch_gen_factory,
     )
 

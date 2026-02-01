@@ -41,9 +41,7 @@ def test_graceful_shutdown_with_active_requests(live_server: str):
                     "/v1/messages",
                     json={
                         "model": "test-model",
-                        "messages": [
-                            {"role": "user", "content": f"Request {index}"}
-                        ],
+                        "messages": [{"role": "user", "content": f"Request {index}"}],
                         "max_tokens": 20,
                     },
                 )
@@ -68,8 +66,9 @@ def test_graceful_shutdown_with_active_requests(live_server: str):
 
         # Verify all responses are 200 OK
         for index, response in responses:
-            assert response.status_code == 200, \
+            assert response.status_code == 200, (
                 f"Request {index} failed with status {response.status_code}"
+            )
 
             # Verify response has content
             data = response.json()
@@ -114,13 +113,16 @@ def test_drain_prevents_new_requests():
         class FakeBatchGen:
             def insert(self, prompts, max_tokens, caches=None, samplers=None):
                 return ["fake-uid"]
+
             def next(self):
                 return []
+
         return FakeBatchGen()
 
     # Create mock tokenizer
     class MockTokenizer:
         eos_token_id = 0
+
         def encode(self, text):
             return [1, 2, 3]
 
@@ -129,10 +131,14 @@ def test_drain_prevents_new_requests():
         tokenizer=MockTokenizer(),
         pool=pool,
         spec=spec,
-        cache_adapter=type('obj', (object,), {
-            'create_batch_generator': lambda *args, **kwargs: None,
-            'create_sampler': lambda *args, **kwargs: None,
-        })(),
+        cache_adapter=type(
+            "obj",
+            (object,),
+            {
+                "create_batch_generator": lambda *args, **kwargs: None,
+                "create_sampler": lambda *args, **kwargs: None,
+            },
+        )(),
         batch_gen_factory=fake_batch_gen_factory,
     )
 

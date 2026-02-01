@@ -16,7 +16,9 @@ from tests.benchmarks.conftest import BenchmarkReporter
 
 
 @pytest.mark.benchmark
-def test_sequential_1_agent_per_model(benchmark_client: httpx.Client, benchmark_reporter: BenchmarkReporter):
+def test_sequential_1_agent_per_model(
+    benchmark_client: httpx.Client, benchmark_reporter: BenchmarkReporter
+):
     """Benchmark sequential processing (1 agent, baseline).
 
     Measures:
@@ -53,9 +55,7 @@ def test_sequential_1_agent_per_model(benchmark_client: httpx.Client, benchmark_
             "/v1/messages",
             json={
                 "model": "test-model",
-                "messages": [
-                    {"role": "user", "content": f"Sequential request {i}"}
-                ],
+                "messages": [{"role": "user", "content": f"Sequential request {i}"}],
                 "max_tokens": tokens_per_request,
             },
         )
@@ -87,7 +87,9 @@ def test_sequential_1_agent_per_model(benchmark_client: httpx.Client, benchmark_
 
 
 @pytest.mark.benchmark
-def test_batched_3_agents_per_model(benchmark_client: httpx.Client, benchmark_reporter: BenchmarkReporter):
+def test_batched_3_agents_per_model(
+    benchmark_client: httpx.Client, benchmark_reporter: BenchmarkReporter
+):
     """Benchmark batched processing (3 concurrent agents).
 
     Measures:
@@ -180,7 +182,9 @@ def test_batched_3_agents_per_model(benchmark_client: httpx.Client, benchmark_re
 
 
 @pytest.mark.benchmark
-def test_batched_5_agents_per_model(benchmark_client: httpx.Client, benchmark_reporter: BenchmarkReporter):
+def test_batched_5_agents_per_model(
+    benchmark_client: httpx.Client, benchmark_reporter: BenchmarkReporter
+):
     """Benchmark batched processing (5 concurrent agents).
 
     Measures:

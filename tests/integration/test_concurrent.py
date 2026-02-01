@@ -51,9 +51,7 @@ class TestConcurrentBlockPool:
                 barrier.wait()
 
                 # Allocate blocks
-                blocks = pool.allocate(
-                    n_blocks=10, layer_id=0, agent_id=f"thread_{thread_id}"
-                )
+                blocks = pool.allocate(n_blocks=10, layer_id=0, agent_id=f"thread_{thread_id}")
                 results.append(("success", blocks))
             except Exception as e:
                 results.append(("error", e))
@@ -80,9 +78,9 @@ class TestConcurrentBlockPool:
         all_block_ids = set()
         for _status, blocks in successes:
             for block in blocks:
-                assert (
-                    block.block_id not in all_block_ids
-                ), f"Block {block.block_id} allocated twice!"
+                assert block.block_id not in all_block_ids, (
+                    f"Block {block.block_id} allocated twice!"
+                )
                 all_block_ids.add(block.block_id)
 
         assert len(all_block_ids) == 100, "Should have 100 unique blocks"

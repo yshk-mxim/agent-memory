@@ -26,7 +26,9 @@ class TestEvictAllToDisk:
 
         # Mock cache adapter
         mock_adapter = Mock()
-        mock_adapter.save.side_effect = lambda aid, blocks, metadata: tmp_path / f"{aid}.safetensors"
+        mock_adapter.save.side_effect = (
+            lambda aid, blocks, metadata: tmp_path / f"{aid}.safetensors"
+        )
 
         store = AgentCacheStore(
             cache_dir=tmp_path,
@@ -85,7 +87,9 @@ class TestEvictAllToDisk:
 
         # Mock adapter
         mock_adapter = Mock()
-        mock_adapter.save.side_effect = lambda aid, blocks, metadata: tmp_path / f"{aid}.safetensors"
+        mock_adapter.save.side_effect = (
+            lambda aid, blocks, metadata: tmp_path / f"{aid}.safetensors"
+        )
 
         store = AgentCacheStore(
             cache_dir=tmp_path,

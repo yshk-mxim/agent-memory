@@ -34,9 +34,7 @@ def pool(spec: ModelCacheSpec) -> BlockPool:
 class TestMemoryConcurrency:
     """Tests for NEW-2: Thread-safe memory tracking."""
 
-    def test_used_memory_consistent_under_concurrent_allocation(
-        self, pool: BlockPool
-    ) -> None:
+    def test_used_memory_consistent_under_concurrent_allocation(self, pool: BlockPool) -> None:
         """used_memory() should return consistent values during concurrent allocations.
 
         NEW-2 validation: Memory tracking remains accurate even when multiple threads
@@ -90,9 +88,7 @@ class TestMemoryConcurrency:
             f"Memory invariant violated: {final_used} + {final_available} != {total}"
         )
 
-    def test_available_memory_consistent_under_concurrent_operations(
-        self, pool: BlockPool
-    ) -> None:
+    def test_available_memory_consistent_under_concurrent_operations(self, pool: BlockPool) -> None:
         """available_memory() should return consistent values during concurrent ops.
 
         NEW-2 validation: Available memory tracking is thread-safe.

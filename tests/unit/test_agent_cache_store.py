@@ -121,9 +121,7 @@ class TestModelTag:
 class TestCacheEntry:
     """Tests for CacheEntry dataclass."""
 
-    def test_create_entry(
-        self, agent_blocks: AgentBlocks, model_tag: ModelTag
-    ) -> None:
+    def test_create_entry(self, agent_blocks: AgentBlocks, model_tag: ModelTag) -> None:
         """Should create cache entry with defaults."""
         entry = CacheEntry(
             agent_id="test_agent",

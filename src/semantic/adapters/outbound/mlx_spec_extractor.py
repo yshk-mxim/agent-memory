@@ -11,9 +11,7 @@ from semantic.domain.value_objects import ModelCacheSpec
 class LayerTypeDetectionStrategy:
     """Strategy for detecting layer attention types for a model architecture."""
 
-    def detect_layer_types(
-        self, model: Any, args: Any, n_layers: int
-    ) -> list[str] | None:
+    def detect_layer_types(self, model: Any, args: Any, n_layers: int) -> list[str] | None:
         """Detect layer types for this model architecture.
 
         Args:
@@ -32,9 +30,7 @@ class Gemma3DetectionStrategy(LayerTypeDetectionStrategy):
 
     GEMMA3_GLOBAL_LAYERS = 8  # First 8 layers use global attention
 
-    def detect_layer_types(
-        self, _model: Any, args: Any, n_layers: int
-    ) -> list[str] | None:
+    def detect_layer_types(self, _model: Any, args: Any, n_layers: int) -> list[str] | None:
         """Detect Gemma 3 hybrid layer pattern."""
         model_type = getattr(args, "model_type", "unknown")
         if model_type == "gemma3":
@@ -47,9 +43,7 @@ class Gemma3DetectionStrategy(LayerTypeDetectionStrategy):
 class UniformAttentionDetectionStrategy(LayerTypeDetectionStrategy):
     """Layer type detection for models with uniform attention."""
 
-    def detect_layer_types(
-        self, _model: Any, _args: Any, n_layers: int
-    ) -> list[str] | None:
+    def detect_layer_types(self, _model: Any, _args: Any, n_layers: int) -> list[str] | None:
         """Detect uniform global attention (default)."""
         return ["global"] * n_layers
 
@@ -71,9 +65,7 @@ class MLXModelSpecExtractor:
         attrs = self._extract_model_attributes(args)
         self._validate_model_attributes(attrs)
 
-        head_dim = self._compute_head_dim(
-            attrs["hidden_size"], attrs["num_attention_heads"]
-        )
+        head_dim = self._compute_head_dim(attrs["hidden_size"], attrs["num_attention_heads"])
         layer_types = self._detect_layer_types(model, args, attrs["n_layers"])
 
         return ModelCacheSpec(
@@ -110,13 +102,9 @@ class MLXModelSpecExtractor:
     def _validate_model_attributes(self, attrs: dict[str, Any]) -> None:
         """Validate required model attributes are present."""
         if attrs["n_layers"] is None:
-            raise ModelSpecValidationError(
-                "Cannot extract num_hidden_layers from model.args"
-            )
+            raise ModelSpecValidationError("Cannot extract num_hidden_layers from model.args")
         if attrs["n_kv_heads"] is None:
-            raise ModelSpecValidationError(
-                "Cannot extract num_key_value_heads from model.args"
-            )
+            raise ModelSpecValidationError("Cannot extract num_key_value_heads from model.args")
         if attrs["hidden_size"] is None or attrs["num_attention_heads"] is None:
             raise ModelSpecValidationError(
                 "Cannot compute head_dim: missing hidden_size or num_attention_heads"

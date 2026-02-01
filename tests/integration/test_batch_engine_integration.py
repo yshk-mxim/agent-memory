@@ -21,6 +21,7 @@ def model_and_tokenizer():
     Scope is 'module' to avoid reloading for each test.
     """
     from mlx_lm import load
+
     model, tokenizer = load("mlx-community/SmolLM2-135M-Instruct")
     return model, tokenizer
 
@@ -29,6 +30,7 @@ def model_and_tokenizer():
 def spec(model_and_tokenizer):
     """Extract ModelCacheSpec from loaded model."""
     from semantic.adapters.outbound.mlx_spec_extractor import get_extractor
+
     model, _ = model_and_tokenizer
     return get_extractor().extract_spec(model)
 
@@ -166,9 +168,9 @@ class TestBlockPoolBatchEngineIntegration:
 
         # Verify no memory leak
         final_available = pool.available_blocks()
-        assert (
-            final_available == initial_available
-        ), f"Memory leak detected: started with {initial_available}, ended with {final_available}"
+        assert final_available == initial_available, (
+            f"Memory leak detected: started with {initial_available}, ended with {final_available}"
+        )
 
     def test_pool_exhaustion_error(self, engine, pool) -> None:
         """Should raise PoolExhaustedError when no blocks available."""

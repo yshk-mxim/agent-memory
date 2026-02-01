@@ -30,7 +30,7 @@ EMA_ALPHA = 0.3  # Smoothing factor for exponential moving averages
 # Default thresholds (overridden by model profile TOML)
 DEFAULT_LONG_CONTEXT_THRESHOLD = 4000
 DEFAULT_HIGH_BATCH_THRESHOLD = 3
-DEFAULT_MEMORY_PRESSURE_MB = 10500   # Profiling: peak at 16K input was 10202MB
+DEFAULT_MEMORY_PRESSURE_MB = 10500  # Profiling: peak at 16K input was 10202MB
 DEFAULT_MIN_CACHE_BENEFIT_RATIO = 0.8
 
 
@@ -83,24 +83,14 @@ class AdaptiveConfig:
 
         thresholds = (model_profile or {}).get("thresholds", {})
         self._long_context = int(
-            thresholds.get(
-                "long_context_threshold", DEFAULT_LONG_CONTEXT_THRESHOLD
-            )
+            thresholds.get("long_context_threshold", DEFAULT_LONG_CONTEXT_THRESHOLD)
         )
-        self._high_batch = int(
-            thresholds.get(
-                "high_batch_threshold", DEFAULT_HIGH_BATCH_THRESHOLD
-            )
-        )
+        self._high_batch = int(thresholds.get("high_batch_threshold", DEFAULT_HIGH_BATCH_THRESHOLD))
         self._memory_pressure = float(
-            thresholds.get(
-                "memory_pressure_mb", DEFAULT_MEMORY_PRESSURE_MB
-            )
+            thresholds.get("memory_pressure_mb", DEFAULT_MEMORY_PRESSURE_MB)
         )
         self._min_cache_ratio = float(
-            thresholds.get(
-                "min_cache_benefit_ratio", DEFAULT_MIN_CACHE_BENEFIT_RATIO
-            )
+            thresholds.get("min_cache_benefit_ratio", DEFAULT_MIN_CACHE_BENEFIT_RATIO)
         )
 
     def update(
@@ -116,31 +106,21 @@ class AdaptiveConfig:
         alpha = EMA_ALPHA
 
         if input_tokens > 0:
-            s.avg_input_tokens = (
-                alpha * input_tokens + (1 - alpha) * s.avg_input_tokens
-            )
+            s.avg_input_tokens = alpha * input_tokens + (1 - alpha) * s.avg_input_tokens
 
         s.total_requests += 1
         if cache_hit:
             s.total_cache_hits += 1
-        s.cache_hit_ratio = (
-            s.total_cache_hits / s.total_requests
-            if s.total_requests > 0
-            else 0.0
-        )
+        s.cache_hit_ratio = s.total_cache_hits / s.total_requests if s.total_requests > 0 else 0.0
 
         if peak_mb > 0:
-            s.peak_memory_mb = (
-                alpha * peak_mb + (1 - alpha) * s.peak_memory_mb
-            )
+            s.peak_memory_mb = alpha * peak_mb + (1 - alpha) * s.peak_memory_mb
 
         s.active_batch_size = active_batch
         s.pending_queue_depth = queue_depth
         s.last_update = time.monotonic()
 
-    def set_batch_state(
-        self, active_batch: int, queue_depth: int
-    ) -> None:
+    def set_batch_state(self, active_batch: int, queue_depth: int) -> None:
         """Update batch/queue state without a full request update."""
         self._state.active_batch_size = active_batch
         self._state.pending_queue_depth = queue_depth

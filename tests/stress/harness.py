@@ -163,8 +163,7 @@ class StressTestHarness:
 
         # Create worker tasks
         tasks = [
-            self._sustained_worker(workload_fn, duration_seconds, results)
-            for _ in range(workers)
+            self._sustained_worker(workload_fn, duration_seconds, results) for _ in range(workers)
         ]
 
         # Run all workers until duration expires
@@ -336,9 +335,7 @@ class StressTestHarness:
                     )
                 )
 
-    async def measure_pool_utilization(
-        self, health_url: str | None = None
-    ) -> float:
+    async def measure_pool_utilization(self, health_url: str | None = None) -> float:
         """Measure current pool utilization from health endpoint.
 
         Args:

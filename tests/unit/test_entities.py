@@ -38,41 +38,31 @@ class TestKVBlock:
 
     def test_create_block_with_defaults(self) -> None:
         """Should create block with default metadata."""
-        block = KVBlock(
-            block_id=0, layer_id=0, token_count=0, layer_data=None
-        )
+        block = KVBlock(block_id=0, layer_id=0, token_count=0, layer_data=None)
 
         assert block.metadata == {}
 
     def test_is_full_true(self) -> None:
         """Should return True when block has 256 tokens."""
-        block = KVBlock(
-            block_id=0, layer_id=0, token_count=256, layer_data=None
-        )
+        block = KVBlock(block_id=0, layer_id=0, token_count=256, layer_data=None)
 
         assert block.is_full() is True
 
     def test_is_full_false(self) -> None:
         """Should return False when block has less than 256 tokens."""
-        block = KVBlock(
-            block_id=0, layer_id=0, token_count=255, layer_data=None
-        )
+        block = KVBlock(block_id=0, layer_id=0, token_count=255, layer_data=None)
 
         assert block.is_full() is False
 
     def test_is_empty_true(self) -> None:
         """Should return True when block has 0 tokens."""
-        block = KVBlock(
-            block_id=0, layer_id=0, token_count=0, layer_data=None
-        )
+        block = KVBlock(block_id=0, layer_id=0, token_count=0, layer_data=None)
 
         assert block.is_empty() is True
 
     def test_is_empty_false(self) -> None:
         """Should return False when block has tokens."""
-        block = KVBlock(
-            block_id=0, layer_id=0, token_count=1, layer_data=None
-        )
+        block = KVBlock(block_id=0, layer_id=0, token_count=1, layer_data=None)
 
         assert block.is_empty() is False
 
@@ -98,19 +88,13 @@ class TestKVBlock:
 
     def test_accept_boundary_values(self) -> None:
         """Should accept boundary values for all attributes."""
-        block = KVBlock(
-            block_id=0, layer_id=0, token_count=0, layer_data=None
-        )
+        block = KVBlock(block_id=0, layer_id=0, token_count=0, layer_data=None)
         assert block.block_id == 0
 
-        block = KVBlock(
-            block_id=9999, layer_id=0, token_count=0, layer_data=None
-        )
+        block = KVBlock(block_id=9999, layer_id=0, token_count=0, layer_data=None)
         assert block.block_id == 9999
 
-        block = KVBlock(
-            block_id=0, layer_id=0, token_count=256, layer_data=None
-        )
+        block = KVBlock(block_id=0, layer_id=0, token_count=256, layer_data=None)
         assert block.token_count == 256
 
 
@@ -119,9 +103,7 @@ class TestAgentBlocks:
 
     def test_create_empty_agent(self) -> None:
         """Should create agent with no blocks."""
-        agent = AgentBlocks(
-            agent_id="agent_1", blocks={}, total_tokens=0
-        )
+        agent = AgentBlocks(agent_id="agent_1", blocks={}, total_tokens=0)
 
         assert agent.agent_id == "agent_1"
         assert agent.blocks == {}
@@ -132,18 +114,10 @@ class TestAgentBlocks:
     def test_create_agent_with_blocks(self) -> None:
         """Should create agent with pre-allocated blocks."""
         # All layers store the same sequence, so token counts must match
-        block_l0_a = KVBlock(
-            block_id=1, layer_id=0, token_count=256, layer_data=None
-        )
-        block_l0_b = KVBlock(
-            block_id=2, layer_id=0, token_count=128, layer_data=None
-        )
-        block_l1_a = KVBlock(
-            block_id=3, layer_id=1, token_count=256, layer_data=None
-        )
-        block_l1_b = KVBlock(
-            block_id=4, layer_id=1, token_count=128, layer_data=None
-        )
+        block_l0_a = KVBlock(block_id=1, layer_id=0, token_count=256, layer_data=None)
+        block_l0_b = KVBlock(block_id=2, layer_id=0, token_count=128, layer_data=None)
+        block_l1_a = KVBlock(block_id=3, layer_id=1, token_count=256, layer_data=None)
+        block_l1_b = KVBlock(block_id=4, layer_id=1, token_count=128, layer_data=None)
 
         agent = AgentBlocks(
             agent_id="agent_1",
@@ -158,15 +132,9 @@ class TestAgentBlocks:
     def test_num_blocks_counts_all_layers(self) -> None:
         """Should count blocks across all layers."""
         # Each layer has one block with 256 tokens (same sequence replicated)
-        block1 = KVBlock(
-            block_id=1, layer_id=0, token_count=256, layer_data=None
-        )
-        block2 = KVBlock(
-            block_id=2, layer_id=1, token_count=256, layer_data=None
-        )
-        block3 = KVBlock(
-            block_id=3, layer_id=2, token_count=256, layer_data=None
-        )
+        block1 = KVBlock(block_id=1, layer_id=0, token_count=256, layer_data=None)
+        block2 = KVBlock(block_id=2, layer_id=1, token_count=256, layer_data=None)
+        block3 = KVBlock(block_id=3, layer_id=2, token_count=256, layer_data=None)
 
         agent = AgentBlocks(
             agent_id="agent_1",
@@ -179,12 +147,8 @@ class TestAgentBlocks:
 
     def test_blocks_for_layer_exists(self) -> None:
         """Should return blocks for existing layer."""
-        block1 = KVBlock(
-            block_id=1, layer_id=0, token_count=256, layer_data=None
-        )
-        block2 = KVBlock(
-            block_id=2, layer_id=0, token_count=128, layer_data=None
-        )
+        block1 = KVBlock(block_id=1, layer_id=0, token_count=256, layer_data=None)
+        block2 = KVBlock(block_id=2, layer_id=0, token_count=128, layer_data=None)
 
         agent = AgentBlocks(
             agent_id="agent_1",
@@ -199,13 +163,10 @@ class TestAgentBlocks:
 
     def test_blocks_for_layer_not_exists(self) -> None:
         """Should return empty list for non-existent layer."""
-        agent = AgentBlocks(
-            agent_id="agent_1", blocks={}, total_tokens=0
-        )
+        agent = AgentBlocks(agent_id="agent_1", blocks={}, total_tokens=0)
 
         blocks = agent.blocks_for_layer(99)
         assert blocks == []
-
 
     def test_reject_empty_agent_id(self) -> None:
         """Should raise ValueError for empty agent_id."""
@@ -219,13 +180,9 @@ class TestAgentBlocks:
 
     def test_reject_mismatched_total_tokens(self) -> None:
         """Should raise ValueError when total_tokens doesn't match sum."""
-        block = KVBlock(
-            block_id=1, layer_id=0, token_count=256, layer_data=None
-        )
+        block = KVBlock(block_id=1, layer_id=0, token_count=256, layer_data=None)
 
-        with pytest.raises(
-            AgentBlocksValidationError, match=r"total_tokens .* doesn't match sum"
-        ):
+        with pytest.raises(AgentBlocksValidationError, match=r"total_tokens .* doesn't match sum"):
             AgentBlocks(
                 agent_id="agent_1",
                 blocks={0: [block]},
@@ -246,8 +203,6 @@ class TestAgentBlocks:
 
     def test_create_with_default_metadata(self) -> None:
         """Should default to empty metadata dict."""
-        agent = AgentBlocks(
-            agent_id="agent_1", blocks={}, total_tokens=0
-        )
+        agent = AgentBlocks(agent_id="agent_1", blocks={}, total_tokens=0)
 
         assert agent.metadata == {}

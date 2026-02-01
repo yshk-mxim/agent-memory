@@ -62,13 +62,14 @@ def test_streaming_response_format(live_server: str):
 
             # Verify at least one content chunk
             content_chunks = [
-                c for c in chunks
-                if not c.get("done") and c["choices"][0]["delta"].get("content")
+                c for c in chunks if not c.get("done") and c["choices"][0]["delta"].get("content")
             ]
             assert len(content_chunks) > 0, "Should have at least one content delta"
 
             # Verify final chunk has finish_reason
-            final_chunk = [c for c in chunks if not c.get("done") and c["choices"][0].get("finish_reason")]
+            final_chunk = [
+                c for c in chunks if not c.get("done") and c["choices"][0].get("finish_reason")
+            ]
             assert len(final_chunk) > 0, "Should have final chunk with finish_reason"
 
             # Verify [DONE] marker
@@ -87,7 +88,9 @@ def test_delta_chunks_arrive_progressively(live_server: str):
     - Each chunk has incremental content
     - Chunks can be accumulated to full response
     """
-    client = httpx.Client(base_url=live_server, timeout=30.0, headers={"x-api-key": "test-key-for-e2e"})
+    client = httpx.Client(
+        base_url=live_server, timeout=30.0, headers={"x-api-key": "test-key-for-e2e"}
+    )
 
     try:
         request_body = {
@@ -140,7 +143,9 @@ def test_final_done_marker(live_server: str):
     - No chunks after [DONE]
     - Proper stream termination
     """
-    client = httpx.Client(base_url=live_server, timeout=30.0, headers={"x-api-key": "test-key-for-e2e"})
+    client = httpx.Client(
+        base_url=live_server, timeout=30.0, headers={"x-api-key": "test-key-for-e2e"}
+    )
 
     try:
         request_body = {
@@ -178,7 +183,9 @@ def test_error_handling_in_streaming(live_server: str):
     - Stream terminates properly on errors
     - Error messages are clear
     """
-    client = httpx.Client(base_url=live_server, timeout=30.0, headers={"x-api-key": "test-key-for-e2e"})
+    client = httpx.Client(
+        base_url=live_server, timeout=30.0, headers={"x-api-key": "test-key-for-e2e"}
+    )
 
     try:
         # Test with invalid max_tokens (too large)
@@ -193,8 +200,9 @@ def test_error_handling_in_streaming(live_server: str):
         # Main point is no crashes and proper error handling
         with client.stream("POST", "/v1/chat/completions", json=request_body) as response:
             # Should get either success or proper error
-            assert response.status_code in [200, 400, 422, 503], \
+            assert response.status_code in [200, 400, 422, 503], (
                 f"Should get valid status code, got {response.status_code}"
+            )
 
             # If it streams, it should not crash
             if response.status_code == 200:
@@ -220,7 +228,9 @@ def test_openai_streaming_vs_non_streaming(live_server: str):
     - Streaming chunks accumulate to same text as non-streaming
     - Both methods work correctly
     """
-    client = httpx.Client(base_url=live_server, timeout=30.0, headers={"x-api-key": "test-key-for-e2e"})
+    client = httpx.Client(
+        base_url=live_server, timeout=30.0, headers={"x-api-key": "test-key-for-e2e"}
+    )
 
     try:
         request_body = {

@@ -105,10 +105,12 @@ def parse_tool_calls(text: str) -> tuple[str, list[dict[str, Any]]]:
         if parsed and "tool_use" in parsed:
             tool_data = parsed["tool_use"]
             if isinstance(tool_data, dict) and "name" in tool_data and "input" in tool_data:
-                tool_calls.append({
-                    "name": tool_data["name"],
-                    "input": tool_data["input"],
-                })
+                tool_calls.append(
+                    {
+                        "name": tool_data["name"],
+                        "input": tool_data["input"],
+                    }
+                )
                 found_ranges.append((start, end))
                 pos = end  # Continue searching after this match
             else:
@@ -180,21 +182,18 @@ def messages_to_prompt(  # noqa: PLR0912, C901
                 elif hasattr(block, "tool_use_id"):
                     # ToolResultContentBlock
                     result_content = (
-                        block.content if isinstance(block.content, str)
+                        block.content
+                        if isinstance(block.content, str)
                         else json.dumps(block.content)
                     )
                     status = "ERROR" if block.is_error else "SUCCESS"
                     lines.append(
-                        f"{msg.role.capitalize()} [Tool Result - {status}]: "
-                        f"{result_content}"
+                        f"{msg.role.capitalize()} [Tool Result - {status}]: {result_content}"
                     )
                 elif hasattr(block, "name") and hasattr(block, "input"):
                     # ToolUseContentBlock (in assistant messages)
                     tool_call = {"name": block.name, "input": block.input}
-                    lines.append(
-                        f"{msg.role.capitalize()} [Tool Call]: "
-                        f'{json.dumps(tool_call)}'
-                    )
+                    lines.append(f"{msg.role.capitalize()} [Tool Call]: {json.dumps(tool_call)}")
 
     # Add assistant prefix for continuation
     lines.append("Assistant:")
@@ -327,9 +326,7 @@ async def stream_generation(  # noqa: C901, PLR0912
             # Yield content_block_stop for tool
             yield {
                 "event": "content_block_stop",
-                "data": json.dumps(
-                    ContentBlockStopEvent(index=content_block_index).model_dump()
-                ),
+                "data": json.dumps(ContentBlockStopEvent(index=content_block_index).model_dump()),
             }
 
             content_block_index += 1
@@ -443,7 +440,7 @@ async def stream_generation_via_scheduler(  # noqa: C901, PLR0912
             max_tokens=request_body.max_tokens,
             prompt_text=prompt,
         ):
-            new_text = delta.text[len(accumulated_text):]
+            new_text = delta.text[len(accumulated_text) :]
             accumulated_text = delta.text
 
             if new_text:
@@ -490,9 +487,7 @@ async def stream_generation_via_scheduler(  # noqa: C901, PLR0912
             }
             yield {
                 "event": "content_block_stop",
-                "data": json.dumps(
-                    ContentBlockStopEvent(index=content_block_index).model_dump()
-                ),
+                "data": json.dumps(ContentBlockStopEvent(index=content_block_index).model_dump()),
             }
             content_block_index += 1
 
@@ -604,8 +599,7 @@ async def create_message(request_body: MessagesRequest, request: Request):  # no
                 tools_text = ""
                 if request_body.tools:
                     tools_text = json.dumps(
-                        [{"name": t.name, "description": t.description}
-                         for t in request_body.tools]
+                        [{"name": t.name, "description": t.description} for t in request_body.tools]
                     )
                 if system_text or tools_text:
                     prefix_hash = SharedPrefixCache.compute_hash(system_text, tools_text)
@@ -623,8 +617,14 @@ async def create_message(request_body: MessagesRequest, request: Request):  # no
                 logger.info("Returning SSE stream via scheduler")
                 return EventSourceResponse(
                     stream_generation_via_scheduler(
-                        request_body, scheduler, cache_store, batch_engine,
-                        tokens, prompt, agent_id, cached_blocks,
+                        request_body,
+                        scheduler,
+                        cache_store,
+                        batch_engine,
+                        tokens,
+                        prompt,
+                        agent_id,
+                        cached_blocks,
                     )
                 )
             # Legacy direct streaming (batch=1 only)

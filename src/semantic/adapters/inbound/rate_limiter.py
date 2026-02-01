@@ -70,9 +70,7 @@ class RateLimiter(BaseHTTPMiddleware):
             f"{requests_per_minute_global} req/min global"
         )
 
-    def _clean_old_requests(
-        self, requests: deque[float], now: float
-    ) -> None:
+    def _clean_old_requests(self, requests: deque[float], now: float) -> None:
         """Remove requests outside the sliding window.
 
         Args:
@@ -116,9 +114,7 @@ class RateLimiter(BaseHTTPMiddleware):
 
         return len(stale_agents)
 
-    def _is_rate_limited_agent(
-        self, agent_id: str, now: float
-    ) -> tuple[bool, float]:
+    def _is_rate_limited_agent(self, agent_id: str, now: float) -> tuple[bool, float]:
         """Check if agent has exceeded rate limit.
 
         Args:
@@ -185,9 +181,7 @@ class RateLimiter(BaseHTTPMiddleware):
         # which is complex in middleware
         return None
 
-    async def dispatch(
-        self, request: Request, call_next: Callable
-    ) -> Response:
+    async def dispatch(self, request: Request, call_next: Callable) -> Response:
         """Process request with rate limiting check.
 
         Args:
@@ -209,9 +203,7 @@ class RateLimiter(BaseHTTPMiddleware):
             # Check global rate limit
             is_global_limited, global_retry_after = self._is_rate_limited_global(now)
             if is_global_limited:
-                logger.warning(
-                    f"{request.method} {request.url.path} - Global rate limit exceeded"
-                )
+                logger.warning(f"{request.method} {request.url.path} - Global rate limit exceeded")
                 return JSONResponse(
                     status_code=status.HTTP_429_TOO_MANY_REQUESTS,
                     headers={"Retry-After": str(global_retry_after)},
@@ -219,8 +211,7 @@ class RateLimiter(BaseHTTPMiddleware):
                         "error": {
                             "type": "rate_limit_error",
                             "message": (
-                                f"Global rate limit exceeded. "
-                                f"Retry after {global_retry_after}s."
+                                f"Global rate limit exceeded. Retry after {global_retry_after}s."
                             ),
                         }
                     },
@@ -231,9 +222,7 @@ class RateLimiter(BaseHTTPMiddleware):
 
             # Check per-agent rate limit (if agent ID available)
             if agent_id:
-                is_agent_limited, agent_retry_after = self._is_rate_limited_agent(
-                    agent_id, now
-                )
+                is_agent_limited, agent_retry_after = self._is_rate_limited_agent(agent_id, now)
                 if is_agent_limited:
                     logger.warning(
                         f"{request.method} {request.url.path} - "
@@ -246,8 +235,7 @@ class RateLimiter(BaseHTTPMiddleware):
                             "error": {
                                 "type": "rate_limit_error",
                                 "message": (
-                                    f"Agent rate limit exceeded. "
-                                    f"Retry after {agent_retry_after}s."
+                                    f"Agent rate limit exceeded. Retry after {agent_retry_after}s."
                                 ),
                             }
                         },

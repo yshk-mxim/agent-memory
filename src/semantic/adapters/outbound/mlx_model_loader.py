@@ -50,7 +50,7 @@ class MLXModelLoader:
         # CRITICAL: Override tokenizer max length for long context
         tokenizer_config = {
             "model_max_length": MAX_CONTEXT_LENGTH,
-            "truncation_side": "left",   # Keep recent tokens if needed
+            "truncation_side": "left",  # Keep recent tokens if needed
             "trust_remote_code": True,
         }
 
@@ -63,8 +63,7 @@ class MLXModelLoader:
 
         if actual_max < MAX_CONTEXT_LENGTH:
             logger.warning(
-                f"Tokenizer max ({actual_max:,}) < target (100,000). "
-                f"Requests may be truncated."
+                f"Tokenizer max ({actual_max:,}) < target (100,000). Requests may be truncated."
             )
 
         return model, tokenizer

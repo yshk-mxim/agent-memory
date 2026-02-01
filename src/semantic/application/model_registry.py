@@ -92,6 +92,7 @@ class ModelRegistry:
 
         # Add quantization settings from caller
         from dataclasses import replace
+
         spec = replace(
             base_spec,
             kv_bits=kv_bits,
@@ -132,7 +133,7 @@ class ModelRegistry:
         logger.info(f"Unloading model: {self._current_model_id}")
 
         # Measure memory before unload (for logging) via injected loader (CR-3 fix)
-        mem_before_mb = self._loader.get_active_memory() / (1024 ** 2)
+        mem_before_mb = self._loader.get_active_memory() / (1024**2)
 
         # Unload (EXP-011 pattern)
         del self._model
@@ -148,13 +149,10 @@ class ModelRegistry:
         self._current_model_id = None
 
         # Measure memory after unload
-        mem_after_mb = self._loader.get_active_memory() / (1024 ** 2)
+        mem_after_mb = self._loader.get_active_memory() / (1024**2)
         reclaimed_mb = mem_before_mb - mem_after_mb
 
-        logger.info(
-            f"Model unloaded: {old_model_id}. "
-            f"Reclaimed {reclaimed_mb:.2f} MB"
-        )
+        logger.info(f"Model unloaded: {old_model_id}. Reclaimed {reclaimed_mb:.2f} MB")
 
     def get_current(self) -> tuple[Any, Any] | None:
         """Get currently loaded model and tokenizer.

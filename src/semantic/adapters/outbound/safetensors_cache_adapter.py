@@ -32,7 +32,9 @@ class SafetensorsCacheAdapter:
         try:
             self.cache_dir.mkdir(parents=True, exist_ok=True)
         except OSError as e:
-            raise CachePersistenceError(f"Failed to create cache directory {self.cache_dir}: {e}") from e
+            raise CachePersistenceError(
+                f"Failed to create cache directory {self.cache_dir}: {e}"
+            ) from e
 
     def _validate_agent_id(self, agent_id: str) -> None:
         """Validate agent_id to prevent path traversal attacks.
@@ -47,9 +49,7 @@ class SafetensorsCacheAdapter:
             raise CachePersistenceError("agent_id cannot be empty")
 
         if len(agent_id) > 256:
-            raise CachePersistenceError(
-                f"agent_id too long: {len(agent_id)} chars (max 256)"
-            )
+            raise CachePersistenceError(f"agent_id too long: {len(agent_id)} chars (max 256)")
 
         if not _VALID_AGENT_ID_PATTERN.match(agent_id):
             raise CachePersistenceError(
@@ -131,12 +131,8 @@ class SafetensorsCacheAdapter:
                             v_data = mx.array(v_data)
 
                         # Quantize to 4-bit with group_size=64
-                        k_weights, k_scales, k_biases = mx.quantize(
-                            k_data, group_size=64, bits=4
-                        )
-                        v_weights, v_scales, v_biases = mx.quantize(
-                            v_data, group_size=64, bits=4
-                        )
+                        k_weights, k_scales, k_biases = mx.quantize(k_data, group_size=64, bits=4)
+                        v_weights, v_scales, v_biases = mx.quantize(v_data, group_size=64, bits=4)
 
                         # Save quantized components
                         tensors[f"L{layer_id}_B{block_idx}_K_weights"] = np.asarray(k_weights)
@@ -177,9 +173,7 @@ class SafetensorsCacheAdapter:
                     tmp_path.unlink()
                 except OSError:
                     logger.warning(f"Failed to clean up temp file: {tmp_path}")
-            raise CachePersistenceError(
-                f"Failed to save cache for agent {agent_id}: {e}"
-            ) from e
+            raise CachePersistenceError(f"Failed to save cache for agent {agent_id}: {e}") from e
         finally:
             # Extra safety: clean up any leftover temp file
             if tmp_path.exists():
@@ -200,7 +194,9 @@ class SafetensorsCacheAdapter:
             with cache_path.open("rb") as f:
                 header_size_bytes = f.read(8)
                 if len(header_size_bytes) < 8:
-                    raise CachePersistenceError(f"Invalid cache file (truncated header): {cache_path}")
+                    raise CachePersistenceError(
+                        f"Invalid cache file (truncated header): {cache_path}"
+                    )
 
                 header_size = struct.unpack("<Q", header_size_bytes)[0]
                 header_bytes = f.read(header_size)
@@ -247,12 +243,16 @@ class SafetensorsCacheAdapter:
                 k_weights = mx.array(tensors_data[k_weights_key])
                 k_scales = mx.array(tensors_data[f"L{layer_id}_B{block_idx}_K_scales"])
                 k_biases_key = f"L{layer_id}_B{block_idx}_K_biases"
-                k_biases = mx.array(tensors_data[k_biases_key]) if k_biases_key in tensors_data else None
+                k_biases = (
+                    mx.array(tensors_data[k_biases_key]) if k_biases_key in tensors_data else None
+                )
 
                 v_weights = mx.array(tensors_data[v_weights_key])
                 v_scales = mx.array(tensors_data[f"L{layer_id}_B{block_idx}_V_scales"])
                 v_biases_key = f"L{layer_id}_B{block_idx}_V_biases"
-                v_biases = mx.array(tensors_data[v_biases_key]) if v_biases_key in tensors_data else None
+                v_biases = (
+                    mx.array(tensors_data[v_biases_key]) if v_biases_key in tensors_data else None
+                )
 
                 # Store as quantized tuples (don't dequantize unless needed)
                 k_data = (k_weights, k_scales, k_biases)

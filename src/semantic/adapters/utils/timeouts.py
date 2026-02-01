@@ -25,9 +25,7 @@ def timeout(seconds: int) -> Callable[[F], F]:
         @functools.wraps(func)
         def wrapper(*args: Any, **kwargs: Any) -> Any:
             def _timeout_handler(_signum: int, _frame: Any) -> None:
-                raise OperationTimeoutError(
-                    f"{func.__name__}() exceeded timeout of {seconds}s"
-                )
+                raise OperationTimeoutError(f"{func.__name__}() exceeded timeout of {seconds}s")
 
             # Set alarm
             old_handler = signal.signal(signal.SIGALRM, _timeout_handler)

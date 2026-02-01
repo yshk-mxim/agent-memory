@@ -37,7 +37,10 @@ def test_single_request_cold_start(live_server):
         json={
             "model": "test-model",
             "messages": [
-                {"role": "user", "content": "Hello, this is a test message for performance measurement."}
+                {
+                    "role": "user",
+                    "content": "Hello, this is a test message for performance measurement.",
+                }
             ],
             "max_tokens": 50,
         },
@@ -99,7 +102,7 @@ def test_sequential_requests_same_agent(live_server):
             json={
                 "model": "test-model",
                 "messages": [
-                    {"role": "user", "content": f"Sequential request {i+1} for cache testing."}
+                    {"role": "user", "content": f"Sequential request {i + 1} for cache testing."}
                 ],
                 "max_tokens": 50,
             },
@@ -107,7 +110,7 @@ def test_sequential_requests_same_agent(live_server):
         elapsed_ms = (time.time() - start_time) * 1000
         latencies.append(elapsed_ms)
 
-        print(f"  Request {i+1}: {elapsed_ms:.0f}ms (status: {response.status_code})")
+        print(f"  Request {i + 1}: {elapsed_ms:.0f}ms (status: {response.status_code})")
 
     # Calculate stats
     if latencies:
@@ -184,7 +187,9 @@ def test_concurrent_health_checks(live_server):
         """Single health check."""
         start = time.time()
         async with aiohttp.ClientSession() as session:
-            async with session.get(f"{live_server}/health/live", timeout=aiohttp.ClientTimeout(total=5.0)) as response:
+            async with session.get(
+                f"{live_server}/health/live", timeout=aiohttp.ClientTimeout(total=5.0)
+            ) as response:
                 latency = (time.time() - start) * 1000
                 return (response.status, latency)
 

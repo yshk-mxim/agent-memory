@@ -10,6 +10,7 @@ Expected:
     ✓ Tokenizer accepts 100K tokens
     ✓ Can encode sequences >16K tokens
 """
+
 import sys
 from pathlib import Path
 
@@ -26,16 +27,12 @@ def test_tokenizer_max_length():
     print("=" * 60)
 
     loader = MLXModelLoader()
-    model, tokenizer = loader.load_model(
-        "mlx-community/DeepSeek-Coder-V2-Lite-Instruct-4bit-mlx"
-    )
+    model, tokenizer = loader.load_model("mlx-community/DeepSeek-Coder-V2-Lite-Instruct-4bit-mlx")
 
     print(f"✓ Model loaded successfully")
     print(f"✓ Tokenizer max length: {tokenizer.model_max_length:,} tokens")
 
-    assert tokenizer.model_max_length == 100000, (
-        f"Expected 100K, got {tokenizer.model_max_length}"
-    )
+    assert tokenizer.model_max_length == 100000, f"Expected 100K, got {tokenizer.model_max_length}"
 
     print(f"✓ Tokenizer accepts 100K tokens!")
 
@@ -47,13 +44,14 @@ def test_long_sequence():
     print("=" * 60)
 
     loader = MLXModelLoader()
-    model, tokenizer = loader.load_model(
-        "mlx-community/DeepSeek-Coder-V2-Lite-Instruct-4bit-mlx"
-    )
+    model, tokenizer = loader.load_model("mlx-community/DeepSeek-Coder-V2-Lite-Instruct-4bit-mlx")
 
     # Generate text that will exceed 16K tokens
     # Repeat a sentence many times to create a very long input
-    long_text = "This is a test sentence with many words that should tokenize to approximately one hundred tokens when encoded by the DeepSeek tokenizer model. " * 1000
+    long_text = (
+        "This is a test sentence with many words that should tokenize to approximately one hundred tokens when encoded by the DeepSeek tokenizer model. "
+        * 1000
+    )
     tokens = tokenizer.encode(long_text)
 
     print(f"✓ Encoded {len(tokens):,} tokens successfully")

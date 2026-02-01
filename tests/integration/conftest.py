@@ -45,6 +45,7 @@ _mock_model.args = SimpleNamespace(
     sliding_window=None,
 )
 
+
 # --- FakeDetokenizer: real class to avoid MagicMock spec issues in Python 3.12+ ---
 class _FakeDetokenizer:
     """Minimal detokenizer for testing. batch_engine.py does type(tok.detokenizer)(tok)."""
@@ -83,6 +84,7 @@ sys.modules["mlx_lm.models.cache"] = _mock_mlx_lm_models_cache
 # =============================================================================
 # FakeBatchGenerator: test-compatible replacement for mlx_lm.server.BatchGenerator
 # =============================================================================
+
 
 class _FakeResponse:
     """Mimics the response object from BatchGenerator.next()."""
@@ -130,19 +132,23 @@ class FakeBatchGenerator:
                 for fc in fake_caches:
                     fc.state = (MagicMock(), MagicMock())
                     fc.offset = 5
-                responses.append(_FakeResponse(
-                    uid=uid,
-                    token=42,
-                    finish_reason="stop",
-                    prompt_cache=fake_caches,
-                ))
+                responses.append(
+                    _FakeResponse(
+                        uid=uid,
+                        token=42,
+                        finish_reason="stop",
+                        prompt_cache=fake_caches,
+                    )
+                )
                 done_uids.append(uid)
             else:
-                responses.append(_FakeResponse(
-                    uid=uid,
-                    token=42,
-                    finish_reason=None,
-                ))
+                responses.append(
+                    _FakeResponse(
+                        uid=uid,
+                        token=42,
+                        finish_reason=None,
+                    )
+                )
 
         for uid in done_uids:
             del self._sequences[uid]
@@ -163,6 +169,7 @@ sys.modules["mlx_lm.sample_utils"] = _mock_sample_utils
 # =============================================================================
 # Pytest fixtures
 # =============================================================================
+
 
 @pytest.fixture(autouse=True, scope="session")
 def _reinstall_mlx_mocks():
@@ -218,10 +225,12 @@ def _patch_for_integration(monkeypatch):
 
     # Reset settings singleton so each test gets a fresh config load
     from semantic.adapters.config import settings as settings_module
+
     monkeypatch.setattr(settings_module, "_settings", None)
 
     # Reset spec extractor singleton
     from semantic.adapters.outbound import mlx_spec_extractor
+
     monkeypatch.setattr(mlx_spec_extractor, "_extractor", None)
 
     # Patch _extract_cache to skip MLX tensor operations
@@ -256,15 +265,18 @@ def _patch_for_integration(monkeypatch):
     # Patch SafetensorsCacheAdapter.save/load — fake blocks have opaque layer_data
     # that safetensors can't serialize. Mock the adapter to store in memory instead.
     from semantic.adapters.outbound.safetensors_cache_adapter import SafetensorsCacheAdapter
+
     _disk_cache: dict[str, tuple] = {}
 
     def _fake_adapter_save(self, agent_id, blocks, metadata):
         import pathlib
+
         _disk_cache[agent_id] = (blocks, metadata)
         return pathlib.Path(test_cache_dir) / f"{agent_id}.safetensors"
 
     def _fake_adapter_load(self, path):
         import pathlib
+
         agent_id = pathlib.Path(path).stem
         if agent_id in _disk_cache:
             blocks, metadata = _disk_cache[agent_id]

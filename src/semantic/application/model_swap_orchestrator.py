@@ -177,9 +177,7 @@ class ModelSwapOrchestrator:
                     logger.info("Rollback successful")
                 except Exception as rollback_error:
                     logger.error(f"Rollback failed: {rollback_error}")
-                    logger.critical(
-                        "System in degraded state - manual intervention required"
-                    )
+                    logger.critical("System in degraded state - manual intervention required")
                     raise  # Re-raise original error
 
             # Re-raise original swap error

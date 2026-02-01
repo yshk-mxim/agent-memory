@@ -62,18 +62,14 @@ class TestAnthropicToolCalling:
             data = response.json()
 
             # Should have tool_use in content
-            has_tool_use = any(
-                block.get("type") == "tool_use" for block in data.get("content", [])
-            )
+            has_tool_use = any(block.get("type") == "tool_use" for block in data.get("content", []))
 
             if has_tool_use:
                 # Verify stop_reason is tool_use
                 assert data["stop_reason"] == "tool_use"
 
                 # Find the tool_use block
-                tool_block = next(
-                    b for b in data["content"] if b.get("type") == "tool_use"
-                )
+                tool_block = next(b for b in data["content"] if b.get("type") == "tool_use")
                 assert "id" in tool_block
                 assert tool_block["name"] == "get_weather"
                 assert "location" in tool_block["input"]
@@ -239,11 +235,7 @@ class TestAnthropicToolCallingStreaming:
                             pass
 
                 # Should have message_start, content blocks, message_delta, message_stop
-                event_types = [
-                    e.get("type")
-                    for e in events
-                    if isinstance(e, dict) and "type" in e
-                ]
+                event_types = [e.get("type") for e in events if isinstance(e, dict) and "type" in e]
 
                 # Basic streaming events should be present
                 assert "message_start" in event_types or len(events) > 0
@@ -252,16 +244,19 @@ class TestAnthropicToolCallingStreaming:
         """Streaming without tools should work normally."""
         app = create_app()
 
-        with TestClient(app) as client, client.stream(
-            "POST",
-            "/v1/messages",
-            json={
-                "model": "test",
-                "max_tokens": 50,
-                "stream": True,
-                "messages": [{"role": "user", "content": "Hello"}],
-            },
-        ) as response:
+        with (
+            TestClient(app) as client,
+            client.stream(
+                "POST",
+                "/v1/messages",
+                json={
+                    "model": "test",
+                    "max_tokens": 50,
+                    "stream": True,
+                    "messages": [{"role": "user", "content": "Hello"}],
+                },
+            ) as response,
+        ):
             assert response.status_code == 200
 
             # Should receive streaming events

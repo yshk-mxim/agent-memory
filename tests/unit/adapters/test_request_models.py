@@ -53,9 +53,7 @@ class TestAnthropicContentBlocks:
 
     def test_tool_use_content_block(self):
         """Tool use content block should serialize correctly."""
-        block = ToolUseContentBlock(
-            id="tool_1", name="search", input={"query": "test"}
-        )
+        block = ToolUseContentBlock(id="tool_1", name="search", input={"query": "test"})
 
         assert block.type == "tool_use"
         assert block.id == "tool_1"
@@ -64,9 +62,7 @@ class TestAnthropicContentBlocks:
 
     def test_tool_result_content_block(self):
         """Tool result content block should serialize correctly."""
-        block = ToolResultContentBlock(
-            tool_use_id="tool_1", content="Result", is_error=False
-        )
+        block = ToolResultContentBlock(tool_use_id="tool_1", content="Result", is_error=False)
 
         assert block.type == "tool_result"
         assert block.tool_use_id == "tool_1"
@@ -155,9 +151,7 @@ class TestMessagesRequest:
             messages=[Message(role="user", content="Hello!")],
             system=[
                 SystemBlock(text="You are a helpful assistant."),
-                SystemBlock(
-                    text="You are an expert.", cache_control={"type": "ephemeral"}
-                ),
+                SystemBlock(text="You are an expert.", cache_control={"type": "ephemeral"}),
             ],
         )
 
@@ -332,9 +326,7 @@ class TestSSEEvents:
 
     def test_content_block_delta_event(self):
         """ContentBlockDeltaEvent should serialize correctly."""
-        event = ContentBlockDeltaEvent(
-            index=0, delta={"type": "text_delta", "text": "Hello"}
-        )
+        event = ContentBlockDeltaEvent(index=0, delta={"type": "text_delta", "text": "Hello"})
 
         assert event.type == "content_block_delta"
         assert event.index == 0

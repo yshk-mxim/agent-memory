@@ -22,10 +22,14 @@ def test_app():
     class MockAppState:
         def __init__(self):
             self.shutting_down = False
-            self.semantic = type('obj', (object,), {
-                'block_pool': None,
-                'batch_engine': None,
-            })()
+            self.semantic = type(
+                "obj",
+                (object,),
+                {
+                    "block_pool": None,
+                    "batch_engine": None,
+                },
+            )()
 
     app.state = MockAppState()
 

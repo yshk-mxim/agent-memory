@@ -8,9 +8,9 @@ Provides low-level CRUD operations for agent cache management:
 """
 
 import asyncio
+import gc
 import logging
 import uuid
-from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request, status
 
@@ -27,6 +27,11 @@ from semantic.adapters.inbound.request_models import (
 from semantic.application.agent_cache_store import AgentCacheStore
 from semantic.application.batch_engine import BlockPoolBatchEngine
 from semantic.domain.errors import PoolExhaustedError, SemanticError
+
+try:
+    import mlx.core as mx
+except ImportError:
+    mx = None  # type: ignore[assignment]
 
 logger = logging.getLogger(__name__)
 
@@ -289,14 +294,10 @@ async def delete_agent(agent_id: str, request: Request):
         cache_store.delete(agent_id)
 
         # Explicitly free GPU memory held by cached tensors
-        import gc
         del cached_blocks
         gc.collect()
-        try:
-            import mlx.core as mx
+        if mx is not None:
             mx.clear_cache()
-        except ImportError:
-            pass
 
         logger.info(f"Agent deleted: {agent_id}")
 

@@ -118,9 +118,7 @@ class TestBlockPoolProperties:
         assert pool.allocated_block_count() + pool.available_blocks() == total_blocks
 
         # After allocation: invariant still holds
-        blocks = pool.allocate(
-            n_blocks=n_blocks_to_allocate, layer_id=0, agent_id="test_agent"
-        )
+        blocks = pool.allocate(n_blocks=n_blocks_to_allocate, layer_id=0, agent_id="test_agent")
         assert pool.allocated_block_count() + pool.available_blocks() == total_blocks
 
         # After freeing: invariant still holds
@@ -129,9 +127,7 @@ class TestBlockPoolProperties:
 
     @given(
         total_blocks=st.integers(min_value=10, max_value=50),
-        allocations=st.lists(
-            st.integers(min_value=1, max_value=10), min_size=1, max_size=10
-        ),
+        allocations=st.lists(st.integers(min_value=1, max_value=10), min_size=1, max_size=10),
     )
     def test_property_allocate_then_free_restores_state(
         self,
@@ -310,9 +306,7 @@ class TestBlockPoolAllocation:
         assert pool.available_blocks() == 0
         assert pool.allocated_block_count() == 50
 
-    def test_allocate_assigns_unique_block_ids(
-        self, gemma_spec: ModelCacheSpec
-    ) -> None:
+    def test_allocate_assigns_unique_block_ids(self, gemma_spec: ModelCacheSpec) -> None:
         """Should assign unique block IDs (no duplicates)."""
         pool = BlockPool(spec=gemma_spec, total_blocks=100)
 
@@ -321,9 +315,7 @@ class TestBlockPoolAllocation:
 
         assert len(block_ids) == len(set(block_ids))  # All unique
 
-    def test_allocate_tracks_agent_allocations(
-        self, gemma_spec: ModelCacheSpec
-    ) -> None:
+    def test_allocate_tracks_agent_allocations(self, gemma_spec: ModelCacheSpec) -> None:
         """Should track which blocks belong to which agent."""
         pool = BlockPool(spec=gemma_spec, total_blocks=100)
 
@@ -336,9 +328,7 @@ class TestBlockPoolAllocation:
         assert len(pool.agent_allocations["agent_1"]) == 5
         assert len(pool.agent_allocations["agent_2"]) == 3
 
-    def test_allocate_to_different_layers(
-        self, gemma_spec: ModelCacheSpec
-    ) -> None:
+    def test_allocate_to_different_layers(self, gemma_spec: ModelCacheSpec) -> None:
         """Should allow allocating blocks to different layers."""
         pool = BlockPool(spec=gemma_spec, total_blocks=100)
 
@@ -355,18 +345,14 @@ class TestBlockPoolAllocation:
 class TestBlockPoolAllocationErrors:
     """Test block allocation error cases."""
 
-    def test_reject_zero_block_allocation(
-        self, gemma_spec: ModelCacheSpec
-    ) -> None:
+    def test_reject_zero_block_allocation(self, gemma_spec: ModelCacheSpec) -> None:
         """Should raise ValueError for n_blocks <= 0."""
         pool = BlockPool(spec=gemma_spec, total_blocks=100)
 
         with pytest.raises(BlockOperationError, match="n_blocks must be > 0"):
             pool.allocate(n_blocks=0, layer_id=0, agent_id="agent_1")
 
-    def test_reject_negative_block_allocation(
-        self, gemma_spec: ModelCacheSpec
-    ) -> None:
+    def test_reject_negative_block_allocation(self, gemma_spec: ModelCacheSpec) -> None:
         """Should raise ValueError for negative n_blocks."""
         pool = BlockPool(spec=gemma_spec, total_blocks=100)
 
@@ -402,9 +388,7 @@ class TestBlockPoolAllocationErrors:
         ):
             pool.allocate(n_blocks=5, layer_id=0, agent_id="agent_2")
 
-    def test_pool_exhausted_provides_details(
-        self, llama_spec: ModelCacheSpec
-    ) -> None:
+    def test_pool_exhausted_provides_details(self, llama_spec: ModelCacheSpec) -> None:
         """PoolExhaustedError should provide pool statistics."""
         pool = BlockPool(spec=llama_spec, total_blocks=20)
         pool.allocate(n_blocks=15, layer_id=0, agent_id="agent_1")
@@ -429,9 +413,7 @@ class TestBlockPoolDeallocation:
         assert pool.available_blocks() == 100
         assert pool.allocated_block_count() == 0
 
-    def test_free_updates_agent_allocations(
-        self, gemma_spec: ModelCacheSpec
-    ) -> None:
+    def test_free_updates_agent_allocations(self, gemma_spec: ModelCacheSpec) -> None:
         """Should remove blocks from agent allocation tracking."""
         pool = BlockPool(spec=gemma_spec, total_blocks=100)
         blocks = pool.allocate(n_blocks=3, layer_id=0, agent_id="agent_1")
@@ -453,15 +435,11 @@ class TestBlockPoolDeallocation:
         assert pool.available_blocks() == 95
         assert len(pool.agent_allocations["agent_1"]) == 5
 
-    def test_reject_freeing_unallocated_block(
-        self, gemma_spec: ModelCacheSpec
-    ) -> None:
+    def test_reject_freeing_unallocated_block(self, gemma_spec: ModelCacheSpec) -> None:
         """Should raise ValueError when freeing unallocated block."""
         pool = BlockPool(spec=gemma_spec, total_blocks=100)
 
-        fake_block = KVBlock(
-            block_id=999, layer_id=0, token_count=0, layer_data=None
-        )
+        fake_block = KVBlock(block_id=999, layer_id=0, token_count=0, layer_data=None)
 
         with pytest.raises(BlockOperationError, match=r"Block 999 is not allocated"):
             pool.free([fake_block], agent_id="agent_1")
@@ -477,9 +455,7 @@ class TestBlockPoolDeallocation:
         with pytest.raises(BlockOperationError, match=r"is not allocated"):
             pool.free(blocks, agent_id="agent_1")
 
-    def test_reject_freeing_other_agents_blocks(
-        self, gemma_spec: ModelCacheSpec
-    ) -> None:
+    def test_reject_freeing_other_agents_blocks(self, gemma_spec: ModelCacheSpec) -> None:
         """Should raise ValueError when freeing another agent's blocks."""
         pool = BlockPool(spec=gemma_spec, total_blocks=100)
         blocks = pool.allocate(n_blocks=3, layer_id=0, agent_id="agent_1")
@@ -508,9 +484,7 @@ class TestBlockPoolFreeAgentBlocks:
         assert pool.available_blocks() == 100
         assert "agent_1" not in pool.agent_allocations
 
-    def test_free_agent_blocks_returns_count(
-        self, gemma_spec: ModelCacheSpec
-    ) -> None:
+    def test_free_agent_blocks_returns_count(self, gemma_spec: ModelCacheSpec) -> None:
         """Should return number of blocks freed."""
         pool = BlockPool(spec=gemma_spec, total_blocks=100)
         pool.allocate(n_blocks=7, layer_id=0, agent_id="agent_1")
@@ -519,9 +493,7 @@ class TestBlockPoolFreeAgentBlocks:
 
         assert freed == 7
 
-    def test_free_nonexistent_agent_returns_zero(
-        self, gemma_spec: ModelCacheSpec
-    ) -> None:
+    def test_free_nonexistent_agent_returns_zero(self, gemma_spec: ModelCacheSpec) -> None:
         """Should return 0 when freeing non-existent agent."""
         pool = BlockPool(spec=gemma_spec, total_blocks=100)
 
@@ -529,9 +501,7 @@ class TestBlockPoolFreeAgentBlocks:
 
         assert freed == 0
 
-    def test_free_agent_blocks_leaves_others(
-        self, gemma_spec: ModelCacheSpec
-    ) -> None:
+    def test_free_agent_blocks_leaves_others(self, gemma_spec: ModelCacheSpec) -> None:
         """Should only free target agent's blocks, not others."""
         pool = BlockPool(spec=gemma_spec, total_blocks=100)
         pool.allocate(n_blocks=5, layer_id=0, agent_id="agent_1")
@@ -552,9 +522,7 @@ class TestBlockPoolMemoryAccounting:
 
         assert pool.used_memory() == 0
 
-    def test_used_memory_after_allocation(
-        self, gemma_spec: ModelCacheSpec
-    ) -> None:
+    def test_used_memory_after_allocation(self, gemma_spec: ModelCacheSpec) -> None:
         """Should calculate used memory correctly."""
         pool = BlockPool(spec=gemma_spec, total_blocks=100)
         pool.allocate(n_blocks=10, layer_id=0, agent_id="agent_1")
@@ -671,9 +639,7 @@ class TestBlockPoolReconfiguration:
 class TestBlockPoolMaxBatchSize:
     """Test max_batch_size() calculation."""
 
-    def test_max_batch_size_default_tokens(
-        self, gemma_spec: ModelCacheSpec
-    ) -> None:
+    def test_max_batch_size_default_tokens(self, gemma_spec: ModelCacheSpec) -> None:
         """Should calculate max agents with default 256 tokens per agent."""
         pool = BlockPool(spec=gemma_spec, total_blocks=1000)
 
@@ -681,9 +647,7 @@ class TestBlockPoolMaxBatchSize:
         # 1000 blocks / 48 = 20 agents
         assert pool.max_batch_size() == 20
 
-    def test_max_batch_size_custom_tokens(
-        self, llama_spec: ModelCacheSpec
-    ) -> None:
+    def test_max_batch_size_custom_tokens(self, llama_spec: ModelCacheSpec) -> None:
         """Should calculate max agents with custom tokens per agent."""
         pool = BlockPool(spec=llama_spec, total_blocks=640)
 
@@ -691,9 +655,7 @@ class TestBlockPoolMaxBatchSize:
         # 640 blocks / 64 = 10 agents
         assert pool.max_batch_size(tokens_per_agent=512) == 10
 
-    def test_max_batch_size_large_context(
-        self, gemma_spec: ModelCacheSpec
-    ) -> None:
+    def test_max_batch_size_large_context(self, gemma_spec: ModelCacheSpec) -> None:
         """Should handle large context sizes correctly."""
         pool = BlockPool(spec=gemma_spec, total_blocks=960)
 
@@ -701,9 +663,7 @@ class TestBlockPoolMaxBatchSize:
         # 960 blocks / 384 = 2 agents
         assert pool.max_batch_size(tokens_per_agent=2048) == 2
 
-    def test_max_batch_size_edge_case_small_tokens(
-        self, llama_spec: ModelCacheSpec
-    ) -> None:
+    def test_max_batch_size_edge_case_small_tokens(self, llama_spec: ModelCacheSpec) -> None:
         """Should handle edge case of very small token count."""
         pool = BlockPool(spec=llama_spec, total_blocks=100)
 

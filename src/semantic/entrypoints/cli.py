@@ -51,6 +51,7 @@ def setup_signal_handlers(logger: Any) -> None:
     Args:
         logger: Logger instance for shutdown messages
     """
+
     def handle_shutdown(signum: int, frame: Any) -> None:
         """Handle shutdown signals gracefully."""
         sig_name = signal.Signals(signum).name
@@ -64,7 +65,8 @@ def setup_signal_handlers(logger: Any) -> None:
     signal.signal(signal.SIGTERM, handle_shutdown)
 
     # SIGHUP for config reload (Unix only)
-    if hasattr(signal, 'SIGHUP'):
+    if hasattr(signal, "SIGHUP"):
+
         def handle_reload(signum: int, frame: Any) -> None:
             logger.info("Received SIGHUP - config reload not implemented yet")
 
@@ -203,6 +205,7 @@ def tune(
         $ semantic tune --output config/models/my-machine.toml
     """
     from semantic.entrypoints.tune import _run_tune
+
     _run_tune(quick=quick, output=output, port=port)
 
 

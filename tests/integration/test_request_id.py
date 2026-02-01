@@ -22,10 +22,14 @@ def test_app():
     class MockAppState:
         def __init__(self):
             self.shutting_down = False
-            self.semantic = type('obj', (object,), {
-                'block_pool': None,
-                'batch_engine': None,
-            })()
+            self.semantic = type(
+                "obj",
+                (object,),
+                {
+                    "block_pool": None,
+                    "batch_engine": None,
+                },
+            )()
 
     app.state = MockAppState()
 
@@ -65,10 +69,7 @@ def test_request_id_preserved_from_header(test_app):
     client = TestClient(test_app)
 
     custom_id = "custom-request-id"
-    response = client.get(
-        "/health/live",
-        headers={"X-Request-ID": custom_id}
-    )
+    response = client.get("/health/live", headers={"X-Request-ID": custom_id})
 
     assert response.status_code == 200
     assert response.headers["X-Request-ID"] == custom_id

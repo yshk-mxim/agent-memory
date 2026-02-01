@@ -24,9 +24,7 @@ class RequestIDMiddleware(BaseHTTPMiddleware):
         app.add_middleware(RequestIDMiddleware)
     """
 
-    async def dispatch(
-        self, request: Request, call_next: Callable
-    ) -> Response:
+    async def dispatch(self, request: Request, call_next: Callable) -> Response:
         """Process request with correlation ID.
 
         Args:

@@ -181,6 +181,7 @@ def trace_log(stage: str, data: dict) -> None:
     except Exception as e:
         logger.warning(f"[TRACE] Write failed: {e}")
 
+
 # FastAPI app
 @asynccontextmanager
 async def lifespan(application: FastAPI):
@@ -235,6 +236,7 @@ class ThinkingConfig(BaseModel):
 
 class ToolChoice(BaseModel):
     """Tool choice configuration."""
+
     type: str = "auto"  # "auto", "any", "tool", "none"
     name: str | None = None  # For type="tool"
     disable_parallel_tool_use: bool = False
@@ -244,6 +246,7 @@ class ToolChoice(BaseModel):
 
 class OutputConfig(BaseModel):
     """Output configuration (beta)."""
+
     effort: str | None = None  # "low", "medium", "high"
 
     model_config = {"extra": "ignore"}
@@ -251,6 +254,7 @@ class OutputConfig(BaseModel):
 
 class OutputFormat(BaseModel):
     """JSON output format (beta)."""
+
     type: str = "json_schema"
     json_schema: dict | None = None
 
@@ -259,6 +263,7 @@ class OutputFormat(BaseModel):
 
 class ContextManagement(BaseModel):
     """Context management config (beta)."""
+
     clear_tool_results: bool = False
 
     model_config = {"extra": "ignore"}
@@ -266,6 +271,7 @@ class ContextManagement(BaseModel):
 
 class MCPServer(BaseModel):
     """MCP server definition (beta)."""
+
     url: str
     name: str | None = None
 
@@ -280,6 +286,7 @@ class MessagesRequest(BaseModel):
     - Beta Messages API
     - Claude Code CLI extensions
     """
+
     # Required
     model: str = "local"
     messages: list[Message]
@@ -381,8 +388,12 @@ def extract_text(content: Any, role: str = "") -> str:
                 elif block.get("type") == "tool_result":
                     seen_tool_use = True
                     rc = block.get("content", "")
-                    result_text = str(rc) if not isinstance(rc, list) else "\n".join(
-                        b.get("text", str(b)) if isinstance(b, dict) else str(b) for b in rc
+                    result_text = (
+                        str(rc)
+                        if not isinstance(rc, list)
+                        else "\n".join(
+                            b.get("text", str(b)) if isinstance(b, dict) else str(b) for b in rc
+                        )
                     )
                     if block.get("is_error"):
                         tool_result_texts.append(f"Error: {result_text}")
@@ -411,6 +422,7 @@ class Usage(BaseModel):
 
 class ContentBlock(BaseModel):
     """Content block that can be text or tool_use."""
+
     type: str = "text"
     text: str | None = None
     # For tool_use blocks
@@ -473,10 +485,7 @@ def chunked_prefill(tokens: list[int]) -> list[QuantizedKVCache]:
     log_memory("PREFILL_START")
 
     # Create Q4 cache for each layer
-    kv_caches = [
-        QuantizedKVCache(group_size=KV_GROUP_SIZE, bits=KV_BITS)
-        for _ in range(N_LAYERS)
-    ]
+    kv_caches = [QuantizedKVCache(group_size=KV_GROUP_SIZE, bits=KV_BITS) for _ in range(N_LAYERS)]
 
     tokens_array = mx.array([tokens])
     pos = 0
@@ -489,7 +498,7 @@ def chunked_prefill(tokens: list[int]) -> list[QuantizedKVCache]:
         chunk = tokens_array[:, pos:end]
         chunk_count += 1
 
-        logger.debug(f"[CHUNK {chunk_count}] pos={pos}, size={end-pos}")
+        logger.debug(f"[CHUNK {chunk_count}] pos={pos}, size={end - pos}")
 
         # Forward pass updates kv_caches in-place
         y = model(chunk, cache=kv_caches)
@@ -503,7 +512,9 @@ def chunked_prefill(tokens: list[int]) -> list[QuantizedKVCache]:
         pos = end
 
     log_memory("PREFILL_END")
-    logger.info(f"[CHUNKED PREFILL] Complete: {chunk_count} chunks, cache offset={kv_caches[0].offset}")
+    logger.info(
+        f"[CHUNKED PREFILL] Complete: {chunk_count} chunks, cache offset={kv_caches[0].offset}"
+    )
 
     return kv_caches
 
@@ -584,7 +595,9 @@ def generate_tokens(
     Returns:
         (generated_token_ids, decoded_text)
     """
-    logger.info(f"[GENERATE] Processing {len(tokens_to_process)} new tokens, generating up to {max_tokens}")
+    logger.info(
+        f"[GENERATE] Processing {len(tokens_to_process)} new tokens, generating up to {max_tokens}"
+    )
     logger.info(f"[GENERATE] temp={temperature}, top_p={top_p}, top_k={top_k}")
 
     # Process any new tokens first
@@ -609,7 +622,7 @@ def generate_tokens(
     # Uses token-level ngram detection (faster than decoding every token).
     REPETITION_CHECK_INTERVAL = 32
     REPETITION_NGRAM_SIZE = 8  # tokens
-    REPETITION_THRESHOLD = 4   # same ngram appears 4+ times → stuck
+    REPETITION_THRESHOLD = 4  # same ngram appears 4+ times → stuck
 
     for i in range(max_tokens):
         # Get logits for last position
@@ -620,7 +633,7 @@ def generate_tokens(
 
         # Check for EOS
         if next_token == eos_id:
-            logger.info(f"[GENERATE] EOS at token {i+1}")
+            logger.info(f"[GENERATE] EOS at token {i + 1}")
             break
 
         generated.append(next_token)
@@ -630,19 +643,21 @@ def generate_tokens(
             current_text = tokenizer.decode(generated)
             for seq in stop_seqs:
                 if seq in current_text:
-                    logger.info(f"[GENERATE] Stop sequence '{seq}' at token {i+1}")
+                    logger.info(f"[GENERATE] Stop sequence '{seq}' at token {i + 1}")
                     idx = current_text.find(seq)
                     if idx >= 0:
                         current_text = current_text[:idx]
                     return generated, current_text
 
         # Repetition detection: check if the model is stuck in a loop
-        if (i + 1) % REPETITION_CHECK_INTERVAL == 0 and len(generated) >= REPETITION_NGRAM_SIZE * REPETITION_THRESHOLD:
+        if (i + 1) % REPETITION_CHECK_INTERVAL == 0 and len(
+            generated
+        ) >= REPETITION_NGRAM_SIZE * REPETITION_THRESHOLD:
             # Check last 128 tokens for repeated ngrams
             window = generated[-128:]
             ngram_counts: dict[tuple, int] = {}
             for j in range(len(window) - REPETITION_NGRAM_SIZE + 1):
-                ngram = tuple(window[j:j + REPETITION_NGRAM_SIZE])
+                ngram = tuple(window[j : j + REPETITION_NGRAM_SIZE])
                 ngram_counts[ngram] = ngram_counts.get(ngram, 0) + 1
             max_count = max(ngram_counts.values()) if ngram_counts else 0
             if max_count >= REPETITION_THRESHOLD:
@@ -650,14 +665,14 @@ def generate_tokens(
                 repeated = next(ng for ng, c in ngram_counts.items() if c == max_count)
                 repeated_text = tokenizer.decode(list(repeated))
                 logger.warning(
-                    f"[GENERATE] Repetition detected at token {i+1}: "
+                    f"[GENERATE] Repetition detected at token {i + 1}: "
                     f"'{repeated_text}' repeated {max_count}x in last 128 tokens. Truncating."
                 )
                 # Truncate to just before the repetition started
                 # Find first occurrence of the repeated ngram in window
                 first_idx = 0
                 for j in range(len(window) - REPETITION_NGRAM_SIZE + 1):
-                    if tuple(window[j:j + REPETITION_NGRAM_SIZE]) == repeated:
+                    if tuple(window[j : j + REPETITION_NGRAM_SIZE]) == repeated:
                         first_idx = j
                         break
                 # Keep tokens up to just after first occurrence
@@ -710,7 +725,9 @@ def save_cache_to_disk(
     """
     total_tokens = len(input_tokens) + len(generated_tokens)
     path = CACHE_DIR / f"{agent_id}.safetensors"
-    logger.info(f"[SAVE] Saving cache: input={len(input_tokens)}, output={len(generated_tokens)}, total={total_tokens}")
+    logger.info(
+        f"[SAVE] Saving cache: input={len(input_tokens)}, output={len(generated_tokens)}, total={total_tokens}"
+    )
 
     tensors = {}
     for layer_id, cache in enumerate(kv_caches):
@@ -756,7 +773,9 @@ def save_cache_to_disk(
     return path
 
 
-def load_cache_from_disk(agent_id: str) -> tuple[list[QuantizedKVCache] | None, int, int, list[int]]:
+def load_cache_from_disk(
+    agent_id: str,
+) -> tuple[list[QuantizedKVCache] | None, int, int, list[int]]:
     """Load Q4 cache from safetensors file.
 
     Returns:
@@ -815,7 +834,9 @@ def load_cache_from_disk(agent_id: str) -> tuple[list[QuantizedKVCache] | None, 
             mx.eval(cache.keys[0])
 
     log_memory("LOAD_END")
-    logger.info(f"[LOAD] Complete: total={total_tokens}, input={input_token_count}, {N_LAYERS} layers")
+    logger.info(
+        f"[LOAD] Complete: total={total_tokens}, input={input_token_count}, {N_LAYERS} layers"
+    )
 
     return kv_caches, total_tokens, input_token_count, input_sequence
 
@@ -862,7 +883,9 @@ def save_prefix_cache(
         "n_tokens": n_prefix_tokens,
         "token_sequence": token_sequence,
     }
-    logger.info(f"[PREFIX SAVE] {prefix_hash[:12]}...: {n_prefix_tokens} tokens, {len(tensors)} tensors")
+    logger.info(
+        f"[PREFIX SAVE] {prefix_hash[:12]}...: {n_prefix_tokens} tokens, {len(tensors)} tensors"
+    )
     return path
 
 
@@ -979,12 +1002,18 @@ def find_best_prefix_match(tokens: list[int], request_type: str = "main") -> tup
             logger.debug(f"[PREFIX MATCH] {agent_id}: {common_len} tokens common prefix")
 
     # Count same-type caches
-    same_type_count = sum(1 for info in cache_index.values() if info.get("request_type") == request_type)
+    same_type_count = sum(
+        1 for info in cache_index.values() if info.get("request_type") == request_type
+    )
 
     if best_agent:
-        logger.info(f"[PREFIX SCAN] Best match: {best_agent} with {best_length} tokens (type={request_type})")
+        logger.info(
+            f"[PREFIX SCAN] Best match: {best_agent} with {best_length} tokens (type={request_type})"
+        )
     else:
-        logger.info(f"[PREFIX SCAN] No prefix match in {same_type_count} {request_type} caches (total: {len(cache_index)})")
+        logger.info(
+            f"[PREFIX SCAN] No prefix match in {same_type_count} {request_type} caches (total: {len(cache_index)})"
+        )
         # Debug: find where divergence happens for same-type caches
         if same_type_count > 0 and len(tokens) > 10:
             for agent_id, info in list(cache_index.items())[:3]:
@@ -1001,16 +1030,24 @@ def find_best_prefix_match(tokens: list[int], request_type: str = "main") -> tup
                         diverge_at = i
                         break
                 if diverge_at >= 0:
-                    logger.info(f"[DIVERGE] {agent_id} (len={cached_len}): diverges at token {diverge_at}")
-                    logger.info(f"[DIVERGE] new[{diverge_at}]={tokens[diverge_at]}, cached[{diverge_at}]={cached_seq[diverge_at]}")
+                    logger.info(
+                        f"[DIVERGE] {agent_id} (len={cached_len}): diverges at token {diverge_at}"
+                    )
+                    logger.info(
+                        f"[DIVERGE] new[{diverge_at}]={tokens[diverge_at]}, cached[{diverge_at}]={cached_seq[diverge_at]}"
+                    )
                 elif cached_len <= len(tokens):
-                    logger.info(f"[DIVERGE] {agent_id}: cached_len={cached_len} but should have matched!")
+                    logger.info(
+                        f"[DIVERGE] {agent_id}: cached_len={cached_len} but should have matched!"
+                    )
 
     return best_agent, best_length
 
 
 def find_conversation_match(
-    messages: list, static_prefix_hash: str, request_type: str,
+    messages: list,
+    static_prefix_hash: str,
+    request_type: str,
 ) -> tuple[str | None, int]:
     """Find a cache entry from the same conversation via static prefix hash.
 
@@ -1104,16 +1141,23 @@ def _extract_pending_todos(messages: list) -> list[str]:
     for msg in messages:
         if msg.role == "assistant" and isinstance(msg.content, list):
             for block in msg.content:
-                if isinstance(block, dict) and block.get("type") == "tool_use" and block.get("name") == "TodoWrite":
+                if (
+                    isinstance(block, dict)
+                    and block.get("type") == "tool_use"
+                    and block.get("name") == "TodoWrite"
+                ):
                     latest_todos = block.get("input", {}).get("todos", [])
     return [
-        t["content"] for t in latest_todos
+        t["content"]
+        for t in latest_todos
         if isinstance(t, dict) and t.get("status") != "completed" and t.get("content")
     ]
 
 
 def _build_reverse_input(
-    tool_use_block: dict, tool_result_block: dict, n_results: int = 1,
+    tool_use_block: dict,
+    tool_result_block: dict,
+    n_results: int = 1,
 ) -> str:
     """Build input for the reverse translator from a tool_use + tool_result pair.
 
@@ -1127,8 +1171,7 @@ def _build_reverse_input(
     result_content = tool_result_block.get("content", "")
     if isinstance(result_content, list):
         result_text = "\n".join(
-            b.get("text", str(b)) if isinstance(b, dict) else str(b)
-            for b in result_content
+            b.get("text", str(b)) if isinstance(b, dict) else str(b) for b in result_content
         )
     else:
         result_text = str(result_content)
@@ -1139,7 +1182,9 @@ def _build_reverse_input(
         args_str = f"file_path={args.get('file_path', '')}"
     elif name == "TodoWrite":
         todos = args.get("todos", [])
-        items = [f"{t.get('content', '')} ({t.get('status', '')})" for t in todos if isinstance(t, dict)]
+        items = [
+            f"{t.get('content', '')} ({t.get('status', '')})" for t in todos if isinstance(t, dict)
+        ]
         args_str = f"todos=[{', '.join(items)}]"
     elif name in ("Glob", "Grep"):
         args_str = f"pattern={args.get('pattern', '')}"
@@ -1165,12 +1210,7 @@ def _build_reverse_input(
         if len(result_text) > 500:
             result_text = result_text[:500] + "...(truncated)"
 
-    return (
-        f"TOOL: {name}\n"
-        f"ARGS: {args_str}\n"
-        f"RESULT: {result_text}\n"
-        f"ERROR: {str(is_error).lower()}"
-    )
+    return f"TOOL: {name}\nARGS: {args_str}\nRESULT: {result_text}\nERROR: {str(is_error).lower()}"
 
 
 def _call_reverse_translator(input_text: str) -> str:
@@ -1192,13 +1232,18 @@ def _call_reverse_translator(input_text: str) -> str:
 
     conv = [
         {"role": "system", "content": REVERSE_TRANSLATOR_SYSTEM},
-        {"role": "user", "content": "TOOL: Bash\nARGS: command=echo hello\nRESULT: hello\nERROR: false"},
+        {
+            "role": "user",
+            "content": "TOOL: Bash\nARGS: command=echo hello\nRESULT: hello\nERROR: false",
+        },
         {"role": "assistant", "content": "I ran `echo hello`. Output: hello"},
         {"role": "user", "content": input_text},
     ]
     try:
         prompt = tokenizer.apply_chat_template(
-            conv, tokenize=False, add_generation_prompt=True,
+            conv,
+            tokenize=False,
+            add_generation_prompt=True,
         )
     except Exception:
         prompt = f"{REVERSE_TRANSLATOR_SYSTEM}\n\n{input_text}\n\nTranslation:"
@@ -1228,15 +1273,18 @@ def _call_reverse_translator(input_text: str) -> str:
 
     if kv_caches is None:
         kv_caches = [
-            QuantizedKVCache(group_size=KV_GROUP_SIZE, bits=KV_BITS)
-            for _ in range(N_LAYERS)
+            QuantizedKVCache(group_size=KV_GROUP_SIZE, bits=KV_BITS) for _ in range(N_LAYERS)
         ]
         tokens_to_process = tokens
         logger.info(f"[REV] Cold start: {len(tokens)} tokens")
 
     generated_ids, output_text = generate_tokens(
-        kv_caches, tokens_to_process, max_tokens=200,
-        temperature=0.0, top_p=1.0, top_k=0,
+        kv_caches,
+        tokens_to_process,
+        max_tokens=200,
+        temperature=0.0,
+        top_p=1.0,
+        top_k=0,
     )
 
     save_cache_to_disk(cache_key, kv_caches, tokens, generated_ids, "rev")
@@ -1270,8 +1318,7 @@ def _is_tool_roundtrip(messages: list) -> bool:
     if not isinstance(last_msg.content, list):
         return False
     has_tool_result = any(
-        isinstance(b, dict) and b.get("type") == "tool_result"
-        for b in last_msg.content
+        isinstance(b, dict) and b.get("type") == "tool_result" for b in last_msg.content
     )
     logger.info(f"[GATE] tool_roundtrip={has_tool_result}")
     return has_tool_result
@@ -1296,17 +1343,17 @@ def _last_message_has_user_text(messages: list) -> bool:
         if isinstance(b, dict) and b.get("type") == "text":
             text = b.get("text", "")
             cleaned = re.sub(
-                r"<system-reminder>.*?</system-reminder>", "",
-                text, flags=re.DOTALL,
+                r"<system-reminder>.*?</system-reminder>",
+                "",
+                text,
+                flags=re.DOTALL,
             ).strip()
             if cleaned:
                 return True
     return False
 
 
-def _build_forward_input(
-    tool_uses: list[dict], messages: list, output_text: str
-) -> str:
+def _build_forward_input(tool_uses: list[dict], messages: list, output_text: str) -> str:
     """Build input for the forward translator (turn management)."""
     pending_todos: list[str] = []
     written_files: list[str] = []
@@ -1361,8 +1408,10 @@ def _build_forward_input(
                 if isinstance(block, dict) and block.get("type") == "text":
                     text = block.get("text", "")
                     cleaned = re.sub(
-                        r"<system-reminder>.*?</system-reminder>", "",
-                        text, flags=re.DOTALL,
+                        r"<system-reminder>.*?</system-reminder>",
+                        "",
+                        text,
+                        flags=re.DOTALL,
                     ).strip()
                     if cleaned:
                         last_user_text = cleaned[:100]
@@ -1390,35 +1439,61 @@ def _call_forward_translator(input_text: str) -> dict:
     conv = [
         {"role": "system", "content": FORWARD_TRANSLATOR_SYSTEM},
         # Example 1: first error → continue
-        {"role": "user", "content": "TOOLS_CALLED: Bash\nFILES_WRITTEN: none\nPENDING_TODOS: none\nHAS_ERROR: true\nCONSECUTIVE_ERRORS: 1\nWORKING_DIR: /Users/dev\nLATEST_OUTPUT: text\nRESULT_COUNT: 1\nUSER_REQUEST: none"},
+        {
+            "role": "user",
+            "content": "TOOLS_CALLED: Bash\nFILES_WRITTEN: none\nPENDING_TODOS: none\nHAS_ERROR: true\nCONSECUTIVE_ERRORS: 1\nWORKING_DIR: /Users/dev\nLATEST_OUTPUT: text\nRESULT_COUNT: 1\nUSER_REQUEST: none",
+        },
         {"role": "assistant", "content": "continue"},
         # Example 2: 3 consecutive errors → end
-        {"role": "user", "content": "TOOLS_CALLED: Bash\nFILES_WRITTEN: none\nPENDING_TODOS: none\nHAS_ERROR: true\nCONSECUTIVE_ERRORS: 3\nWORKING_DIR: /Users/dev\nLATEST_OUTPUT: text\nRESULT_COUNT: 3\nUSER_REQUEST: none"},
+        {
+            "role": "user",
+            "content": "TOOLS_CALLED: Bash\nFILES_WRITTEN: none\nPENDING_TODOS: none\nHAS_ERROR: true\nCONSECUTIVE_ERRORS: 3\nWORKING_DIR: /Users/dev\nLATEST_OUTPUT: text\nRESULT_COUNT: 3\nUSER_REQUEST: none",
+        },
         {"role": "assistant", "content": "end"},
         # Example 3: files written + pending todos → complete_and_end
-        {"role": "user", "content": "TOOLS_CALLED: Write\nFILES_WRITTEN: stack.py\nPENDING_TODOS: Create stack.py\nHAS_ERROR: false\nCONSECUTIVE_ERRORS: 0\nWORKING_DIR: /Users/dev\nLATEST_OUTPUT: text\nRESULT_COUNT: 2\nUSER_REQUEST: none"},
+        {
+            "role": "user",
+            "content": "TOOLS_CALLED: Write\nFILES_WRITTEN: stack.py\nPENDING_TODOS: Create stack.py\nHAS_ERROR: false\nCONSECUTIVE_ERRORS: 0\nWORKING_DIR: /Users/dev\nLATEST_OUTPUT: text\nRESULT_COUNT: 2\nUSER_REQUEST: none",
+        },
         {"role": "assistant", "content": "complete_and_end"},
         # Example 4: pending todos, no files → continue
-        {"role": "user", "content": "TOOLS_CALLED: TodoWrite\nFILES_WRITTEN: none\nPENDING_TODOS: Create stack.py, Add tests\nHAS_ERROR: false\nCONSECUTIVE_ERRORS: 0\nWORKING_DIR: /Users/dev\nLATEST_OUTPUT: tool_use\nRESULT_COUNT: 1\nUSER_REQUEST: none"},
+        {
+            "role": "user",
+            "content": "TOOLS_CALLED: TodoWrite\nFILES_WRITTEN: none\nPENDING_TODOS: Create stack.py, Add tests\nHAS_ERROR: false\nCONSECUTIVE_ERRORS: 0\nWORKING_DIR: /Users/dev\nLATEST_OUTPUT: tool_use\nRESULT_COUNT: 1\nUSER_REQUEST: none",
+        },
         {"role": "assistant", "content": "continue"},
         # Example 5: no todos, no error → end
-        {"role": "user", "content": "TOOLS_CALLED: Bash\nFILES_WRITTEN: none\nPENDING_TODOS: none\nHAS_ERROR: false\nCONSECUTIVE_ERRORS: 0\nWORKING_DIR: /Users/dev\nLATEST_OUTPUT: text\nRESULT_COUNT: 1\nUSER_REQUEST: none"},
+        {
+            "role": "user",
+            "content": "TOOLS_CALLED: Bash\nFILES_WRITTEN: none\nPENDING_TODOS: none\nHAS_ERROR: false\nCONSECUTIVE_ERRORS: 0\nWORKING_DIR: /Users/dev\nLATEST_OUTPUT: text\nRESULT_COUNT: 1\nUSER_REQUEST: none",
+        },
         {"role": "assistant", "content": "end"},
         # Example 6: long chain done → end
-        {"role": "user", "content": "TOOLS_CALLED: Bash\nFILES_WRITTEN: hello.py\nPENDING_TODOS: none\nHAS_ERROR: false\nCONSECUTIVE_ERRORS: 0\nWORKING_DIR: /Users/dev\nLATEST_OUTPUT: text\nRESULT_COUNT: 8\nUSER_REQUEST: none"},
+        {
+            "role": "user",
+            "content": "TOOLS_CALLED: Bash\nFILES_WRITTEN: hello.py\nPENDING_TODOS: none\nHAS_ERROR: false\nCONSECUTIVE_ERRORS: 0\nWORKING_DIR: /Users/dev\nLATEST_OUTPUT: text\nRESULT_COUNT: 8\nUSER_REQUEST: none",
+        },
         {"role": "assistant", "content": "end"},
         # Example 7: multiple files + todos → complete_and_end
-        {"role": "user", "content": "TOOLS_CALLED: Write\nFILES_WRITTEN: stack.py, test_stack.py\nPENDING_TODOS: Create stack.py, Add tests\nHAS_ERROR: false\nCONSECUTIVE_ERRORS: 0\nWORKING_DIR: /Users/dev\nLATEST_OUTPUT: text\nRESULT_COUNT: 4\nUSER_REQUEST: none"},
+        {
+            "role": "user",
+            "content": "TOOLS_CALLED: Write\nFILES_WRITTEN: stack.py, test_stack.py\nPENDING_TODOS: Create stack.py, Add tests\nHAS_ERROR: false\nCONSECUTIVE_ERRORS: 0\nWORKING_DIR: /Users/dev\nLATEST_OUTPUT: text\nRESULT_COUNT: 4\nUSER_REQUEST: none",
+        },
         {"role": "assistant", "content": "complete_and_end"},
         # Example 8: user asked to "test" but model produced text only → continue
-        {"role": "user", "content": "TOOLS_CALLED: none\nFILES_WRITTEN: stack.py\nPENDING_TODOS: none\nHAS_ERROR: false\nCONSECUTIVE_ERRORS: 0\nWORKING_DIR: /Users/dev\nLATEST_OUTPUT: text\nRESULT_COUNT: 3\nUSER_REQUEST: test"},
+        {
+            "role": "user",
+            "content": "TOOLS_CALLED: none\nFILES_WRITTEN: stack.py\nPENDING_TODOS: none\nHAS_ERROR: false\nCONSECUTIVE_ERRORS: 0\nWORKING_DIR: /Users/dev\nLATEST_OUTPUT: text\nRESULT_COUNT: 3\nUSER_REQUEST: test",
+        },
         {"role": "assistant", "content": "continue"},
         {"role": "user", "content": input_text},
     ]
 
     try:
         prompt = tokenizer.apply_chat_template(
-            conv, tokenize=False, add_generation_prompt=True,
+            conv,
+            tokenize=False,
+            add_generation_prompt=True,
         )
     except Exception:
         prompt = f"{FORWARD_TRANSLATOR_SYSTEM}\n\n{input_text}\n\nDecision:"
@@ -1447,8 +1522,7 @@ def _call_forward_translator(input_text: str) -> dict:
 
     if kv_caches is None:
         kv_caches = [
-            QuantizedKVCache(group_size=KV_GROUP_SIZE, bits=KV_BITS)
-            for _ in range(N_LAYERS)
+            QuantizedKVCache(group_size=KV_GROUP_SIZE, bits=KV_BITS) for _ in range(N_LAYERS)
         ]
         tokens_to_process = tokens
 
@@ -1576,29 +1650,47 @@ def build_static_prefix(system: Any = "", tools: list[Tool] | None = None) -> st
         lines.append("When you call a tool, the result appears as the next User message.")
         lines.append("After seeing the result, either call another tool or respond with text.")
         lines.append("If the user's request is fulfilled, respond briefly (e.g. the result).")
-        lines.append("If a User message contains '[New user request]', the text after that marker is the user's NEW instruction.")
+        lines.append(
+            "If a User message contains '[New user request]', the text after that marker is the user's NEW instruction."
+        )
         lines.append("Always prioritize the NEW instruction over prior tool result context.\n")
 
     if tools:
         lines.append("\n## Available Functions\n")
-        lines.append("You can call these functions when needed. To call a function, use this exact JSON format:")
-        lines.append('```json')
+        lines.append(
+            "You can call these functions when needed. To call a function, use this exact JSON format:"
+        )
+        lines.append("```json")
         lines.append('{"name": "function_name", "arguments": {"param1": "value1"}}')
-        lines.append('```\n')
-        lines.append("IMPORTANT: To create or modify files, you MUST use the Write function. Use the actual file path relative to the working directory:")
-        lines.append('```json')
-        lines.append('{"name": "Write", "arguments": {"file_path": "src/example.py", "content": "file contents here"}}')
-        lines.append('```')
-        lines.append("Do NOT output file contents in markdown code blocks. Always use Write with a real file path.\n")
+        lines.append("```\n")
+        lines.append(
+            "IMPORTANT: To create or modify files, you MUST use the Write function. Use the actual file path relative to the working directory:"
+        )
+        lines.append("```json")
+        lines.append(
+            '{"name": "Write", "arguments": {"file_path": "src/example.py", "content": "file contents here"}}'
+        )
+        lines.append("```")
+        lines.append(
+            "Do NOT output file contents in markdown code blocks. Always use Write with a real file path.\n"
+        )
         lines.append("To launch a background task or subagent, use the Task function:")
-        lines.append('```json')
-        lines.append('{"name": "Task", "arguments": {"description": "short desc", "prompt": "what to do", "subagent_type": "general-purpose"}}')
-        lines.append('```')
-        lines.append("To track COMPLEX multi-step tasks (3+ steps), use TodoWrite. For simple tasks (single file, single command), skip TodoWrite and call Write or Bash directly:")
-        lines.append('```json')
-        lines.append('{"name": "TodoWrite", "arguments": {"todos": [{"content": "task name", "status": "pending", "activeForm": "Doing task"}]}}')
-        lines.append('```')
-        lines.append("After calling TodoWrite, you MUST call Write or Bash next. Never call TodoWrite twice in a row.\n")
+        lines.append("```json")
+        lines.append(
+            '{"name": "Task", "arguments": {"description": "short desc", "prompt": "what to do", "subagent_type": "general-purpose"}}'
+        )
+        lines.append("```")
+        lines.append(
+            "To track COMPLEX multi-step tasks (3+ steps), use TodoWrite. For simple tasks (single file, single command), skip TodoWrite and call Write or Bash directly:"
+        )
+        lines.append("```json")
+        lines.append(
+            '{"name": "TodoWrite", "arguments": {"todos": [{"content": "task name", "status": "pending", "activeForm": "Doing task"}]}}'
+        )
+        lines.append("```")
+        lines.append(
+            "After calling TodoWrite, you MUST call Write or Bash next. Never call TodoWrite twice in a row.\n"
+        )
         lines.append("Available functions:\n")
         for tool in tools:
             lines.append(f"### {tool.name}")
@@ -1611,12 +1703,14 @@ def build_static_prefix(system: Any = "", tools: list[Tool] | None = None) -> st
                 for name, spec in props.items():
                     req_marker = " (required)" if name in required else ""
                     desc = spec.get("description", "")[:300]
-                    param_type = spec.get('type', 'any')
+                    param_type = spec.get("type", "any")
                     lines.append(f"  - {name}: {param_type}{req_marker} - {desc}")
                     if param_type == "array" and "items" in spec:
                         items = spec["items"]
                         if items.get("type") == "object" and "properties" in items:
-                            lines.append(f"    Array items must have: {list(items['properties'].keys())}")
+                            lines.append(
+                                f"    Array items must have: {list(items['properties'].keys())}"
+                            )
                     elif param_type == "object" and "properties" in spec:
                         lines.append(f"    Object must have: {list(spec['properties'].keys())}")
             lines.append("")
@@ -1649,8 +1743,7 @@ def _process_tool_result_message(
     Shared by both messages_to_prompt() (cold start) and build_prompt_delta() (append).
     """
     tool_result_blocks = [
-        b for b in msg.content
-        if isinstance(b, dict) and b.get("type") == "tool_result"
+        b for b in msg.content if isinstance(b, dict) and b.get("type") == "tool_result"
     ]
     if not tool_result_blocks:
         return 0
@@ -1671,18 +1764,17 @@ def _process_tool_result_message(
         if isinstance(b, dict) and b.get("type") == "text":
             text = b.get("text", "")
             cleaned = re.sub(
-                r"<system-reminder>.*?</system-reminder>", "",
-                text, flags=re.DOTALL,
+                r"<system-reminder>.*?</system-reminder>",
+                "",
+                text,
+                flags=re.DOTALL,
             ).strip()
             if cleaned.startswith("[SUGGESTION MODE"):
                 continue
             if cleaned:
                 user_texts.append(cleaned)
 
-    filtered_user_texts = [
-        t for t in user_texts
-        if not any(pat in t for pat in _CLI_META_PATTERNS)
-    ]
+    filtered_user_texts = [t for t in user_texts if not any(pat in t for pat in _CLI_META_PATTERNS)]
 
     # EXPAND compacted rounds: each tool_result gets its own
     # Assistant: [Used X] / User: <translated result> pair.
@@ -1702,7 +1794,9 @@ def _process_tool_result_message(
                 translated = str(rc)[:max_translated_chars]
 
             if result_idx == n_results - 1 and filtered_user_texts:
-                out_lines.append(f"User: {translated}\n[New user request]\n" + "\n".join(filtered_user_texts))
+                out_lines.append(
+                    f"User: {translated}\n[New user request]\n" + "\n".join(filtered_user_texts)
+                )
             else:
                 out_lines.append(f"User: {translated}")
     else:
@@ -1765,8 +1859,7 @@ def build_prompt_delta(
 
         if msg.role == "user" and isinstance(msg.content, list):
             has_tool_results = any(
-                isinstance(b, dict) and b.get("type") == "tool_result"
-                for b in msg.content
+                isinstance(b, dict) and b.get("type") == "tool_result" for b in msg.content
             )
             if has_tool_results:
                 prev_assistant = (
@@ -1785,7 +1878,9 @@ def build_prompt_delta(
     return "\n".join(delta_lines), tool_result_count
 
 
-def messages_to_prompt(messages: list[Message], system: Any = "", tools: list[Tool] | None = None) -> tuple[str, str]:
+def messages_to_prompt(
+    messages: list[Message], system: Any = "", tools: list[Tool] | None = None
+) -> tuple[str, str]:
     """Convert messages to prompt string (cold start path).
 
     Used when no conversation state exists (first request or state miss).
@@ -1800,11 +1895,12 @@ def messages_to_prompt(messages: list[Message], system: Any = "", tools: list[To
         # User messages with tool_results: delegate to shared helper
         if msg.role == "user" and isinstance(msg.content, list):
             has_tool_results = any(
-                isinstance(b, dict) and b.get("type") == "tool_result"
-                for b in msg.content
+                isinstance(b, dict) and b.get("type") == "tool_result" for b in msg.content
             )
             if has_tool_results:
-                prev_assistant = messages[i - 1] if i > 0 and messages[i - 1].role == "assistant" else None
+                prev_assistant = (
+                    messages[i - 1] if i > 0 and messages[i - 1].role == "assistant" else None
+                )
                 n = _process_tool_result_message(msg, prev_assistant, lines)
                 total_tool_results += n
                 logger.info(f"[MSG {i}] Processed {n} tool results")
@@ -1827,8 +1923,8 @@ def messages_to_prompt(messages: list[Message], system: Any = "", tools: list[To
 
 # DeepSeek tool call markers - stop after FIRST tool call completes
 DEEPSEEK_TOOL_STOP_SEQUENCES = [
-    "<｜tool▁call▁end｜>",   # Stop after first tool call (singular)
-    "<|tool▁call▁end|>",    # Alternative encoding
+    "<｜tool▁call▁end｜>",  # Stop after first tool call (singular)
+    "<|tool▁call▁end|>",  # Alternative encoding
 ]
 
 # DeepSeek tool call markers for parsing
@@ -1846,19 +1942,21 @@ def sanitize_terminal_output(text: str) -> str:
     in alternate screen mode, trigger vi mode, or cause other terminal issues.
     """
     # Remove ANSI escape sequences (CSI sequences like \x1b[...)
-    text = re.sub(r'\x1b\[[0-9;]*[a-zA-Z]', '', text)
+    text = re.sub(r"\x1b\[[0-9;]*[a-zA-Z]", "", text)
     # Remove OSC sequences (like \x1b]...BEL)
-    text = re.sub(r'\x1b\][^\x07]*\x07', '', text)
+    text = re.sub(r"\x1b\][^\x07]*\x07", "", text)
     # Remove other escape sequences
-    text = re.sub(r'\x1b[PX^_][^\x1b]*\x1b\\', '', text)
+    text = re.sub(r"\x1b[PX^_][^\x1b]*\x1b\\", "", text)
     # Remove remaining bare escapes
-    text = re.sub(r'\x1b.', '', text)
+    text = re.sub(r"\x1b.", "", text)
     # Remove control characters except tab, newline, carriage return
-    text = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', text)
+    text = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", "", text)
     return text
 
 
-def parse_tool_calls(text: str, available_tools: list[Tool] | None = None) -> tuple[str, list[dict]]:
+def parse_tool_calls(
+    text: str, available_tools: list[Tool] | None = None
+) -> tuple[str, list[dict]]:
     """Parse DeepSeek tool call format and extract tool_use blocks.
 
     DeepSeek format: <｜tool▁calls▁begin｜><｜tool▁call▁begin｜>function<｜tool▁sep｜>name
@@ -1882,13 +1980,19 @@ def parse_tool_calls(text: str, available_tools: list[Tool] | None = None) -> tu
     # Strip model echoing assistant tool-call text from prompt pattern.
     # DeepSeek sometimes copies previous assistant text before its own tool call.
     # Formats: "(Called Write)", "[Used Write]", "I'll write to file.py."
-    cleaned_text = re.sub(r"^\s*(\(Called \w+\)\s*)+", '', remaining_text)
+    cleaned_text = re.sub(r"^\s*(\(Called \w+\)\s*)+", "", remaining_text)
     if cleaned_text == remaining_text:
-        cleaned_text = re.sub(r"^\s*\[Used [^\]]+\]\s*", '', remaining_text)
+        cleaned_text = re.sub(r"^\s*\[Used [^\]]+\]\s*", "", remaining_text)
     if cleaned_text == remaining_text:
-        cleaned_text = re.sub(r"^\s*(I'll (write to|read|run:|edit|update the task|launch:|search for:|use) [^\n]*\.\s*)+", '', remaining_text)
+        cleaned_text = re.sub(
+            r"^\s*(I'll (write to|read|run:|edit|update the task|launch:|search for:|use) [^\n]*\.\s*)+",
+            "",
+            remaining_text,
+        )
     if cleaned_text != remaining_text:
-        logger.info(f"[TOOL PARSE] Stripped echoed assistant text prefix ({len(remaining_text) - len(cleaned_text)} chars)")
+        logger.info(
+            f"[TOOL PARSE] Stripped echoed assistant text prefix ({len(remaining_text) - len(cleaned_text)} chars)"
+        )
         remaining_text = cleaned_text
         text = cleaned_text
 
@@ -1902,9 +2006,9 @@ def parse_tool_calls(text: str, available_tools: list[Tool] | None = None) -> tu
             depth = 0
             end_idx = start_idx
             for i, c in enumerate(text[start_idx:]):
-                if c == '{':
+                if c == "{":
                     depth += 1
-                elif c == '}':
+                elif c == "}":
                     depth -= 1
                     if depth == 0:
                         end_idx = start_idx + i + 1
@@ -1916,11 +2020,11 @@ def parse_tool_calls(text: str, available_tools: list[Tool] | None = None) -> tu
             if end_idx <= start_idx and 0 < depth <= 4:
                 json_str = text[start_idx:]
                 # Strip trailing markdown fences
-                json_str = re.sub(r'\s*```\s*$', '', json_str)
+                json_str = re.sub(r"\s*```\s*$", "", json_str)
                 json_str = json_str.rstrip()
                 # Fix ) → } confusion: model generates }) instead of }}
                 # when Python code inside content ends with )
-                json_str = re.sub(r'\)\s*$', '}', json_str)
+                json_str = re.sub(r"\)\s*$", "}", json_str)
                 # Ensure enough closing braces
                 try:
                     test_parse = json.loads(json_str)
@@ -1930,7 +2034,7 @@ def parse_tool_calls(text: str, available_tools: list[Tool] | None = None) -> tu
                         logger.info("[TOOL PARSE] Bracket repair: fixed ) → } confusion")
                 except json.JSONDecodeError:
                     # Still broken — append missing braces
-                    json_str += '}' * depth
+                    json_str += "}" * depth
                     logger.info(f"[TOOL PARSE] Bracket repair: added {depth} closing brace(s)")
                     try:
                         obj = json.loads(json_str)
@@ -1939,8 +2043,10 @@ def parse_tool_calls(text: str, available_tools: list[Tool] | None = None) -> tu
                     except json.JSONDecodeError:
                         # Last resort: try replacing ALL trailing ) with }
                         json_str2 = text[start_idx:]
-                        json_str2 = re.sub(r'\s*```\s*$', '', json_str2).rstrip()
-                        json_str2 = re.sub(r'[)]+\s*$', lambda m: '}' * len(m.group().strip()), json_str2)
+                        json_str2 = re.sub(r"\s*```\s*$", "", json_str2).rstrip()
+                        json_str2 = re.sub(
+                            r"[)]+\s*$", lambda m: "}" * len(m.group().strip()), json_str2
+                        )
                         try:
                             obj = json.loads(json_str2)
                             if "name" in obj and "arguments" in obj:
@@ -1966,21 +2072,27 @@ def parse_tool_calls(text: str, available_tools: list[Tool] | None = None) -> tu
                 canonical_name = tool_name_map.get(parsed_name.lower())
                 if canonical_name:
                     tool_id = f"toolu_{hashlib.md5(f'{canonical_name}{time.time()}'.encode()).hexdigest()[:24]}"
-                    tool_uses.append({
-                        "type": "tool_use",
-                        "id": tool_id,
-                        "name": canonical_name,
-                        "input": args,
-                    })
+                    tool_uses.append(
+                        {
+                            "type": "tool_use",
+                            "id": tool_id,
+                            "name": canonical_name,
+                            "input": args,
+                        }
+                    )
                     # Remove the JSON and surrounding markdown fences from remaining text
                     remaining_text = text[:start_idx] + text[end_idx:]
-                    remaining_text = re.sub(r'```json\s*```', '', remaining_text)
-                    remaining_text = re.sub(r'```\s*```', '', remaining_text)
+                    remaining_text = re.sub(r"```json\s*```", "", remaining_text)
+                    remaining_text = re.sub(r"```\s*```", "", remaining_text)
                     remaining_text = remaining_text.strip()
-                    logger.info(f"[TOOL PARSE] Found JSON tool call: {parsed_name} -> {canonical_name}")
+                    logger.info(
+                        f"[TOOL PARSE] Found JSON tool call: {parsed_name} -> {canonical_name}"
+                    )
                     return remaining_text, tool_uses
                 else:
-                    logger.warning(f"[TOOL PARSE] Unknown tool: {parsed_name}, available: {list(tool_name_map.keys())}")
+                    logger.warning(
+                        f"[TOOL PARSE] Unknown tool: {parsed_name}, available: {list(tool_name_map.keys())}"
+                    )
 
     except Exception as e:
         logger.debug(f"[TOOL PARSE] JSON parse failed: {e}")
@@ -1996,7 +2108,9 @@ def parse_tool_calls(text: str, available_tools: list[Tool] | None = None) -> tu
 
         for part in parts[1:]:
             if len(tool_uses) >= MAX_TOOL_CALLS:
-                logger.warning(f"[TOOL PARSE] Hit max tool call limit ({MAX_TOOL_CALLS}), ignoring rest")
+                logger.warning(
+                    f"[TOOL PARSE] Hit max tool call limit ({MAX_TOOL_CALLS}), ignoring rest"
+                )
                 break
 
             # Each part should be: function<｜tool▁sep｜>name\ncode...<｜tool▁call▁end｜>
@@ -2007,7 +2121,7 @@ def parse_tool_calls(text: str, available_tools: list[Tool] | None = None) -> tu
                     rest = sep_parts[1]
 
                     # Extract function name (first word/identifier after sep)
-                    name_match = re.match(r'^\s*([a-zA-Z_][a-zA-Z0-9_]*)', rest)
+                    name_match = re.match(r"^\s*([a-zA-Z_][a-zA-Z0-9_]*)", rest)
                     if name_match:
                         parsed_name = name_match.group(1)
 
@@ -2016,23 +2130,23 @@ def parse_tool_calls(text: str, available_tools: list[Tool] | None = None) -> tu
                         if canonical_name:
                             # Try to extract arguments
                             args = {}
-                            args_text = rest[name_match.end():]
+                            args_text = rest[name_match.end() :]
                             if TOOL_CALL_END in args_text:
                                 args_text = args_text.split(TOOL_CALL_END)[0]
 
                             # Strip markdown code fences from args
-                            args_text = re.sub(r'```(?:json)?\s*', '', args_text)
+                            args_text = re.sub(r"```(?:json)?\s*", "", args_text)
                             args_text = args_text.strip()
 
                             # Use bracket counting for nested JSON (not flat regex)
-                            json_start = args_text.find('{')
+                            json_start = args_text.find("{")
                             if json_start >= 0:
                                 depth = 0
                                 json_end = json_start
                                 for i, c in enumerate(args_text[json_start:]):
-                                    if c == '{':
+                                    if c == "{":
                                         depth += 1
-                                    elif c == '}':
+                                    elif c == "}":
                                         depth -= 1
                                         if depth == 0:
                                             json_end = json_start + i + 1
@@ -2046,27 +2160,44 @@ def parse_tool_calls(text: str, available_tools: list[Tool] | None = None) -> tu
                             # Fallback: regex extract for Write with malformed JSON
                             if not args and canonical_name == "Write":
                                 fp = re.search(r'"file_path"\s*:\s*"([^"]*)"', args_text)
-                                ct = re.search(r'"content"\s*:\s*"(.*?)(?:"\s*[},]|$)', args_text, re.DOTALL)
+                                ct = re.search(
+                                    r'"content"\s*:\s*"(.*?)(?:"\s*[},]|$)', args_text, re.DOTALL
+                                )
                                 if fp and ct:
-                                    content_val = ct.group(1).replace('\\n', '\n').replace('\\"', '"').replace('\\\\', '\\')
+                                    content_val = (
+                                        ct.group(1)
+                                        .replace("\\n", "\n")
+                                        .replace('\\"', '"')
+                                        .replace("\\\\", "\\")
+                                    )
                                     args = {"file_path": fp.group(1), "content": content_val}
-                                    logger.info(f"[TOOL PARSE] Regex fallback for Write: {fp.group(1)}")
+                                    logger.info(
+                                        f"[TOOL PARSE] Regex fallback for Write: {fp.group(1)}"
+                                    )
 
                             # Skip empty tool calls (degenerate output)
                             if not args:
-                                logger.warning(f"[TOOL PARSE] Skipping empty tool call: {parsed_name}")
+                                logger.warning(
+                                    f"[TOOL PARSE] Skipping empty tool call: {parsed_name}"
+                                )
                                 continue
 
                             tool_id = f"toolu_{hashlib.md5(f'{canonical_name}{time.time()}'.encode()).hexdigest()[:24]}"
-                            tool_uses.append({
-                                "type": "tool_use",
-                                "id": tool_id,
-                                "name": canonical_name,
-                                "input": args,
-                            })
-                            logger.info(f"[TOOL PARSE] Extracted tool call: {parsed_name} -> {canonical_name}")
+                            tool_uses.append(
+                                {
+                                    "type": "tool_use",
+                                    "id": tool_id,
+                                    "name": canonical_name,
+                                    "input": args,
+                                }
+                            )
+                            logger.info(
+                                f"[TOOL PARSE] Extracted tool call: {parsed_name} -> {canonical_name}"
+                            )
                         else:
-                            logger.warning(f"[TOOL PARSE] Unknown tool: {parsed_name}, available: {list(tool_name_map.keys())}")
+                            logger.warning(
+                                f"[TOOL PARSE] Unknown tool: {parsed_name}, available: {list(tool_name_map.keys())}"
+                            )
                             remaining_parts.append(part)  # Keep unrecognized parts
                     else:
                         remaining_parts.append(part)
@@ -2088,14 +2219,14 @@ def parse_tool_calls(text: str, available_tools: list[Tool] | None = None) -> tu
     if not tool_uses:
         try:
             # Find start of any JSON object using bracket counting
-            json_start = remaining_text.find('{')
+            json_start = remaining_text.find("{")
             if json_start >= 0:
                 depth = 0
                 json_end = json_start
                 for i, c in enumerate(remaining_text[json_start:]):
-                    if c == '{':
+                    if c == "{":
                         depth += 1
-                    elif c == '}':
+                    elif c == "}":
                         depth -= 1
                         if depth == 0:
                             json_end = json_start + i + 1
@@ -2127,15 +2258,21 @@ def parse_tool_calls(text: str, available_tools: list[Tool] | None = None) -> tu
                             canonical_name = tool_name_map.get(inferred_name.lower())
                             if canonical_name:
                                 tool_id = f"toolu_{hashlib.md5(f'{canonical_name}{time.time()}'.encode()).hexdigest()[:24]}"
-                                tool_uses.append({
-                                    "type": "tool_use",
-                                    "id": tool_id,
-                                    "name": canonical_name,
-                                    "input": obj,
-                                })
-                                remaining_text = remaining_text[:json_start] + remaining_text[json_end:]
+                                tool_uses.append(
+                                    {
+                                        "type": "tool_use",
+                                        "id": tool_id,
+                                        "name": canonical_name,
+                                        "input": obj,
+                                    }
+                                )
+                                remaining_text = (
+                                    remaining_text[:json_start] + remaining_text[json_end:]
+                                )
                                 remaining_text = remaining_text.strip()
-                                logger.info(f"[TOOL PARSE] Inferred tool from args: {inferred_name} -> {canonical_name}")
+                                logger.info(
+                                    f"[TOOL PARSE] Inferred tool from args: {inferred_name} -> {canonical_name}"
+                                )
                     except json.JSONDecodeError:
                         pass
         except Exception as e:
@@ -2146,36 +2283,44 @@ def parse_tool_calls(text: str, available_tools: list[Tool] | None = None) -> tu
     # history to the model, so model always sees consistent markdown format.
     if not tool_uses:
         # Match ```bash or ```shell code blocks
-        bash_match = re.search(r'```(?:bash|shell|sh)\n(.*?)```', remaining_text, re.DOTALL)
-        if bash_match and tool_name_map.get('bash'):
+        bash_match = re.search(r"```(?:bash|shell|sh)\n(.*?)```", remaining_text, re.DOTALL)
+        if bash_match and tool_name_map.get("bash"):
             command = bash_match.group(1).strip()
             if command:
                 tool_id = f"toolu_{hashlib.md5(f'Bash{time.time()}'.encode()).hexdigest()[:24]}"
-                tool_uses.append({
-                    "type": "tool_use",
-                    "id": tool_id,
-                    "name": tool_name_map['bash'],
-                    "input": {"command": command},
-                })
+                tool_uses.append(
+                    {
+                        "type": "tool_use",
+                        "id": tool_id,
+                        "name": tool_name_map["bash"],
+                        "input": {"command": command},
+                    }
+                )
                 # Keep explanation text, just remove the code block
-                remaining_text = re.sub(r'```(?:bash|shell|sh)\n.*?```', '', remaining_text, flags=re.DOTALL).strip()
+                remaining_text = re.sub(
+                    r"```(?:bash|shell|sh)\n.*?```", "", remaining_text, flags=re.DOTALL
+                ).strip()
                 logger.info(f"[TOOL PARSE] Converted bash markdown to tool_use: {command[:50]}...")
 
         # Match ```python code blocks -> run via python3 -c
         if not tool_uses:
-            python_match = re.search(r'```python\n(.*?)```', remaining_text, re.DOTALL)
-            if python_match and tool_name_map.get('bash'):
+            python_match = re.search(r"```python\n(.*?)```", remaining_text, re.DOTALL)
+            if python_match and tool_name_map.get("bash"):
                 code = python_match.group(1).strip()
                 if code:
                     escaped_code = code.replace("'", "'\"'\"'")
                     tool_id = f"toolu_{hashlib.md5(f'Bash{time.time()}'.encode()).hexdigest()[:24]}"
-                    tool_uses.append({
-                        "type": "tool_use",
-                        "id": tool_id,
-                        "name": tool_name_map['bash'],
-                        "input": {"command": f"python3 -c '{escaped_code}'"},
-                    })
-                    remaining_text = re.sub(r'```python\n.*?```', '', remaining_text, flags=re.DOTALL).strip()
+                    tool_uses.append(
+                        {
+                            "type": "tool_use",
+                            "id": tool_id,
+                            "name": tool_name_map["bash"],
+                            "input": {"command": f"python3 -c '{escaped_code}'"},
+                        }
+                    )
+                    remaining_text = re.sub(
+                        r"```python\n.*?```", "", remaining_text, flags=re.DOTALL
+                    ).strip()
                     logger.info(f"[TOOL PARSE] Converted python markdown to bash tool_use")
 
     # Always clean up any DeepSeek markers from remaining text
@@ -2185,7 +2330,7 @@ def parse_tool_calls(text: str, available_tools: list[Tool] | None = None) -> tu
     remaining_text = remaining_text.replace(TOOL_CALL_END, "")
     remaining_text = remaining_text.replace(TOOL_SEP, "")
     # Clean up "function" keyword that appears after tool_call_begin
-    remaining_text = re.sub(r'\bfunction\b\s*', '', remaining_text)
+    remaining_text = re.sub(r"\bfunction\b\s*", "", remaining_text)
     remaining_text = remaining_text.strip()
 
     return remaining_text, tool_uses
@@ -2215,7 +2360,7 @@ def _chunk_text(text: str, max_words: int = 3) -> list[str]:
     words = text.split(" ")
     chunks = []
     for i in range(0, len(words), max_words):
-        chunk = " ".join(words[i:i + max_words])
+        chunk = " ".join(words[i : i + max_words])
         if i + max_words < len(words):
             chunk += " "
         chunks.append(chunk)
@@ -2231,6 +2376,7 @@ async def _generate_sse_events(response: MessagesResponse):
     Emits: message_start, ping, content_block_start/delta/stop for each block,
     message_delta (with stop_reason), message_stop.
     """
+
     def sse(event: str, data: dict) -> str:
         return f"event: {event}\ndata: {json.dumps(data)}\n\n"
 
@@ -2250,50 +2396,68 @@ async def _generate_sse_events(response: MessagesResponse):
 
         if block_type == "text":
             text_content = block_data.get("text", "")
-            yield sse("content_block_start", {
-                "type": "content_block_start",
-                "index": idx,
-                "content_block": {"type": "text", "text": ""},
-            })
+            yield sse(
+                "content_block_start",
+                {
+                    "type": "content_block_start",
+                    "index": idx,
+                    "content_block": {"type": "text", "text": ""},
+                },
+            )
             # Progressive text emission: 3-word chunks with ~15ms delay
             chunks = _chunk_text(text_content)
             for chunk in chunks:
-                yield sse("content_block_delta", {
-                    "type": "content_block_delta",
-                    "index": idx,
-                    "delta": {"type": "text_delta", "text": chunk},
-                })
+                yield sse(
+                    "content_block_delta",
+                    {
+                        "type": "content_block_delta",
+                        "index": idx,
+                        "delta": {"type": "text_delta", "text": chunk},
+                    },
+                )
                 if len(chunks) > 1:
                     await asyncio.sleep(0.015)
             yield sse("content_block_stop", {"type": "content_block_stop", "index": idx})
 
         elif block_type == "tool_use":
-            yield sse("content_block_start", {
-                "type": "content_block_start",
-                "index": idx,
-                "content_block": {
-                    "type": "tool_use",
-                    "id": block_data.get("id", ""),
-                    "name": block_data.get("name", ""),
-                    "input": {},
+            yield sse(
+                "content_block_start",
+                {
+                    "type": "content_block_start",
+                    "index": idx,
+                    "content_block": {
+                        "type": "tool_use",
+                        "id": block_data.get("id", ""),
+                        "name": block_data.get("name", ""),
+                        "input": {},
+                    },
                 },
-            })
+            )
             # Send complete JSON in one shot — CLI parses partial_json immediately
             input_data = block_data.get("input", {})
             if input_data:
-                yield sse("content_block_delta", {
-                    "type": "content_block_delta",
-                    "index": idx,
-                    "delta": {"type": "input_json_delta", "partial_json": json.dumps(input_data)},
-                })
+                yield sse(
+                    "content_block_delta",
+                    {
+                        "type": "content_block_delta",
+                        "index": idx,
+                        "delta": {
+                            "type": "input_json_delta",
+                            "partial_json": json.dumps(input_data),
+                        },
+                    },
+                )
             yield sse("content_block_stop", {"type": "content_block_stop", "index": idx})
 
     # message_delta with stop_reason
-    yield sse("message_delta", {
-        "type": "message_delta",
-        "delta": {"stop_reason": response.stop_reason, "stop_sequence": None},
-        "usage": {"output_tokens": response.usage.output_tokens},
-    })
+    yield sse(
+        "message_delta",
+        {
+            "type": "message_delta",
+            "delta": {"stop_reason": response.stop_reason, "stop_sequence": None},
+            "usage": {"output_tokens": response.usage.output_tokens},
+        },
+    )
 
     # message_stop
     yield sse("message_stop", {"type": "message_stop"})
@@ -2322,7 +2486,9 @@ async def create_message(request_body: MessagesRequest, request: Request) -> JSO
             "system_text": system_text,
             "system_length": len(system_text) if system_text else 0,
             # Full messages
-            "messages": [{"role": m.role, "content": str(m.content)} for m in request_body.messages],
+            "messages": [
+                {"role": m.role, "content": str(m.content)} for m in request_body.messages
+            ],
             "n_messages": len(request_body.messages),
             # Full tool definitions with schemas for commonality analysis
             "tools": [
@@ -2332,24 +2498,31 @@ async def create_message(request_body: MessagesRequest, request: Request) -> JSO
                     "input_schema": t.input_schema,
                 }
                 for t in request_body.tools
-            ] if request_body.tools else [],
+            ]
+            if request_body.tools
+            else [],
             "n_tools": len(request_body.tools) if request_body.tools else 0,
             "tool_names": [t.name for t in request_body.tools] if request_body.tools else [],
             "stop_sequences": request_body.stop_sequences,
             # Additional API params
             "tool_choice": str(request_body.tool_choice) if request_body.tool_choice else None,
-            "thinking": {"type": request_body.thinking.type, "budget": request_body.thinking.budget_tokens} if request_body.thinking else None,
+            "thinking": {
+                "type": request_body.thinking.type,
+                "budget": request_body.thinking.budget_tokens,
+            }
+            if request_body.thinking
+            else None,
         },
         "headers": {
             "anthropic_beta": request.headers.get("anthropic-beta", ""),
             "user_agent": request.headers.get("user-agent", ""),
             "session_id": request.headers.get("X-Session-ID", ""),
         },
-        "timing": {},      # Timing breakdown
-        "tokens": {},      # Token analysis
-        "cache": {},       # Cache analysis
+        "timing": {},  # Timing breakdown
+        "tokens": {},  # Token analysis
+        "cache": {},  # Cache analysis
         "processing": {},  # Processing stats
-        "response": {},    # Response data
+        "response": {},  # Response data
     }
 
     # Cap max_tokens to prevent runaway generation (context window is 100K)
@@ -2372,8 +2545,12 @@ async def create_message(request_body: MessagesRequest, request: Request) -> JSO
     top_p = request_body.top_p if request_body.top_p is not None else 1.0
     top_k = request_body.top_k if request_body.top_k is not None else 0
 
-    logger.info(f"[REQUEST] msgs={len(request_body.messages)}, max_tokens={max_tokens}, tools={n_tools}")
-    logger.info(f"[PARAMS] temp={temperature}, top_p={top_p}, top_k={top_k}, stream={request_body.stream}")
+    logger.info(
+        f"[REQUEST] msgs={len(request_body.messages)}, max_tokens={max_tokens}, tools={n_tools}"
+    )
+    logger.info(
+        f"[PARAMS] temp={temperature}, top_p={top_p}, top_k={top_k}, stream={request_body.stream}"
+    )
     if anthropic_beta:
         logger.info(f"[BETA] {anthropic_beta}")
     if request_body.betas:
@@ -2383,7 +2560,9 @@ async def create_message(request_body: MessagesRequest, request: Request) -> JSO
     if request_body.tool_choice:
         logger.info(f"[TOOL_CHOICE] {request_body.tool_choice}")
     if request_body.thinking:
-        logger.info(f"[THINKING] type={request_body.thinking.type}, budget={request_body.thinking.budget_tokens}")
+        logger.info(
+            f"[THINKING] type={request_body.thinking.type}, budget={request_body.thinking.budget_tokens}"
+        )
     if request_body.output_format:
         logger.info(f"[OUTPUT_FORMAT] {request_body.output_format}")
     for i, msg in enumerate(request_body.messages):
@@ -2391,31 +2570,39 @@ async def create_message(request_body: MessagesRequest, request: Request) -> JSO
     log_memory("REQUEST_START")
 
     # TRACE: Full CLI input — every message with COMPLETE content (no truncation)
-    trace_log("CLI_IN", {
-        "n_messages": len(request_body.messages),
-        "max_tokens": max_tokens,
-        "n_tools": n_tools,
-        "system_len": len(str(request_body.system)) if request_body.system else 0,
-        "messages": [
-            {
-                "idx": i,
-                "role": m.role,
-                "content": m.content if isinstance(m.content, str) else [
-                    {
-                        "type": b.get("type", "?"),
-                        "id": b.get("id", b.get("tool_use_id", "")),
-                        "name": b.get("name", ""),
-                        "text": b.get("text", "")[:500] if b.get("type") == "text" else "",
-                        "content": str(b.get("content", ""))[:300] if b.get("type") == "tool_result" else "",
-                        "is_error": b.get("is_error", None),
-                        "input": b.get("input", None),
-                    }
-                    for b in m.content if isinstance(b, dict)
-                ],
-            }
-            for i, m in enumerate(request_body.messages)
-        ],
-    })
+    trace_log(
+        "CLI_IN",
+        {
+            "n_messages": len(request_body.messages),
+            "max_tokens": max_tokens,
+            "n_tools": n_tools,
+            "system_len": len(str(request_body.system)) if request_body.system else 0,
+            "messages": [
+                {
+                    "idx": i,
+                    "role": m.role,
+                    "content": m.content
+                    if isinstance(m.content, str)
+                    else [
+                        {
+                            "type": b.get("type", "?"),
+                            "id": b.get("id", b.get("tool_use_id", "")),
+                            "name": b.get("name", ""),
+                            "text": b.get("text", "")[:500] if b.get("type") == "text" else "",
+                            "content": str(b.get("content", ""))[:300]
+                            if b.get("type") == "tool_result"
+                            else "",
+                            "is_error": b.get("is_error", None),
+                            "input": b.get("input", None),
+                        }
+                        for b in m.content
+                        if isinstance(b, dict)
+                    ],
+                }
+                for i, m in enumerate(request_body.messages)
+            ],
+        },
+    )
 
     # 1. Convert to prompt and tokenize
     tokenize_start = time.time()
@@ -2436,13 +2623,16 @@ async def create_message(request_body: MessagesRequest, request: Request) -> JSO
     static_prefix_hash = hashlib.md5(static_prefix.encode()).hexdigest()
 
     conv_agent, n_consumed = find_conversation_match(
-        request_body.messages, static_prefix_hash, request_type,
+        request_body.messages,
+        static_prefix_hash,
+        request_type,
     )
 
     if conv_agent and n_consumed > 0:
         info = cache_index[conv_agent]
         delta, delta_results = build_prompt_delta(
-            request_body.messages, n_consumed,
+            request_body.messages,
+            n_consumed,
             info.get("last_output_text", ""),
             info.get("last_tool_uses", []),
             request_body.tools,
@@ -2450,7 +2640,7 @@ async def create_message(request_body: MessagesRequest, request: Request) -> JSO
         stored = info["running_prompt"]
         base = stored.rstrip()
         if base.endswith("Assistant:"):
-            base = base[:-len("Assistant:")]
+            base = base[: -len("Assistant:")]
         prompt = base.rstrip() + "\n" + delta + "\nAssistant:"
         total_tool_results = info.get("total_tool_results", 0) + delta_results
         logger.info(
@@ -2468,14 +2658,17 @@ async def create_message(request_body: MessagesRequest, request: Request) -> JSO
     # turn markers inside tool descriptions
     prefix_len = len(static_prefix)
     messages_section = prompt[prefix_len:].lstrip("\n")
-    trace_log("PROMPT_BUILT", {
-        "total_chars": len(prompt),
-        "total_lines": prompt.count("\n") + 1,
-        "total_tool_results": total_tool_results,
-        "system_and_tools_chars": prefix_len,
-        "messages_section": messages_section,
-        "full_prompt_hash": hashlib.md5(prompt.encode()).hexdigest(),
-    })
+    trace_log(
+        "PROMPT_BUILT",
+        {
+            "total_chars": len(prompt),
+            "total_lines": prompt.count("\n") + 1,
+            "total_tool_results": total_tool_results,
+            "system_and_tools_chars": prefix_len,
+            "messages_section": messages_section,
+            "full_prompt_hash": hashlib.md5(prompt.encode()).hexdigest(),
+        },
+    )
 
     # Cap max_tokens during tool roundtrips — model only needs enough for
     # 1-2 tool calls, not 10K tokens of rambling. Checked before generation.
@@ -2563,12 +2756,16 @@ async def create_message(request_body: MessagesRequest, request: Request) -> JSO
         "total_cached": total_cached if cache_hit else 0,
         "input_cached": input_cached if cache_hit else 0,
         "n_cached_agents": len(cache_index),
-        "cached_agent_types": list(set(info.get("request_type", "unknown") for info in cache_index.values())),
+        "cached_agent_types": list(
+            set(info.get("request_type", "unknown") for info in cache_index.values())
+        ),
     }
     request_log["timing"]["cache_lookup_ms"] = round(cache_lookup_time * 1000, 2)
 
     if cache_hit:
-        logger.info(f"[CACHE HIT] agent={agent_id}, total_cached={total_cached}, input_cached={input_cached}, prefix_match={prefix_length}")
+        logger.info(
+            f"[CACHE HIT] agent={agent_id}, total_cached={total_cached}, input_cached={input_cached}, prefix_match={prefix_length}"
+        )
 
         # Use the smaller of: total_cached (full cache), or prefix_length (common prefix)
         # This handles partial prefix matches where cached and new tokens diverge
@@ -2582,7 +2779,9 @@ async def create_message(request_body: MessagesRequest, request: Request) -> JSO
         # Process all tokens after the usable cache
         if len(tokens) > usable_cache_len:
             tokens_to_process = tokens[usable_cache_len:]
-            logger.info(f"[PARTIAL PREFIX] Using {usable_cache_len} cached tokens, processing {len(tokens_to_process)} new")
+            logger.info(
+                f"[PARTIAL PREFIX] Using {usable_cache_len} cached tokens, processing {len(tokens_to_process)} new"
+            )
         else:
             # Exact match or shorter - reprocess last token to get logits
             tokens_to_process = [tokens[-1]]
@@ -2599,15 +2798,16 @@ async def create_message(request_body: MessagesRequest, request: Request) -> JSO
         if prefix_kv and len(tokens) > prefix_n and tokens[:prefix_n] == prefix_seq:
             kv_caches = prefix_kv
             tokens_to_process = tokens[prefix_n:]
-            logger.info(f"[PREFIX HIT] Reusing {prefix_n} prefix tokens, processing {len(tokens_to_process)} remaining")
+            logger.info(
+                f"[PREFIX HIT] Reusing {prefix_n} prefix tokens, processing {len(tokens_to_process)} remaining"
+            )
         elif len(tokens) >= CHUNKED_PREFILL_THRESHOLD:
             kv_caches = chunked_prefill(tokens)
             tokens_to_process = []  # All tokens already processed
         else:
             # Short prompt: process directly
             kv_caches = [
-                QuantizedKVCache(group_size=KV_GROUP_SIZE, bits=KV_BITS)
-                for _ in range(N_LAYERS)
+                QuantizedKVCache(group_size=KV_GROUP_SIZE, bits=KV_BITS) for _ in range(N_LAYERS)
             ]
             tokens_to_process = tokens
 
@@ -2626,14 +2826,17 @@ async def create_message(request_body: MessagesRequest, request: Request) -> JSO
     )
 
     # TRACE: Raw model output — the EXACT text DeepSeek generated (before any processing)
-    trace_log("MODEL_OUT_RAW", {
-        "n_tokens": len(generated_ids),
-        "max_tokens": max_tokens,
-        "hit_max": len(generated_ids) >= max_tokens,
-        "output_text": output_text,
-        "cache_hit": cache_hit,
-        "tokens_processed": len(tokens_to_process),
-    })
+    trace_log(
+        "MODEL_OUT_RAW",
+        {
+            "n_tokens": len(generated_ids),
+            "max_tokens": max_tokens,
+            "hit_max": len(generated_ids) >= max_tokens,
+            "output_text": output_text,
+            "cache_hit": cache_hit,
+            "tokens_processed": len(tokens_to_process),
+        },
+    )
 
     # 5. Save FULL cache (input + output) so next request doesn't reprocess
     save_cache_to_disk(agent_id, kv_caches, tokens, generated_ids, request_type)
@@ -2654,7 +2857,9 @@ async def create_message(request_body: MessagesRequest, request: Request) -> JSO
     # 7. Build response
     elapsed = time.time() - start_time
     log_memory("REQUEST_END")
-    logger.info(f"[DONE] {len(generated_ids)} tokens in {elapsed:.2f}s ({len(generated_ids)/elapsed:.1f} tok/s)")
+    logger.info(
+        f"[DONE] {len(generated_ids)} tokens in {elapsed:.2f}s ({len(generated_ids) / elapsed:.1f} tok/s)"
+    )
 
     # Sanitize output to prevent terminal control sequence issues
     output_text = sanitize_terminal_output(output_text)
@@ -2663,14 +2868,14 @@ async def create_message(request_body: MessagesRequest, request: Request) -> JSO
     remaining_text, tool_uses = parse_tool_calls(output_text, request_body.tools)
 
     # TRACE: What parse_tool_calls extracted
-    trace_log("TOOL_PARSE", {
-        "remaining_text": remaining_text,
-        "n_tool_uses": len(tool_uses),
-        "tool_uses": [
-            {"name": t.get("name"), "input": t.get("input")}
-            for t in tool_uses
-        ],
-    })
+    trace_log(
+        "TOOL_PARSE",
+        {
+            "remaining_text": remaining_text,
+            "n_tool_uses": len(tool_uses),
+            "tool_uses": [{"name": t.get("name"), "input": t.get("input")} for t in tool_uses],
+        },
+    )
 
     # Build content blocks — text THEN tool_use (matches real Anthropic API).
     # The model can say "Let me check that file." then emit a Read tool call.
@@ -2678,8 +2883,8 @@ async def create_message(request_body: MessagesRequest, request: Request) -> JSO
 
     if remaining_text:
         clean_text = sanitize_terminal_output(remaining_text.strip())
-        clean_text = re.sub(r'```json\s*```', '', clean_text)
-        clean_text = re.sub(r'```\s*```', '', clean_text)
+        clean_text = re.sub(r"```json\s*```", "", clean_text)
+        clean_text = re.sub(r"```\s*```", "", clean_text)
         clean_text = clean_text.strip()
         # Only emit text when it's meaningful context, not noise
         if clean_text and len(clean_text) > 3 and not clean_text.startswith("{"):
@@ -2704,9 +2909,7 @@ async def create_message(request_body: MessagesRequest, request: Request) -> JSO
     action = "n/a"
     is_tool_rt = _is_tool_roundtrip(request_body.messages)
     if is_tool_rt:
-        fwd_input = _build_forward_input(
-            tool_uses, request_body.messages, output_text
-        )
+        fwd_input = _build_forward_input(tool_uses, request_body.messages, output_text)
         logger.info(f"[FWD] State: {fwd_input}")
         trace_log("FORWARD_IN", {"state": fwd_input})
         decision = _call_forward_translator(fwd_input)
@@ -2721,12 +2924,18 @@ async def create_message(request_body: MessagesRequest, request: Request) -> JSO
                     for item in pending
                 ]
                 tool_id = f"toolu_{hashlib.md5(f'proc{time.time()}'.encode()).hexdigest()[:24]}"
-                content_blocks = [{
-                    "type": "tool_use", "id": tool_id,
-                    "name": "TodoWrite", "input": {"todos": completed},
-                }]
+                content_blocks = [
+                    {
+                        "type": "tool_use",
+                        "id": tool_id,
+                        "name": "TodoWrite",
+                        "input": {"todos": completed},
+                    }
+                ]
                 stop_reason = "tool_use"
-                logger.info(f"[FWD] complete_and_end: TodoWrite(completed) for {len(completed)} items")
+                logger.info(
+                    f"[FWD] complete_and_end: TodoWrite(completed) for {len(completed)} items"
+                )
             else:
                 content_blocks = [{"type": "text", "text": "Done."}]
                 stop_reason = "end_turn"
@@ -2748,24 +2957,29 @@ async def create_message(request_body: MessagesRequest, request: Request) -> JSO
     # Store the INPUT prompt (ends with \nAssistant:) — not the model output.
     # build_prompt_delta will reconstruct the assistant turn from last_output/last_tool_uses.
     if agent_id in cache_index:
-        cache_index[agent_id].update({
-            "running_prompt": prompt,
-            "last_output_text": output_text,
-            "last_tool_uses": tool_uses,
-            "n_messages_consumed": len(request_body.messages),
-            "static_prefix_hash": static_prefix_hash,
-            "total_tool_results": total_tool_results,
-        })
+        cache_index[agent_id].update(
+            {
+                "running_prompt": prompt,
+                "last_output_text": output_text,
+                "last_tool_uses": tool_uses,
+                "n_messages_consumed": len(request_body.messages),
+                "static_prefix_hash": static_prefix_hash,
+                "total_tool_results": total_tool_results,
+            }
+        )
 
     # TRACE: Final response sent to CLI — the EXACT content blocks the CLI will process
     fwd_action = action if is_tool_rt else "n/a"
-    trace_log("CLI_OUT", {
-        "stop_reason": stop_reason,
-        "n_blocks": len(content_blocks) if content_blocks else 0,
-        "content_blocks": content_blocks if content_blocks else [],
-        "fwd_action": fwd_action,
-        "is_tool_roundtrip": is_tool_rt,
-    })
+    trace_log(
+        "CLI_OUT",
+        {
+            "stop_reason": stop_reason,
+            "n_blocks": len(content_blocks) if content_blocks else 0,
+            "content_blocks": content_blocks if content_blocks else [],
+            "fwd_action": fwd_action,
+            "is_tool_roundtrip": is_tool_rt,
+        },
+    )
 
     response = MessagesResponse(
         id=f"msg_{agent_id}",
@@ -2799,18 +3013,26 @@ async def create_message(request_body: MessagesRequest, request: Request) -> JSO
         "tokens_processed": len(tokens_to_process),
         "tokens_from_cache": prefix_length if cache_hit else 0,
         "output_tokens": len(generated_ids),
-        "cache_savings_pct": round((prefix_length / len(tokens)) * 100, 1) if cache_hit and len(tokens) > 0 else 0,
+        "cache_savings_pct": round((prefix_length / len(tokens)) * 100, 1)
+        if cache_hit and len(tokens) > 0
+        else 0,
     }
     request_log["timing"]["total_ms"] = round(elapsed * 1000, 2)
-    request_log["timing"]["generation_ms"] = round((elapsed - cache_lookup_time - tokenize_time) * 1000, 2)
-    request_log["timing"]["tokens_per_second"] = round(len(generated_ids) / elapsed, 1) if elapsed > 0 else 0
+    request_log["timing"]["generation_ms"] = round(
+        (elapsed - cache_lookup_time - tokenize_time) * 1000, 2
+    )
+    request_log["timing"]["tokens_per_second"] = (
+        round(len(generated_ids) / elapsed, 1) if elapsed > 0 else 0
+    )
 
     request_log["response"] = {
         "output_text": output_text,
         "remaining_text": remaining_text,
         "output_tokens": len(generated_ids),
         "stop_reason": stop_reason,
-        "tool_uses": [{"name": t.get("name"), "input": t.get("input")} for t in tool_uses] if tool_uses else [],
+        "tool_uses": [{"name": t.get("name"), "input": t.get("input")} for t in tool_uses]
+        if tool_uses
+        else [],
         "n_tool_uses": len(tool_uses),
         "content_blocks": len(content_blocks),
     }
@@ -2854,7 +3076,9 @@ async def create_message(request_body: MessagesRequest, request: Request) -> JSO
             "cache_hits": cache_hits,
             "cache_hit_rate": round(cache_hits / len(reqs) * 100, 1) if reqs else 0,
             "by_request_type": by_type,
-            "total_tokens_processed": sum(r.get("processing", {}).get("total_input_tokens", 0) for r in reqs),
+            "total_tokens_processed": sum(
+                r.get("processing", {}).get("total_input_tokens", 0) for r in reqs
+            ),
             "total_time_ms": sum(r.get("timing", {}).get("total_ms", 0) for r in reqs),
         }
 

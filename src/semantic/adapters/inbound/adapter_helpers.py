@@ -83,7 +83,7 @@ def try_parse_json_at(text: str, start: int) -> tuple[dict[str, Any] | None, int
     Returns:
         Tuple of (parsed_dict or None, end_position)
     """
-    if start >= len(text) or text[start] != '{':
+    if start >= len(text) or text[start] != "{":
         return None, start
 
     depth = 0
@@ -96,7 +96,7 @@ def try_parse_json_at(text: str, start: int) -> tuple[dict[str, Any] | None, int
             escape_next = False
             continue
 
-        if char == '\\' and in_string:
+        if char == "\\" and in_string:
             escape_next = True
             continue
 
@@ -107,9 +107,9 @@ def try_parse_json_at(text: str, start: int) -> tuple[dict[str, Any] | None, int
         if in_string:
             continue
 
-        if char == '{':
+        if char == "{":
             depth += 1
-        elif char == '}':
+        elif char == "}":
             depth -= 1
             if depth == 0:
                 end = i + 1

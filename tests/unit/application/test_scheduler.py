@@ -24,6 +24,7 @@ from semantic.domain.value_objects import CompletedGeneration
 # Fakes
 # -------------------------------------------------------------------
 
+
 @dataclass
 class FakeKVCache:
     offset: int = 0
@@ -125,6 +126,7 @@ class FakePrefillAdapter:
 # Helpers
 # -------------------------------------------------------------------
 
+
 def run_async(coro):
     """Run a coroutine in a new event loop (for tests)."""
     loop = asyncio.new_event_loop()
@@ -137,6 +139,7 @@ def run_async(coro):
 # -------------------------------------------------------------------
 # Tests: Lifecycle
 # -------------------------------------------------------------------
+
 
 class TestSchedulerLifecycle:
     def test_start_stop(self) -> None:
@@ -183,17 +186,17 @@ class TestSchedulerLifecycle:
 # Tests: Short prompt (direct path, no chunked prefill)
 # -------------------------------------------------------------------
 
+
 class TestSchedulerDirectSubmit:
     def test_short_prompt_goes_direct(self) -> None:
         """Prompts shorter than interleave threshold bypass chunked prefill."""
         engine = FakeBatchEngine(steps_to_complete=1)
         adapter = FakePrefillAdapter()
-        scheduler = ConcurrentScheduler(
-            engine, adapter, n_layers=4, interleave_threshold=100
-        )
+        scheduler = ConcurrentScheduler(engine, adapter, n_layers=4, interleave_threshold=100)
         scheduler.start()
 
         try:
+
             async def run():
                 return await scheduler.submit_and_wait(
                     agent_id="a1",
@@ -211,12 +214,11 @@ class TestSchedulerDirectSubmit:
     def test_short_prompt_completes_with_correct_uid(self) -> None:
         engine = FakeBatchEngine(steps_to_complete=2)
         adapter = FakePrefillAdapter()
-        scheduler = ConcurrentScheduler(
-            engine, adapter, n_layers=4, interleave_threshold=100
-        )
+        scheduler = ConcurrentScheduler(engine, adapter, n_layers=4, interleave_threshold=100)
         scheduler.start()
 
         try:
+
             async def run():
                 return await scheduler.submit_and_wait(
                     agent_id="a1",
@@ -235,18 +237,18 @@ class TestSchedulerDirectSubmit:
 # Tests: Long prompt (chunked prefill path)
 # -------------------------------------------------------------------
 
+
 class TestSchedulerChunkedPrefill:
     def test_long_prompt_uses_prefill_adapter(self) -> None:
         """Prompts longer than threshold go through chunked prefill."""
         engine = FakeBatchEngine(steps_to_complete=1)
         adapter = FakePrefillAdapter(chunk_size=512)
         threshold = 100
-        scheduler = ConcurrentScheduler(
-            engine, adapter, n_layers=4, interleave_threshold=threshold
-        )
+        scheduler = ConcurrentScheduler(engine, adapter, n_layers=4, interleave_threshold=threshold)
         scheduler.start()
 
         try:
+
             async def run():
                 return await scheduler.submit_and_wait(
                     agent_id="a1",
@@ -267,12 +269,11 @@ class TestSchedulerChunkedPrefill:
         """After prefill, sequence enters decode and completes."""
         engine = FakeBatchEngine(steps_to_complete=1)
         adapter = FakePrefillAdapter(chunk_size=256)
-        scheduler = ConcurrentScheduler(
-            engine, adapter, n_layers=2, interleave_threshold=100
-        )
+        scheduler = ConcurrentScheduler(engine, adapter, n_layers=2, interleave_threshold=100)
         scheduler.start()
 
         try:
+
             async def run():
                 return await scheduler.submit_and_wait(
                     agent_id="a1",
@@ -292,12 +293,11 @@ class TestSchedulerChunkedPrefill:
         """Large prompt requires many chunks, all tracked."""
         engine = FakeBatchEngine(steps_to_complete=1)
         adapter = FakePrefillAdapter(chunk_size=100)
-        scheduler = ConcurrentScheduler(
-            engine, adapter, n_layers=2, interleave_threshold=50
-        )
+        scheduler = ConcurrentScheduler(engine, adapter, n_layers=2, interleave_threshold=50)
         scheduler.start()
 
         try:
+
             async def run():
                 return await scheduler.submit_and_wait(
                     agent_id="a1",
@@ -318,18 +318,18 @@ class TestSchedulerChunkedPrefill:
 # Tests: Interleaving (decode + prefill concurrent)
 # -------------------------------------------------------------------
 
+
 class TestSchedulerInterleaving:
     def test_two_concurrent_requests(self) -> None:
         """Two requests: one short (direct), one long (prefill).
         Both complete successfully."""
         engine = FakeBatchEngine(steps_to_complete=2)
         adapter = FakePrefillAdapter(chunk_size=200)
-        scheduler = ConcurrentScheduler(
-            engine, adapter, n_layers=2, interleave_threshold=100
-        )
+        scheduler = ConcurrentScheduler(engine, adapter, n_layers=2, interleave_threshold=100)
         scheduler.start()
 
         try:
+
             async def run():
                 t1 = asyncio.create_task(
                     scheduler.submit_and_wait("short", list(range(50)), None, 10)
@@ -354,12 +354,11 @@ class TestSchedulerInterleaving:
         """Two long prompts: both go through prefill queue (FIFO)."""
         engine = FakeBatchEngine(steps_to_complete=1)
         adapter = FakePrefillAdapter(chunk_size=200)
-        scheduler = ConcurrentScheduler(
-            engine, adapter, n_layers=2, interleave_threshold=100
-        )
+        scheduler = ConcurrentScheduler(engine, adapter, n_layers=2, interleave_threshold=100)
         scheduler.start()
 
         try:
+
             async def run():
                 t1 = asyncio.create_task(
                     scheduler.submit_and_wait("a1", list(range(400)), None, 10)
@@ -381,6 +380,7 @@ class TestSchedulerInterleaving:
 # Tests: Error handling
 # -------------------------------------------------------------------
 
+
 class TestSchedulerErrorHandling:
     def test_prefill_failure_rejects_request(self) -> None:
         """If a prefill chunk fails, the request Future gets the exception."""
@@ -393,12 +393,11 @@ class TestSchedulerErrorHandling:
 
         adapter.process_prefill_chunk = failing_chunk
 
-        scheduler = ConcurrentScheduler(
-            engine, adapter, n_layers=2, interleave_threshold=10
-        )
+        scheduler = ConcurrentScheduler(engine, adapter, n_layers=2, interleave_threshold=10)
         scheduler.start()
 
         try:
+
             async def run():
                 return await scheduler.submit_and_wait(
                     agent_id="fail",
@@ -417,23 +416,21 @@ class TestSchedulerErrorHandling:
 # Tests: Request routing
 # -------------------------------------------------------------------
 
+
 class TestSchedulerRequestRouting:
     def test_threshold_boundary_short(self) -> None:
         """Prompt exactly at threshold goes direct."""
         engine = FakeBatchEngine(steps_to_complete=1)
         adapter = FakePrefillAdapter()
         threshold = 100
-        scheduler = ConcurrentScheduler(
-            engine, adapter, n_layers=2, interleave_threshold=threshold
-        )
+        scheduler = ConcurrentScheduler(engine, adapter, n_layers=2, interleave_threshold=threshold)
         scheduler.start()
 
         try:
+
             async def run():
                 # Exactly threshold tokens → direct (< is the check)
-                return await scheduler.submit_and_wait(
-                    "a1", list(range(99)), None, 10
-                )
+                return await scheduler.submit_and_wait("a1", list(range(99)), None, 10)
 
             run_async(run())
             assert adapter.init_calls == 0
@@ -445,17 +442,14 @@ class TestSchedulerRequestRouting:
         engine = FakeBatchEngine(steps_to_complete=1)
         adapter = FakePrefillAdapter(chunk_size=200)
         threshold = 100
-        scheduler = ConcurrentScheduler(
-            engine, adapter, n_layers=2, interleave_threshold=threshold
-        )
+        scheduler = ConcurrentScheduler(engine, adapter, n_layers=2, interleave_threshold=threshold)
         scheduler.start()
 
         try:
+
             async def run():
                 # Exactly threshold tokens → prefill path
-                return await scheduler.submit_and_wait(
-                    "a1", list(range(100)), None, 10
-                )
+                return await scheduler.submit_and_wait("a1", list(range(100)), None, 10)
 
             run_async(run())
             assert adapter.init_calls == 1

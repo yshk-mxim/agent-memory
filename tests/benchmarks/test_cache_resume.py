@@ -16,7 +16,9 @@ from tests.benchmarks.conftest import BenchmarkReporter
 
 
 @pytest.mark.benchmark
-def test_cache_save_time_2k_4k_8k_tokens(benchmark_client: httpx.Client, benchmark_reporter: BenchmarkReporter):
+def test_cache_save_time_2k_4k_8k_tokens(
+    benchmark_client: httpx.Client, benchmark_reporter: BenchmarkReporter
+):
     """Benchmark cache save time for different token counts.
 
     Measures:
@@ -63,9 +65,7 @@ def test_cache_save_time_2k_4k_8k_tokens(benchmark_client: httpx.Client, benchma
             "/v1/messages",
             json={
                 "model": "test-model",
-                "messages": [
-                    {"role": "user", "content": f"Final request for {agent_id}"}
-                ],
+                "messages": [{"role": "user", "content": f"Final request for {agent_id}"}],
                 "max_tokens": 50,
             },
             headers={"X-API-Key": agent_id},
@@ -74,20 +74,17 @@ def test_cache_save_time_2k_4k_8k_tokens(benchmark_client: httpx.Client, benchma
         elapsed_ms = (time.perf_counter() - start_time) * 1000
         save_times[f"{token_count}_tokens"] = round(elapsed_ms, 1)
 
-        print(
-            f"  {token_count} tokens: {elapsed_ms:.0f}ms"
-        )
+        print(f"  {token_count} tokens: {elapsed_ms:.0f}ms")
 
     benchmark_reporter.record("cache_save_time_by_size", save_times)
 
-    print(
-        f"\n📊 Cache save time benchmark:"
-        f"\n  Results: {save_times}"
-    )
+    print(f"\n📊 Cache save time benchmark:\n  Results: {save_times}")
 
 
 @pytest.mark.benchmark
-def test_cache_load_time_2k_4k_8k_tokens(benchmark_client: httpx.Client, benchmark_reporter: BenchmarkReporter):
+def test_cache_load_time_2k_4k_8k_tokens(
+    benchmark_client: httpx.Client, benchmark_reporter: BenchmarkReporter
+):
     """Benchmark cache load time for different token counts.
 
     Measures:
@@ -132,9 +129,7 @@ def test_cache_load_time_2k_4k_8k_tokens(benchmark_client: httpx.Client, benchma
             "/v1/messages",
             json={
                 "model": "test-model",
-                "messages": [
-                    {"role": "user", "content": f"Resume with cache {agent_id}"}
-                ],
+                "messages": [{"role": "user", "content": f"Resume with cache {agent_id}"}],
                 "max_tokens": 50,
             },
             headers={"X-API-Key": agent_id},
@@ -147,26 +142,26 @@ def test_cache_load_time_2k_4k_8k_tokens(benchmark_client: httpx.Client, benchma
         target_ms = {2000: 200, 4000: 350, 8000: 500}[token_count]
         status = "✅" if elapsed_ms < target_ms else "⚠️"
 
-        print(
-            f"  {token_count} tokens: {elapsed_ms:.0f}ms {status} (target <{target_ms}ms)"
-        )
+        print(f"  {token_count} tokens: {elapsed_ms:.0f}ms {status} (target <{target_ms}ms)")
 
     benchmark_reporter.record("cache_load_time_by_size", load_times)
 
     # Verify 8K target (<500ms)
-    assert (
-        load_times["8000_tokens"] < 500
-    ), f"8K token load time too high: {load_times['8000_tokens']:.0f}ms (target <500ms)"
+    assert load_times["8000_tokens"] < 500, (
+        f"8K token load time too high: {load_times['8000_tokens']:.0f}ms (target <500ms)"
+    )
 
     print(
-        f"\n📊 Cache load time benchmark:"
-        f"\n  Results: {load_times}"
-        f"\n  ✅ All targets met" if load_times["8000_tokens"] < 500 else "\n  ⚠️  8K target missed"
+        f"\n📊 Cache load time benchmark:\n  Results: {load_times}\n  ✅ All targets met"
+        if load_times["8000_tokens"] < 500
+        else "\n  ⚠️  8K target missed"
     )
 
 
 @pytest.mark.benchmark
-def test_resume_generation_speed(benchmark_client: httpx.Client, benchmark_reporter: BenchmarkReporter):
+def test_resume_generation_speed(
+    benchmark_client: httpx.Client, benchmark_reporter: BenchmarkReporter
+):
     """Benchmark generation speed when resuming from cache.
 
     Measures:
@@ -184,9 +179,7 @@ def test_resume_generation_speed(benchmark_client: httpx.Client, benchmark_repor
             "/v1/messages",
             json={
                 "model": "test-model",
-                "messages": [
-                    {"role": "user", "content": f"Build context part {i}"}
-                ],
+                "messages": [{"role": "user", "content": f"Build context part {i}"}],
                 "max_tokens": 500,
             },
             headers={"X-API-Key": agent_id},
@@ -199,9 +192,7 @@ def test_resume_generation_speed(benchmark_client: httpx.Client, benchmark_repor
         "/v1/messages",
         json={
             "model": "test-model",
-            "messages": [
-                {"role": "user", "content": "Generate with cached context"}
-            ],
+            "messages": [{"role": "user", "content": "Generate with cached context"}],
             "max_tokens": 100,
         },
         headers={"X-API-Key": agent_id},
@@ -227,7 +218,9 @@ def test_resume_generation_speed(benchmark_client: httpx.Client, benchmark_repor
 
 
 @pytest.mark.benchmark
-def test_cold_start_vs_cache_resume(benchmark_client: httpx.Client, benchmark_reporter: BenchmarkReporter):
+def test_cold_start_vs_cache_resume(
+    benchmark_client: httpx.Client, benchmark_reporter: BenchmarkReporter
+):
     """Compare cold start vs cache resume speedup.
 
     Measures:
@@ -248,9 +241,7 @@ def test_cold_start_vs_cache_resume(benchmark_client: httpx.Client, benchmark_re
         "/v1/messages",
         json={
             "model": "test-model",
-            "messages": [
-                {"role": "user", "content": "Cold start generation"}
-            ],
+            "messages": [{"role": "user", "content": "Cold start generation"}],
             "max_tokens": tokens_to_generate,
         },
         headers={"X-API-Key": cold_agent_id},
@@ -266,9 +257,7 @@ def test_cold_start_vs_cache_resume(benchmark_client: httpx.Client, benchmark_re
             "/v1/messages",
             json={
                 "model": "test-model",
-                "messages": [
-                    {"role": "user", "content": f"Build cache part {i}"}
-                ],
+                "messages": [{"role": "user", "content": f"Build cache part {i}"}],
                 "max_tokens": 500,
             },
             headers={"X-API-Key": warm_agent_id},
@@ -281,9 +270,7 @@ def test_cold_start_vs_cache_resume(benchmark_client: httpx.Client, benchmark_re
         "/v1/messages",
         json={
             "model": "test-model",
-            "messages": [
-                {"role": "user", "content": "Cache resume generation"}
-            ],
+            "messages": [{"role": "user", "content": "Cache resume generation"}],
             "max_tokens": tokens_to_generate,
         },
         headers={"X-API-Key": warm_agent_id},

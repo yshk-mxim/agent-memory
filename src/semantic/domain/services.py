@@ -395,9 +395,7 @@ class BlockPool:
             500  # 1000 blocks / 2 blocks per agent
         """
         if tokens_per_agent <= 0:
-            raise BlockOperationError(
-                f"tokens_per_agent must be > 0, got {tokens_per_agent}"
-            )
+            raise BlockOperationError(f"tokens_per_agent must be > 0, got {tokens_per_agent}")
 
         # Ceiling division: how many blocks needed for this many tokens
         blocks_per_agent = (tokens_per_agent + self.block_tokens - 1) // self.block_tokens

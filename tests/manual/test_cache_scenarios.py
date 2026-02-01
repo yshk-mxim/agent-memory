@@ -16,6 +16,7 @@ from typing import Any
 
 BASE_URL = "http://localhost:8000"
 
+
 def make_request(
     prompt: str,
     max_tokens: int = 50,
@@ -48,7 +49,7 @@ def make_request(
         tokens = 0
         for line in response.iter_lines():
             if line:
-                line = line.decode('utf-8')
+                line = line.decode("utf-8")
                 if line.startswith("data: "):
                     data = line[6:]
                     if data == "[DONE]":
@@ -114,7 +115,7 @@ def generate_prompt(word_count: int, unique_prefix: str = "") -> str:
     repeats = word_count // words_per_repeat
 
     prompt = unique_prefix + (base_text * repeats)
-    return prompt[:word_count * 6]  # Approximate character count
+    return prompt[: word_count * 6]  # Approximate character count
 
 
 def run_scenario(
@@ -125,9 +126,9 @@ def run_scenario(
     expected_hit: bool = False,
 ) -> dict[str, Any]:
     """Run a single scenario and print results."""
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"SCENARIO: {name}")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
     print(f"Prompt length: {len(prompt)} chars (~{len(prompt.split())} words)")
     print(f"Max tokens: {max_tokens}")
     print(f"Session ID: {session_id or 'None'}")
@@ -151,7 +152,7 @@ def run_scenario(
     if "cache_read" in result:
         print(f"Cache read tokens: {result['cache_read']}")
         print(f"Cache creation tokens: {result['cache_creation']}")
-        actual_hit = result['cache_read'] > 0
+        actual_hit = result["cache_read"] > 0
         print(f"Actual cache: {'HIT' if actual_hit else 'MISS'}")
         if actual_hit != expected_hit:
             print(f"⚠️  UNEXPECTED: Expected {'HIT' if expected_hit else 'MISS'}")
@@ -255,9 +256,7 @@ def main():
     print("SUMMARY")
     print("=" * 60)
 
-    print("\n{:<40} {:>10} {:>10} {:>10}".format(
-        "Scenario", "Time (s)", "Tokens", "Tok/s"
-    ))
+    print("\n{:<40} {:>10} {:>10} {:>10}".format("Scenario", "Time (s)", "Tokens", "Tok/s"))
     print("-" * 70)
 
     for key, result in results.items():
@@ -268,12 +267,14 @@ def main():
             "s4": "4. Hit 5K→50",
             "s5": "5. Stale 10K→50",
         }[key]
-        print("{:<40} {:>10.2f} {:>10} {:>10.1f}".format(
-            name,
-            result["elapsed"],
-            result["tokens"],
-            result["tokens_per_sec"],
-        ))
+        print(
+            "{:<40} {:>10.2f} {:>10} {:>10.1f}".format(
+                name,
+                result["elapsed"],
+                result["tokens"],
+                result["tokens_per_sec"],
+            )
+        )
 
     # Get final memory stats
     final_stats = get_server_stats()

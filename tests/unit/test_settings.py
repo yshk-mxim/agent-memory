@@ -233,8 +233,7 @@ class TestDotEnvLoading:
         # Create temporary .env file
         env_file = tmp_path / ".env"
         env_file.write_text(
-            "SEMANTIC_MLX_MODEL_ID=dotenv-model\n"
-            "SEMANTIC_AGENT_MAX_AGENTS_IN_MEMORY=15\n"
+            "SEMANTIC_MLX_MODEL_ID=dotenv-model\nSEMANTIC_AGENT_MAX_AGENTS_IN_MEMORY=15\n"
         )
 
         # Change to temp directory

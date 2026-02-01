@@ -47,9 +47,7 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
         self._auth_disabled = self._check_auth_disabled()
 
         if self._valid_keys:
-            logger.info(
-                f"Authentication enabled with {len(self._valid_keys)} valid key(s)"
-            )
+            logger.info(f"Authentication enabled with {len(self._valid_keys)} valid key(s)")
         elif self._auth_disabled:
             logger.info(
                 "Authentication disabled (local development mode). "
@@ -103,9 +101,7 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
         keys = {key.strip() for key in api_key.split(",")}
         return {key for key in keys if key}  # Filter empty strings
 
-    async def dispatch(
-        self, request: Request, call_next: Callable
-    ) -> Response:
+    async def dispatch(self, request: Request, call_next: Callable) -> Response:
         """Process request with authentication check.
 
         Args:
@@ -152,9 +148,7 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
 
         # Validate API key
         if not api_key:
-            logger.warning(
-                f"{request.method} {request.url.path} - Missing API key"
-            )
+            logger.warning(f"{request.method} {request.url.path} - Missing API key")
             return JSONResponse(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 content={
@@ -166,9 +160,7 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
             )
 
         if not any(secrets.compare_digest(api_key, valid_key) for valid_key in self._valid_keys):
-            logger.warning(
-                f"{request.method} {request.url.path} - Invalid API key"
-            )
+            logger.warning(f"{request.method} {request.url.path} - Invalid API key")
             return JSONResponse(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 content={
@@ -180,9 +172,7 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
             )
 
         # Valid key - proceed with request
-        logger.debug(
-            f"{request.method} {request.url.path} - Authenticated"
-        )
+        logger.debug(f"{request.method} {request.url.path} - Authenticated")
         return await call_next(request)
 
 

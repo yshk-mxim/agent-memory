@@ -39,9 +39,7 @@ class RequestMetricsMiddleware(BaseHTTPMiddleware):
         super().__init__(app)
         self.skip_paths = skip_paths or set()
 
-    async def dispatch(
-        self, request: Request, call_next: Callable
-    ) -> Response:
+    async def dispatch(self, request: Request, call_next: Callable) -> Response:
         """Collect metrics for this request.
 
         Args:
@@ -64,27 +62,23 @@ class RequestMetricsMiddleware(BaseHTTPMiddleware):
         except Exception:
             # Still record metrics on error
             duration = time.time() - start_time
-            request_duration_seconds.labels(
-                method=request.method,
-                path=request.url.path
-            ).observe(duration)
+            request_duration_seconds.labels(method=request.method, path=request.url.path).observe(
+                duration
+            )
             request_total.labels(
                 method=request.method,
                 path=request.url.path,
-                status_code="500"  # Assume 500 for unhandled exception
+                status_code="500",  # Assume 500 for unhandled exception
             ).inc()
             raise
 
         # Record metrics
         duration = time.time() - start_time
-        request_duration_seconds.labels(
-            method=request.method,
-            path=request.url.path
-        ).observe(duration)
+        request_duration_seconds.labels(method=request.method, path=request.url.path).observe(
+            duration
+        )
         request_total.labels(
-            method=request.method,
-            path=request.url.path,
-            status_code=str(response.status_code)
+            method=request.method, path=request.url.path, status_code=str(response.status_code)
         ).inc()
 
         return response

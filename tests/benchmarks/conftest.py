@@ -106,9 +106,7 @@ def benchmark_server() -> Iterator[str]:
 
     # Setup environment
     env = os.environ.copy()
-    env["SEMANTIC_CACHE_DIR"] = str(
-        Path.home() / ".cache" / "semantic" / "benchmark"
-    )
+    env["SEMANTIC_CACHE_DIR"] = str(Path.home() / ".cache" / "semantic" / "benchmark")
     env["SEMANTIC_LOG_LEVEL"] = "WARNING"
     env["ANTHROPIC_API_KEY"] = "test-key-benchmark"
 

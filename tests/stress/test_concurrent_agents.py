@@ -34,9 +34,7 @@ async def test_10_agents_50_rapid_requests(live_server, cleanup_after_stress):
     num_agents = 10
     requests_per_agent = 50
 
-    harness = StressTestHarness(
-        base_url=base_url, num_workers=num_agents, timeout=60.0
-    )
+    harness = StressTestHarness(base_url=base_url, num_workers=num_agents, timeout=60.0)
 
     async def agent_workload(agent_id: str) -> list[RequestResult]:
         """Workload for a single agent: 50 rapid requests."""
@@ -65,9 +63,7 @@ async def test_10_agents_50_rapid_requests(live_server, cleanup_after_stress):
                             "X-API-Key": f"test-key-{agent_id}",
                         },
                     ) as response:
-                        latency_ms = (
-                            asyncio.get_event_loop().time() - start_time
-                        ) * 1000
+                        latency_ms = (asyncio.get_event_loop().time() - start_time) * 1000
                         status_code = response.status
 
                         response_body = None
@@ -87,9 +83,7 @@ async def test_10_agents_50_rapid_requests(live_server, cleanup_after_stress):
                         )
 
                 except Exception as e:
-                    latency_ms = (
-                        asyncio.get_event_loop().time() - start_time
-                    ) * 1000
+                    latency_ms = (asyncio.get_event_loop().time() - start_time) * 1000
                     results.append(
                         RequestResult(
                             status_code=0,
@@ -105,35 +99,35 @@ async def test_10_agents_50_rapid_requests(live_server, cleanup_after_stress):
     agent_results = await harness.run_agent_workloads(agent_workload, num_agents)
 
     # Verify all agents completed
-    assert len(agent_results) == num_agents, f"Expected {num_agents} agents, got {len(agent_results)}"
+    assert len(agent_results) == num_agents, (
+        f"Expected {num_agents} agents, got {len(agent_results)}"
+    )
 
     # Collect all results
     all_results = []
     for agent_id, results in agent_results.items():
         all_results.extend(results)
         # Verify each agent made all requests
-        assert (
-            len(results) == requests_per_agent
-        ), f"{agent_id}: Expected {requests_per_agent} requests, got {len(results)}"
+        assert len(results) == requests_per_agent, (
+            f"{agent_id}: Expected {requests_per_agent} requests, got {len(results)}"
+        )
 
     # Analyze overall metrics
     collector = MetricsCollector()
     metrics = collector.analyze(all_results)
 
     # Assertions
-    assert (
-        metrics.total_requests == num_agents * requests_per_agent
-    ), f"Expected {num_agents * requests_per_agent} total requests"
+    assert metrics.total_requests == num_agents * requests_per_agent, (
+        f"Expected {num_agents * requests_per_agent} total requests"
+    )
 
     # Error rate should be acceptable (<10%)
-    assert (
-        metrics.error_rate < 0.10
-    ), f"Error rate too high: {metrics.error_rate:.2%} (expected <10%)"
+    assert metrics.error_rate < 0.10, (
+        f"Error rate too high: {metrics.error_rate:.2%} (expected <10%)"
+    )
 
     # No crashes (5xx errors)
-    status_5xx = sum(
-        count for status, count in metrics.status_codes.items() if 500 <= status < 600
-    )
+    status_5xx = sum(count for status, count in metrics.status_codes.items() if 500 <= status < 600)
     assert status_5xx == 0, f"Server crashed {status_5xx} times"
 
     print(
@@ -226,14 +220,10 @@ async def test_cache_isolation_under_load(live_server, cleanup_after_stress):
     metrics = collector.analyze(all_results)
 
     # Basic validation
-    assert (
-        metrics.total_requests == num_agents * requests_per_agent
-    ), "All requests should complete"
+    assert metrics.total_requests == num_agents * requests_per_agent, "All requests should complete"
 
     # Most requests should succeed
-    assert (
-        metrics.error_rate < 0.20
-    ), f"Error rate too high: {metrics.error_rate:.2%}"
+    assert metrics.error_rate < 0.20, f"Error rate too high: {metrics.error_rate:.2%}"
 
     print(
         f"\n✅ Cache isolation under load test passed:"
@@ -265,9 +255,7 @@ async def test_latency_remains_acceptable(live_server, cleanup_after_stress):
         path="/v1/messages",
         body={
             "model": "test-model",
-            "messages": [
-                {"role": "user", "content": "Latency measurement under load"}
-            ],
+            "messages": [{"role": "user", "content": "Latency measurement under load"}],
             "max_tokens": 50,
         },
         num_requests=100,
@@ -280,13 +268,13 @@ async def test_latency_remains_acceptable(live_server, cleanup_after_stress):
     assert metrics.latency is not None, "Should have latency metrics"
 
     # Latency targets
-    assert (
-        metrics.latency.p95 < 2000
-    ), f"p95 latency too high: {metrics.latency.p95:.0f}ms (target <2000ms)"
+    assert metrics.latency.p95 < 2000, (
+        f"p95 latency too high: {metrics.latency.p95:.0f}ms (target <2000ms)"
+    )
 
-    assert (
-        metrics.latency.p99 < 5000
-    ), f"p99 latency too high: {metrics.latency.p99:.0f}ms (target <5000ms)"
+    assert metrics.latency.p99 < 5000, (
+        f"p99 latency too high: {metrics.latency.p99:.0f}ms (target <5000ms)"
+    )
 
     print(
         f"\n✅ Latency test passed:"
@@ -322,9 +310,7 @@ async def test_cache_hit_rate_high(live_server, cleanup_after_stress):
         results = []
 
         # Use the same content repeatedly (should cache)
-        messages = [
-            {"role": "user", "content": f"{agent_id}: What is the capital of France?"}
-        ]
+        messages = [{"role": "user", "content": f"{agent_id}: What is the capital of France?"}]
 
         timeout = aiohttp.ClientTimeout(total=60.0)
         async with aiohttp.ClientSession(timeout=timeout) as session:
@@ -365,9 +351,7 @@ async def test_cache_hit_rate_high(live_server, cleanup_after_stress):
         return results
 
     # Run agents
-    agent_results = await harness.run_agent_workloads(
-        multi_turn_agent, num_agents
-    )
+    agent_results = await harness.run_agent_workloads(multi_turn_agent, num_agents)
 
     # Collect results
     all_results = []
@@ -378,17 +362,13 @@ async def test_cache_hit_rate_high(live_server, cleanup_after_stress):
     metrics = collector.analyze(all_results)
 
     # Basic validation
-    assert (
-        metrics.total_requests == num_agents * turns_per_agent
-    ), "All requests should complete"
+    assert metrics.total_requests == num_agents * turns_per_agent, "All requests should complete"
 
     # Note: Cache hit rate measurement requires API support
     # For now, verify that requests complete successfully
     # which indicates cache is working (not crashing)
 
-    assert (
-        metrics.error_rate < 0.10
-    ), f"Error rate too high: {metrics.error_rate:.2%}"
+    assert metrics.error_rate < 0.10, f"Error rate too high: {metrics.error_rate:.2%}"
 
     # If we get latency metrics, later turns should be faster (cache hits)
     # This is a simplified check - real cache hit rate would come from API metrics

@@ -12,10 +12,8 @@ Usage:
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import platform
-import subprocess
 import sys
 import time
 from datetime import datetime, timezone
@@ -43,9 +41,7 @@ def _run_tune(
         MemoryProbe,
         PromptFactory,
         RequestClient,
-        ScenarioResult,
         ServerManager,
-        compute_stats,
     )
 
     base_url = f"http://127.0.0.1:{port}"
@@ -85,24 +81,18 @@ def _run_tune(
             if n_concurrent > 1:
                 t_start = time.perf_counter()
                 coros = [
-                    client.send_and_measure(
-                        body, session_id=f"{session_id}_{i}"
-                    )
+                    client.send_and_measure(body, session_id=f"{session_id}_{i}")
                     for i in range(n_concurrent)
                 ]
                 results_list = await asyncio.gather(*coros)
                 wall_ms = (time.perf_counter() - t_start) * 1000
                 total_out = sum(r.output_tokens for r in results_list)
-                system_tps = (
-                    total_out / (wall_ms / 1000) if wall_ms > 0 else 0
-                )
+                system_tps = total_out / (wall_ms / 1000) if wall_ms > 0 else 0
                 # Cleanup
                 for i in range(n_concurrent):
                     async with httpx.AsyncClient(timeout=5) as c:
                         try:
-                            await c.delete(
-                                f"{base_url}/v1/agents/sess_{session_id}_{i}"
-                            )
+                            await c.delete(f"{base_url}/v1/agents/sess_{session_id}_{i}")
                         except Exception:
                             pass
                 return {
@@ -115,9 +105,7 @@ def _run_tune(
             # Cleanup
             async with httpx.AsyncClient(timeout=5) as c:
                 try:
-                    await c.delete(
-                        f"{base_url}/v1/agents/sess_{session_id}"
-                    )
+                    await c.delete(f"{base_url}/v1/agents/sess_{session_id}")
                 except Exception:
                     pass
 
@@ -159,9 +147,7 @@ def _run_tune(
                     await client.send_and_measure(body, session_id="warmup")
                     async with httpx.AsyncClient(timeout=5) as c:
                         try:
-                            await c.delete(
-                                f"{base_url}/v1/agents/sess_warmup"
-                            )
+                            await c.delete(f"{base_url}/v1/agents/sess_warmup")
                         except Exception:
                             pass
                 finally:
@@ -222,15 +208,12 @@ def _run_tune(
                 await asyncio.sleep(1)
 
                 for tok in input_sizes:
-                    m = await measure(
-                        env, tok, session_id=f"step_{step}_{tok}"
-                    )
+                    m = await measure(env, tok, session_id=f"step_{step}_{tok}")
                     tps = m.get("tps", 0)
                     total_tps += tps
                     count += 1
                     typer.echo(
-                        f"    step={step} input={tok}: "
-                        f"E2E={m['e2e_ms']:.0f}ms TPS={tps:.1f}"
+                        f"    step={step} input={tok}: E2E={m['e2e_ms']:.0f}ms TPS={tps:.1f}"
                     )
             finally:
                 server.stop()
@@ -264,10 +247,9 @@ def _run_tune(
                 n_concurrent=n,
             )
             if bs in sweep:
-                avg_tps = sum(
-                    r.get("system_tps", r.get("tps", 0))
-                    for r in sweep[bs]
-                ) / max(len(sweep[bs]), 1)
+                avg_tps = sum(r.get("system_tps", r.get("tps", 0)) for r in sweep[bs]) / max(
+                    len(sweep[bs]), 1
+                )
                 if avg_tps > best_sys_tps:
                     best_sys_tps = avg_tps
                     best_batch = bs
@@ -287,35 +269,23 @@ def _run_tune(
         try:
             client = RequestClient(base_url)
             try:
-                await client.send_and_measure(
-                    prompt.build_request(500, 8), session_id="warmup"
-                )
+                await client.send_and_measure(prompt.build_request(500, 8), session_id="warmup")
             finally:
                 await client.close()
             await asyncio.sleep(1)
 
             decode_tps_values = []
             for out_len in out_lengths:
-                m = await measure(
-                    env, 1000, max_tokens=out_len,
-                    session_id=f"outlen_{out_len}"
-                )
+                m = await measure(env, 1000, max_tokens=out_len, session_id=f"outlen_{out_len}")
                 tps = m.get("tps", 0)
                 decode_tps_values.append(tps)
-                typer.echo(
-                    f"    output={out_len}: "
-                    f"E2E={m['e2e_ms']:.0f}ms TPS={tps:.1f}"
-                )
+                typer.echo(f"    output={out_len}: E2E={m['e2e_ms']:.0f}ms TPS={tps:.1f}")
         finally:
             server.stop()
 
         if decode_tps_values:
-            optimal["avg_decode_tps"] = sum(decode_tps_values) / len(
-                decode_tps_values
-            )
-            typer.echo(
-                f"  → Average decode TPS: {optimal['avg_decode_tps']:.1f}"
-            )
+            optimal["avg_decode_tps"] = sum(decode_tps_values) / len(decode_tps_values)
+            typer.echo(f"  → Average decode TPS: {optimal['avg_decode_tps']:.1f}")
 
         return optimal
 
@@ -329,15 +299,15 @@ def _run_tune(
     optimal = asyncio.run(tune_all())
 
     # Write TOML profile
-    output_path = Path(output) if output else (
-        Path(__file__).resolve().parents[3]
-        / "config"
-        / "models"
-        / "tuned.toml"
+    output_path = (
+        Path(output)
+        if output
+        else (Path(__file__).resolve().parents[3] / "config" / "models" / "tuned.toml")
     )
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     from semantic.adapters.config.settings import get_settings
+
     settings = get_settings()
 
     try:
@@ -356,7 +326,7 @@ def _run_tune(
 
     # Build TOML content
     lines = [
-        f"# Auto-tuned configuration",
+        "# Auto-tuned configuration",
         f"# Generated: {datetime.now(timezone.utc).isoformat()}",
         f"# Hardware: {platform.machine()} / {platform.system()} {platform.release()}",
         f"# Mode: {'quick' if quick else 'full'}",
@@ -374,7 +344,9 @@ def _run_tune(
         f"chunked_prefill_min_chunk = {settings.mlx.chunked_prefill_min_chunk}",
         f"chunked_prefill_max_chunk = {settings.mlx.chunked_prefill_max_chunk}",
         f"batch_window_ms = {settings.agent.batch_window_ms}",
-        'scheduler_enabled = true' if optimal.get('max_batch_size', 1) > 1 else 'scheduler_enabled = false',
+        "scheduler_enabled = true"
+        if optimal.get("max_batch_size", 1) > 1
+        else "scheduler_enabled = false",
         f"max_agents_in_memory = {settings.agent.max_agents_in_memory}",
         "evict_to_disk = true",
         "",
@@ -394,10 +366,10 @@ def _run_tune(
         f.write("\n".join(lines) + "\n")
 
     typer.echo(f"\n{'=' * 60}")
-    typer.echo(f"  Tuning complete!")
+    typer.echo("  Tuning complete!")
     typer.echo(f"  Profile written to: {output_path}")
     typer.echo(f"{'=' * 60}")
-    typer.echo(f"\nOptimal settings:")
+    typer.echo("\nOptimal settings:")
     typer.echo(f"  prefill_step_size = {optimal.get('prefill_step_size', 512)}")
     typer.echo(f"  max_batch_size = {optimal.get('max_batch_size', 2)}")
     typer.echo(f"  avg_decode_tps = {optimal.get('avg_decode_tps', 0):.1f}")

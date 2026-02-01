@@ -15,7 +15,9 @@ from tests.benchmarks.conftest import BenchmarkReporter
 
 
 @pytest.mark.benchmark
-def test_memory_per_agent_1_5_10_agents(benchmark_client: httpx.Client, benchmark_reporter: BenchmarkReporter):
+def test_memory_per_agent_1_5_10_agents(
+    benchmark_client: httpx.Client, benchmark_reporter: BenchmarkReporter
+):
     """Benchmark memory usage as agent count increases.
 
     Measures:
@@ -98,9 +100,9 @@ def test_memory_per_agent_1_5_10_agents(benchmark_client: httpx.Client, benchmar
     # Verify per-agent memory is reasonable (<100MB per agent)
     for result in results:
         if result["num_agents"] > 1:  # Skip baseline check
-            assert (
-                result["memory_per_agent_mb"] < 100
-            ), f"Memory per agent too high: {result['memory_per_agent_mb']:.1f} MB (target <100 MB)"
+            assert result["memory_per_agent_mb"] < 100, (
+                f"Memory per agent too high: {result['memory_per_agent_mb']:.1f} MB (target <100 MB)"
+            )
 
     print(
         f"\n📊 Memory scaling benchmark:"
@@ -110,7 +112,9 @@ def test_memory_per_agent_1_5_10_agents(benchmark_client: httpx.Client, benchmar
 
 
 @pytest.mark.benchmark
-def test_block_padding_overhead(benchmark_client: httpx.Client, benchmark_reporter: BenchmarkReporter):
+def test_block_padding_overhead(
+    benchmark_client: httpx.Client, benchmark_reporter: BenchmarkReporter
+):
     """Benchmark block padding overhead (wasted memory from alignment).
 
     Measures:
@@ -168,7 +172,9 @@ def test_block_padding_overhead(benchmark_client: httpx.Client, benchmark_report
 
 
 @pytest.mark.benchmark
-def test_cache_vs_model_memory_ratio(benchmark_client: httpx.Client, benchmark_reporter: BenchmarkReporter):
+def test_cache_vs_model_memory_ratio(
+    benchmark_client: httpx.Client, benchmark_reporter: BenchmarkReporter
+):
     """Benchmark cache memory vs model memory ratio.
 
     Measures:
@@ -208,9 +214,7 @@ def test_cache_vs_model_memory_ratio(benchmark_client: httpx.Client, benchmark_r
                 "/v1/messages",
                 json={
                     "model": "test-model",
-                    "messages": [
-                        {"role": "user", "content": f"{agent_id} request {req_num}"}
-                    ],
+                    "messages": [{"role": "user", "content": f"{agent_id} request {req_num}"}],
                     "max_tokens": 500,
                 },
                 headers={"X-API-Key": agent_id},
@@ -244,7 +248,9 @@ def test_cache_vs_model_memory_ratio(benchmark_client: httpx.Client, benchmark_r
 
 
 @pytest.mark.benchmark
-def test_actual_vs_theoretical_memory(benchmark_client: httpx.Client, benchmark_reporter: BenchmarkReporter):
+def test_actual_vs_theoretical_memory(
+    benchmark_client: httpx.Client, benchmark_reporter: BenchmarkReporter
+):
     """Compare actual memory usage vs theoretical predictions.
 
     Measures:

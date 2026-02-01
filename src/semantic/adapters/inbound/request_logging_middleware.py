@@ -36,9 +36,7 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
         super().__init__(app)
         self.skip_paths = skip_paths or set()
 
-    async def dispatch(
-        self, request: Request, call_next: Callable
-    ) -> Response:
+    async def dispatch(self, request: Request, call_next: Callable) -> Response:
         """Process request with logging.
 
         Args:

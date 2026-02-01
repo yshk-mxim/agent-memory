@@ -58,7 +58,9 @@ def mock_components(tmp_path):
     tag = ModelTag.from_spec("small-model", spec_small)
 
     mock_cache_adapter = Mock()
-    mock_cache_adapter.save.side_effect = lambda aid, blocks, metadata: tmp_path / f"{aid}.safetensors"
+    mock_cache_adapter.save.side_effect = (
+        lambda aid, blocks, metadata: tmp_path / f"{aid}.safetensors"
+    )
 
     cache_store = AgentCacheStore(
         cache_dir=tmp_path,

@@ -35,9 +35,7 @@ def test_five_concurrent_claude_code_sessions(test_client: httpx.Client, cleanup
             # Make request to /v1/messages
             request_body = {
                 "model": "test-model",
-                "messages": [
-                    {"role": "user", "content": f"Agent {agent_num}: Hello, world!"}
-                ],
+                "messages": [{"role": "user", "content": f"Agent {agent_num}: Hello, world!"}],
                 "max_tokens": 10,
             }
 
@@ -64,7 +62,9 @@ def test_five_concurrent_claude_code_sessions(test_client: httpx.Client, cleanup
     errors = [r for r in results if isinstance(r[1], Exception)]
 
     # Should have some successes or expected HTTP errors (not crashes)
-    assert len(successes) + len(errors) == num_agents, "All requests should complete (success or expected error)"
+    assert len(successes) + len(errors) == num_agents, (
+        "All requests should complete (success or expected error)"
+    )
 
 
 @pytest.mark.e2e

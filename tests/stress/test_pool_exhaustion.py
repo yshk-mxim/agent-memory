@@ -54,16 +54,12 @@ async def test_100_plus_concurrent_requests(live_server, cleanup_after_stress):
     assert metrics.total_requests == 150, "All 150 requests should complete"
 
     # Allow for some 429s (pool exhaustion), but no 500s (crashes)
-    status_5xx = sum(
-        count for status, count in metrics.status_codes.items() if 500 <= status < 600
-    )
+    status_5xx = sum(count for status, count in metrics.status_codes.items() if 500 <= status < 600)
     assert status_5xx == 0, f"No 5xx errors allowed, got {status_5xx}"
 
     # All requests should get a response (status code != 0)
     failed_connections = sum(1 for r in results if r.status_code == 0)
-    assert (
-        failed_connections < 10
-    ), f"Too many connection failures: {failed_connections}/150"
+    assert failed_connections < 10, f"Too many connection failures: {failed_connections}/150"
 
     # At least 50% should succeed (rest can be 429s)
     success_rate = metrics.successful_requests / metrics.total_requests
@@ -107,9 +103,7 @@ async def test_graceful_429_when_pool_exhausted(live_server, cleanup_after_stres
         path="/v1/messages",
         body={
             "model": "test-model",
-            "messages": [
-                {"role": "user", "content": "Pool exhaustion test - ramp up load"}
-            ],
+            "messages": [{"role": "user", "content": "Pool exhaustion test - ramp up load"}],
             "max_tokens": 100,  # Larger tokens to fill pool faster
         },
         start_workers=10,
@@ -131,24 +125,18 @@ async def test_graceful_429_when_pool_exhausted(live_server, cleanup_after_stres
     # Note: If pool is very large, we might not hit exhaustion
     # Check if we got ANY 429s, or if all succeeded (large pool)
     if status_429_count > 0:
-        print(
-            f"\n✅ Pool exhaustion detected: {status_429_count} × 429 responses"
-        )
+        print(f"\n✅ Pool exhaustion detected: {status_429_count} × 429 responses")
         # Verify 429s are graceful (not mixed with 500s)
         status_5xx = sum(
-            count
-            for status, count in metrics.status_codes.items()
-            if 500 <= status < 600
+            count for status, count in metrics.status_codes.items() if 500 <= status < 600
         )
         assert status_5xx == 0, f"Got {status_5xx} × 5xx errors during pool exhaustion"
     else:
-        print(
-            "\n⚠️  No 429s observed (pool may be large enough for this test)"
-        )
+        print("\n⚠️  No 429s observed (pool may be large enough for this test)")
         # If no 429s, all requests should have succeeded
-        assert (
-            metrics.error_rate < 0.1
-        ), f"Expected low error rate without pool exhaustion, got {metrics.error_rate:.2%}"
+        assert metrics.error_rate < 0.1, (
+            f"Expected low error rate without pool exhaustion, got {metrics.error_rate:.2%}"
+        )
 
     # No crashes regardless
     status_500 = metrics.status_codes.get(500, 0)
@@ -196,9 +184,7 @@ async def test_no_crashes_under_load(live_server, cleanup_after_stress):
             url=f"{base_url}/v1/messages",
             body={
                 "model": "test-model",
-                "messages": [
-                    {"role": "user", "content": "Sustained load stability test"}
-                ],
+                "messages": [{"role": "user", "content": "Sustained load stability test"}],
                 "max_tokens": 50,
             },
             headers={
@@ -222,22 +208,20 @@ async def test_no_crashes_under_load(live_server, cleanup_after_stress):
     metrics = collector.analyze(all_results)
 
     # Verify no crashes (500 errors)
-    status_5xx = sum(
-        count for status, count in metrics.status_codes.items() if 500 <= status < 600
-    )
+    status_5xx = sum(count for status, count in metrics.status_codes.items() if 500 <= status < 600)
     assert status_5xx == 0, f"Server crashed {status_5xx} times during sustained load"
 
     # Verify health endpoint still responsive
     async with aiohttp.ClientSession() as session:
-        async with session.get(f"{base_url}/health/live", timeout=aiohttp.ClientTimeout(total=5.0)) as response:
-            assert (
-                response.status == 200
-            ), f"Health endpoint not responsive: {response.status}"
+        async with session.get(
+            f"{base_url}/health/live", timeout=aiohttp.ClientTimeout(total=5.0)
+        ) as response:
+            assert response.status == 200, f"Health endpoint not responsive: {response.status}"
 
     # Most requests should succeed (allow for some 429s under load)
-    assert (
-        metrics.error_rate < 0.5
-    ), f"Error rate too high under sustained load: {metrics.error_rate:.2%}"
+    assert metrics.error_rate < 0.5, (
+        f"Error rate too high under sustained load: {metrics.error_rate:.2%}"
+    )
 
     print(
         f"\n✅ No crashes under load test passed:"
@@ -268,9 +252,7 @@ async def test_pool_recovery_after_load(live_server, cleanup_after_stress):
     base_url = live_server
 
     # Phase 1: High load (saturate pool)
-    harness_high = StressTestHarness(
-        base_url=base_url, num_workers=50, timeout=60.0
-    )
+    harness_high = StressTestHarness(base_url=base_url, num_workers=50, timeout=60.0)
 
     high_load_results = await harness_high.run_concurrent_requests(
         path="/v1/messages",
@@ -309,23 +291,23 @@ async def test_pool_recovery_after_load(live_server, cleanup_after_stress):
     low_load_metrics = collector.analyze(low_load_results)
 
     # Verify recovery
-    low_load_success_rate = (
-        low_load_metrics.successful_requests / low_load_metrics.total_requests
+    low_load_success_rate = low_load_metrics.successful_requests / low_load_metrics.total_requests
+    assert low_load_success_rate > 0.8, (
+        f"Pool did not recover, success rate: {low_load_success_rate:.2%}"
     )
-    assert (
-        low_load_success_rate > 0.8
-    ), f"Pool did not recover, success rate: {low_load_success_rate:.2%}"
 
     # Verify health endpoint responsive
     async with aiohttp.ClientSession() as session:
-        async with session.get(f"{base_url}/health/live", timeout=aiohttp.ClientTimeout(total=5.0)) as response:
+        async with session.get(
+            f"{base_url}/health/live", timeout=aiohttp.ClientTimeout(total=5.0)
+        ) as response:
             assert response.status == 200, "Health endpoint not responsive after recovery"
 
     # If we have latency data, verify it's reasonable
     if low_load_metrics.latency:
-        assert (
-            low_load_metrics.latency.p95 < 5000
-        ), f"p95 latency still high after recovery: {low_load_metrics.latency.p95:.0f}ms"
+        assert low_load_metrics.latency.p95 < 5000, (
+            f"p95 latency still high after recovery: {low_load_metrics.latency.p95:.0f}ms"
+        )
 
     print(
         f"\n✅ Pool recovery test passed:"
@@ -334,6 +316,4 @@ async def test_pool_recovery_after_load(live_server, cleanup_after_stress):
         f"\n  Health endpoint: ✅ Responsive"
     )
     if low_load_metrics.latency:
-        print(
-            f"  p95 latency: {low_load_metrics.latency.p95:.0f}ms"
-        )
+        print(f"  p95 latency: {low_load_metrics.latency.p95:.0f}ms")

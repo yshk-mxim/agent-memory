@@ -97,10 +97,12 @@ def parse_function_calls(text: str) -> tuple[str, list[dict[str, Any]]]:
                     with contextlib.suppress(json.JSONDecodeError):
                         arguments = json.loads(arguments)
 
-                function_calls.append({
-                    "name": func_data["name"],
-                    "arguments": arguments,
-                })
+                function_calls.append(
+                    {
+                        "name": func_data["name"],
+                        "arguments": arguments,
+                    }
+                )
                 found_ranges.append((start, end))
                 pos = end  # Continue searching after this match
             else:
@@ -194,11 +196,21 @@ async def _stream_via_scheduler(  # noqa: C901, PLR0912
     model = request_body.model
 
     yield {
-        "data": json.dumps({
-            "id": completion_id, "object": "chat.completion.chunk",
-            "created": created, "model": model,
-            "choices": [{"index": 0, "delta": {"role": "assistant", "content": ""}, "finish_reason": None}],
-        })
+        "data": json.dumps(
+            {
+                "id": completion_id,
+                "object": "chat.completion.chunk",
+                "created": created,
+                "model": model,
+                "choices": [
+                    {
+                        "index": 0,
+                        "delta": {"role": "assistant", "content": ""},
+                        "finish_reason": None,
+                    }
+                ],
+            }
+        )
     }
 
     accumulated_text = ""
@@ -212,16 +224,22 @@ async def _stream_via_scheduler(  # noqa: C901, PLR0912
         max_tokens=max_tokens,
         prompt_text=prompt,
     ):
-        new_text = delta.text[len(accumulated_text):]
+        new_text = delta.text[len(accumulated_text) :]
         accumulated_text = delta.text
         token_count = delta.token_count
         if new_text:
             yield {
-                "data": json.dumps({
-                    "id": completion_id, "object": "chat.completion.chunk",
-                    "created": created, "model": model,
-                    "choices": [{"index": 0, "delta": {"content": new_text}, "finish_reason": None}],
-                })
+                "data": json.dumps(
+                    {
+                        "id": completion_id,
+                        "object": "chat.completion.chunk",
+                        "created": created,
+                        "model": model,
+                        "choices": [
+                            {"index": 0, "delta": {"content": new_text}, "finish_reason": None}
+                        ],
+                    }
+                )
             }
         if delta.finish_reason is not None:
             finish_reason_raw = delta.finish_reason
@@ -236,14 +254,33 @@ async def _stream_via_scheduler(  # noqa: C901, PLR0912
             if isinstance(arguments, dict):
                 arguments = json.dumps(arguments)
             yield {
-                "data": json.dumps({
-                    "id": completion_id, "object": "chat.completion.chunk",
-                    "created": created, "model": model,
-                    "choices": [{"index": 0, "delta": {
-                        "tool_calls": [{"index": 0, "id": tool_call_id, "type": "function",
-                                        "function": {"name": func_call["name"], "arguments": arguments}}],
-                    }, "finish_reason": None}],
-                })
+                "data": json.dumps(
+                    {
+                        "id": completion_id,
+                        "object": "chat.completion.chunk",
+                        "created": created,
+                        "model": model,
+                        "choices": [
+                            {
+                                "index": 0,
+                                "delta": {
+                                    "tool_calls": [
+                                        {
+                                            "index": 0,
+                                            "id": tool_call_id,
+                                            "type": "function",
+                                            "function": {
+                                                "name": func_call["name"],
+                                                "arguments": arguments,
+                                            },
+                                        }
+                                    ],
+                                },
+                                "finish_reason": None,
+                            }
+                        ],
+                    }
+                )
             }
 
     # Save updated cache
@@ -260,14 +297,20 @@ async def _stream_via_scheduler(  # noqa: C901, PLR0912
         finish_reason = "length"
 
     yield {
-        "data": json.dumps({
-            "id": completion_id, "object": "chat.completion.chunk",
-            "created": created, "model": model,
-            "choices": [{"index": 0, "delta": {}, "finish_reason": finish_reason}],
-        })
+        "data": json.dumps(
+            {
+                "id": completion_id,
+                "object": "chat.completion.chunk",
+                "created": created,
+                "model": model,
+                "choices": [{"index": 0, "delta": {}, "finish_reason": finish_reason}],
+            }
+        )
     }
     yield {"data": "[DONE]"}
-    logger.info(f"Scheduler streaming complete: {token_count} tokens, finish_reason={finish_reason}")
+    logger.info(
+        f"Scheduler streaming complete: {token_count} tokens, finish_reason={finish_reason}"
+    )
 
 
 async def stream_chat_completion(  # noqa: C901, PLR0912, PLR0915
@@ -298,8 +341,15 @@ async def stream_chat_completion(  # noqa: C901, PLR0912, PLR0915
         # --- Scheduler path: true per-token streaming ---
         if scheduler is not None:
             async for event in _stream_via_scheduler(
-                request_body, batch_engine, cache_store, _tokens,
-                agent_id, cached_blocks, prompt, max_tokens, scheduler,
+                request_body,
+                batch_engine,
+                cache_store,
+                _tokens,
+                agent_id,
+                cached_blocks,
+                prompt,
+                max_tokens,
+                scheduler,
             ):
                 yield event
             return
@@ -318,17 +368,21 @@ async def stream_chat_completion(  # noqa: C901, PLR0912, PLR0915
 
         # Yield initial chunk with role
         yield {
-            "data": json.dumps({
-                "id": completion_id,
-                "object": "chat.completion.chunk",
-                "created": created_timestamp,
-                "model": request_body.model,
-                "choices": [{
-                    "index": 0,
-                    "delta": {"role": "assistant", "content": ""},
-                    "finish_reason": None,
-                }],
-            })
+            "data": json.dumps(
+                {
+                    "id": completion_id,
+                    "object": "chat.completion.chunk",
+                    "created": created_timestamp,
+                    "model": request_body.model,
+                    "choices": [
+                        {
+                            "index": 0,
+                            "delta": {"role": "assistant", "content": ""},
+                            "finish_reason": None,
+                        }
+                    ],
+                }
+            )
         }
 
         # Stream token deltas
@@ -340,22 +394,26 @@ async def stream_chat_completion(  # noqa: C901, PLR0912, PLR0915
                 # Yield text delta
                 if result.text:
                     # Incremental text (only new text since last yield)
-                    new_text = result.text[len(accumulated_text):]
+                    new_text = result.text[len(accumulated_text) :]
                     accumulated_text = result.text
 
                     if new_text:
                         yield {
-                            "data": json.dumps({
-                                "id": completion_id,
-                                "object": "chat.completion.chunk",
-                                "created": created_timestamp,
-                                "model": request_body.model,
-                                "choices": [{
-                                    "index": 0,
-                                    "delta": {"content": new_text},
-                                    "finish_reason": None,
-                                }],
-                            })
+                            "data": json.dumps(
+                                {
+                                    "id": completion_id,
+                                    "object": "chat.completion.chunk",
+                                    "created": created_timestamp,
+                                    "model": request_body.model,
+                                    "choices": [
+                                        {
+                                            "index": 0,
+                                            "delta": {"content": new_text},
+                                            "finish_reason": None,
+                                        }
+                                    ],
+                                }
+                            )
                         }
                 break
 
@@ -377,27 +435,33 @@ async def stream_chat_completion(  # noqa: C901, PLR0912, PLR0915
 
                 # Yield tool call delta
                 yield {
-                    "data": json.dumps({
-                        "id": completion_id,
-                        "object": "chat.completion.chunk",
-                        "created": created_timestamp,
-                        "model": request_body.model,
-                        "choices": [{
-                            "index": 0,
-                            "delta": {
-                                "tool_calls": [{
+                    "data": json.dumps(
+                        {
+                            "id": completion_id,
+                            "object": "chat.completion.chunk",
+                            "created": created_timestamp,
+                            "model": request_body.model,
+                            "choices": [
+                                {
                                     "index": 0,
-                                    "id": tool_call_id,
-                                    "type": "function",
-                                    "function": {
-                                        "name": func_call["name"],
-                                        "arguments": arguments,
+                                    "delta": {
+                                        "tool_calls": [
+                                            {
+                                                "index": 0,
+                                                "id": tool_call_id,
+                                                "type": "function",
+                                                "function": {
+                                                    "name": func_call["name"],
+                                                    "arguments": arguments,
+                                                },
+                                            }
+                                        ],
                                     },
-                                }],
-                            },
-                            "finish_reason": None,
-                        }],
-                    })
+                                    "finish_reason": None,
+                                }
+                            ],
+                        }
+                    )
                 }
 
         # Save updated cache
@@ -416,25 +480,28 @@ async def stream_chat_completion(  # noqa: C901, PLR0912, PLR0915
 
         # Yield final chunk with finish_reason
         yield {
-            "data": json.dumps({
-                "id": completion_id,
-                "object": "chat.completion.chunk",
-                "created": created_timestamp,
-                "model": request_body.model,
-                "choices": [{
-                    "index": 0,
-                    "delta": {},
-                    "finish_reason": finish_reason,
-                }],
-            })
+            "data": json.dumps(
+                {
+                    "id": completion_id,
+                    "object": "chat.completion.chunk",
+                    "created": created_timestamp,
+                    "model": request_body.model,
+                    "choices": [
+                        {
+                            "index": 0,
+                            "delta": {},
+                            "finish_reason": finish_reason,
+                        }
+                    ],
+                }
+            )
         }
 
         # Yield [DONE] marker
         yield {"data": "[DONE]"}
 
         logger.info(
-            f"Streaming complete: {completion.token_count} tokens, "
-            f"finish_reason={finish_reason}"
+            f"Streaming complete: {completion.token_count} tokens, finish_reason={finish_reason}"
         )
 
     except asyncio.CancelledError:
@@ -448,13 +515,15 @@ async def stream_chat_completion(  # noqa: C901, PLR0912, PLR0915
         # OpenAI format: errors are JSON objects in data field
         yield {
             "event": "error",
-            "data": json.dumps({
-                "error": {
-                    "message": str(e),
-                    "type": "server_error",
-                    "code": "internal_error",
+            "data": json.dumps(
+                {
+                    "error": {
+                        "message": str(e),
+                        "type": "server_error",
+                        "code": "internal_error",
+                    }
                 }
-            })
+            ),
         }
 
 
@@ -517,8 +586,13 @@ async def create_chat_completion(  # noqa: C901, PLR0912, PLR0915
             logger.info("Returning OpenAI SSE stream")
             return EventSourceResponse(
                 stream_chat_completion(
-                    request_body, batch_engine, cache_store, tokens,
-                    agent_id, cached_blocks, prompt,
+                    request_body,
+                    batch_engine,
+                    cache_store,
+                    tokens,
+                    agent_id,
+                    cached_blocks,
+                    prompt,
                     scheduler=semantic_state.scheduler,
                 )
             )
@@ -582,14 +656,16 @@ async def create_chat_completion(  # noqa: C901, PLR0912, PLR0915
                 if isinstance(arguments, dict):
                     arguments = json.dumps(arguments)
 
-                tool_calls_array.append({
-                    "id": tool_call_id,
-                    "type": "function",
-                    "function": {
-                        "name": func_call["name"],
-                        "arguments": arguments,
-                    },
-                })
+                tool_calls_array.append(
+                    {
+                        "id": tool_call_id,
+                        "type": "function",
+                        "function": {
+                            "name": func_call["name"],
+                            "arguments": arguments,
+                        },
+                    }
+                )
 
         # Determine finish_reason
         if function_calls:
@@ -624,9 +700,7 @@ async def create_chat_completion(  # noqa: C901, PLR0912, PLR0915
             ),
         )
 
-        logger.info(
-            f"Response: {response.usage.completion_tokens} completion tokens"
-        )
+        logger.info(f"Response: {response.usage.completion_tokens} completion tokens")
         return response
 
     except PoolExhaustedError as e:

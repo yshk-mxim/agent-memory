@@ -118,7 +118,4 @@ class SharedPrefixCache:
             return
         lru_hash = min(self._entries, key=lambda h: self._entries[h].hit_count)
         evicted = self._entries.pop(lru_hash)
-        logger.debug(
-            f"[PREFIX CACHE EVICT] hash={lru_hash[:8]}, "
-            f"hits={evicted.hit_count}"
-        )
+        logger.debug(f"[PREFIX CACHE EVICT] hash={lru_hash[:8]}, hits={evicted.hit_count}")
