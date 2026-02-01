@@ -29,12 +29,12 @@ def test_tokenizer_max_length():
     loader = MLXModelLoader()
     model, tokenizer = loader.load_model("mlx-community/DeepSeek-Coder-V2-Lite-Instruct-4bit-mlx")
 
-    print(f"✓ Model loaded successfully")
+    print("✓ Model loaded successfully")
     print(f"✓ Tokenizer max length: {tokenizer.model_max_length:,} tokens")
 
     assert tokenizer.model_max_length == 100000, f"Expected 100K, got {tokenizer.model_max_length}"
 
-    print(f"✓ Tokenizer accepts 100K tokens!")
+    print("✓ Tokenizer accepts 100K tokens!")
 
 
 def test_long_sequence():

@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, Mock
 # Mock MLX modules
 sys.modules["mlx"] = MagicMock()
 sys.modules["mlx.core"] = MagicMock()
+sys.modules["mlx.utils"] = MagicMock()
 sys.modules["mlx_lm"] = MagicMock()
 
 from semantic.application.agent_cache_store import AgentCacheStore, ModelTag
@@ -278,3 +279,200 @@ class TestModelTagCompatibility:
 
         # Same spec, different model_id -> compatible
         assert tag.is_compatible(spec)
+
+
+class TestDiskLoadRejectsIncompatible:
+    """Verify _load_from_disk rejects cache when model tag doesn't match."""
+
+    def _make_store_with_cache(self, tmp_path, tag, adapter=None):
+        """Helper to create a store with one saved cache entry."""
+        from semantic.domain.entities import KVBlock
+
+        if adapter is None:
+            adapter = Mock()
+            adapter.save.side_effect = (
+                lambda aid, blocks, metadata: tmp_path / f"{aid}.safetensors"
+            )
+
+        store = AgentCacheStore(
+            cache_dir=tmp_path,
+            max_hot_agents=5,
+            model_tag=tag,
+            cache_adapter=adapter,
+        )
+
+        block = KVBlock(block_id=0, layer_id=0, token_count=16, layer_data="fake")
+        blocks = AgentBlocks(
+            agent_id="agent_1",
+            blocks={0: [block]},
+            total_tokens=16,
+            token_sequence=[1, 2, 3],
+        )
+        store.save("agent_1", blocks)
+        return store
+
+    def test_disk_load_rejects_n_layers_mismatch(self, tmp_path):
+        """Disk load returns None when n_layers differs."""
+        from pathlib import Path
+
+        original_tag = ModelTag(
+            model_id="model", n_layers=24, n_kv_heads=8, head_dim=128, block_tokens=16,
+        )
+
+        # Create an in-memory adapter that returns metadata with original tag
+        saved_data = {}
+
+        class FakeAdapter:
+            def save(self, agent_id, blocks, metadata):
+                path = tmp_path / f"{agent_id}.safetensors"
+                path.write_bytes(b"x")
+                saved_data[agent_id] = (blocks, metadata)
+                return path
+
+            def load(self, path):
+                agent_id = Path(path).stem
+                blocks_obj, metadata = saved_data[agent_id]
+                return blocks_obj.blocks, metadata
+
+        store = self._make_store_with_cache(tmp_path, original_tag, FakeAdapter())
+        store.invalidate_hot("agent_1")
+
+        # Change to model with different n_layers
+        store.model_tag = ModelTag(
+            model_id="model", n_layers=32, n_kv_heads=8, head_dim=128, block_tokens=16,
+        )
+        assert store.load("agent_1") is None
+
+    def test_disk_load_rejects_n_kv_heads_mismatch(self, tmp_path):
+        """Disk load returns None when n_kv_heads differs."""
+        from pathlib import Path
+
+        original_tag = ModelTag(
+            model_id="model", n_layers=24, n_kv_heads=8, head_dim=128, block_tokens=16,
+        )
+
+        saved_data = {}
+
+        class FakeAdapter:
+            def save(self, agent_id, blocks, metadata):
+                path = tmp_path / f"{agent_id}.safetensors"
+                path.write_bytes(b"x")
+                saved_data[agent_id] = (blocks, metadata)
+                return path
+
+            def load(self, path):
+                agent_id = Path(path).stem
+                blocks_obj, metadata = saved_data[agent_id]
+                return blocks_obj.blocks, metadata
+
+        store = self._make_store_with_cache(tmp_path, original_tag, FakeAdapter())
+        store.invalidate_hot("agent_1")
+
+        store.model_tag = ModelTag(
+            model_id="model", n_layers=24, n_kv_heads=16, head_dim=128, block_tokens=16,
+        )
+        assert store.load("agent_1") is None
+
+    def test_disk_load_rejects_head_dim_mismatch(self, tmp_path):
+        """Disk load returns None when head_dim differs."""
+        from pathlib import Path
+
+        original_tag = ModelTag(
+            model_id="model", n_layers=24, n_kv_heads=8, head_dim=128, block_tokens=16,
+        )
+
+        saved_data = {}
+
+        class FakeAdapter:
+            def save(self, agent_id, blocks, metadata):
+                path = tmp_path / f"{agent_id}.safetensors"
+                path.write_bytes(b"x")
+                saved_data[agent_id] = (blocks, metadata)
+                return path
+
+            def load(self, path):
+                agent_id = Path(path).stem
+                blocks_obj, metadata = saved_data[agent_id]
+                return blocks_obj.blocks, metadata
+
+        store = self._make_store_with_cache(tmp_path, original_tag, FakeAdapter())
+        store.invalidate_hot("agent_1")
+
+        store.model_tag = ModelTag(
+            model_id="model", n_layers=24, n_kv_heads=8, head_dim=256, block_tokens=16,
+        )
+        assert store.load("agent_1") is None
+
+    def test_disk_load_rejects_block_tokens_mismatch(self, tmp_path):
+        """Disk load returns None when block_tokens differs."""
+        from pathlib import Path
+
+        original_tag = ModelTag(
+            model_id="model", n_layers=24, n_kv_heads=8, head_dim=128, block_tokens=16,
+        )
+
+        saved_data = {}
+
+        class FakeAdapter:
+            def save(self, agent_id, blocks, metadata):
+                path = tmp_path / f"{agent_id}.safetensors"
+                path.write_bytes(b"x")
+                saved_data[agent_id] = (blocks, metadata)
+                return path
+
+            def load(self, path):
+                agent_id = Path(path).stem
+                blocks_obj, metadata = saved_data[agent_id]
+                return blocks_obj.blocks, metadata
+
+        store = self._make_store_with_cache(tmp_path, original_tag, FakeAdapter())
+        store.invalidate_hot("agent_1")
+
+        store.model_tag = ModelTag(
+            model_id="model", n_layers=24, n_kv_heads=8, head_dim=128, block_tokens=32,
+        )
+        assert store.load("agent_1") is None
+
+
+class TestInvalidateHot:
+    """Test invalidate_hot() preserves warm tier."""
+
+    def test_invalidate_hot_preserves_warm_tier(self, tmp_path):
+        """invalidate_hot() removes from hot but keeps warm entry intact."""
+        tag = ModelTag(
+            model_id="model", n_layers=24, n_kv_heads=8, head_dim=128, block_tokens=16,
+        )
+        mock_adapter = Mock()
+        mock_adapter.save.side_effect = (
+            lambda aid, blocks, metadata: tmp_path / f"{aid}.safetensors"
+        )
+
+        store = AgentCacheStore(
+            cache_dir=tmp_path,
+            max_hot_agents=5,
+            model_tag=tag,
+            cache_adapter=mock_adapter,
+        )
+
+        blocks = AgentBlocks(agent_id="agent_1", blocks={}, total_tokens=0)
+        store.save("agent_1", blocks)
+
+        assert "agent_1" in store._hot_cache
+        assert "agent_1" in store._warm_cache
+
+        store.invalidate_hot("agent_1")
+
+        assert "agent_1" not in store._hot_cache
+        assert "agent_1" in store._warm_cache
+
+    def test_invalidate_hot_noop_for_missing_agent(self, tmp_path):
+        """invalidate_hot() on non-existent agent is a no-op."""
+        tag = ModelTag(
+            model_id="model", n_layers=24, n_kv_heads=8, head_dim=128, block_tokens=16,
+        )
+        store = AgentCacheStore(
+            cache_dir=tmp_path, max_hot_agents=5, model_tag=tag,
+        )
+
+        # Should not raise
+        store.invalidate_hot("nonexistent")

@@ -175,9 +175,7 @@ class AgentCacheStore:
         # Warm tier: agent_id → file path (on disk)
         self._warm_cache: dict[str, Path] = {}
 
-        # Prefix trie for token prefix matching
-        # Leaf nodes have "_agents" key with set of agent IDs
-        self._prefix_trie: dict[int | str, Any] = {}
+        # Future: trie-based prefix matching for O(log n) lookup
 
     def save(self, agent_id: str, blocks: AgentBlocks) -> None:
         """Save agent cache to hot tier AND warm tier (disk).
@@ -340,19 +338,21 @@ class AgentCacheStore:
         with self._lock:
             best_match: AgentBlocks | None = None
             best_prefix_len = 0
+            best_entry: CacheEntry | None = None
 
-            # Check all cached agents for prefix match
             for _agent_id, entry in self._hot_cache.items():
                 if entry.blocks is None:
                     continue
 
-                # Simplified prefix matching using total_tokens as proxy
-                prefix_len = min(len(tokens), entry.blocks.total_tokens)
+                prefix_len = entry.blocks.common_prefix_length(tokens)
 
                 if prefix_len > best_prefix_len:
                     best_prefix_len = prefix_len
                     best_match = entry.blocks
-                    entry.mark_accessed()  # Update LRU
+                    best_entry = entry
+
+            if best_entry is not None:
+                best_entry.mark_accessed()
 
             return best_match
 

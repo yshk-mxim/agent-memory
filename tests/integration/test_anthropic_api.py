@@ -225,10 +225,21 @@ class TestAnthropicAPIWithModel:
 
             assert response.status_code == 200
             data = response.json()
+            # Content block validation
             assert "content" in data
             assert len(data["content"]) > 0
             assert data["content"][0]["type"] == "text"
+            assert isinstance(data["content"][0]["text"], str)
             assert len(data["content"][0]["text"]) > 0
+            # Stop reason must be a valid Anthropic reason
+            assert data["stop_reason"] in ("end_turn", "max_tokens")
+            # Usage fields
+            assert "usage" in data
+            assert data["usage"]["input_tokens"] > 0
+            assert data["usage"]["output_tokens"] > 0
+            # Model and ID fields
+            assert "id" in data
+            assert "model" in data
 
     def test_cache_reuse_across_requests(self):
         """Cache should persist across multiple requests."""
@@ -285,3 +296,5 @@ class TestAnthropicAPIWithModel:
             assert response.status_code == 200
             data = response.json()
             assert len(data["content"]) > 0
+            assert data["content"][0]["type"] == "text"
+            assert data["stop_reason"] in ("end_turn", "max_tokens")

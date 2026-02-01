@@ -1,4 +1,4 @@
-"""Integration tests for Prometheus metrics (Sprint 7 Day 3).
+"""Integration tests for Prometheus metrics.
 
 Tests verify that metrics are:
 - Exposed via /metrics endpoint in Prometheus format

@@ -1,4 +1,4 @@
-"""E2E tests for multi-agent concurrent sessions (Sprint 6 Day 1).
+"""E2E tests for multi-agent concurrent sessions.
 
 Tests verify that multiple agents can run concurrently with independent caches
 and no interference between sessions.

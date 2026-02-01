@@ -1,4 +1,4 @@
-"""Pool exhaustion stress tests (Sprint 6 Day 3).
+"""Pool exhaustion stress tests.
 
 Tests verify graceful degradation when block pool approaches/reaches capacity:
 - 100+ concurrent requests handled without crashes

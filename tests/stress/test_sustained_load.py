@@ -1,4 +1,4 @@
-"""Sustained load tests (Sprint 6 Day 4).
+"""Sustained load tests for latency degradation detection.
 
 Tests verify stability and performance over extended periods (1 hour):
 - 1 hour of continuous operation
@@ -488,11 +488,6 @@ async def test_no_performance_degradation_over_time(live_server, cleanup_after_s
     early_metrics = collector.analyze(early_results)
     middle_metrics = collector.analyze(middle_results)
     late_metrics = collector.analyze(late_results)
-
-    # Verify we have data for all periods
-    assert early_metrics.latency is not None, "Should have early latency data"
-    assert middle_metrics.latency is not None, "Should have middle latency data"
-    assert late_metrics.latency is not None, "Should have late latency data"
 
     # Compare latencies (allow 20% variance)
     early_p95 = early_metrics.latency.p95

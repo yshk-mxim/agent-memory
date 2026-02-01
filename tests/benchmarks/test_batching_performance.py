@@ -1,4 +1,4 @@
-"""Batching performance benchmarks (Sprint 6 Day 5).
+"""Batching performance benchmarks.
 
 Measures throughput benefits of batching multiple agents:
 - Sequential (1 agent): baseline performance

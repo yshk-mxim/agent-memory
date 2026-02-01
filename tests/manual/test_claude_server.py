@@ -38,7 +38,7 @@ from typing import Any
 import mlx.core as mx
 import uvicorn
 from fastapi import FastAPI, Request
-from fastapi.responses import StreamingResponse, JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from mlx_lm import load
 from mlx_lm.models.cache import QuantizedKVCache
 from pydantic import BaseModel
@@ -465,12 +465,11 @@ def adaptive_chunk_size(cache_pos: int) -> int:
     """
     if cache_pos < 2000:
         return MAX_CHUNK_SIZE  # 4096
-    elif cache_pos < 8000:
+    if cache_pos < 8000:
         return MAX_CHUNK_SIZE // 2  # 2048
-    elif cache_pos < 20000:
+    if cache_pos < 20000:
         return MAX_CHUNK_SIZE // 4  # 1024
-    else:
-        return MIN_CHUNK_SIZE  # 512
+    return MIN_CHUNK_SIZE  # 512
 
 
 def chunked_prefill(tokens: list[int]) -> list[QuantizedKVCache]:
@@ -1206,9 +1205,8 @@ def _build_reverse_input(
         max_result_len = 300
         if len(result_text) > max_result_len:
             result_text = result_text[:max_result_len] + "...(truncated)"
-    else:
-        if len(result_text) > 500:
-            result_text = result_text[:500] + "...(truncated)"
+    elif len(result_text) > 500:
+        result_text = result_text[:500] + "...(truncated)"
 
     return f"TOOL: {name}\nARGS: {args_str}\nRESULT: {result_text}\nERROR: {str(is_error).lower()}"
 
@@ -2089,10 +2087,9 @@ def parse_tool_calls(
                         f"[TOOL PARSE] Found JSON tool call: {parsed_name} -> {canonical_name}"
                     )
                     return remaining_text, tool_uses
-                else:
-                    logger.warning(
-                        f"[TOOL PARSE] Unknown tool: {parsed_name}, available: {list(tool_name_map.keys())}"
-                    )
+                logger.warning(
+                    f"[TOOL PARSE] Unknown tool: {parsed_name}, available: {list(tool_name_map.keys())}"
+                )
 
     except Exception as e:
         logger.debug(f"[TOOL PARSE] JSON parse failed: {e}")
@@ -2100,7 +2097,7 @@ def parse_tool_calls(
     # Second, try DeepSeek native format
     MAX_TOOL_CALLS = 10  # Cap to prevent degenerate output loops
     if TOOL_CALL_BEGIN in text:
-        logger.info(f"[TOOL PARSE] Found DeepSeek markers in output")
+        logger.info("[TOOL PARSE] Found DeepSeek markers in output")
 
         # Split on tool call begin markers
         parts = text.split(TOOL_CALL_BEGIN)
@@ -2239,9 +2236,7 @@ def parse_tool_calls(
                         inferred_name = None
                         if "command" in obj:
                             inferred_name = "Bash"
-                        elif "prompt" in obj and "subagent_type" in obj:
-                            inferred_name = "Task"
-                        elif "description" in obj and "subagent_type" in obj:
+                        elif ("prompt" in obj and "subagent_type" in obj) or ("description" in obj and "subagent_type" in obj):
                             inferred_name = "Task"
                         elif "file_path" in obj and "content" not in obj:
                             inferred_name = "Read"
@@ -2321,7 +2316,7 @@ def parse_tool_calls(
                     remaining_text = re.sub(
                         r"```python\n.*?```", "", remaining_text, flags=re.DOTALL
                     ).strip()
-                    logger.info(f"[TOOL PARSE] Converted python markdown to bash tool_use")
+                    logger.info("[TOOL PARSE] Converted python markdown to bash tool_use")
 
     # Always clean up any DeepSeek markers from remaining text
     remaining_text = remaining_text.replace(TOOL_CALLS_BEGIN, "")
@@ -2773,8 +2768,7 @@ async def create_message(request_body: MessagesRequest, request: Request) -> JSO
 
         # Truncate KV cache to usable length
         for c in kv_caches:
-            if c.offset > usable_cache_len:
-                c.offset = usable_cache_len
+            c.offset = min(c.offset, usable_cache_len)
 
         # Process all tokens after the usable cache
         if len(tokens) > usable_cache_len:
@@ -2788,7 +2782,7 @@ async def create_message(request_body: MessagesRequest, request: Request) -> JSO
             for c in kv_caches:
                 if c.offset > 0:
                     c.offset = min(c.offset, len(tokens)) - 1
-            logger.info(f"[EXACT/SHORT] Reprocessing last token for logits")
+            logger.info("[EXACT/SHORT] Reprocessing last token for logits")
 
     if not cache_hit:
         logger.info(f"[CACHE MISS] agent={agent_id}")
@@ -3041,7 +3035,7 @@ async def create_message(request_body: MessagesRequest, request: Request) -> JSO
     try:
         # Read existing entries from this session's file
         if TEST_SET_PATH.exists():
-            with open(TEST_SET_PATH, "r") as f:
+            with open(TEST_SET_PATH) as f:
                 test_set = json.load(f)
         else:
             test_set = {

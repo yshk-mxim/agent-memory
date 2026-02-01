@@ -44,6 +44,15 @@ class ModelCacheSpec:
 
     def __post_init__(self) -> None:
         """Validate cache spec invariants."""
+        if self.n_layers <= 0:
+            raise ModelSpecValidationError(f"n_layers must be > 0, got {self.n_layers}")
+        if self.n_kv_heads <= 0:
+            raise ModelSpecValidationError(f"n_kv_heads must be > 0, got {self.n_kv_heads}")
+        if self.head_dim <= 0:
+            raise ModelSpecValidationError(f"head_dim must be > 0, got {self.head_dim}")
+        if self.block_tokens <= 0:
+            raise ModelSpecValidationError(f"block_tokens must be > 0, got {self.block_tokens}")
+
         if len(self.layer_types) != self.n_layers:
             raise ModelSpecValidationError(
                 f"layer_types length ({len(self.layer_types)}) must equal "
@@ -57,9 +66,13 @@ class ModelCacheSpec:
                 f"kv_bits must be one of {valid_kv_bits}, got {self.kv_bits}"
             )
 
-        # Validate kv_group_size is positive
+        # Validate kv_group_size is positive and power of 2
         if self.kv_group_size <= 0:
             raise ModelSpecValidationError(f"kv_group_size must be > 0, got {self.kv_group_size}")
+        if self.kv_group_size & (self.kv_group_size - 1) != 0:
+            raise ModelSpecValidationError(
+                f"kv_group_size must be a power of 2, got {self.kv_group_size}"
+            )
 
     def bytes_per_block_per_layer(self) -> int:
         """Calculate memory bytes required for one block at one layer.
@@ -69,7 +82,7 @@ class ModelCacheSpec:
         - Q8 (kv_bits=8): ~1.0625 bytes (1 + scales/group_size)
         - Q4 (kv_bits=4): ~0.5625 bytes (0.5 + scales/group_size)
 
-        Quantization adds scales+biases overhead of ~2 bytes per group element.
+        Quantization adds scales+biases overhead of ~4 bytes per group (2 scales + 2 biases).
         """
         elements_per_kv = self.n_kv_heads * self.head_dim * self.block_tokens
         total_elements = elements_per_kv * 2  # K and V

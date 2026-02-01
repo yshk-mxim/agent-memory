@@ -32,8 +32,6 @@ def _apply_patch() -> None:
         logger.debug("mlx_lm not available, skipping sink compat patch")
         return
 
-    _original = base_module.scaled_dot_product_attention
-
     def _patched_sdpa(
         queries: mx.array,
         keys: mx.array | tuple,

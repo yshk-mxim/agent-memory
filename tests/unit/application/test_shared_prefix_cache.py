@@ -1,6 +1,5 @@
 """Unit tests for SharedPrefixCache."""
 
-import pytest
 
 from semantic.application.shared_prefix_cache import SharedPrefixCache
 
@@ -15,7 +14,6 @@ class TestSharedPrefixCacheBasic:
         cache.put("abc123", kv_caches=["fake_kv"], n_tokens=100, token_sequence=[1, 2, 3])
 
         entry = cache.get("abc123")
-        assert entry is not None
         assert entry.n_tokens == 100
         assert entry.kv_caches == ["fake_kv"]
         assert entry.token_sequence == [1, 2, 3]
@@ -29,7 +27,6 @@ class TestSharedPrefixCacheBasic:
         cache.get("abc123")
 
         entry = cache.get("abc123")
-        assert entry is not None
         assert entry.hit_count == 4  # 3 + 1 from final get
 
     def test_put_duplicate_is_noop(self) -> None:
@@ -38,7 +35,6 @@ class TestSharedPrefixCacheBasic:
         cache.put("abc", kv_caches=["second"], n_tokens=20, token_sequence=[2])
 
         entry = cache.get("abc")
-        assert entry is not None
         assert entry.kv_caches == ["first"]  # First value kept
         assert entry.n_tokens == 10
 
@@ -87,9 +83,9 @@ class TestSharedPrefixCacheEviction:
         # Add third — should evict "unpopular" (fewer hits)
         cache.put("new", kv_caches=[], n_tokens=3, token_sequence=[])
 
-        assert cache.get("popular") is not None
-        assert cache.get("new") is not None
-        assert cache.get("unpopular") is None
+        assert cache.get("popular").n_tokens == 1  # popular survived eviction
+        assert cache.get("new").n_tokens == 3  # new was just inserted
+        assert cache.get("unpopular") is None  # evicted (fewest hits)
 
 
 class TestSharedPrefixCacheHash:

@@ -8,6 +8,7 @@ import pytest
 # Mock MLX modules before importing ModelRegistry
 sys.modules["mlx"] = MagicMock()
 sys.modules["mlx.core"] = MagicMock()
+sys.modules["mlx.utils"] = MagicMock()
 sys.modules["mlx_lm"] = MagicMock()
 
 from semantic.application.model_registry import ModelRegistry
@@ -163,9 +164,7 @@ class TestModelRegistryLifecycle:
         registry.load_model("mlx-community/SmolLM2-135M-Instruct")
         current = registry.get_current()
 
-        assert current is not None
-        assert current[0] is mock_model
-        assert current[1] is mock_tokenizer
+        assert current == (mock_model, mock_tokenizer)
 
     @patch("semantic.application.model_registry.get_extractor")
     def test_get_current_spec_returns_spec(self, mock_get_extractor, mock_loader):

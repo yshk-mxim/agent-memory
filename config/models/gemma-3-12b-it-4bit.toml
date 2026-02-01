@@ -55,4 +55,7 @@ multiturn_speedup = "2.8x"
 
 model_memory_gb = 6.8
 block_pool_blocks = 15534
-block_size_mb = 0.53
+# Q4 formula: (n_kv_heads * head_dim * block_tokens * 2(K+V) * 4bits/8)
+#   + scales/biases overhead = 294912 bytes ≈ 0.28 MB per block per layer
+# Previous value (0.53) matched Q8 formula; corrected to Q4 (kv_bits=4).
+block_size_mb = 0.28

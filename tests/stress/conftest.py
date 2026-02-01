@@ -1,4 +1,4 @@
-"""Stress test fixtures for semantic caching server (Sprint 6 Day 3).
+"""Stress test fixtures for semantic caching server.
 
 Provides fixtures for:
 - Async HTTP client (aiohttp)

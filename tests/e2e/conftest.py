@@ -154,11 +154,11 @@ def live_server(cleanup_caches) -> Iterator[str]:
         # Close log files to prevent resource warnings
         try:
             stdout_file.close()
-        except:
+        except OSError:
             pass
         try:
             stderr_file.close()
-        except:
+        except OSError:
             pass
 
         process.terminate()

@@ -179,8 +179,8 @@ class SafetensorsCacheAdapter:
             if tmp_path.exists():
                 try:
                     tmp_path.unlink()
-                except OSError:
-                    pass  # Already renamed or cleaned up
+                except OSError as e:
+                    logger.debug(f"Temp file already cleaned up: {tmp_path} ({e})")
 
         return cache_path
 
@@ -267,6 +267,10 @@ class SafetensorsCacheAdapter:
                 v_key = f"L{layer_id}_B{block_idx}_V"
 
                 if k_key not in tensors_data or v_key not in tensors_data:
+                    logger.warning(
+                        f"Incomplete block L{layer_id}_B{block_idx}: "
+                        f"K present={k_key in tensors_data}, V present={v_key in tensors_data}"
+                    )
                     continue
 
                 k_data = tensors_data[k_key]

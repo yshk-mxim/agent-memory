@@ -1,4 +1,4 @@
-"""Performance baseline measurements for Sprint 7 Day 1.
+"""Performance baseline measurements.
 
 Simple tests to measure actual inference performance and establish baselines.
 These replace full stress tests which assume faster inference than MLX provides.

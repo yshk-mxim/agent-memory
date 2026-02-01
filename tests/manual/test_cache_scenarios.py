@@ -11,8 +11,9 @@ Scenarios:
 
 import json
 import time
-import requests
 from typing import Any
+
+import requests
 
 BASE_URL = "http://localhost:8000"
 
@@ -71,31 +72,30 @@ def make_request(
             "elapsed": elapsed,
             "tokens_per_sec": tokens / elapsed if elapsed > 0 else 0,
         }
-    else:
-        response = requests.post(
-            f"{BASE_URL}/v1/messages",
-            headers=headers,
-            json=payload,
-        )
-        elapsed = time.time() - start
+    response = requests.post(
+        f"{BASE_URL}/v1/messages",
+        headers=headers,
+        json=payload,
+    )
+    elapsed = time.time() - start
 
-        data = response.json()
-        text = ""
-        if "content" in data and data["content"]:
-            text = data["content"][0].get("text", "")
+    data = response.json()
+    text = ""
+    if data.get("content"):
+        text = data["content"][0].get("text", "")
 
-        usage = data.get("usage", {})
-        output_tokens = usage.get("output_tokens", len(text.split()))
+    usage = data.get("usage", {})
+    output_tokens = usage.get("output_tokens", len(text.split()))
 
-        return {
-            "text": text,
-            "tokens": output_tokens,
-            "elapsed": elapsed,
-            "tokens_per_sec": output_tokens / elapsed if elapsed > 0 else 0,
-            "input_tokens": usage.get("input_tokens", 0),
-            "cache_read": usage.get("cache_read_input_tokens", 0),
-            "cache_creation": usage.get("cache_creation_input_tokens", 0),
-        }
+    return {
+        "text": text,
+        "tokens": output_tokens,
+        "elapsed": elapsed,
+        "tokens_per_sec": output_tokens / elapsed if elapsed > 0 else 0,
+        "input_tokens": usage.get("input_tokens", 0),
+        "cache_read": usage.get("cache_read_input_tokens", 0),
+        "cache_creation": usage.get("cache_creation_input_tokens", 0),
+    }
 
 
 def get_server_stats() -> dict[str, Any]:
@@ -157,13 +157,13 @@ def run_scenario(
         if actual_hit != expected_hit:
             print(f"⚠️  UNEXPECTED: Expected {'HIT' if expected_hit else 'MISS'}")
 
-    print(f"\nGenerated text (first 200 chars):")
+    print("\nGenerated text (first 200 chars):")
     print(f"  {result['text'][:200]}...")
 
     # Memory stats
     if "memory" in stats_after:
         mem = stats_after["memory"]
-        print(f"\nMemory after:")
+        print("\nMemory after:")
         print(f"  Active: {mem.get('active_gb', 'N/A')} GB")
         print(f"  Peak: {mem.get('peak_gb', 'N/A')} GB")
         print(f"  Cache: {mem.get('cache_gb', 'N/A')} GB")
@@ -192,7 +192,7 @@ def main():
     # ~5000 tokens ≈ 3750 words
     prompt_5k = generate_prompt(3750, "SESSION_B: ")
 
-    print(f"\nGenerated prompts:")
+    print("\nGenerated prompts:")
     print(f"  10K prompt: {len(prompt_10k)} chars")
     print(f"  5K prompt: {len(prompt_5k)} chars")
 

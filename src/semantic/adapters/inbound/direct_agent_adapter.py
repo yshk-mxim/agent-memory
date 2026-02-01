@@ -209,13 +209,12 @@ async def generate(
             cache_store.save(agent_id, updated_blocks)
             logger.debug(f"Saved cache: {agent_id} ({updated_blocks.total_tokens} tokens)")
 
-        # Return response
-        agent_blocks_for_size = batch_engine.get_agent_blocks(agent_id)
+        # Return response (reuse updated_blocks to avoid redundant lookup)
         response = GenerateResponse(
             text=completion.text,
             tokens_generated=completion.token_count,
             finish_reason=completion.finish_reason,
-            cache_size_tokens=agent_blocks_for_size.total_tokens if agent_blocks_for_size else 0,
+            cache_size_tokens=updated_blocks.total_tokens if updated_blocks else 0,
         )
 
         logger.info(f"Response: {response.tokens_generated} tokens generated")

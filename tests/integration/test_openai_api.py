@@ -255,8 +255,19 @@ class TestOpenAIAPIWithModel:
             data = response.json()
             # OpenAI format fields
             assert "id" in data
+            assert data["id"].startswith("chatcmpl-")
             assert "created" in data
+            assert isinstance(data["created"], int)
             assert "model" in data
             assert "choices" in data
+            assert len(data["choices"]) == 1
             assert "usage" in data
             assert data["choices"][0]["finish_reason"] in ["stop", "length"]
+            assert data["choices"][0]["message"]["role"] == "assistant"
+            assert isinstance(data["choices"][0]["message"]["content"], str)
+            # Usage fields must be present and positive
+            assert data["usage"]["prompt_tokens"] > 0
+            assert data["usage"]["completion_tokens"] > 0
+            assert data["usage"]["total_tokens"] == (
+                data["usage"]["prompt_tokens"] + data["usage"]["completion_tokens"]
+            )

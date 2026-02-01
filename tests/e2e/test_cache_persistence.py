@@ -1,4 +1,4 @@
-"""E2E tests for cache persistence across server restarts (Sprint 6 Day 1).
+"""E2E tests for cache persistence across server restarts.
 
 Tests verify that agent caches are saved to disk and can be restored
 when the server restarts, enabling session resumption.
@@ -77,7 +77,7 @@ def test_agent_resumes_from_saved_cache(test_client: httpx.Client, cleanup_cache
 
 @pytest.mark.e2e
 def test_cache_load_time_under_500ms(test_client: httpx.Client, cleanup_caches):
-    """Test that cache loads in <500ms (Sprint 6 target).
+    """Test that cache loads in <500ms.
 
     Verifies:
     - Cache save completes

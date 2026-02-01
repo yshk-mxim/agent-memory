@@ -12,6 +12,21 @@ from unittest.mock import MagicMock
 
 import pytest
 
+# ---------------------------------------------------------------------------
+# Constants derived from real model specs (config/models/*.toml)
+# ---------------------------------------------------------------------------
+
+# Gemma 3 12B IT 4-bit (primary production model)
+GEMMA3_N_LAYERS = 48
+GEMMA3_N_KV_HEADS = 4  # from config.json: num_key_value_heads
+GEMMA3_HEAD_DIM = 256  # hidden_size(3072) / num_attention_heads(12)
+GEMMA3_BLOCK_TOKENS = 256  # universal block size
+GEMMA3_GLOBAL_LAYERS = 8  # first 8 layers use global attention
+GEMMA3_SLIDING_WINDOW = 1024
+GEMMA3_LAYER_TYPES = ["global"] * GEMMA3_GLOBAL_LAYERS + ["sliding_window"] * (
+    GEMMA3_N_LAYERS - GEMMA3_GLOBAL_LAYERS
+)
+
 
 def pytest_configure(config: pytest.Config) -> None:
     """Register custom markers."""
@@ -58,7 +73,7 @@ def fake_model_backend() -> MagicMock:
     mock.generate.return_value = MagicMock(
         text="Generated text",
         tokens=[1, 2, 3, 4, 5],
-        cache=[MagicMock() for _ in range(48)],  # 48 layers
+        cache=[MagicMock() for _ in range(GEMMA3_N_LAYERS)],
     )
     return mock
 
@@ -72,7 +87,7 @@ def fake_cache_persistence() -> MagicMock:
     """
     mock = MagicMock()
     mock.save.return_value = None
-    mock.load.return_value = [MagicMock() for _ in range(48)]  # 48 layers
+    mock.load.return_value = [MagicMock() for _ in range(GEMMA3_N_LAYERS)]
     mock.exists.return_value = False
     return mock
 
@@ -98,12 +113,12 @@ def fake_model_cache_spec() -> MagicMock:
     Returns a minimal ModelCacheSpec for Gemma 3 12B hybrid architecture.
     """
     spec = MagicMock()
-    spec.n_layers = 48
-    spec.n_kv_heads = 8
-    spec.head_dim = 256
-    spec.block_tokens = 256
-    spec.layer_types = ["global"] * 8 + ["sliding_window"] * 40
-    spec.sliding_window_size = 1024
+    spec.n_layers = GEMMA3_N_LAYERS
+    spec.n_kv_heads = GEMMA3_N_KV_HEADS
+    spec.head_dim = GEMMA3_HEAD_DIM
+    spec.block_tokens = GEMMA3_BLOCK_TOKENS
+    spec.layer_types = GEMMA3_LAYER_TYPES
+    spec.sliding_window_size = GEMMA3_SLIDING_WINDOW
     return spec
 
 

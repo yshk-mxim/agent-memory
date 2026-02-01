@@ -1,4 +1,4 @@
-"""Unit tests for Pydantic Settings configuration (NEW-4).
+"""Unit tests for Pydantic Settings configuration.
 
 Tests configuration loading from environment variables, .env files,
 and defaults with proper precedence and validation.
@@ -69,6 +69,118 @@ class TestMLXSettings:
             MLXSettings(kv_bits=16)
 
 
+class TestMLXSettingsKvBitsEdgeCases:
+    """Edge cases for kv_bits string parsing from environment variables."""
+
+    def test_empty_string_becomes_none(self, monkeypatch) -> None:
+        """Empty env var resolves to None (FP16 mode)."""
+        monkeypatch.setenv("SEMANTIC_MLX_KV_BITS", "")
+        settings = MLXSettings()
+        assert settings.kv_bits is None
+
+    def test_string_none_becomes_none(self, monkeypatch) -> None:
+        """String 'none' resolves to None (FP16 mode)."""
+        monkeypatch.setenv("SEMANTIC_MLX_KV_BITS", "none")
+        settings = MLXSettings()
+        assert settings.kv_bits is None
+
+    def test_string_null_becomes_none(self, monkeypatch) -> None:
+        """String 'null' resolves to None (FP16 mode)."""
+        monkeypatch.setenv("SEMANTIC_MLX_KV_BITS", "null")
+        settings = MLXSettings()
+        assert settings.kv_bits is None
+
+    def test_string_zero_becomes_none(self, monkeypatch) -> None:
+        """String '0' resolves to None (FP16 mode)."""
+        monkeypatch.setenv("SEMANTIC_MLX_KV_BITS", "0")
+        settings = MLXSettings()
+        assert settings.kv_bits is None
+
+    def test_integer_zero_becomes_none(self) -> None:
+        """Integer 0 resolves to None (FP16 mode)."""
+        settings = MLXSettings(kv_bits=0)
+        assert settings.kv_bits is None
+
+    def test_string_4_parses_correctly(self, monkeypatch) -> None:
+        """String '4' from env var parses to int 4."""
+        monkeypatch.setenv("SEMANTIC_MLX_KV_BITS", "4")
+        settings = MLXSettings()
+        assert settings.kv_bits == 4
+
+    def test_string_8_parses_correctly(self, monkeypatch) -> None:
+        """String '8' from env var parses to int 8."""
+        monkeypatch.setenv("SEMANTIC_MLX_KV_BITS", "8")
+        settings = MLXSettings()
+        assert settings.kv_bits == 8
+
+    def test_invalid_string_raises(self, monkeypatch) -> None:
+        """Non-numeric, non-special string raises ValueError."""
+        monkeypatch.setenv("SEMANTIC_MLX_KV_BITS", "invalid")
+        with pytest.raises(ValueError):
+            MLXSettings()
+
+
+class TestMLXSettingsKvGroupSize:
+    """Validation tests for kv_group_size (must be power of 2)."""
+
+    def test_valid_power_of_2_values(self) -> None:
+        """Powers of 2 within range are accepted."""
+        for size in (16, 32, 64, 128, 256):
+            settings = MLXSettings(kv_group_size=size)
+            assert settings.kv_group_size == size
+
+    def test_below_minimum_rejected(self) -> None:
+        """Values below minimum (16) are rejected by range check."""
+        for size in (3, 5, 8, 15):
+            with pytest.raises(ValueError, match="greater than or equal to 16"):
+                MLXSettings(kv_group_size=size)
+
+    def test_non_power_of_2_in_range_rejected(self) -> None:
+        """Non-power-of-2 values within [16, 256] are rejected."""
+        for size in (17, 48, 63, 65, 100, 200):
+            with pytest.raises(ValueError, match="power of 2"):
+                MLXSettings(kv_group_size=size)
+
+    def test_from_env_var(self, monkeypatch) -> None:
+        """kv_group_size loaded from env var."""
+        monkeypatch.setenv("SEMANTIC_MLX_KV_GROUP_SIZE", "128")
+        settings = MLXSettings()
+        assert settings.kv_group_size == 128
+
+    def test_invalid_from_env_var(self, monkeypatch) -> None:
+        """Non-power-of-2 from env var is rejected."""
+        monkeypatch.setenv("SEMANTIC_MLX_KV_GROUP_SIZE", "100")
+        with pytest.raises(ValueError, match="power of 2"):
+            MLXSettings()
+
+
+class TestServerSettingsPortEdgeCases:
+    """Edge cases for port validation."""
+
+    def test_port_99999_rejected(self) -> None:
+        """Port 99999 exceeds max (65535)."""
+        with pytest.raises(ValueError, match="less than or equal to 65535"):
+            ServerSettings(port=99999)
+
+    def test_port_from_env_var(self, monkeypatch) -> None:
+        """Port loaded from env var and validated."""
+        monkeypatch.setenv("SEMANTIC_SERVER_PORT", "9000")
+        settings = ServerSettings()
+        assert settings.port == 9000
+
+    def test_port_0_rejected(self) -> None:
+        """Port 0 is below minimum (1024)."""
+        with pytest.raises(ValueError, match="greater than or equal to 1024"):
+            ServerSettings(port=0)
+
+    def test_port_boundary_values(self) -> None:
+        """Ports 1023 and 65536 are just outside valid range."""
+        with pytest.raises(ValueError, match="greater than or equal to 1024"):
+            ServerSettings(port=1023)
+        with pytest.raises(ValueError, match="less than or equal to 65535"):
+            ServerSettings(port=65536)
+
+
 class TestAgentSettings:
     """Tests for agent cache management configuration."""
 
@@ -86,13 +198,13 @@ class TestAgentSettings:
     def test_load_from_env_vars(self, monkeypatch) -> None:
         """Should load from SEMANTIC_AGENT_* environment variables."""
         monkeypatch.setenv("SEMANTIC_AGENT_MAX_AGENTS_IN_MEMORY", "10")
-        monkeypatch.setenv("SEMANTIC_AGENT_CACHE_DIR", "/tmp/caches")  # noqa: S108
+        monkeypatch.setenv("SEMANTIC_AGENT_CACHE_DIR", "/tmp/caches")
         monkeypatch.setenv("SEMANTIC_AGENT_BATCH_WINDOW_MS", "50")
 
         settings = AgentSettings()
 
         assert settings.max_agents_in_memory == 10
-        assert settings.cache_dir == "/tmp/caches"  # noqa: S108
+        assert settings.cache_dir == "/tmp/caches"
         assert settings.batch_window_ms == 50
 
     def test_validation_max_agents_ge_1(self) -> None:

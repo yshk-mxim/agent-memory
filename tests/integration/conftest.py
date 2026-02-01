@@ -6,13 +6,22 @@ implements the insert/next protocol so the engine pipeline works end-to-end
 without real MLX inference.
 """
 
-import os
 import sys
 import tempfile
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
+
+# ---------------------------------------------------------------------------
+# Test model constants (small model for fast integration tests)
+# ---------------------------------------------------------------------------
+TEST_MODEL_N_LAYERS = 12
+TEST_MODEL_N_KV_HEADS = 4
+TEST_MODEL_N_ATTENTION_HEADS = 12
+TEST_MODEL_HIDDEN_SIZE = 768
+TEST_MODEL_HEAD_DIM = TEST_MODEL_HIDDEN_SIZE // TEST_MODEL_N_ATTENTION_HEADS  # 64
+FAKE_BATCH_GEN_DEFAULT_STEPS = 3  # tokens generated before completion
 
 # =============================================================================
 # Module-level: Mock MLX modules before any test imports api_server.
@@ -31,16 +40,18 @@ _mock_mx.quantize.return_value = [MagicMock(), MagicMock(), MagicMock()]
 
 _mock_mlx = MagicMock()
 _mock_mlx.core = _mock_mx  # Wire parent.core → child mock
+_mock_mlx_utils = MagicMock()
 sys.modules["mlx"] = _mock_mlx
 sys.modules["mlx.core"] = _mock_mx
+sys.modules["mlx.utils"] = _mock_mlx_utils
 
 # --- Mock model with attributes for spec extraction ---
 _mock_model = MagicMock()
 _mock_model.args = SimpleNamespace(
-    num_hidden_layers=12,
-    num_key_value_heads=4,
-    num_attention_heads=12,
-    hidden_size=768,
+    num_hidden_layers=TEST_MODEL_N_LAYERS,
+    num_key_value_heads=TEST_MODEL_N_KV_HEADS,
+    num_attention_heads=TEST_MODEL_N_ATTENTION_HEADS,
+    hidden_size=TEST_MODEL_HIDDEN_SIZE,
     model_type="llama",
     sliding_window=None,
 )
@@ -100,8 +111,10 @@ class FakeBatchGenerator:
     """Test-compatible replacement for mlx_lm.server.BatchGenerator.
 
     Implements the insert/next protocol that BlockPoolBatchEngine expects.
-    Generates a few fake tokens then returns finish_reason="stop".
+    Generates a configurable number of fake tokens then returns finish_reason="stop".
     """
+
+    steps_to_complete: int = FAKE_BATCH_GEN_DEFAULT_STEPS
 
     def __init__(self, model=None, stop_tokens=None, **kwargs):
         self._sequences: dict[str, dict] = {}
@@ -126,9 +139,9 @@ class FakeBatchGenerator:
         done_uids = []
         for uid, seq in list(self._sequences.items()):
             seq["generated"] += 1
-            if seq["generated"] >= min(3, seq["max_tokens"]):
-                # Done: return finish_reason and fake prompt_cache (12 layers)
-                fake_caches = [MagicMock() for _ in range(12)]
+            if seq["generated"] >= min(self.steps_to_complete, seq["max_tokens"]):
+                # Done: return finish_reason and fake prompt_cache
+                fake_caches = [MagicMock() for _ in range(TEST_MODEL_N_LAYERS)]
                 for fc in fake_caches:
                     fc.state = (MagicMock(), MagicMock())
                     fc.offset = 5
@@ -179,6 +192,7 @@ def _reinstall_mlx_mocks():
     """
     sys.modules["mlx"] = _mock_mlx
     sys.modules["mlx.core"] = _mock_mx
+    sys.modules["mlx.utils"] = _mock_mlx_utils
     sys.modules["mlx_lm"] = _mock_mlx_lm
     sys.modules["mlx_lm.models"] = _mock_mlx_lm_models
     sys.modules["mlx_lm.models.cache"] = _mock_mlx_lm_models_cache
@@ -201,6 +215,7 @@ def _patch_for_integration(monkeypatch):
     # module-scoped fixtures run, and the values are idempotent.
     sys.modules["mlx"] = _mock_mlx
     sys.modules["mlx.core"] = _mock_mx
+    sys.modules["mlx.utils"] = _mock_mlx_utils
     sys.modules["mlx_lm"] = _mock_mlx_lm
     sys.modules["mlx_lm.models"] = _mock_mlx_lm_models
     sys.modules["mlx_lm.models.cache"] = _mock_mlx_lm_models_cache
@@ -241,7 +256,7 @@ def _patch_for_integration(monkeypatch):
     def _fake_extract_cache(self, uid, cache=None, token_sequence=None):
         if uid not in self._active_requests:
             raise GenerationError(f"UID {uid} not found")
-        agent_id, _, _, _ = self._active_requests[uid]
+        agent_id, _, _, _, _ = self._active_requests[uid]
         tok_seq = token_sequence or [1, 2, 3, 4, 5]
         n_tokens = len(tok_seq)
         # Allocate real blocks from the pool so free() works correctly

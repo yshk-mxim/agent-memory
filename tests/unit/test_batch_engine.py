@@ -13,6 +13,7 @@ import pytest
 # Mock MLX modules before importing batch_engine
 sys.modules["mlx"] = MagicMock()
 sys.modules["mlx.core"] = MagicMock()
+sys.modules["mlx.utils"] = MagicMock()
 sys.modules["mlx_lm"] = MagicMock()
 sys.modules["mlx_lm.models"] = MagicMock()
 sys.modules["mlx_lm.models.cache"] = MagicMock()
@@ -295,7 +296,7 @@ class FakeResponse:
 
 
 class FakeCacheAdapter:
-    """Fake cache adapter for testing (CRITICAL-1, Sprint 3.5).
+    """Fake cache adapter for testing.
 
     Mimics MLXCacheAdapter behavior without requiring MLX.
     Works with FakeTensor objects.
@@ -489,7 +490,6 @@ class TestBlockPoolBatchEngineSubmit:
         uid = engine.submit(agent_id="test_agent", prompt="Hello world", max_tokens=50)
 
         # Verify UID returned
-        assert uid is not None
         assert isinstance(uid, str)
         assert uid.startswith("fake_uid_")  # From FakeBatchGenerator
 
@@ -520,8 +520,7 @@ class TestBlockPoolBatchEngineSubmit:
 
         # Verify request was tracked
         assert uid in engine._active_requests
-        # Verify cache was reconstructed (checked in engine internals)
-        assert uid is not None
+        assert uid.startswith("fake_uid_")
 
 
 class TestBlockPoolBatchEngineStep:

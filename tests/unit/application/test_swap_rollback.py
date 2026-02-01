@@ -8,8 +8,10 @@ import pytest
 # Mock MLX modules
 sys.modules["mlx"] = MagicMock()
 sys.modules["mlx.core"] = MagicMock()
+sys.modules["mlx.utils"] = MagicMock()
 sys.modules["mlx_lm"] = MagicMock()
 
+from semantic.application.batch_engine import BlockPoolBatchEngine
 from semantic.application.model_swap_orchestrator import ModelSwapOrchestrator
 from semantic.domain.errors import ModelNotFoundError, PoolConfigurationError
 from semantic.domain.value_objects import ModelCacheSpec
@@ -243,4 +245,4 @@ class TestSwapRollback:
 
         assert mock_registry.load_model.call_count == 1
         mock_registry.load_model.assert_called_once_with("new-model")
-        assert new_engine is not None
+        assert isinstance(new_engine, BlockPoolBatchEngine)

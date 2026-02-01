@@ -1,4 +1,4 @@
-"""Concurrent agent stress tests (Sprint 6 Day 4).
+"""Concurrent agent stress tests.
 
 Tests verify multi-agent scenarios with rapid, concurrent requests:
 - 10 agents × 50 rapid requests (500 total)
@@ -264,8 +264,6 @@ async def test_latency_remains_acceptable(live_server, cleanup_after_stress):
     # Analyze latency
     collector = MetricsCollector()
     metrics = collector.analyze(results)
-
-    assert metrics.latency is not None, "Should have latency metrics"
 
     # Latency targets
     assert metrics.latency.p95 < 2000, (

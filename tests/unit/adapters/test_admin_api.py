@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 # Mock MLX modules
 sys.modules["mlx"] = MagicMock()
 sys.modules["mlx.core"] = MagicMock()
+sys.modules["mlx.utils"] = MagicMock()
 sys.modules["mlx_lm"] = MagicMock()
 
 from semantic.adapters.inbound.admin_api import (
@@ -212,7 +213,6 @@ class TestSwapModelEndpoint:
         from semantic.adapters.inbound.admin_api import _swap_lock
 
         # Verify lock exists and is an asyncio.Lock
-        assert _swap_lock is not None
         assert isinstance(_swap_lock, asyncio.Lock)
 
         # NOTE: Testing actual concurrent behavior in unit tests is complex.

@@ -1,24 +1,15 @@
 """Unit tests for ConcurrentScheduler."""
 
 import asyncio
-import threading
-import time
 from collections.abc import Iterator
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
-from unittest.mock import MagicMock
 
 import pytest
 
-from semantic.application.prefill_state import PrefillState
 from semantic.application.scheduler import (
-    INTERLEAVE_THRESHOLD_DEFAULT,
     ConcurrentScheduler,
-    SchedulerRequest,
 )
-from semantic.domain.entities import AgentBlocks
-from semantic.domain.value_objects import CompletedGeneration
-
 
 # -------------------------------------------------------------------
 # Fakes
@@ -74,6 +65,7 @@ class FakeBatchEngine:
         prompt_tokens: list[int],
         kv_caches: list[Any],
         max_tokens: int = 256,
+        prompt_text: str | None = None,
     ) -> str:
         self._uid_counter += 1
         uid = f"uid_{self._uid_counter}"
@@ -93,6 +85,33 @@ class FakeBatchEngine:
         for uid in completed:
             del self._active[uid]
             yield FakeCompletedGeneration(uid)
+
+    def step_once(self) -> list[Any]:
+        """Per-token decode step matching scheduler's expected interface."""
+        from semantic.domain.value_objects import StepOneResult
+
+        results = []
+        completed_uids = []
+        for uid, info in list(self._active.items()):
+            info["steps_remaining"] -= 1
+            finish = None
+            completion = None
+            if info["steps_remaining"] <= 0:
+                finish = "end_turn"
+                completed_uids.append(uid)
+                completion = FakeCompletedGeneration(uid)
+            results.append(
+                StepOneResult(
+                    uid=uid,
+                    text="tok",
+                    token_count=1,
+                    finish_reason=finish,
+                    completion=completion,
+                )
+            )
+        for uid in completed_uids:
+            del self._active[uid]
+        return results
 
 
 class FakePrefillAdapter:
@@ -149,7 +168,6 @@ class TestSchedulerLifecycle:
 
         scheduler.start()
         assert scheduler.is_running
-        assert scheduler._worker_thread is not None
         assert scheduler._worker_thread.is_alive()
 
         scheduler.stop()
@@ -259,9 +277,10 @@ class TestSchedulerChunkedPrefill:
 
             result = run_async(run())
             assert adapter.init_calls == 1
-            assert len(adapter.chunks_processed) == 2  # 512 + 512
+            # prefill_end = 1024 - 1 = 1023 (reserves 1 token for BatchGenerator)
+            assert len(adapter.chunks_processed) == 2  # 512 + 511
             assert adapter.chunks_processed[0] == (0, 512)
-            assert adapter.chunks_processed[1] == (512, 1024)
+            assert adapter.chunks_processed[1] == (512, 1023)
         finally:
             scheduler.stop()
 
@@ -307,9 +326,9 @@ class TestSchedulerChunkedPrefill:
                 )
 
             result = run_async(run())
-            # 450 / 100 = 5 chunks (100, 100, 100, 100, 50)
+            # prefill_end = 450 - 1 = 449; chunks: (0,100),(100,200),(200,300),(300,400),(400,449)
             assert len(adapter.chunks_processed) == 5
-            assert adapter.chunks_processed[-1] == (400, 450)
+            assert adapter.chunks_processed[-1] == (400, 449)
         finally:
             scheduler.stop()
 
@@ -322,7 +341,8 @@ class TestSchedulerChunkedPrefill:
 class TestSchedulerInterleaving:
     def test_two_concurrent_requests(self) -> None:
         """Two requests: one short (direct), one long (prefill).
-        Both complete successfully."""
+        Both complete successfully.
+        """
         engine = FakeBatchEngine(steps_to_complete=2)
         adapter = FakePrefillAdapter(chunk_size=200)
         scheduler = ConcurrentScheduler(engine, adapter, n_layers=2, interleave_threshold=100)

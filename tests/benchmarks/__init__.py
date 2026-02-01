@@ -1,4 +1,4 @@
-"""Benchmark suite for semantic caching server (Sprint 6).
+"""Benchmark suite for semantic caching server.
 
 This package provides performance benchmarks for:
 - Batching throughput (sequential vs batched)

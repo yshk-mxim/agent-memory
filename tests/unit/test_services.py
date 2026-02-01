@@ -23,6 +23,7 @@ from hypothesis import strategies as st
 from semantic.domain.entities import KVBlock
 from semantic.domain.errors import (
     BlockOperationError,
+    ModelSpecValidationError,
     PoolConfigurationError,
     PoolExhaustedError,
 )
@@ -255,17 +256,15 @@ class TestBlockPoolInitialization:
             BlockPool(spec=gemma_spec, total_blocks=-100)
 
     def test_reject_invalid_spec(self) -> None:
-        """Should raise ValueError for invalid spec."""
-        invalid_spec = ModelCacheSpec(
-            n_layers=0,  # Invalid!
-            n_kv_heads=8,
-            head_dim=256,
-            block_tokens=256,
-            layer_types=[],
-        )
-
-        with pytest.raises(PoolConfigurationError, match="n_layers must be > 0"):
-            BlockPool(spec=invalid_spec, total_blocks=100)
+        """Should raise for invalid spec (n_layers=0 caught at spec level)."""
+        with pytest.raises(ModelSpecValidationError, match="n_layers must be > 0"):
+            ModelCacheSpec(
+                n_layers=0,
+                n_kv_heads=8,
+                head_dim=256,
+                block_tokens=256,
+                layer_types=[],
+            )
 
 
 class TestBlockPoolAllocation:
@@ -670,3 +669,73 @@ class TestBlockPoolMaxBatchSize:
         # 64 tokens = 1 block (rounds up), 32 layers = 32 blocks per agent
         # 100 blocks / 32 = 3 agents
         assert pool.max_batch_size(tokens_per_agent=64) == 3
+
+
+class TestBlockPoolO1Timing:
+    """Verify block pool allocation/deallocation is O(1), not O(n)."""
+
+    def test_allocation_mean_under_threshold(self, small_spec: ModelCacheSpec) -> None:
+        """1000 allocations should average < 0.1ms each."""
+        import time
+
+        pool = BlockPool(spec=small_spec, total_blocks=2000)
+        times = []
+
+        for i in range(1000):
+            start = time.perf_counter()
+            blocks = pool.allocate(1, layer_id=0, agent_id=f"agent_{i}")
+            elapsed = time.perf_counter() - start
+            times.append(elapsed)
+
+        mean_ms = (sum(times) / len(times)) * 1000
+        assert mean_ms < 0.1, f"Mean allocation time {mean_ms:.4f}ms exceeds 0.1ms"
+
+    def test_deallocation_mean_under_threshold(self, small_spec: ModelCacheSpec) -> None:
+        """1000 deallocations should average < 0.1ms each."""
+        import time
+
+        pool = BlockPool(spec=small_spec, total_blocks=2000)
+        allocated = []
+        for i in range(1000):
+            blocks = pool.allocate(1, layer_id=0, agent_id=f"agent_{i}")
+            allocated.append(blocks)
+
+        times = []
+        for i, blocks in enumerate(allocated):
+            start = time.perf_counter()
+            pool.free(blocks, agent_id=f"agent_{i}")
+            elapsed = time.perf_counter() - start
+            times.append(elapsed)
+
+        mean_ms = (sum(times) / len(times)) * 1000
+        assert mean_ms < 0.1, f"Mean deallocation time {mean_ms:.4f}ms exceeds 0.1ms"
+
+    def test_scaling_ratio_indicates_o1(self, small_spec: ModelCacheSpec) -> None:
+        """10 allocations vs 10000: ratio must be < 3x (O(1) not O(n))."""
+        import time
+
+        # Small batch: 10 allocations
+        pool_small = BlockPool(spec=small_spec, total_blocks=20000)
+        start = time.perf_counter()
+        for i in range(10):
+            pool_small.allocate(1, layer_id=0, agent_id=f"agent_{i}")
+        time_10 = time.perf_counter() - start
+
+        # Large batch: 10000 allocations
+        pool_large = BlockPool(spec=small_spec, total_blocks=20000)
+        start = time.perf_counter()
+        for i in range(10000):
+            pool_large.allocate(1, layer_id=0, agent_id=f"agent_{i}")
+        time_10000 = time.perf_counter() - start
+
+        # If O(1): time_10000 / time_10 ≈ 1000 (just more iterations)
+        # If O(n): time_10000 / time_10 would be >> 1000
+        # We check per-operation: mean_10000 should be < 3x mean_10
+        mean_10 = time_10 / 10
+        mean_10000 = time_10000 / 10000
+        ratio = mean_10000 / mean_10 if mean_10 > 0 else 1.0
+
+        assert ratio < 3.0, (
+            f"Scaling ratio {ratio:.2f}x suggests O(n) not O(1). "
+            f"10-op mean={mean_10*1000:.4f}ms, 10000-op mean={mean_10000*1000:.4f}ms"
+        )

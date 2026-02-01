@@ -10,16 +10,12 @@ verifying that:
 """
 
 import asyncio
-import time
 from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Any
 
-import pytest
-
 from semantic.application.scheduler import ConcurrentScheduler
 from semantic.application.shared_prefix_cache import SharedPrefixCache
-
 
 # -------------------------------------------------------------------
 # Fakes (self-contained — no MLX dependency)
@@ -264,7 +260,6 @@ class TestSharedPrefixCacheIntegration:
         cache.put(h, kv_caches=["fake_kv_state"], n_tokens=200, token_sequence=list(range(200)))
 
         entry = cache.get(h)
-        assert entry is not None
         assert entry.n_tokens == 200
         assert entry.hit_count == 1
 
@@ -288,7 +283,6 @@ class TestSharedPrefixCacheIntegration:
         # 100 agents looking up same prefix
         for i in range(100):
             entry = cache.get(h)
-            assert entry is not None
             assert entry.kv_caches == ["shared"]
 
         assert cache.get(h).hit_count == 101  # 100 + 1

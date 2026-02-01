@@ -93,7 +93,7 @@ class TestGemma3OpenAIAPI:
             choice = data["choices"][0]
             assert "message" in choice
             assert choice["message"]["role"] == "assistant"
-            assert choice["message"]["content"] is not None
+            assert isinstance(choice["message"]["content"], str)
             assert len(choice["message"]["content"]) > 0
 
             # Verify usage

@@ -1,4 +1,4 @@
-"""Integration tests for 3-tier health endpoints (Sprint 7 Day 0).
+"""Integration tests for 3-tier health endpoints.
 
 Tests verify Kubernetes-compatible health endpoints:
 - /health/live - Liveness probe (always 200)
