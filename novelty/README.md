@@ -84,16 +84,6 @@ This directory contains novelty analysis for building a **persistent multi-agent
 
 ---
 
-## Archived Materials
-
-Previous research direction (semantic KV cache isolation within single session) archived to:
-- `archive_semantic_isolation/NOVELTY.md` - Original novelty analysis
-- `archive_semantic_isolation/DEBATE_*.md` - Multi-round debates
-
-**Reason for pivot**: Single-turn agents don't benefit from semantic KV cache partitioning. Persistent multi-agent memory fills clearer gap in existing tools.
-
----
-
 ### 3. Q4 Direct Injection
 **File**: `q4_direct_injection.md`
 
@@ -123,10 +113,10 @@ Unified document tying all five techniques together around the Apple Silicon Uni
 
 ## Related Documentation
 
-- **POC Plan**: `/Users/dev_user/semantic/plans/POC_PLAN.md`
-- **Sprint Plans**: `/Users/dev_user/semantic/plans/SPRINT_*.md`
-- **Code Archive**: `/Users/dev_user/semantic/archive/semantic_isolation/`
+- **Architecture Overview**: `../ARCHITECTURE.md`
+- **Benchmark Results**: `../benchmarks/BENCHMARK_RESULTS.md`
+- **API Documentation**: `../docs/`
 
 ---
 
-**Last Updated**: January 30, 2026
+**Last Updated**: February 1, 2026
