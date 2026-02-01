@@ -44,6 +44,7 @@ data/batch_*.json
 data/*.pkl
 data/*.pickle
 models/
+!config/models/
 
 # Results - keep scripts and small configs, ignore large outputs
 results/**/*.json

@@ -1,0 +1,53 @@
+# Configuration for SmolLM2 135M (lightweight summary/classification model)
+# Model: mlx-community/SmolLM2-135M-Instruct
+# Platform: Any Apple Silicon (runs on 8GB+)
+#
+# Use case: Lightweight tasks (summarization, classification, extraction).
+# Demonstrates model hot-swap between large (16B) and small (135M) models
+# for cost-effective task routing.
+
+[model]
+model_id = "mlx-community/SmolLM2-135M-Instruct"
+
+[optimal]
+max_batch_size = 4
+prefill_step_size = 512
+kv_bits = 4
+kv_group_size = 64
+
+chunked_prefill_enabled = false
+chunked_prefill_threshold = 8192
+
+batch_window_ms = 5
+scheduler_enabled = true
+
+max_agents_in_memory = 20
+evict_to_disk = true
+
+[thresholds]
+long_context_threshold = 4000
+high_batch_threshold = 4
+memory_pressure_mb = 4000
+min_cache_benefit_ratio = 0.5
+
+[benchmark]
+# Apple Silicon M4 Pro, 24GB, MLX 0.30.5
+platform = "M4 Pro 24GB"
+date = "2026-02-01"
+
+cold_short_ttft_ms = 356
+cold_short_e2e_ms = 357
+cold_medium_ttft_ms = 466
+cold_medium_e2e_ms = 467
+
+multiturn_t1_e2e_ms = 489
+multiturn_t1_tps = 130.8
+multiturn_t2_e2e_ms = 494
+multiturn_t2_tps = 129.5
+multiturn_t3_e2e_ms = 470
+multiturn_t3_tps = 136.1
+multiturn_speedup = "1.0x"
+
+# Note: Minimal cache speedup because 135M model is so lightweight
+# that prefill overhead is negligible. Cache reuse is most valuable
+# for larger models where prefill dominates latency.

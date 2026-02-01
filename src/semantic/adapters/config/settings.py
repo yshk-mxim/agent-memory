@@ -91,10 +91,20 @@ class MLXSettings(BaseSettings):
         description="KV cache quantization group size (must be power of 2)",
     )
 
-    @field_validator("kv_bits")
+    @field_validator("kv_bits", mode="before")
     @classmethod
-    def validate_kv_bits(cls, v: int | None) -> int | None:
-        """Validate kv_bits is 4, 8, or None."""
+    def validate_kv_bits(cls, v: int | str | None) -> int | None:
+        """Validate kv_bits is 4, 8, or None (FP16).
+
+        Accepts "none" or "0" from environment variables to disable quantization.
+        """
+        if isinstance(v, str):
+            v = v.strip().lower()
+            if v in ("none", "null", "", "0"):
+                return None
+            return int(v)
+        if v == 0:
+            return None
         if v is not None and v not in (4, 8):
             raise ValueError("kv_bits must be 4, 8, or None (FP16)")
         return v

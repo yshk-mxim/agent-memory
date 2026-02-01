@@ -1,0 +1,68 @@
+# Configuration for GPT-OSS 20B (MLX community, MXFP4-Q4)
+# Model: mlx-community/gpt-oss-20b-MXFP4-Q4
+# Platform: Apple Silicon (M-series), 24GB+ recommended
+#
+# Sparse Mixture-of-Experts (MoE) model: 21B total params, ~3.6B active per token.
+# Supports configurable reasoning effort (low/medium/high) with chain-of-thought.
+# MXFP4 quantization (~11GB on disk).
+# Model memory: ~10.6GB
+#
+# NOTE: GPT-OSS uses attention sinks which are incompatible with MLX's
+# quantized SDPA kernel. The semantic server applies a runtime patch
+# (mlx_sink_compat.py) that dequantizes Q4 KV to FP16 transiently during
+# attention compute while preserving Q4 storage. See novelty/q4_attention_sink_compat.md.
+
+[model]
+model_id = "mlx-community/gpt-oss-20b-MXFP4-Q4"
+status = "compatible"
+note = "Requires mlx_sink_compat patch for Q4 KV + attention sinks"
+
+[optimal]
+max_batch_size = 1
+prefill_step_size = 256
+kv_bits = 4
+kv_group_size = 64
+
+chunked_prefill_enabled = true
+chunked_prefill_threshold = 2048
+chunked_prefill_min_chunk = 512
+chunked_prefill_max_chunk = 1024
+
+batch_window_ms = 10
+scheduler_enabled = true
+
+max_agents_in_memory = 2
+evict_to_disk = true
+
+[thresholds]
+long_context_threshold = 4000
+high_batch_threshold = 2
+memory_pressure_mb = 16000
+min_cache_benefit_ratio = 0.8
+
+[benchmark]
+# Apple Silicon M4 Pro, 24GB, MLX 0.30.5
+platform = "M4 Pro 24GB"
+date = "2026-02-01"
+
+cold_short_ttft_ms = 1280
+cold_short_e2e_ms = 1281
+cold_medium_ttft_ms = 3102
+cold_medium_e2e_ms = 3103
+
+multiturn_t1_e2e_ms = 3117
+multiturn_t1_tps = 20.5
+multiturn_t2_e2e_ms = 1437
+multiturn_t2_tps = 44.5
+multiturn_t3_e2e_ms = 1421
+multiturn_t3_tps = 45.0
+multiturn_speedup = "2.2x"
+
+thinking_256tok_e2e_ms = 3635
+thinking_256tok_tps = 70.4
+nonthinking_64tok_e2e_ms = 1083
+nonthinking_64tok_tps = 59.1
+
+model_memory_gb = 10.6
+block_pool_blocks = 82850
+block_size_mb = 0.1

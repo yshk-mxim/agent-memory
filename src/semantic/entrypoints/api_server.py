@@ -15,6 +15,8 @@ from fastapi.responses import JSONResponse
 from mlx_lm import load
 from prometheus_client import generate_latest
 
+import semantic.adapters.outbound.mlx_sink_compat  # noqa: F401, E402
+
 from semantic.adapters.config.logging import configure_logging
 from semantic.adapters.config.settings import get_settings
 from semantic.adapters.inbound.anthropic_adapter import router as anthropic_router
