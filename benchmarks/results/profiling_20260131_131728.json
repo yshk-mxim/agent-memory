@@ -1,0 +1,831 @@
+{
+  "metadata": {
+    "timestamp": "2026-01-31T21:17:28.332869+00:00",
+    "model_id": "mlx-community/DeepSeek-Coder-V2-Lite-Instruct-4bit-mlx",
+    "machine": {
+      "os": "Darwin",
+      "os_version": "25.2.0",
+      "chip": "arm64"
+    },
+    "git_sha": "68def5d",
+    "runs_per_scenario": 2,
+    "quick": true
+  },
+  "experiments": {
+    "A": {
+      "A_step256": {
+        "description": "Prefill step size = 256",
+        "env": {
+          "SEMANTIC_MLX_CHUNKED_PREFILL_ENABLED": "true",
+          "SEMANTIC_MLX_CHUNKED_PREFILL_THRESHOLD": "2048",
+          "SEMANTIC_MLX_CHUNKED_PREFILL_MIN_CHUNK": "512",
+          "SEMANTIC_MLX_CHUNKED_PREFILL_MAX_CHUNK": "4096",
+          "SEMANTIC_MLX_DEFAULT_TEMPERATURE": "0.0",
+          "SEMANTIC_MLX_KV_BITS": "4",
+          "SEMANTIC_MLX_MAX_CONTEXT_LENGTH": "100000",
+          "SEMANTIC_MLX_MAX_BATCH_SIZE": "1",
+          "SEMANTIC_MLX_SCHEDULER_ENABLED": "false",
+          "SEMANTIC_MLX_PREFILL_STEP_SIZE": "256",
+          "SEMANTIC_SERVER_LOG_LEVEL": "WARNING",
+          "SEMANTIC_API_KEY": ""
+        },
+        "scenarios": {
+          "prefill_step256_input200": {
+            "runs": [
+              {
+                "scenario": "prefill_step256_input200",
+                "config": "",
+                "ttft_ms": 897.4574169842526,
+                "e2e_ms": 898.0992920114659,
+                "itl_mean_ms": 0.0,
+                "itl_p95_ms": 0.0,
+                "itl_p99_ms": 0.0,
+                "tpot_ms": 898.0992920114659,
+                "decode_tps": 1557.9356690999243,
+                "overall_tps": 1557.9356690999243,
+                "output_tokens": 1,
+                "input_tokens": 0,
+                "cache_created": 0,
+                "cache_read": 0,
+                "memory_before_mb": 8431.1,
+                "memory_after_mb": 8448.3,
+                "peak_memory_mb": 9081.9,
+                "raw_output": " fixed size and allocated per-layer per-agent from a shared pool. When an agent's cache exceeds the hot tier capacity, the least recently used agent is evicted to disk via safetensors serialization. Subsequent requests retrieve the cache from disk and reconstruct the quantized KV blocks. This architecture supports efficient memory management",
+                "error": null
+              },
+              {
+                "scenario": "prefill_step256_input200",
+                "config": "",
+                "ttft_ms": 884.525291970931,
+                "e2e_ms": 885.2376669528894,
+                "itl_mean_ms": 0.0,
+                "itl_p95_ms": 0.0,
+                "itl_p99_ms": 0.0,
+                "tpot_ms": 885.2376669528894,
+                "decode_tps": 1403.7550802961373,
+                "overall_tps": 1403.7550802961373,
+                "output_tokens": 1,
+                "input_tokens": 0,
+                "cache_created": 0,
+                "cache_read": 0,
+                "memory_before_mb": 8431.1,
+                "memory_after_mb": 8448.3,
+                "peak_memory_mb": 9081.9,
+                "raw_output": " fixed size and allocated per-layer per-agent from a shared pool. When an agent's cache exceeds the hot tier capacity, the least recently used agent is evicted to disk via safetensors serialization. Subsequent requests retrieve the cache from disk and reconstruct the quantized KV blocks. This architecture supports efficient memory management",
+                "error": null
+              }
+            ],
+            "stats": {
+              "ttft_ms": {
+                "mean": 890.9913544775918,
+                "median": 890.9913544775918,
+                "p95": 896.8108107335865,
+                "p99": 897.3280957341194
+              },
+              "e2e_ms": {
+                "mean": 891.6684794821776,
+                "median": 891.6684794821776,
+                "p95": 897.456210758537,
+                "p99": 897.9706757608801
+              },
+              "tpot_ms": {
+                "mean": 891.6684794821776,
+                "median": 891.6684794821776,
+                "p95": 897.456210758537,
+                "p99": 897.9706757608801
+              },
+              "decode_tps": {
+                "mean": 1480.8453746980308,
+                "median": 1480.8453746980308,
+                "p95": 1550.226639659735,
+                "p99": 1556.3938632118864
+              },
+              "overall_tps": {
+                "mean": 1480.8453746980308,
+                "median": 1480.8453746980308,
+                "p95": 1550.226639659735,
+                "p99": 1556.3938632118864
+              },
+              "peak_memory_mb": {
+                "mean": 9081.9,
+                "median": 9081.9,
+                "p95": 9081.9,
+                "p99": 9081.9
+              }
+            }
+          },
+          "prefill_step256_input2000": {
+            "runs": [
+              {
+                "scenario": "prefill_step256_input2000",
+                "config": "",
+                "ttft_ms": 2313.0117089604028,
+                "e2e_ms": 2313.643166969996,
+                "itl_mean_ms": 0.0,
+                "itl_p95_ms": 0.0,
+                "itl_p99_ms": 0.0,
+                "tpot_ms": 2313.643166969996,
+                "decode_tps": 1583.6365756833793,
+                "overall_tps": 1583.6365756833793,
+                "output_tokens": 1,
+                "input_tokens": 0,
+                "cache_created": 0,
+                "cache_read": 0,
+                "memory_before_mb": 8431.1,
+                "memory_after_mb": 8543.8,
+                "peak_memory_mb": 9251.2,
+                "raw_output": " a block-based KV cache architecture where each block stores a fixed number of token key-value pairs. Blocks are allocated from a shared pool and assigned per-layer per-agent. When an agent's cache exceeds the hot tier capacity, the least recently used agent is evicted to disk via safetensors serialization",
+                "error": null
+              },
+              {
+                "scenario": "prefill_step256_input2000",
+                "config": "",
+                "ttft_ms": 2322.168333979789,
+                "e2e_ms": 2322.795166983269,
+                "itl_mean_ms": 0.0,
+                "itl_p95_ms": 0.0,
+                "itl_p99_ms": 0.0,
+                "tpot_ms": 2322.795166983269,
+                "decode_tps": 1595.321233005126,
+                "overall_tps": 1595.321233005126,
+                "output_tokens": 1,
+                "input_tokens": 0,
+                "cache_created": 0,
+                "cache_read": 0,
+                "memory_before_mb": 8431.1,
+                "memory_after_mb": 8543.8,
+                "peak_memory_mb": 9251.2,
+                "raw_output": " a block-based KV cache architecture where each block stores a fixed number of token key-value pairs. Blocks are allocated from a shared pool and assigned per-layer per-agent. When an agent's cache exceeds the hot tier capacity, the least recently used agent is evicted to disk via safetensors serialization",
+                "error": null
+              }
+            ],
+            "stats": {
+              "ttft_ms": {
+                "mean": 2317.590021470096,
+                "median": 2317.590021470096,
+                "p95": 2321.71050272882,
+                "p99": 2322.0767677295953
+              },
+              "e2e_ms": {
+                "mean": 2318.2191669766326,
+                "median": 2318.2191669766326,
+                "p95": 2322.3375669826055,
+                "p99": 2322.7036469831364
+              },
+              "tpot_ms": {
+                "mean": 2318.2191669766326,
+                "median": 2318.2191669766326,
+                "p95": 2322.3375669826055,
+                "p99": 2322.7036469831364
+              },
+              "decode_tps": {
+                "mean": 1589.4789043442527,
+                "median": 1589.4789043442527,
+                "p95": 1594.7370001390386,
+                "p99": 1595.2043864319087
+              },
+              "overall_tps": {
+                "mean": 1589.4789043442527,
+                "median": 1589.4789043442527,
+                "p95": 1594.7370001390386,
+                "p99": 1595.2043864319087
+              },
+              "peak_memory_mb": {
+                "mean": 9251.2,
+                "median": 9251.2,
+                "p95": 9251.2,
+                "p99": 9251.2
+              }
+            }
+          },
+          "prefill_step256_input8000": {
+            "runs": [
+              {
+                "scenario": "prefill_step256_input8000",
+                "config": "",
+                "ttft_ms": 8883.316499995999,
+                "e2e_ms": 8885.97058301093,
+                "itl_mean_ms": 0.0,
+                "itl_p95_ms": 0.0,
+                "itl_p99_ms": 0.0,
+                "tpot_ms": 8885.97058301093,
+                "decode_tps": 376.7779660146757,
+                "overall_tps": 376.7779660146757,
+                "output_tokens": 1,
+                "input_tokens": 0,
+                "cache_created": 0,
+                "cache_read": 0,
+                "memory_before_mb": 8431.1,
+                "memory_after_mb": 8866.4,
+                "peak_memory_mb": 10674.4,
+                "raw_output": " s a fixed number of token key-value pairs. Blocks are allocated from a shared pool and assigned per-layer per-agent. When an agent's cache exceeds the hot tier capacity, the least recently used agent is evicted to disk via safetensors serialization. On subsequent requests, the cache is loaded from",
+                "error": null
+              },
+              {
+                "scenario": "prefill_step256_input8000",
+                "config": "",
+                "ttft_ms": 8973.980249953456,
+                "e2e_ms": 8974.971707968507,
+                "itl_mean_ms": 0.0,
+                "itl_p95_ms": 0.0,
+                "itl_p99_ms": 0.0,
+                "tpot_ms": 8974.971707968507,
+                "decode_tps": 1008.6155790962301,
+                "overall_tps": 1008.6155790962301,
+                "output_tokens": 1,
+                "input_tokens": 0,
+                "cache_created": 0,
+                "cache_read": 0,
+                "memory_before_mb": 8431.1,
+                "memory_after_mb": 8866.4,
+                "peak_memory_mb": 10674.4,
+                "raw_output": " s a fixed number of token key-value pairs. Blocks are allocated from a shared pool and assigned per-layer per-agent. When an agent's cache exceeds the hot tier capacity, the least recently used agent is evicted to disk via safetensors serialization. On subsequent requests, the cache is loaded from",
+                "error": null
+              }
+            ],
+            "stats": {
+              "ttft_ms": {
+                "mean": 8928.648374974728,
+                "median": 8928.648374974728,
+                "p95": 8969.447062455583,
+                "p99": 8973.073612453882
+              },
+              "e2e_ms": {
+                "mean": 8930.471145489719,
+                "median": 8930.471145489719,
+                "p95": 8970.521651720628,
+                "p99": 8974.081696718931
+              },
+              "tpot_ms": {
+                "mean": 8930.471145489719,
+                "median": 8930.471145489719,
+                "p95": 8970.521651720628,
+                "p99": 8974.081696718931
+              },
+              "decode_tps": {
+                "mean": 692.696772555453,
+                "median": 692.696772555453,
+                "p95": 977.0236984421524,
+                "p99": 1002.2972029654146
+              },
+              "overall_tps": {
+                "mean": 692.696772555453,
+                "median": 692.696772555453,
+                "p95": 977.0236984421524,
+                "p99": 1002.2972029654146
+              },
+              "peak_memory_mb": {
+                "mean": 10674.4,
+                "median": 10674.4,
+                "p95": 10674.4,
+                "p99": 10674.4
+              }
+            }
+          }
+        }
+      },
+      "A_step512": {
+        "description": "Prefill step size = 512",
+        "env": {
+          "SEMANTIC_MLX_CHUNKED_PREFILL_ENABLED": "true",
+          "SEMANTIC_MLX_CHUNKED_PREFILL_THRESHOLD": "2048",
+          "SEMANTIC_MLX_CHUNKED_PREFILL_MIN_CHUNK": "512",
+          "SEMANTIC_MLX_CHUNKED_PREFILL_MAX_CHUNK": "4096",
+          "SEMANTIC_MLX_DEFAULT_TEMPERATURE": "0.0",
+          "SEMANTIC_MLX_KV_BITS": "4",
+          "SEMANTIC_MLX_MAX_CONTEXT_LENGTH": "100000",
+          "SEMANTIC_MLX_MAX_BATCH_SIZE": "1",
+          "SEMANTIC_MLX_SCHEDULER_ENABLED": "false",
+          "SEMANTIC_MLX_PREFILL_STEP_SIZE": "512",
+          "SEMANTIC_SERVER_LOG_LEVEL": "WARNING",
+          "SEMANTIC_API_KEY": ""
+        },
+        "scenarios": {
+          "prefill_step512_input200": {
+            "runs": [
+              {
+                "scenario": "prefill_step512_input200",
+                "config": "",
+                "ttft_ms": 894.3564160144888,
+                "e2e_ms": 895.0539579964243,
+                "itl_mean_ms": 0.0,
+                "itl_p95_ms": 0.0,
+                "itl_p99_ms": 0.0,
+                "tpot_ms": 895.0539579964243,
+                "decode_tps": 1433.6054687708618,
+                "overall_tps": 1433.6054687708618,
+                "output_tokens": 1,
+                "input_tokens": 0,
+                "cache_created": 0,
+                "cache_read": 0,
+                "memory_before_mb": 8431.1,
+                "memory_after_mb": 8448.3,
+                "peak_memory_mb": 9081.9,
+                "raw_output": " fixed size and allocated per-layer per-agent from a shared pool. When an agent's cache exceeds the hot tier capacity, the least recently used agent is evicted to disk via safetensors serialization. Subsequent requests retrieve the cache from disk and reconstruct the quantized KV blocks. This architecture supports efficient memory management",
+                "error": null
+              },
+              {
+                "scenario": "prefill_step512_input200",
+                "config": "",
+                "ttft_ms": 871.5986249735579,
+                "e2e_ms": 872.2641249769367,
+                "itl_mean_ms": 0.0,
+                "itl_p95_ms": 0.0,
+                "itl_p99_ms": 0.0,
+                "tpot_ms": 872.2641249769367,
+                "decode_tps": 1502.629594174091,
+                "overall_tps": 1502.629594174091,
+                "output_tokens": 1,
+                "input_tokens": 0,
+                "cache_created": 0,
+                "cache_read": 0,
+                "memory_before_mb": 8431.1,
+                "memory_after_mb": 8448.3,
+                "peak_memory_mb": 9081.9,
+                "raw_output": " fixed size and allocated per-layer per-agent from a shared pool. When an agent's cache exceeds the hot tier capacity, the least recently used agent is evicted to disk via safetensors serialization. Subsequent requests retrieve the cache from disk and reconstruct the quantized KV blocks. This architecture supports efficient memory management",
+                "error": null
+              }
+            ],
+            "stats": {
+              "ttft_ms": {
+                "mean": 882.9775204940233,
+                "median": 882.9775204940233,
+                "p95": 893.2185264624422,
+                "p99": 894.1288381040795
+              },
+              "e2e_ms": {
+                "mean": 883.6590414866805,
+                "median": 883.6590414866805,
+                "p95": 893.9144663454499,
+                "p99": 894.8260596662294
+              },
+              "tpot_ms": {
+                "mean": 883.6590414866805,
+                "median": 883.6590414866805,
+                "p95": 893.9144663454499,
+                "p99": 894.8260596662294
+              },
+              "decode_tps": {
+                "mean": 1468.1175314724765,
+                "median": 1468.1175314724765,
+                "p95": 1499.1783879039294,
+                "p99": 1501.9393529200586
+              },
+              "overall_tps": {
+                "mean": 1468.1175314724765,
+                "median": 1468.1175314724765,
+                "p95": 1499.1783879039294,
+                "p99": 1501.9393529200586
+              },
+              "peak_memory_mb": {
+                "mean": 9081.9,
+                "median": 9081.9,
+                "p95": 9081.9,
+                "p99": 9081.9
+              }
+            }
+          },
+          "prefill_step512_input2000": {
+            "runs": [
+              {
+                "scenario": "prefill_step512_input2000",
+                "config": "",
+                "ttft_ms": 2297.3685420001857,
+                "e2e_ms": 2297.8814999805763,
+                "itl_mean_ms": 0.0,
+                "itl_p95_ms": 0.0,
+                "itl_p99_ms": 0.0,
+                "tpot_ms": 2297.8814999805763,
+                "decode_tps": 1949.4774196484084,
+                "overall_tps": 1949.4774196484084,
+                "output_tokens": 1,
+                "input_tokens": 0,
+                "cache_created": 0,
+                "cache_read": 0,
+                "memory_before_mb": 8431.1,
+                "memory_after_mb": 8543.8,
+                "peak_memory_mb": 9251.2,
+                "raw_output": " a block-based KV cache architecture where each block stores a fixed number of token key-value pairs. Blocks are allocated from a shared pool and assigned per-layer per-agent. When an agent's cache exceeds the hot tier capacity, the least recently used agent is evicted to disk via safetensors serialization",
+                "error": null
+              },
+              {
+                "scenario": "prefill_step512_input2000",
+                "config": "",
+                "ttft_ms": 2332.115665951278,
+                "e2e_ms": 2332.7057079877704,
+                "itl_mean_ms": 0.0,
+                "itl_p95_ms": 0.0,
+                "itl_p99_ms": 0.0,
+                "tpot_ms": 2332.7057079877704,
+                "decode_tps": 1694.7945030233766,
+                "overall_tps": 1694.7945030233766,
+                "output_tokens": 1,
+                "input_tokens": 0,
+                "cache_created": 0,
+                "cache_read": 0,
+                "memory_before_mb": 8431.1,
+                "memory_after_mb": 8543.8,
+                "peak_memory_mb": 9251.2,
+                "raw_output": " a block-based KV cache architecture where each block stores a fixed number of token key-value pairs. Blocks are allocated from a shared pool and assigned per-layer per-agent. When an agent's cache exceeds the hot tier capacity, the least recently used agent is evicted to disk via safetensors serialization",
+                "error": null
+              }
+            ],
+            "stats": {
+              "ttft_ms": {
+                "mean": 2314.742103975732,
+                "median": 2314.742103975732,
+                "p95": 2330.3783097537234,
+                "p99": 2331.768194711767
+              },
+              "e2e_ms": {
+                "mean": 2315.2936039841734,
+                "median": 2315.2936039841734,
+                "p95": 2330.9644975874107,
+                "p99": 2332.3574659076985
+              },
+              "tpot_ms": {
+                "mean": 2315.2936039841734,
+                "median": 2315.2936039841734,
+                "p95": 2330.9644975874107,
+                "p99": 2332.3574659076985
+              },
+              "decode_tps": {
+                "mean": 1822.1359613358925,
+                "median": 1822.1359613358925,
+                "p95": 1936.7432738171567,
+                "p99": 1946.930590482158
+              },
+              "overall_tps": {
+                "mean": 1822.1359613358925,
+                "median": 1822.1359613358925,
+                "p95": 1936.7432738171567,
+                "p99": 1946.930590482158
+              },
+              "peak_memory_mb": {
+                "mean": 9251.2,
+                "median": 9251.2,
+                "p95": 9251.2,
+                "p99": 9251.2
+              }
+            }
+          },
+          "prefill_step512_input8000": {
+            "runs": [
+              {
+                "scenario": "prefill_step512_input8000",
+                "config": "",
+                "ttft_ms": 8891.559625044465,
+                "e2e_ms": 8892.182500043418,
+                "itl_mean_ms": 0.0,
+                "itl_p95_ms": 0.0,
+                "itl_p99_ms": 0.0,
+                "tpot_ms": 8892.182500043418,
+                "decode_tps": 1605.4585617990842,
+                "overall_tps": 1605.4585617990842,
+                "output_tokens": 1,
+                "input_tokens": 0,
+                "cache_created": 0,
+                "cache_read": 0,
+                "memory_before_mb": 8431.1,
+                "memory_after_mb": 8866.4,
+                "peak_memory_mb": 10674.4,
+                "raw_output": " s a fixed number of token key-value pairs. Blocks are allocated from a shared pool and assigned per-layer per-agent. When an agent's cache exceeds the hot tier capacity, the least recently used agent is evicted to disk via safetensors serialization. On subsequent requests, the cache is loaded from",
+                "error": null
+              },
+              {
+                "scenario": "prefill_step512_input8000",
+                "config": "",
+                "ttft_ms": 9027.042749978136,
+                "e2e_ms": 9027.671790972818,
+                "itl_mean_ms": 0.0,
+                "itl_p95_ms": 0.0,
+                "itl_p99_ms": 0.0,
+                "tpot_ms": 9027.671790972818,
+                "decode_tps": 1589.7215101321922,
+                "overall_tps": 1589.7215101321922,
+                "output_tokens": 1,
+                "input_tokens": 0,
+                "cache_created": 0,
+                "cache_read": 0,
+                "memory_before_mb": 8431.1,
+                "memory_after_mb": 8866.4,
+                "peak_memory_mb": 10674.4,
+                "raw_output": " s a fixed number of token key-value pairs. Blocks are allocated from a shared pool and assigned per-layer per-agent. When an agent's cache exceeds the hot tier capacity, the least recently used agent is evicted to disk via safetensors serialization. On subsequent requests, the cache is loaded from",
+                "error": null
+              }
+            ],
+            "stats": {
+              "ttft_ms": {
+                "mean": 8959.3011875113,
+                "median": 8959.3011875113,
+                "p95": 9020.268593731453,
+                "p99": 9025.6879187288
+              },
+              "e2e_ms": {
+                "mean": 8959.927145508118,
+                "median": 8959.927145508118,
+                "p95": 9020.897326426348,
+                "p99": 9026.316898063524
+              },
+              "tpot_ms": {
+                "mean": 8959.927145508118,
+                "median": 8959.927145508118,
+                "p95": 9020.897326426348,
+                "p99": 9026.316898063524
+              },
+              "decode_tps": {
+                "mean": 1597.5900359656382,
+                "median": 1597.5900359656382,
+                "p95": 1604.6717092157396,
+                "p99": 1605.3011912824154
+              },
+              "overall_tps": {
+                "mean": 1597.5900359656382,
+                "median": 1597.5900359656382,
+                "p95": 1604.6717092157396,
+                "p99": 1605.3011912824154
+              },
+              "peak_memory_mb": {
+                "mean": 10674.4,
+                "median": 10674.4,
+                "p95": 10674.4,
+                "p99": 10674.4
+              }
+            }
+          }
+        }
+      },
+      "A_step1024": {
+        "description": "Prefill step size = 1024",
+        "env": {
+          "SEMANTIC_MLX_CHUNKED_PREFILL_ENABLED": "true",
+          "SEMANTIC_MLX_CHUNKED_PREFILL_THRESHOLD": "2048",
+          "SEMANTIC_MLX_CHUNKED_PREFILL_MIN_CHUNK": "512",
+          "SEMANTIC_MLX_CHUNKED_PREFILL_MAX_CHUNK": "4096",
+          "SEMANTIC_MLX_DEFAULT_TEMPERATURE": "0.0",
+          "SEMANTIC_MLX_KV_BITS": "4",
+          "SEMANTIC_MLX_MAX_CONTEXT_LENGTH": "100000",
+          "SEMANTIC_MLX_MAX_BATCH_SIZE": "1",
+          "SEMANTIC_MLX_SCHEDULER_ENABLED": "false",
+          "SEMANTIC_MLX_PREFILL_STEP_SIZE": "1024",
+          "SEMANTIC_SERVER_LOG_LEVEL": "WARNING",
+          "SEMANTIC_API_KEY": ""
+        },
+        "scenarios": {
+          "prefill_step1024_input200": {
+            "runs": [
+              {
+                "scenario": "prefill_step1024_input200",
+                "config": "",
+                "ttft_ms": 1022.3129580263048,
+                "e2e_ms": 1022.9396250215359,
+                "itl_mean_ms": 0.0,
+                "itl_p95_ms": 0.0,
+                "itl_p99_ms": 0.0,
+                "tpot_ms": 1022.9396250215359,
+                "decode_tps": 1595.7438441947688,
+                "overall_tps": 1595.7438441947688,
+                "output_tokens": 1,
+                "input_tokens": 0,
+                "cache_created": 0,
+                "cache_read": 0,
+                "memory_before_mb": 8431.1,
+                "memory_after_mb": 8448.3,
+                "peak_memory_mb": 9081.9,
+                "raw_output": " fixed size and allocated per-layer per-agent from a shared pool. When an agent's cache exceeds the hot tier capacity, the least recently used agent is evicted to disk via safetensors serialization. Subsequent requests retrieve the cache from disk and reconstruct the quantized KV blocks. This architecture supports efficient memory management",
+                "error": null
+              },
+              {
+                "scenario": "prefill_step1024_input200",
+                "config": "",
+                "ttft_ms": 877.5222500553355,
+                "e2e_ms": 878.2808750402182,
+                "itl_mean_ms": 0.0,
+                "itl_p95_ms": 0.0,
+                "itl_p99_ms": 0.0,
+                "tpot_ms": 878.2808750402182,
+                "decode_tps": 1318.1743548223988,
+                "overall_tps": 1318.1743548223988,
+                "output_tokens": 1,
+                "input_tokens": 0,
+                "cache_created": 0,
+                "cache_read": 0,
+                "memory_before_mb": 8431.1,
+                "memory_after_mb": 8448.3,
+                "peak_memory_mb": 9081.9,
+                "raw_output": " fixed size and allocated per-layer per-agent from a shared pool. When an agent's cache exceeds the hot tier capacity, the least recently used agent is evicted to disk via safetensors serialization. Subsequent requests retrieve the cache from disk and reconstruct the quantized KV blocks. This architecture supports efficient memory management",
+                "error": null
+              }
+            ],
+            "stats": {
+              "ttft_ms": {
+                "mean": 949.9176040408202,
+                "median": 949.9176040408202,
+                "p95": 1015.0734226277564,
+                "p99": 1020.8650509465951
+              },
+              "e2e_ms": {
+                "mean": 950.6102500308771,
+                "median": 950.6102500308771,
+                "p95": 1015.70668752247,
+                "p99": 1021.4930375217227
+              },
+              "tpot_ms": {
+                "mean": 950.6102500308771,
+                "median": 950.6102500308771,
+                "p95": 1015.70668752247,
+                "p99": 1021.4930375217227
+              },
+              "decode_tps": {
+                "mean": 1456.9590995085837,
+                "median": 1456.9590995085837,
+                "p95": 1581.8653697261502,
+                "p99": 1592.968149301045
+              },
+              "overall_tps": {
+                "mean": 1456.9590995085837,
+                "median": 1456.9590995085837,
+                "p95": 1581.8653697261502,
+                "p99": 1592.968149301045
+              },
+              "peak_memory_mb": {
+                "mean": 9081.9,
+                "median": 9081.9,
+                "p95": 9081.9,
+                "p99": 9081.9
+              }
+            }
+          },
+          "prefill_step1024_input2000": {
+            "runs": [
+              {
+                "scenario": "prefill_step1024_input2000",
+                "config": "",
+                "ttft_ms": 2317.325707990676,
+                "e2e_ms": 2317.9549579508603,
+                "itl_mean_ms": 0.0,
+                "itl_p95_ms": 0.0,
+                "itl_p99_ms": 0.0,
+                "tpot_ms": 2317.9549579508603,
+                "decode_tps": 1589.1935848632136,
+                "overall_tps": 1589.1935848632136,
+                "output_tokens": 1,
+                "input_tokens": 0,
+                "cache_created": 0,
+                "cache_read": 0,
+                "memory_before_mb": 8431.1,
+                "memory_after_mb": 8543.8,
+                "peak_memory_mb": 9251.2,
+                "raw_output": " a block-based KV cache architecture where each block stores a fixed number of token key-value pairs. Blocks are allocated from a shared pool and assigned per-layer per-agent. When an agent's cache exceeds the hot tier capacity, the least recently used agent is evicted to disk via safetensors serialization",
+                "error": null
+              },
+              {
+                "scenario": "prefill_step1024_input2000",
+                "config": "",
+                "ttft_ms": 2345.313999976497,
+                "e2e_ms": 2345.906374976039,
+                "itl_mean_ms": 0.0,
+                "itl_p95_ms": 0.0,
+                "itl_p99_ms": 0.0,
+                "tpot_ms": 2345.906374976039,
+                "decode_tps": 1688.1198578155975,
+                "overall_tps": 1688.1198578155975,
+                "output_tokens": 1,
+                "input_tokens": 0,
+                "cache_created": 0,
+                "cache_read": 0,
+                "memory_before_mb": 8431.1,
+                "memory_after_mb": 8543.8,
+                "peak_memory_mb": 9251.5,
+                "raw_output": " a block-based KV cache architecture where each block stores a fixed number of token key-value pairs. Blocks are allocated from a shared pool and assigned per-layer per-agent. When an agent's cache exceeds the hot tier capacity, the least recently used agent is evicted to disk via safetensors serialization",
+                "error": null
+              }
+            ],
+            "stats": {
+              "ttft_ms": {
+                "mean": 2331.3198539835867,
+                "median": 2331.3198539835867,
+                "p95": 2343.914585377206,
+                "p99": 2345.034117056639
+              },
+              "e2e_ms": {
+                "mean": 2331.9306664634496,
+                "median": 2331.9306664634496,
+                "p95": 2344.50880412478,
+                "p99": 2345.626860805787
+              },
+              "tpot_ms": {
+                "mean": 2331.9306664634496,
+                "median": 2331.9306664634496,
+                "p95": 2344.50880412478,
+                "p99": 2345.626860805787
+              },
+              "decode_tps": {
+                "mean": 1638.6567213394055,
+                "median": 1638.6567213394055,
+                "p95": 1683.1735441679782,
+                "p99": 1687.1305950860735
+              },
+              "overall_tps": {
+                "mean": 1638.6567213394055,
+                "median": 1638.6567213394055,
+                "p95": 1683.1735441679782,
+                "p99": 1687.1305950860735
+              },
+              "peak_memory_mb": {
+                "mean": 9251.35,
+                "median": 9251.35,
+                "p95": 9251.485,
+                "p99": 9251.497000000001
+              }
+            }
+          },
+          "prefill_step1024_input8000": {
+            "runs": [
+              {
+                "scenario": "prefill_step1024_input8000",
+                "config": "",
+                "ttft_ms": 8911.561875022016,
+                "e2e_ms": 8912.306208047085,
+                "itl_mean_ms": 0.0,
+                "itl_p95_ms": 0.0,
+                "itl_p99_ms": 0.0,
+                "tpot_ms": 8912.306208047085,
+                "decode_tps": 1343.484658508311,
+                "overall_tps": 1343.484658508311,
+                "output_tokens": 1,
+                "input_tokens": 0,
+                "cache_created": 0,
+                "cache_read": 0,
+                "memory_before_mb": 8431.1,
+                "memory_after_mb": 8866.4,
+                "peak_memory_mb": 10674.4,
+                "raw_output": " s a fixed number of token key-value pairs. Blocks are allocated from a shared pool and assigned per-layer per-agent. When an agent's cache exceeds the hot tier capacity, the least recently used agent is evicted to disk via safetensors serialization. On subsequent requests, the cache is loaded from",
+                "error": null
+              },
+              {
+                "scenario": "prefill_step1024_input8000",
+                "config": "",
+                "ttft_ms": 8923.498957999982,
+                "e2e_ms": 8924.398833012674,
+                "itl_mean_ms": 0.0,
+                "itl_p95_ms": 0.0,
+                "itl_p99_ms": 0.0,
+                "tpot_ms": 8924.398833012674,
+                "decode_tps": 1111.265437861645,
+                "overall_tps": 1111.265437861645,
+                "output_tokens": 1,
+                "input_tokens": 0,
+                "cache_created": 0,
+                "cache_read": 0,
+                "memory_before_mb": 8431.1,
+                "memory_after_mb": 8866.4,
+                "peak_memory_mb": 10674.4,
+                "raw_output": " s a fixed number of token key-value pairs. Blocks are allocated from a shared pool and assigned per-layer per-agent. When an agent's cache exceeds the hot tier capacity, the least recently used agent is evicted to disk via safetensors serialization. On subsequent requests, the cache is loaded from",
+                "error": null
+              }
+            ],
+            "stats": {
+              "ttft_ms": {
+                "mean": 8917.530416511,
+                "median": 8917.530416511,
+                "p95": 8922.902103851084,
+                "p99": 8923.379587170202
+              },
+              "e2e_ms": {
+                "mean": 8918.35252052988,
+                "median": 8918.35252052988,
+                "p95": 8923.794201764395,
+                "p99": 8924.277906763018
+              },
+              "tpot_ms": {
+                "mean": 8918.35252052988,
+                "median": 8918.35252052988,
+                "p95": 8923.794201764395,
+                "p99": 8924.277906763018
+              },
+              "decode_tps": {
+                "mean": 1227.375048184978,
+                "median": 1227.375048184978,
+                "p95": 1331.8736974759777,
+                "p99": 1341.1624663018445
+              },
+              "overall_tps": {
+                "mean": 1227.375048184978,
+                "median": 1227.375048184978,
+                "p95": 1331.8736974759777,
+                "p99": 1341.1624663018445
+              },
+              "peak_memory_mb": {
+                "mean": 10674.4,
+                "median": 10674.4,
+                "p95": 10674.4,
+                "p99": 10674.4
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

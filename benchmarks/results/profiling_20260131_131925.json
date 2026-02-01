@@ -1,0 +1,327 @@
+{
+  "metadata": {
+    "timestamp": "2026-01-31T21:19:25.797837+00:00",
+    "model_id": "mlx-community/DeepSeek-Coder-V2-Lite-Instruct-4bit-mlx",
+    "machine": {
+      "os": "Darwin",
+      "os_version": "25.2.0",
+      "chip": "arm64"
+    },
+    "git_sha": "68def5d",
+    "runs_per_scenario": 2,
+    "quick": true
+  },
+  "experiments": {
+    "C": {
+      "C_batch1": {
+        "description": "Batch size = 1",
+        "env": {
+          "SEMANTIC_MLX_CHUNKED_PREFILL_ENABLED": "true",
+          "SEMANTIC_MLX_CHUNKED_PREFILL_THRESHOLD": "2048",
+          "SEMANTIC_MLX_CHUNKED_PREFILL_MIN_CHUNK": "512",
+          "SEMANTIC_MLX_CHUNKED_PREFILL_MAX_CHUNK": "4096",
+          "SEMANTIC_MLX_DEFAULT_TEMPERATURE": "0.0",
+          "SEMANTIC_MLX_KV_BITS": "4",
+          "SEMANTIC_MLX_MAX_CONTEXT_LENGTH": "100000",
+          "SEMANTIC_MLX_MAX_BATCH_SIZE": "1",
+          "SEMANTIC_MLX_SCHEDULER_ENABLED": "false",
+          "SEMANTIC_MLX_PREFILL_STEP_SIZE": "256",
+          "SEMANTIC_SERVER_LOG_LEVEL": "WARNING",
+          "SEMANTIC_API_KEY": ""
+        },
+        "scenarios": {
+          "batch1_input1000": {
+            "runs": [
+              {
+                "scenario": "batch1_input1000",
+                "config": "",
+                "ttft_ms": 1660.7401670189574,
+                "e2e_ms": 1661.4051249925978,
+                "itl_mean_ms": 0.0,
+                "itl_p95_ms": 0.0,
+                "itl_p99_ms": 0.0,
+                "tpot_ms": 1661.4051249925978,
+                "decode_tps": 1503.854438387061,
+                "overall_tps": 1503.854438387061,
+                "output_tokens": 1,
+                "input_tokens": 0,
+                "cache_created": 0,
+                "cache_read": 0,
+                "memory_before_mb": 8431.1,
+                "memory_after_mb": 8491.4,
+                "peak_memory_mb": 9082.6,
+                "raw_output": " implements a block-based KV cache architecture where each block stores a fixed number of token key-value pairs. Blocks are allocated from a shared pool and assigned per-layer per-agent. When an agent's cache exceeds the hot tier capacity, the least recently used agent is evicted to disk via safetensors",
+                "error": null
+              },
+              {
+                "scenario": "batch1_input1000",
+                "config": "",
+                "ttft_ms": 1528.0780000030063,
+                "e2e_ms": 1528.9546659914777,
+                "itl_mean_ms": 0.0,
+                "itl_p95_ms": 0.0,
+                "itl_p99_ms": 0.0,
+                "tpot_ms": 1528.9546659914777,
+                "decode_tps": 1140.6852930883042,
+                "overall_tps": 1140.6852930883042,
+                "output_tokens": 1,
+                "input_tokens": 0,
+                "cache_created": 0,
+                "cache_read": 0,
+                "memory_before_mb": 8431.1,
+                "memory_after_mb": 8491.4,
+                "peak_memory_mb": 9082.6,
+                "raw_output": " implements a block-based KV cache architecture where each block stores a fixed number of token key-value pairs. Blocks are allocated from a shared pool and assigned per-layer per-agent. When an agent's cache exceeds the hot tier capacity, the least recently used agent is evicted to disk via safetensors",
+                "error": null
+              }
+            ],
+            "stats": {
+              "ttft_ms": {
+                "mean": 1594.4090835109819,
+                "median": 1594.4090835109819,
+                "p95": 1654.1070586681599,
+                "p99": 1659.413545348798
+              },
+              "e2e_ms": {
+                "mean": 1595.1798954920378,
+                "median": 1595.1798954920378,
+                "p95": 1654.7826020425418,
+                "p99": 1660.0806204025866
+              },
+              "tpot_ms": {
+                "mean": 1595.1798954920378,
+                "median": 1595.1798954920378,
+                "p95": 1654.7826020425418,
+                "p99": 1660.0806204025866
+              },
+              "decode_tps": {
+                "mean": 1322.2698657376827,
+                "median": 1322.2698657376827,
+                "p95": 1485.6959811221232,
+                "p99": 1500.2227469340735
+              },
+              "overall_tps": {
+                "mean": 1322.2698657376827,
+                "median": 1322.2698657376827,
+                "p95": 1485.6959811221232,
+                "p99": 1500.2227469340735
+              },
+              "peak_memory_mb": {
+                "mean": 9082.6,
+                "median": 9082.6,
+                "p95": 9082.6,
+                "p99": 9082.6
+              }
+            }
+          }
+        }
+      },
+      "C_batch2": {
+        "description": "Batch size = 2",
+        "env": {
+          "SEMANTIC_MLX_CHUNKED_PREFILL_ENABLED": "true",
+          "SEMANTIC_MLX_CHUNKED_PREFILL_THRESHOLD": "2048",
+          "SEMANTIC_MLX_CHUNKED_PREFILL_MIN_CHUNK": "512",
+          "SEMANTIC_MLX_CHUNKED_PREFILL_MAX_CHUNK": "4096",
+          "SEMANTIC_MLX_DEFAULT_TEMPERATURE": "0.0",
+          "SEMANTIC_MLX_KV_BITS": "4",
+          "SEMANTIC_MLX_MAX_CONTEXT_LENGTH": "100000",
+          "SEMANTIC_MLX_MAX_BATCH_SIZE": "2",
+          "SEMANTIC_MLX_SCHEDULER_ENABLED": "true",
+          "SEMANTIC_MLX_PREFILL_STEP_SIZE": "256",
+          "SEMANTIC_SERVER_LOG_LEVEL": "WARNING",
+          "SEMANTIC_API_KEY": ""
+        },
+        "scenarios": {
+          "batch2_input1000": {
+            "runs": [
+              {
+                "scenario": "batch2_input1000",
+                "config": "",
+                "ttft_ms": 1694.6342089795507,
+                "e2e_ms": 2774.2105840006843,
+                "itl_mean_ms": 0.0,
+                "itl_p95_ms": 0.0,
+                "itl_p99_ms": 0.0,
+                "tpot_ms": 43.345270187273854,
+                "decode_tps": 59.28873437874271,
+                "overall_tps": 46.13925155436882,
+                "output_tokens": 64,
+                "input_tokens": 0,
+                "cache_created": 0,
+                "cache_read": 0,
+                "memory_before_mb": 8431.1,
+                "memory_after_mb": 8431.1,
+                "peak_memory_mb": 9281.6,
+                "raw_output": "implements a block-based KV cache architecture where each block stores a fixed number of token key-value pairs. Blocks are allocated from a shared pool and assigned per-layer per-agent. When an agent's cache exceeds the hot tier capacity, the least recently used agent is evicted to disk via safettensors",
+                "error": null
+              },
+              {
+                "scenario": "batch2_input1000",
+                "config": "",
+                "ttft_ms": 1552.0780840306543,
+                "e2e_ms": 2625.5468750023283,
+                "itl_mean_ms": 0.0,
+                "itl_p95_ms": 0.0,
+                "itl_p99_ms": 0.0,
+                "tpot_ms": 41.02308854726289,
+                "decode_tps": 59.62364902497598,
+                "overall_tps": 48.75174814766409,
+                "output_tokens": 64,
+                "input_tokens": 0,
+                "cache_created": 0,
+                "cache_read": 0,
+                "memory_before_mb": 8431.1,
+                "memory_after_mb": 8431.1,
+                "peak_memory_mb": 9281.9,
+                "raw_output": "implements a block-based KV cache architecture where each block stores a fixed number of token key-value pairs. Blocks are allocated from a shared pool and assigned per-layer per-agent. When an agent's cache exceeds the hot tier capacity, the least recently used agent is evicted to disk via safettensors",
+                "error": null
+              }
+            ],
+            "stats": {
+              "ttft_ms": {
+                "mean": 1623.3561465051025,
+                "median": 1623.3561465051025,
+                "p95": 1687.506402732106,
+                "p99": 1693.2086477300618
+              },
+              "e2e_ms": {
+                "mean": 2699.8787295015063,
+                "median": 2699.8787295015063,
+                "p95": 2766.7773985507665,
+                "p99": 2772.7239469107008
+              },
+              "tpot_ms": {
+                "mean": 42.18417936726837,
+                "median": 42.18417936726837,
+                "p95": 43.229161105273306,
+                "p99": 43.322048370873745
+              },
+              "decode_tps": {
+                "mean": 59.456191701859346,
+                "median": 59.456191701859346,
+                "p95": 59.60690329266432,
+                "p99": 59.62029987851365
+              },
+              "overall_tps": {
+                "mean": 47.44549985101645,
+                "median": 47.44549985101645,
+                "p95": 48.62112331799933,
+                "p99": 48.72562318173113
+              },
+              "peak_memory_mb": {
+                "mean": 9281.75,
+                "median": 9281.75,
+                "p95": 9281.884999999998,
+                "p99": 9281.897
+              }
+            }
+          }
+        }
+      },
+      "C_batch3": {
+        "description": "Batch size = 3",
+        "env": {
+          "SEMANTIC_MLX_CHUNKED_PREFILL_ENABLED": "true",
+          "SEMANTIC_MLX_CHUNKED_PREFILL_THRESHOLD": "2048",
+          "SEMANTIC_MLX_CHUNKED_PREFILL_MIN_CHUNK": "512",
+          "SEMANTIC_MLX_CHUNKED_PREFILL_MAX_CHUNK": "4096",
+          "SEMANTIC_MLX_DEFAULT_TEMPERATURE": "0.0",
+          "SEMANTIC_MLX_KV_BITS": "4",
+          "SEMANTIC_MLX_MAX_CONTEXT_LENGTH": "100000",
+          "SEMANTIC_MLX_MAX_BATCH_SIZE": "3",
+          "SEMANTIC_MLX_SCHEDULER_ENABLED": "true",
+          "SEMANTIC_MLX_PREFILL_STEP_SIZE": "256",
+          "SEMANTIC_SERVER_LOG_LEVEL": "WARNING",
+          "SEMANTIC_API_KEY": ""
+        },
+        "scenarios": {
+          "batch3_input1000": {
+            "runs": [
+              {
+                "scenario": "batch3_input1000",
+                "config": "",
+                "ttft_ms": 3170.3203750075772,
+                "e2e_ms": 4638.536250044126,
+                "itl_mean_ms": 0.0,
+                "itl_p95_ms": 0.0,
+                "itl_p99_ms": 0.0,
+                "tpot_ms": 72.47339973400813,
+                "decode_tps": 43.59740713450778,
+                "overall_tps": 41.39236812004509,
+                "output_tokens": 64,
+                "input_tokens": 0,
+                "cache_created": 0,
+                "cache_read": 0,
+                "memory_before_mb": 8431.1,
+                "memory_after_mb": 8431.1,
+                "peak_memory_mb": 9455.3,
+                "raw_output": "implements a block-based KV cache architecture where each block stores a fixed number of token key-value pairs. Blocks are allocated from a shared pool and assigned per-layer per-agent. When an agent's cache exceeds the hot tier capacity, the least recently used agent is evicted to disk via safettensors",
+                "error": null
+              },
+              {
+                "scenario": "batch3_input1000",
+                "config": "",
+                "ttft_ms": 2271.4646250242367,
+                "e2e_ms": 3746.9333749613725,
+                "itl_mean_ms": 0.0,
+                "itl_p95_ms": 0.0,
+                "itl_p99_ms": 0.0,
+                "tpot_ms": 58.54299087513937,
+                "decode_tps": 43.381395665640774,
+                "overall_tps": 51.24190392149136,
+                "output_tokens": 64,
+                "input_tokens": 0,
+                "cache_created": 0,
+                "cache_read": 0,
+                "memory_before_mb": 8431.1,
+                "memory_after_mb": 8431.1,
+                "peak_memory_mb": 9455.3,
+                "raw_output": "implements a block-based KV cache architecture where each block stores a fixed number of token key-value pairs. Blocks are allocated from a shared pool and assigned per-layer per-agent. When an agent's cache exceeds the hot tier capacity, the least recently used agent is evicted to disk via safettensors",
+                "error": null
+              }
+            ],
+            "stats": {
+              "ttft_ms": {
+                "mean": 2720.892500015907,
+                "median": 2720.892500015907,
+                "p95": 3125.37758750841,
+                "p99": 3161.331817507744
+              },
+              "e2e_ms": {
+                "mean": 4192.734812502749,
+                "median": 4192.734812502749,
+                "p95": 4593.956106289988,
+                "p99": 4629.6202212932985
+              },
+              "tpot_ms": {
+                "mean": 65.50819530457375,
+                "median": 65.50819530457375,
+                "p95": 71.77687929106469,
+                "p99": 72.33409564541944
+              },
+              "decode_tps": {
+                "mean": 43.48940140007428,
+                "median": 43.48940140007428,
+                "p95": 43.586606561064436,
+                "p99": 43.59524701981911
+              },
+              "overall_tps": {
+                "mean": 46.317136020768224,
+                "median": 46.317136020768224,
+                "p95": 50.74942713141904,
+                "p99": 51.143408563476896
+              },
+              "peak_memory_mb": {
+                "mean": 9455.3,
+                "median": 9455.3,
+                "p95": 9455.3,
+                "p99": 9455.3
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

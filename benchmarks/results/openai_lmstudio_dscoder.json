@@ -1,0 +1,453 @@
+{
+  "metadata": {
+    "timestamp": "2026-02-01T00:01:33.704069+00:00",
+    "server": "lmstudio_dscoder",
+    "base_url": "http://127.0.0.1:1234",
+    "context_mode": "full",
+    "api": "openai",
+    "endpoint": "/v1/chat/completions",
+    "machine": {
+      "os": "Darwin",
+      "os_version": "25.2.0",
+      "chip": "arm64"
+    },
+    "git_sha": "d1035c5",
+    "runs_per_scenario": 1,
+    "quick": false
+  },
+  "experiments": {
+    "1_cold_start": {
+      "cold_short": {
+        "runs": [
+          {
+            "scenario": "cold_short",
+            "config": "lmstudio_dscoder",
+            "ttft_ms": 273.64695799769834,
+            "e2e_ms": 761.1978329950944,
+            "itl_mean_ms": 0.0,
+            "itl_p95_ms": 0.0,
+            "itl_p99_ms": 0.0,
+            "tpot_ms": 7.7389027777364445,
+            "decode_tps": 129.21728424820586,
+            "overall_tps": 129.21728424820586,
+            "output_tokens": 63,
+            "input_tokens": 0,
+            "cache_created": 0,
+            "cache_read": 0,
+            "memory_before_mb": 0.0,
+            "memory_after_mb": 0.0,
+            "peak_memory_mb": 0,
+            "raw_output": "The system's block-based KV (Key-Value) cache architecture is designed to efficiently manage memory usage by storing data in fixed-size blocks. Each block contains a specific number of token key-value pairs, which are used to store and retrieve data during the execution of a model. These blocks are allocated",
+            "error": null
+          }
+        ],
+        "stats": {
+          "ttft_ms": {
+            "mean": 273.64695799769834,
+            "median": 273.64695799769834,
+            "p95": 273.64695799769834,
+            "p99": 273.64695799769834
+          },
+          "e2e_ms": {
+            "mean": 761.1978329950944,
+            "median": 761.1978329950944,
+            "p95": 761.1978329950944,
+            "p99": 761.1978329950944
+          },
+          "decode_tps": {
+            "mean": 129.21728424820586,
+            "median": 129.21728424820586,
+            "p95": 129.21728424820586,
+            "p99": 129.21728424820586
+          },
+          "peak_memory_mb": {
+            "mean": 0.0,
+            "median": 0,
+            "p95": 0,
+            "p99": 0
+          }
+        }
+      },
+      "cold_medium": {
+        "runs": [
+          {
+            "scenario": "cold_medium",
+            "config": "lmstudio_dscoder",
+            "ttft_ms": 1555.3385409875773,
+            "e2e_ms": 2134.3676659744233,
+            "itl_mean_ms": 0.0,
+            "itl_p95_ms": 0.0,
+            "itl_p99_ms": 0.0,
+            "tpot_ms": 9.190938491854698,
+            "decode_tps": 108.80281713192095,
+            "overall_tps": 108.80281713192095,
+            "output_tokens": 63,
+            "input_tokens": 0,
+            "cache_created": 0,
+            "cache_read": 0,
+            "memory_before_mb": 0.0,
+            "memory_after_mb": 0.0,
+            "peak_memory_mb": 0,
+            "raw_output": "a block-based KV cache architecture where each block stores a fixed number of token key-value pairs. Blocks are allocated from a shared pool and assigned per-layer per-agent. When an agent's cache exceeds the hot tier capacity, the least recently used agent is evicted to disk via safetensors",
+            "error": null
+          }
+        ],
+        "stats": {
+          "ttft_ms": {
+            "mean": 1555.3385409875773,
+            "median": 1555.3385409875773,
+            "p95": 1555.3385409875773,
+            "p99": 1555.3385409875773
+          },
+          "e2e_ms": {
+            "mean": 2134.3676659744233,
+            "median": 2134.3676659744233,
+            "p95": 2134.3676659744233,
+            "p99": 2134.3676659744233
+          },
+          "decode_tps": {
+            "mean": 108.80281713192095,
+            "median": 108.80281713192095,
+            "p95": 108.80281713192095,
+            "p99": 108.80281713192095
+          },
+          "peak_memory_mb": {
+            "mean": 0.0,
+            "median": 0,
+            "p95": 0,
+            "p99": 0
+          }
+        }
+      },
+      "cold_long": {
+        "runs": [
+          {
+            "scenario": "cold_long",
+            "config": "lmstudio_dscoder",
+            "ttft_ms": 5949.553874961566,
+            "e2e_ms": 6690.062249952462,
+            "itl_mean_ms": 0.0,
+            "itl_p95_ms": 0.0,
+            "itl_p99_ms": 0.0,
+            "tpot_ms": 11.754101190331673,
+            "decode_tps": 85.07668802635027,
+            "overall_tps": 85.07668802635027,
+            "output_tokens": 63,
+            "input_tokens": 0,
+            "cache_created": 0,
+            "cache_read": 0,
+            "memory_before_mb": 0.0,
+            "memory_after_mb": 0.0,
+            "peak_memory_mb": 0,
+            "raw_output": "\n\nThe system implements a block-based KV cache architecture where each block stores a fixed number of token key-value pairs. Blocks are allocated from a shared pool and assigned per-layer per-agent. When an agent's cache exceeds the hot tier capacity, the least recently used agent is evicted to",
+            "error": null
+          }
+        ],
+        "stats": {
+          "ttft_ms": {
+            "mean": 5949.553874961566,
+            "median": 5949.553874961566,
+            "p95": 5949.553874961566,
+            "p99": 5949.553874961566
+          },
+          "e2e_ms": {
+            "mean": 6690.062249952462,
+            "median": 6690.062249952462,
+            "p95": 6690.062249952462,
+            "p99": 6690.062249952462
+          },
+          "decode_tps": {
+            "mean": 85.07668802635027,
+            "median": 85.07668802635027,
+            "p95": 85.07668802635027,
+            "p99": 85.07668802635027
+          },
+          "peak_memory_mb": {
+            "mean": 0.0,
+            "median": 0,
+            "p95": 0,
+            "p99": 0
+          }
+        }
+      },
+      "cold_xl": {
+        "runs": [
+          {
+            "scenario": "cold_xl",
+            "config": "lmstudio_dscoder",
+            "ttft_ms": 33759.72587498836,
+            "e2e_ms": 35257.28837499628,
+            "itl_mean_ms": 0.0,
+            "itl_p95_ms": 0.0,
+            "itl_p99_ms": 0.0,
+            "tpot_ms": 23.770833333458988,
+            "decode_tps": 42.06836108654362,
+            "overall_tps": 42.06836108654362,
+            "output_tokens": 63,
+            "input_tokens": 0,
+            "cache_created": 0,
+            "cache_read": 0,
+            "memory_before_mb": 0.0,
+            "memory_after_mb": 0.0,
+            "peak_memory_mb": 0,
+            "raw_output": "ization. On subsequent requests the cache is loaded from disk and reconstructed into quantized KV blocks. This design enables efficient memory management while preserving semantic context across conversations. The prefill phase processes input tokens in adaptive chunks to bound peak memory usage during long-context inference on Apple Silicon. The system implements a block-based",
+            "error": null
+          }
+        ],
+        "stats": {
+          "ttft_ms": {
+            "mean": 33759.72587498836,
+            "median": 33759.72587498836,
+            "p95": 33759.72587498836,
+            "p99": 33759.72587498836
+          },
+          "e2e_ms": {
+            "mean": 35257.28837499628,
+            "median": 35257.28837499628,
+            "p95": 35257.28837499628,
+            "p99": 35257.28837499628
+          },
+          "decode_tps": {
+            "mean": 42.06836108654362,
+            "median": 42.06836108654362,
+            "p95": 42.06836108654362,
+            "p99": 42.06836108654362
+          },
+          "peak_memory_mb": {
+            "mean": 0.0,
+            "median": 0,
+            "p95": 0,
+            "p99": 0
+          }
+        }
+      }
+    },
+    "4_output_scaling": {
+      "output_16": {
+        "runs": [
+          {
+            "scenario": "output_16",
+            "config": "lmstudio_dscoder",
+            "ttft_ms": 238.08679200010374,
+            "e2e_ms": 238.08679200010374,
+            "itl_mean_ms": 0.0,
+            "itl_p95_ms": 0.0,
+            "itl_p99_ms": 0.0,
+            "tpot_ms": 15.872452800006917,
+            "decode_tps": 63.00223491605307,
+            "overall_tps": 63.00223491605307,
+            "output_tokens": 15,
+            "input_tokens": 729,
+            "cache_created": 0,
+            "cache_read": 0,
+            "memory_before_mb": 0.0,
+            "memory_after_mb": 0.0,
+            "peak_memory_mb": 0.0,
+            "raw_output": "implements a block-based KV cache architecture where each block stores a fixed number",
+            "error": null
+          }
+        ],
+        "stats": {
+          "e2e_ms": {
+            "mean": 238.08679200010374,
+            "median": 238.08679200010374,
+            "p95": 238.08679200010374,
+            "p99": 238.08679200010374
+          },
+          "tpot_ms": {
+            "mean": 15.872452800006917,
+            "median": 15.872452800006917,
+            "p95": 15.872452800006917,
+            "p99": 15.872452800006917
+          },
+          "decode_tps": {
+            "mean": 63.00223491605307,
+            "median": 63.00223491605307,
+            "p95": 63.00223491605307,
+            "p99": 63.00223491605307
+          }
+        }
+      },
+      "output_64": {
+        "runs": [
+          {
+            "scenario": "output_64",
+            "config": "lmstudio_dscoder",
+            "ttft_ms": 649.5704160188325,
+            "e2e_ms": 649.5704160188325,
+            "itl_mean_ms": 0.0,
+            "itl_p95_ms": 0.0,
+            "itl_p99_ms": 0.0,
+            "tpot_ms": 10.310641524108451,
+            "decode_tps": 96.98717559540688,
+            "overall_tps": 96.98717559540688,
+            "output_tokens": 63,
+            "input_tokens": 729,
+            "cache_created": 0,
+            "cache_read": 0,
+            "memory_before_mb": 0.0,
+            "memory_after_mb": 0.0,
+            "peak_memory_mb": 0.0,
+            "raw_output": "implements a block-based KV cache architecture where each block stores a fixed number of token key-value pairs. Blocks are allocated from a shared pool and assigned per-layer per-agent. When an agent's cache exceeds the hot tier capacity, the least recently used agent is evicted to disk via safet",
+            "error": null
+          }
+        ],
+        "stats": {
+          "e2e_ms": {
+            "mean": 649.5704160188325,
+            "median": 649.5704160188325,
+            "p95": 649.5704160188325,
+            "p99": 649.5704160188325
+          },
+          "tpot_ms": {
+            "mean": 10.310641524108451,
+            "median": 10.310641524108451,
+            "p95": 10.310641524108451,
+            "p99": 10.310641524108451
+          },
+          "decode_tps": {
+            "mean": 96.98717559540688,
+            "median": 96.98717559540688,
+            "p95": 96.98717559540688,
+            "p99": 96.98717559540688
+          }
+        }
+      },
+      "output_128": {
+        "runs": [
+          {
+            "scenario": "output_128",
+            "config": "lmstudio_dscoder",
+            "ttft_ms": 1200.5718749715015,
+            "e2e_ms": 1200.5718749715015,
+            "itl_mean_ms": 0.0,
+            "itl_p95_ms": 0.0,
+            "itl_p99_ms": 0.0,
+            "tpot_ms": 9.922081611334724,
+            "decode_tps": 100.78530283984225,
+            "overall_tps": 100.78530283984225,
+            "output_tokens": 121,
+            "input_tokens": 729,
+            "cache_created": 0,
+            "cache_read": 0,
+            "memory_before_mb": 0.0,
+            "memory_after_mb": 0.0,
+            "peak_memory_mb": 0.0,
+            "raw_output": "implements a block-based KV cache architecture where each block stores a fixed number of token key-value pairs. Blocks are allocated from a shared pool and assigned per-layer per-agent. When an agent's cache exceeds the hot tier capacity, the least recently used agent is evicted to disk via safetensors serialization. On subsequent requests, the cache is loaded from disk and reconstructed into quantized KV blocks. This design enables efficient memory management while preserving semantic context across conversations. The prefill phase processes input tokens in adaptive chunks to bound peak memory usage during long-context inference on Apple Silicon.",
+            "error": null
+          }
+        ],
+        "stats": {
+          "e2e_ms": {
+            "mean": 1200.5718749715015,
+            "median": 1200.5718749715015,
+            "p95": 1200.5718749715015,
+            "p99": 1200.5718749715015
+          },
+          "tpot_ms": {
+            "mean": 9.922081611334724,
+            "median": 9.922081611334724,
+            "p95": 9.922081611334724,
+            "p99": 9.922081611334724
+          },
+          "decode_tps": {
+            "mean": 100.78530283984225,
+            "median": 100.78530283984225,
+            "p95": 100.78530283984225,
+            "p99": 100.78530283984225
+          }
+        }
+      },
+      "output_256": {
+        "runs": [
+          {
+            "scenario": "output_256",
+            "config": "lmstudio_dscoder",
+            "ttft_ms": 1196.4516249718145,
+            "e2e_ms": 1196.4516249718145,
+            "itl_mean_ms": 0.0,
+            "itl_p95_ms": 0.0,
+            "itl_p99_ms": 0.0,
+            "tpot_ms": 9.888029958444747,
+            "decode_tps": 101.13237967548456,
+            "overall_tps": 101.13237967548456,
+            "output_tokens": 121,
+            "input_tokens": 729,
+            "cache_created": 0,
+            "cache_read": 0,
+            "memory_before_mb": 0.0,
+            "memory_after_mb": 0.0,
+            "peak_memory_mb": 0.0,
+            "raw_output": "implements a block-based KV cache architecture where each block stores a fixed number of token key-value pairs. Blocks are allocated from a shared pool and assigned per-layer per-agent. When an agent's cache exceeds the hot tier capacity, the least recently used agent is evicted to disk via safetensors serialization. On subsequent requests, the cache is loaded from disk and reconstructed into quantized KV blocks. This design enables efficient memory management while preserving semantic context across conversations. The prefill phase processes input tokens in adaptive chunks to bound peak memory usage during long-context inference on Apple Silicon.",
+            "error": null
+          }
+        ],
+        "stats": {
+          "e2e_ms": {
+            "mean": 1196.4516249718145,
+            "median": 1196.4516249718145,
+            "p95": 1196.4516249718145,
+            "p99": 1196.4516249718145
+          },
+          "tpot_ms": {
+            "mean": 9.888029958444747,
+            "median": 9.888029958444747,
+            "p95": 9.888029958444747,
+            "p99": 9.888029958444747
+          },
+          "decode_tps": {
+            "mean": 101.13237967548456,
+            "median": 101.13237967548456,
+            "p95": 101.13237967548456,
+            "p99": 101.13237967548456
+          }
+        }
+      },
+      "output_512": {
+        "runs": [
+          {
+            "scenario": "output_512",
+            "config": "lmstudio_dscoder",
+            "ttft_ms": 1193.4343749890104,
+            "e2e_ms": 1193.4343749890104,
+            "itl_mean_ms": 0.0,
+            "itl_p95_ms": 0.0,
+            "itl_p99_ms": 0.0,
+            "tpot_ms": 9.86309400817364,
+            "decode_tps": 101.38806333705128,
+            "overall_tps": 101.38806333705128,
+            "output_tokens": 121,
+            "input_tokens": 729,
+            "cache_created": 0,
+            "cache_read": 0,
+            "memory_before_mb": 0.0,
+            "memory_after_mb": 0.0,
+            "peak_memory_mb": 0.0,
+            "raw_output": "implements a block-based KV cache architecture where each block stores a fixed number of token key-value pairs. Blocks are allocated from a shared pool and assigned per-layer per-agent. When an agent's cache exceeds the hot tier capacity, the least recently used agent is evicted to disk via safetensors serialization. On subsequent requests, the cache is loaded from disk and reconstructed into quantized KV blocks. This design enables efficient memory management while preserving semantic context across conversations. The prefill phase processes input tokens in adaptive chunks to bound peak memory usage during long-context inference on Apple Silicon.",
+            "error": null
+          }
+        ],
+        "stats": {
+          "e2e_ms": {
+            "mean": 1193.4343749890104,
+            "median": 1193.4343749890104,
+            "p95": 1193.4343749890104,
+            "p99": 1193.4343749890104
+          },
+          "tpot_ms": {
+            "mean": 9.86309400817364,
+            "median": 9.86309400817364,
+            "p95": 9.86309400817364,
+            "p99": 9.86309400817364
+          },
+          "decode_tps": {
+            "mean": 101.38806333705128,
+            "median": 101.38806333705128,
+            "p95": 101.38806333705128,
+            "p99": 101.38806333705128
+          }
+        }
+      }
+    }
+  }
+}

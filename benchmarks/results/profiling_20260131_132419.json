@@ -1,0 +1,322 @@
+{
+  "metadata": {
+    "timestamp": "2026-01-31T21:24:19.336031+00:00",
+    "model_id": "mlx-community/DeepSeek-Coder-V2-Lite-Instruct-4bit-mlx",
+    "machine": {
+      "os": "Darwin",
+      "os_version": "25.2.0",
+      "chip": "arm64"
+    },
+    "git_sha": "68def5d",
+    "runs_per_scenario": 2,
+    "quick": true
+  },
+  "experiments": {
+    "G": {
+      "G_agents1": {
+        "description": "Max agents = 1",
+        "env": {
+          "SEMANTIC_MLX_CHUNKED_PREFILL_ENABLED": "true",
+          "SEMANTIC_MLX_CHUNKED_PREFILL_THRESHOLD": "2048",
+          "SEMANTIC_MLX_CHUNKED_PREFILL_MIN_CHUNK": "512",
+          "SEMANTIC_MLX_CHUNKED_PREFILL_MAX_CHUNK": "4096",
+          "SEMANTIC_MLX_DEFAULT_TEMPERATURE": "0.0",
+          "SEMANTIC_MLX_KV_BITS": "4",
+          "SEMANTIC_MLX_MAX_CONTEXT_LENGTH": "100000",
+          "SEMANTIC_MLX_MAX_BATCH_SIZE": "1",
+          "SEMANTIC_MLX_SCHEDULER_ENABLED": "false",
+          "SEMANTIC_MLX_PREFILL_STEP_SIZE": "256",
+          "SEMANTIC_SERVER_LOG_LEVEL": "WARNING",
+          "SEMANTIC_API_KEY": "",
+          "SEMANTIC_AGENT_MAX_AGENTS_IN_MEMORY": "1"
+        },
+        "scenarios": {
+          "G_fill_1": {
+            "runs": [
+              {
+                "scenario": "G_fill_1",
+                "config": "G_agents1",
+                "ttft_ms": 0.0,
+                "e2e_ms": 1288.4173193209183,
+                "itl_mean_ms": 0.0,
+                "itl_p95_ms": 0.0,
+                "itl_p99_ms": 0.0,
+                "tpot_ms": 0.0,
+                "decode_tps": 0.0,
+                "overall_tps": 0.0,
+                "output_tokens": 0,
+                "input_tokens": 0,
+                "cache_created": 0,
+                "cache_read": 0,
+                "memory_before_mb": 0.0,
+                "memory_after_mb": 0.0,
+                "peak_memory_mb": 9196.9,
+                "raw_output": "",
+                "error": null
+              },
+              {
+                "scenario": "G_fill_1",
+                "config": "G_agents1",
+                "ttft_ms": 0.0,
+                "e2e_ms": 1253.820291662123,
+                "itl_mean_ms": 0.0,
+                "itl_p95_ms": 0.0,
+                "itl_p99_ms": 0.0,
+                "tpot_ms": 0.0,
+                "decode_tps": 0.0,
+                "overall_tps": 0.0,
+                "output_tokens": 0,
+                "input_tokens": 0,
+                "cache_created": 0,
+                "cache_read": 0,
+                "memory_before_mb": 0.0,
+                "memory_after_mb": 0.0,
+                "peak_memory_mb": 9196.9,
+                "raw_output": "",
+                "error": null
+              }
+            ],
+            "stats": {
+              "e2e_ms": {
+                "mean": 1271.1188054915206,
+                "median": 1271.1188054915206,
+                "p95": 1286.6874679379785,
+                "p99": 1288.0713490443304
+              },
+              "ttft_ms": {
+                "mean": 0.0,
+                "median": 0.0,
+                "p95": 0.0,
+                "p99": 0.0
+              },
+              "peak_memory_mb": {
+                "mean": 9196.9,
+                "median": 9196.9,
+                "p95": 9196.9,
+                "p99": 9196.9
+              }
+            }
+          },
+          "G_reload_1": {
+            "runs": [
+              {
+                "scenario": "G_reload_1",
+                "config": "G_agents1",
+                "ttft_ms": 0.0,
+                "e2e_ms": 762.2941250156146,
+                "itl_mean_ms": 0.0,
+                "itl_p95_ms": 0.0,
+                "itl_p99_ms": 0.0,
+                "tpot_ms": 0.0,
+                "decode_tps": 0.0,
+                "overall_tps": 0.0,
+                "output_tokens": 0,
+                "input_tokens": 0,
+                "cache_created": 0,
+                "cache_read": 0,
+                "memory_before_mb": 0.0,
+                "memory_after_mb": 0.0,
+                "peak_memory_mb": 0.0,
+                "raw_output": "",
+                "error": null
+              },
+              {
+                "scenario": "G_reload_1",
+                "config": "G_agents1",
+                "ttft_ms": 0.0,
+                "e2e_ms": 762.6591460139025,
+                "itl_mean_ms": 0.0,
+                "itl_p95_ms": 0.0,
+                "itl_p99_ms": 0.0,
+                "tpot_ms": 0.0,
+                "decode_tps": 0.0,
+                "overall_tps": 0.0,
+                "output_tokens": 0,
+                "input_tokens": 0,
+                "cache_created": 0,
+                "cache_read": 0,
+                "memory_before_mb": 0.0,
+                "memory_after_mb": 0.0,
+                "peak_memory_mb": 0.0,
+                "raw_output": "",
+                "error": null
+              }
+            ],
+            "stats": {
+              "e2e_ms": {
+                "mean": 762.4766355147585,
+                "median": 762.4766355147585,
+                "p95": 762.6408949639881,
+                "p99": 762.6554958039196
+              },
+              "ttft_ms": {
+                "mean": 0.0,
+                "median": 0.0,
+                "p95": 0.0,
+                "p99": 0.0
+              },
+              "peak_memory_mb": {
+                "mean": 0.0,
+                "median": 0.0,
+                "p95": 0.0,
+                "p99": 0.0
+              }
+            }
+          }
+        }
+      },
+      "G_agents5": {
+        "description": "Max agents = 5",
+        "env": {
+          "SEMANTIC_MLX_CHUNKED_PREFILL_ENABLED": "true",
+          "SEMANTIC_MLX_CHUNKED_PREFILL_THRESHOLD": "2048",
+          "SEMANTIC_MLX_CHUNKED_PREFILL_MIN_CHUNK": "512",
+          "SEMANTIC_MLX_CHUNKED_PREFILL_MAX_CHUNK": "4096",
+          "SEMANTIC_MLX_DEFAULT_TEMPERATURE": "0.0",
+          "SEMANTIC_MLX_KV_BITS": "4",
+          "SEMANTIC_MLX_MAX_CONTEXT_LENGTH": "100000",
+          "SEMANTIC_MLX_MAX_BATCH_SIZE": "1",
+          "SEMANTIC_MLX_SCHEDULER_ENABLED": "false",
+          "SEMANTIC_MLX_PREFILL_STEP_SIZE": "256",
+          "SEMANTIC_SERVER_LOG_LEVEL": "WARNING",
+          "SEMANTIC_API_KEY": "",
+          "SEMANTIC_AGENT_MAX_AGENTS_IN_MEMORY": "5"
+        },
+        "scenarios": {
+          "G_fill_5": {
+            "runs": [
+              {
+                "scenario": "G_fill_5",
+                "config": "G_agents5",
+                "ttft_ms": 0.0,
+                "e2e_ms": 1258.2952559875723,
+                "itl_mean_ms": 0.0,
+                "itl_p95_ms": 0.0,
+                "itl_p99_ms": 0.0,
+                "tpot_ms": 0.0,
+                "decode_tps": 0.0,
+                "overall_tps": 0.0,
+                "output_tokens": 0,
+                "input_tokens": 0,
+                "cache_created": 0,
+                "cache_read": 0,
+                "memory_before_mb": 0.0,
+                "memory_after_mb": 0.0,
+                "peak_memory_mb": 9426.4,
+                "raw_output": "",
+                "error": null
+              },
+              {
+                "scenario": "G_fill_5",
+                "config": "G_agents5",
+                "ttft_ms": 0.0,
+                "e2e_ms": 1236.0043035670449,
+                "itl_mean_ms": 0.0,
+                "itl_p95_ms": 0.0,
+                "itl_p99_ms": 0.0,
+                "tpot_ms": 0.0,
+                "decode_tps": 0.0,
+                "overall_tps": 0.0,
+                "output_tokens": 0,
+                "input_tokens": 0,
+                "cache_created": 0,
+                "cache_read": 0,
+                "memory_before_mb": 0.0,
+                "memory_after_mb": 0.0,
+                "peak_memory_mb": 9426.4,
+                "raw_output": "",
+                "error": null
+              }
+            ],
+            "stats": {
+              "e2e_ms": {
+                "mean": 1247.1497797773086,
+                "median": 1247.1497797773086,
+                "p95": 1257.180708366546,
+                "p99": 1258.072346463367
+              },
+              "ttft_ms": {
+                "mean": 0.0,
+                "median": 0.0,
+                "p95": 0.0,
+                "p99": 0.0
+              },
+              "peak_memory_mb": {
+                "mean": 9426.4,
+                "median": 9426.4,
+                "p95": 9426.4,
+                "p99": 9426.4
+              }
+            }
+          },
+          "G_reload_5": {
+            "runs": [
+              {
+                "scenario": "G_reload_5",
+                "config": "G_agents5",
+                "ttft_ms": 0.0,
+                "e2e_ms": 764.6334585151635,
+                "itl_mean_ms": 0.0,
+                "itl_p95_ms": 0.0,
+                "itl_p99_ms": 0.0,
+                "tpot_ms": 0.0,
+                "decode_tps": 0.0,
+                "overall_tps": 0.0,
+                "output_tokens": 0,
+                "input_tokens": 0,
+                "cache_created": 0,
+                "cache_read": 0,
+                "memory_before_mb": 0.0,
+                "memory_after_mb": 0.0,
+                "peak_memory_mb": 0.0,
+                "raw_output": "",
+                "error": null
+              },
+              {
+                "scenario": "G_reload_5",
+                "config": "G_agents5",
+                "ttft_ms": 0.0,
+                "e2e_ms": 773.1826245144475,
+                "itl_mean_ms": 0.0,
+                "itl_p95_ms": 0.0,
+                "itl_p99_ms": 0.0,
+                "tpot_ms": 0.0,
+                "decode_tps": 0.0,
+                "overall_tps": 0.0,
+                "output_tokens": 0,
+                "input_tokens": 0,
+                "cache_created": 0,
+                "cache_read": 0,
+                "memory_before_mb": 0.0,
+                "memory_after_mb": 0.0,
+                "peak_memory_mb": 0.0,
+                "raw_output": "",
+                "error": null
+              }
+            ],
+            "stats": {
+              "e2e_ms": {
+                "mean": 768.9080415148055,
+                "median": 768.9080415148055,
+                "p95": 772.7551662144833,
+                "p99": 773.0971328544547
+              },
+              "ttft_ms": {
+                "mean": 0.0,
+                "median": 0.0,
+                "p95": 0.0,
+                "p99": 0.0
+              },
+              "peak_memory_mb": {
+                "mean": 0.0,
+                "median": 0.0,
+                "p95": 0.0,
+                "p99": 0.0
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

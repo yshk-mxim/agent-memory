@@ -75,22 +75,11 @@ class MLXCacheAdapter:
             v_scales = mx.concatenate(v_scales_list, axis=2)
             v_biases = mx.concatenate(v_biases_list, axis=2) if all(v_has_biases) else None
 
-            # Force evaluation
-            if k_biases is not None:
-                mx.eval(k_weights, k_scales, k_biases, v_weights, v_scales, v_biases)
-            else:
-                mx.eval(k_weights, k_scales, v_weights, v_scales)
-
-            # Return as quantized tuples - NO dequantization!
+            # Return LAZY tensors — caller is responsible for mx.eval.
+            # _reconstruct_cache batches all layers into a single mx.eval
+            # call, eliminating 27 per-layer GPU sync fences.
             k_full = (k_weights, k_scales, k_biases)
             v_full = (v_weights, v_scales, v_biases)
-
-            import logging
-            logger = logging.getLogger(__name__)
-            logger.info(
-                f"Concatenated {len(k_tensors)} quantized blocks "
-                f"(kept quantized - avoiding dequantization overhead!)"
-            )
 
             return k_full, v_full
 

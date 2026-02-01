@@ -81,8 +81,9 @@ OPENAI_BENCH_ENV: dict[str, str] = {
 class OpenAIPromptFactory:
     """Build prompts in OpenAI chat format at target token counts."""
 
-    def __init__(self) -> None:
+    def __init__(self, model: str = "default") -> None:
         self._padding = PADDING_TEXT
+        self._model = model
 
     def build_messages(self, target_tokens: int) -> list[dict[str, str]]:
         chars_needed = max(target_tokens * 4, 100)
@@ -105,7 +106,7 @@ class OpenAIPromptFactory:
         self, target_tokens: int, max_tokens: int = OUTPUT_TOKENS
     ) -> dict[str, Any]:
         return {
-            "model": "default",
+            "model": self._model,
             "messages": self.build_messages(target_tokens),
             "max_tokens": max_tokens,
             "temperature": 0.0,
@@ -123,7 +124,7 @@ class OpenAIPromptFactory:
             {"role": "user", "content": "Continue explaining in more detail."},
         ]
         return {
-            "model": "default",
+            "model": self._model,
             "messages": messages,
             "max_tokens": max_tokens,
             "temperature": 0.0,
@@ -137,7 +138,7 @@ class OpenAIPromptFactory:
         max_tokens: int = OUTPUT_TOKENS,
     ) -> dict[str, Any]:
         return {
-            "model": "default",
+            "model": self._model,
             "messages": self.build_system_messages(system_tokens, user_content),
             "max_tokens": max_tokens,
             "temperature": 0.0,
@@ -361,6 +362,8 @@ class OpenAIBenchmarkSuite:
         context_mode: str = "full",
         output_path: str | None = None,
         server_label: str = "semantic",
+        model: str = "default",
+        concurrency: int = 2,
     ) -> None:
         self.base_url = base_url
         self.port = port
@@ -369,7 +372,8 @@ class OpenAIBenchmarkSuite:
         self.external = external
         self.context_mode = context_mode
         self.server_label = server_label
-        self.prompt = OpenAIPromptFactory()
+        self.concurrency = concurrency
+        self.prompt = OpenAIPromptFactory(model=model)
 
         self.server: ServerManager | None = None
         if not external:
@@ -588,7 +592,7 @@ class OpenAIBenchmarkSuite:
                 turn_results: list[dict[str, Any]] = []
                 messages = self.prompt.build_messages(2000)
                 body: dict[str, Any] = {
-                    "model": "default",
+                    "model": self.prompt._model,
                     "messages": messages,
                     "max_tokens": OUTPUT_TOKENS,
                     "temperature": 0.0,
@@ -618,7 +622,7 @@ class OpenAIBenchmarkSuite:
                         {"role": "user", "content": "Continue explaining in more detail."},
                     ]
                     body = {
-                        "model": "default",
+                        "model": self.prompt._model,
                         "messages": messages,
                         "max_tokens": OUTPUT_TOKENS,
                         "temperature": 0.0,
@@ -697,32 +701,28 @@ class OpenAIBenchmarkSuite:
     # --- Experiment 5: Concurrent Requests ---
 
     async def exp_concurrent(self) -> None:
-        if self.external:
-            print("\n  === Experiment 5: Concurrent Requests — SKIPPED (external) ===")
-            return
-
-        print("\n  === Experiment 5: Concurrent Requests (batch=2) ===")
+        print(f"\n  === Experiment 5: Concurrent Requests (n={self.concurrency}) ===")
         scenarios: dict[str, Any] = {}
 
         for i in range(self.runs):
             body = self.prompt.build_request(2000, OUTPUT_TOKENS)
 
             clients = [
-                OpenAIRequestClient(self.base_url),
-                OpenAIRequestClient(self.base_url),
+                OpenAIRequestClient(self.base_url)
+                for _ in range(self.concurrency)
             ]
 
             sids = [
-                f"concurrent_r{i}_c0" if self.context_mode == "session" else None,
-                f"concurrent_r{i}_c1" if self.context_mode == "session" else None,
+                f"concurrent_r{i}_c{j}" if self.context_mode == "session" else None
+                for j in range(self.concurrency)
             ]
 
             t_wall_start = time.perf_counter()
             try:
-                results = await asyncio.gather(
-                    clients[0].send_and_measure(body, session_id=sids[0]),
-                    clients[1].send_and_measure(body, session_id=sids[1]),
-                )
+                results = await asyncio.gather(*(
+                    clients[j].send_and_measure(body, session_id=sids[j])
+                    for j in range(self.concurrency)
+                ))
             except Exception as exc:
                 print(f"    run {i + 1}/{self.runs} ERROR: {exc}")
                 for c in clients:
@@ -842,7 +842,10 @@ class OpenAIBenchmarkSuite:
         if not self.external:
             print("\n[SERVER] Starting semantic server...")
             assert self.server is not None
-            self.server.start(OPENAI_BENCH_ENV)
+            env = {**OPENAI_BENCH_ENV}
+            if self.concurrency > 0:
+                env["SEMANTIC_MLX_MAX_BATCH_SIZE"] = str(max(self.concurrency, 1))
+            self.server.start(env)
 
         try:
             await self._warmup()
@@ -1082,6 +1085,14 @@ def main() -> None:
         "--label", type=str, default=None,
         help="Server label for results (default: auto-detect)"
     )
+    parser.add_argument(
+        "--model", type=str, default="default",
+        help="Model name for /v1/chat/completions requests (default: 'default')"
+    )
+    parser.add_argument(
+        "--concurrency", type=int, default=2,
+        help="Number of concurrent requests for experiment 5 (default: 2)"
+    )
 
     # Comparison mode
     parser.add_argument(
@@ -1130,6 +1141,8 @@ def main() -> None:
         context_mode=args.context_mode,
         output_path=args.output,
         server_label=label,
+        model=args.model,
+        concurrency=args.concurrency,
     )
 
     asyncio.run(suite.run_all(args.experiment))

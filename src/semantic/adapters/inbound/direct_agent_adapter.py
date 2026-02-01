@@ -287,6 +287,17 @@ async def delete_agent(agent_id: str, request: Request):
 
         # Delete from cache store (memory and disk)
         cache_store.delete(agent_id)
+
+        # Explicitly free GPU memory held by cached tensors
+        import gc
+        del cached_blocks
+        gc.collect()
+        try:
+            import mlx.core as mx
+            mx.clear_cache()
+        except ImportError:
+            pass
+
         logger.info(f"Agent deleted: {agent_id}")
 
         return  # 204 No Content

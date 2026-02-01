@@ -1,0 +1,289 @@
+{
+  "metadata": {
+    "timestamp": "2026-01-31T21:45:14.252667+00:00",
+    "model_id": "mlx-community/DeepSeek-Coder-V2-Lite-Instruct-4bit-mlx",
+    "machine": {
+      "os": "Darwin",
+      "os_version": "25.2.0",
+      "chip": "arm64"
+    },
+    "git_sha": "dea5835",
+    "runs_per_scenario": 2,
+    "quick": true
+  },
+  "experiments": {
+    "E": {
+      "E_output_scaling": {
+        "description": "Output length scaling",
+        "env": {
+          "SEMANTIC_MLX_CHUNKED_PREFILL_ENABLED": "true",
+          "SEMANTIC_MLX_CHUNKED_PREFILL_THRESHOLD": "2048",
+          "SEMANTIC_MLX_CHUNKED_PREFILL_MIN_CHUNK": "512",
+          "SEMANTIC_MLX_CHUNKED_PREFILL_MAX_CHUNK": "4096",
+          "SEMANTIC_MLX_DEFAULT_TEMPERATURE": "0.0",
+          "SEMANTIC_MLX_KV_BITS": "4",
+          "SEMANTIC_MLX_MAX_CONTEXT_LENGTH": "100000",
+          "SEMANTIC_MLX_MAX_BATCH_SIZE": "1",
+          "SEMANTIC_MLX_SCHEDULER_ENABLED": "false",
+          "SEMANTIC_MLX_PREFILL_STEP_SIZE": "256",
+          "SEMANTIC_SERVER_LOG_LEVEL": "WARNING",
+          "SEMANTIC_API_KEY": ""
+        },
+        "scenarios": {
+          "output16": {
+            "runs": [
+              {
+                "scenario": "output16",
+                "config": "",
+                "ttft_ms": 1061.1922080279328,
+                "e2e_ms": 1061.1922080279328,
+                "itl_mean_ms": 0.0,
+                "itl_p95_ms": 0.0,
+                "itl_p99_ms": 0.0,
+                "tpot_ms": 66.3245130017458,
+                "decode_tps": 15.07738172119979,
+                "overall_tps": 15.07738172119979,
+                "output_tokens": 16,
+                "input_tokens": 728,
+                "cache_created": 728,
+                "cache_read": 0,
+                "memory_before_mb": 8431.1,
+                "memory_after_mb": 8487.2,
+                "peak_memory_mb": 9082.6,
+                "raw_output": "implements a block-based KV cache architecture where each block stores a fixed number of",
+                "error": null
+              },
+              {
+                "scenario": "output16",
+                "config": "",
+                "ttft_ms": 1042.28808300104,
+                "e2e_ms": 1042.28808300104,
+                "itl_mean_ms": 0.0,
+                "itl_p95_ms": 0.0,
+                "itl_p99_ms": 0.0,
+                "tpot_ms": 65.143005187565,
+                "decode_tps": 15.350842306410632,
+                "overall_tps": 15.350842306410632,
+                "output_tokens": 16,
+                "input_tokens": 728,
+                "cache_created": 728,
+                "cache_read": 0,
+                "memory_before_mb": 8431.1,
+                "memory_after_mb": 8487.2,
+                "peak_memory_mb": 9082.6,
+                "raw_output": "implements a block-based KV cache architecture where each block stores a fixed number of",
+                "error": null
+              }
+            ],
+            "stats": {
+              "ttft_ms": {
+                "mean": 1051.7401455144864,
+                "median": 1051.7401455144864,
+                "p95": 1060.2470017765881,
+                "p99": 1061.0031667776639
+              },
+              "e2e_ms": {
+                "mean": 1051.7401455144864,
+                "median": 1051.7401455144864,
+                "p95": 1060.2470017765881,
+                "p99": 1061.0031667776639
+              },
+              "tpot_ms": {
+                "mean": 65.7337590946554,
+                "median": 65.7337590946554,
+                "p95": 66.26543761103676,
+                "p99": 66.31269792360399
+              },
+              "decode_tps": {
+                "mean": 15.214112013805211,
+                "median": 15.214112013805211,
+                "p95": 15.337169277150089,
+                "p99": 15.348107700558524
+              },
+              "overall_tps": {
+                "mean": 15.214112013805211,
+                "median": 15.214112013805211,
+                "p95": 15.337169277150089,
+                "p99": 15.348107700558524
+              },
+              "peak_memory_mb": {
+                "mean": 9082.6,
+                "median": 9082.6,
+                "p95": 9082.6,
+                "p99": 9082.6
+              }
+            }
+          },
+          "output64": {
+            "runs": [
+              {
+                "scenario": "output64",
+                "config": "",
+                "ttft_ms": 1506.378834019415,
+                "e2e_ms": 1506.378834019415,
+                "itl_mean_ms": 0.0,
+                "itl_p95_ms": 0.0,
+                "itl_p99_ms": 0.0,
+                "tpot_ms": 23.53716928155336,
+                "decode_tps": 42.4859926033554,
+                "overall_tps": 42.4859926033554,
+                "output_tokens": 64,
+                "input_tokens": 728,
+                "cache_created": 728,
+                "cache_read": 0,
+                "memory_before_mb": 8431.1,
+                "memory_after_mb": 8491.4,
+                "peak_memory_mb": 9082.6,
+                "raw_output": "implements a block-based KV cache architecture where each block stores a fixed number of token key-value pairs. Blocks are allocated from a shared pool and assigned per-layer per-agent. When an agent's cache exceeds the hot tier capacity, the least recently used agent is evicted to disk via safetensors",
+                "error": null
+              },
+              {
+                "scenario": "output64",
+                "config": "",
+                "ttft_ms": 1523.7080419901758,
+                "e2e_ms": 1523.7080419901758,
+                "itl_mean_ms": 0.0,
+                "itl_p95_ms": 0.0,
+                "itl_p99_ms": 0.0,
+                "tpot_ms": 23.807938156096498,
+                "decode_tps": 42.00279727893741,
+                "overall_tps": 42.00279727893741,
+                "output_tokens": 64,
+                "input_tokens": 728,
+                "cache_created": 728,
+                "cache_read": 0,
+                "memory_before_mb": 8431.1,
+                "memory_after_mb": 8491.4,
+                "peak_memory_mb": 9082.6,
+                "raw_output": "implements a block-based KV cache architecture where each block stores a fixed number of token key-value pairs. Blocks are allocated from a shared pool and assigned per-layer per-agent. When an agent's cache exceeds the hot tier capacity, the least recently used agent is evicted to disk via safetensors",
+                "error": null
+              }
+            ],
+            "stats": {
+              "ttft_ms": {
+                "mean": 1515.0434380047955,
+                "median": 1515.0434380047955,
+                "p95": 1522.8415815916378,
+                "p99": 1523.5347499104682
+              },
+              "e2e_ms": {
+                "mean": 1515.0434380047955,
+                "median": 1515.0434380047955,
+                "p95": 1522.8415815916378,
+                "p99": 1523.5347499104682
+              },
+              "tpot_ms": {
+                "mean": 23.67255371882493,
+                "median": 23.67255371882493,
+                "p95": 23.79439971236934,
+                "p99": 23.805230467351066
+              },
+              "decode_tps": {
+                "mean": 42.2443949411464,
+                "median": 42.2443949411464,
+                "p95": 42.4618328371345,
+                "p99": 42.48116065011122
+              },
+              "overall_tps": {
+                "mean": 42.2443949411464,
+                "median": 42.2443949411464,
+                "p95": 42.4618328371345,
+                "p99": 42.48116065011122
+              },
+              "peak_memory_mb": {
+                "mean": 9082.6,
+                "median": 9082.6,
+                "p95": 9082.6,
+                "p99": 9082.6
+              }
+            }
+          },
+          "output256": {
+            "runs": [
+              {
+                "scenario": "output256",
+                "config": "",
+                "ttft_ms": 2048.96062501939,
+                "e2e_ms": 2048.96062501939,
+                "itl_mean_ms": 0.0,
+                "itl_p95_ms": 0.0,
+                "itl_p99_ms": 0.0,
+                "tpot_ms": 17.074671875161584,
+                "decode_tps": 58.56627918306844,
+                "overall_tps": 58.56627918306844,
+                "output_tokens": 120,
+                "input_tokens": 728,
+                "cache_created": 728,
+                "cache_read": 0,
+                "memory_before_mb": 8431.1,
+                "memory_after_mb": 8495.2,
+                "peak_memory_mb": 9082.6,
+                "raw_output": "implements a block-based KV cache architecture where each block stores a fixed number of token key-value pairs. Blocks are allocated from a shared pool and assigned per-layer per-agent. When an agent's cache exceeds the hot tier capacity, the least recently used agent is evicted to disk via safetensors serialization. On subsequent requests, the cache is loaded from disk and reconstructed into quantized KV blocks. This design enables efficient memory management while preserving semantic context across conversations. The prefill phase processes input tokens in adaptive chunks to bound peak memory usage during long-context inference on Apple Silicon.",
+                "error": null
+              },
+              {
+                "scenario": "output256",
+                "config": "",
+                "ttft_ms": 2059.1392089845613,
+                "e2e_ms": 2059.1392089845613,
+                "itl_mean_ms": 0.0,
+                "itl_p95_ms": 0.0,
+                "itl_p99_ms": 0.0,
+                "tpot_ms": 17.159493408204675,
+                "decode_tps": 58.27677870267766,
+                "overall_tps": 58.27677870267766,
+                "output_tokens": 120,
+                "input_tokens": 728,
+                "cache_created": 728,
+                "cache_read": 0,
+                "memory_before_mb": 8431.1,
+                "memory_after_mb": 8495.2,
+                "peak_memory_mb": 9082.6,
+                "raw_output": "implements a block-based KV cache architecture where each block stores a fixed number of token key-value pairs. Blocks are allocated from a shared pool and assigned per-layer per-agent. When an agent's cache exceeds the hot tier capacity, the least recently used agent is evicted to disk via safetensors serialization. On subsequent requests, the cache is loaded from disk and reconstructed into quantized KV blocks. This design enables efficient memory management while preserving semantic context across conversations. The prefill phase processes input tokens in adaptive chunks to bound peak memory usage during long-context inference on Apple Silicon.",
+                "error": null
+              }
+            ],
+            "stats": {
+              "ttft_ms": {
+                "mean": 2054.0499170019757,
+                "median": 2054.0499170019757,
+                "p95": 2058.6302797863027,
+                "p99": 2059.0374231449096
+              },
+              "e2e_ms": {
+                "mean": 2054.0499170019757,
+                "median": 2054.0499170019757,
+                "p95": 2058.6302797863027,
+                "p99": 2059.0374231449096
+              },
+              "tpot_ms": {
+                "mean": 17.11708264168313,
+                "median": 17.11708264168313,
+                "p95": 17.155252331552518,
+                "p99": 17.158645192874243
+              },
+              "decode_tps": {
+                "mean": 58.42152894287305,
+                "median": 58.42152894287305,
+                "p95": 58.5518041590489,
+                "p99": 58.56338417826453
+              },
+              "overall_tps": {
+                "mean": 58.42152894287305,
+                "median": 58.42152894287305,
+                "p95": 58.5518041590489,
+                "p99": 58.56338417826453
+              },
+              "peak_memory_mb": {
+                "mean": 9082.6,
+                "median": 9082.6,
+                "p95": 9082.6,
+                "p99": 9082.6
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

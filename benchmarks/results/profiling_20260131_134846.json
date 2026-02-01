@@ -1,0 +1,235 @@
+{
+  "metadata": {
+    "timestamp": "2026-01-31T21:48:46.058241+00:00",
+    "model_id": "mlx-community/DeepSeek-Coder-V2-Lite-Instruct-4bit-mlx",
+    "machine": {
+      "os": "Darwin",
+      "os_version": "25.2.0",
+      "chip": "arm64"
+    },
+    "git_sha": "dea5835",
+    "runs_per_scenario": 2,
+    "quick": true
+  },
+  "experiments": {
+    "F": {
+      "F_cache_ratio": {
+        "description": "Cold/warm/hot cache ratios",
+        "env": {
+          "SEMANTIC_MLX_CHUNKED_PREFILL_ENABLED": "true",
+          "SEMANTIC_MLX_CHUNKED_PREFILL_THRESHOLD": "2048",
+          "SEMANTIC_MLX_CHUNKED_PREFILL_MIN_CHUNK": "512",
+          "SEMANTIC_MLX_CHUNKED_PREFILL_MAX_CHUNK": "4096",
+          "SEMANTIC_MLX_DEFAULT_TEMPERATURE": "0.0",
+          "SEMANTIC_MLX_KV_BITS": "4",
+          "SEMANTIC_MLX_MAX_CONTEXT_LENGTH": "100000",
+          "SEMANTIC_MLX_MAX_BATCH_SIZE": "1",
+          "SEMANTIC_MLX_SCHEDULER_ENABLED": "false",
+          "SEMANTIC_MLX_PREFILL_STEP_SIZE": "256",
+          "SEMANTIC_SERVER_LOG_LEVEL": "WARNING",
+          "SEMANTIC_API_KEY": ""
+        },
+        "scenarios": {
+          "F_cold_only": {
+            "runs": [
+              {
+                "scenario": "F_cold_only",
+                "config": "F_cache_ratio",
+                "ttft_ms": 0.0,
+                "e2e_ms": 2348.4428329742514,
+                "itl_mean_ms": 0.0,
+                "itl_p95_ms": 0.0,
+                "itl_p99_ms": 0.0,
+                "tpot_ms": 0.0,
+                "decode_tps": 27.27885946206439,
+                "overall_tps": 0.0,
+                "output_tokens": 320,
+                "input_tokens": 0,
+                "cache_created": 0,
+                "cache_read": 0,
+                "memory_before_mb": 0.0,
+                "memory_after_mb": 0.0,
+                "peak_memory_mb": 0.0,
+                "raw_output": "",
+                "error": null
+              },
+              {
+                "scenario": "F_cold_only",
+                "config": "F_cache_ratio",
+                "ttft_ms": 0.0,
+                "e2e_ms": 2330.206391797401,
+                "itl_mean_ms": 0.0,
+                "itl_p95_ms": 0.0,
+                "itl_p99_ms": 0.0,
+                "tpot_ms": 0.0,
+                "decode_tps": 27.4667532623,
+                "overall_tps": 0.0,
+                "output_tokens": 320,
+                "input_tokens": 0,
+                "cache_created": 0,
+                "cache_read": 0,
+                "memory_before_mb": 0.0,
+                "memory_after_mb": 0.0,
+                "peak_memory_mb": 0.0,
+                "raw_output": "",
+                "error": null
+              }
+            ],
+            "stats": {
+              "e2e_ms": {
+                "mean": 2339.324612385826,
+                "median": 2339.324612385826,
+                "p95": 2347.531010915409,
+                "p99": 2348.260468562483
+              },
+              "ttft_ms": {
+                "mean": 0.0,
+                "median": 0.0,
+                "p95": 0.0,
+                "p99": 0.0
+              },
+              "peak_memory_mb": {
+                "mean": 0.0,
+                "median": 0.0,
+                "p95": 0.0,
+                "p99": 0.0
+              }
+            }
+          },
+          "F_warm_only": {
+            "runs": [
+              {
+                "scenario": "F_warm_only",
+                "config": "F_cache_ratio",
+                "ttft_ms": 0.0,
+                "e2e_ms": 2284.710908390116,
+                "itl_mean_ms": 0.0,
+                "itl_p95_ms": 0.0,
+                "itl_p99_ms": 0.0,
+                "tpot_ms": 0.0,
+                "decode_tps": 30.381212515584487,
+                "overall_tps": 0.0,
+                "output_tokens": 320,
+                "input_tokens": 0,
+                "cache_created": 0,
+                "cache_read": 0,
+                "memory_before_mb": 0.0,
+                "memory_after_mb": 0.0,
+                "peak_memory_mb": 0.0,
+                "raw_output": "",
+                "error": null
+              },
+              {
+                "scenario": "F_warm_only",
+                "config": "F_cache_ratio",
+                "ttft_ms": 0.0,
+                "e2e_ms": 2310.315075016115,
+                "itl_mean_ms": 0.0,
+                "itl_p95_ms": 0.0,
+                "itl_p99_ms": 0.0,
+                "tpot_ms": 0.0,
+                "decode_tps": 30.39275839894234,
+                "overall_tps": 0.0,
+                "output_tokens": 320,
+                "input_tokens": 0,
+                "cache_created": 0,
+                "cache_read": 0,
+                "memory_before_mb": 0.0,
+                "memory_after_mb": 0.0,
+                "peak_memory_mb": 0.0,
+                "raw_output": "",
+                "error": null
+              }
+            ],
+            "stats": {
+              "e2e_ms": {
+                "mean": 2297.5129917031154,
+                "median": 2297.5129917031154,
+                "p95": 2309.034866684815,
+                "p99": 2310.059033349855
+              },
+              "ttft_ms": {
+                "mean": 0.0,
+                "median": 0.0,
+                "p95": 0.0,
+                "p99": 0.0
+              },
+              "peak_memory_mb": {
+                "mean": 0.0,
+                "median": 0.0,
+                "p95": 0.0,
+                "p99": 0.0
+              }
+            }
+          },
+          "F_hot_path": {
+            "runs": [
+              {
+                "scenario": "F_hot_path",
+                "config": "F_cache_ratio",
+                "ttft_ms": 1829.637916001957,
+                "e2e_ms": 896.5615667984821,
+                "itl_mean_ms": 0.0,
+                "itl_p95_ms": 0.0,
+                "itl_p99_ms": 0.0,
+                "tpot_ms": 0.0,
+                "decode_tps": 21.57645048129315,
+                "overall_tps": 0.0,
+                "output_tokens": 160,
+                "input_tokens": 0,
+                "cache_created": 0,
+                "cache_read": 0,
+                "memory_before_mb": 0.0,
+                "memory_after_mb": 0.0,
+                "peak_memory_mb": 0.0,
+                "raw_output": "",
+                "error": null
+              },
+              {
+                "scenario": "F_hot_path",
+                "config": "F_cache_ratio",
+                "ttft_ms": 1901.2185420142487,
+                "e2e_ms": 904.9624293111265,
+                "itl_mean_ms": 0.0,
+                "itl_p95_ms": 0.0,
+                "itl_p99_ms": 0.0,
+                "tpot_ms": 0.0,
+                "decode_tps": 21.548409354601826,
+                "overall_tps": 0.0,
+                "output_tokens": 160,
+                "input_tokens": 0,
+                "cache_created": 0,
+                "cache_read": 0,
+                "memory_before_mb": 0.0,
+                "memory_after_mb": 0.0,
+                "peak_memory_mb": 0.0,
+                "raw_output": "",
+                "error": null
+              }
+            ],
+            "stats": {
+              "e2e_ms": {
+                "mean": 900.7619980548043,
+                "median": 900.7619980548043,
+                "p95": 904.5423861854943,
+                "p99": 904.878420686
+              },
+              "ttft_ms": {
+                "mean": 1865.4282290081028,
+                "median": 1865.4282290081028,
+                "p95": 1897.639510713634,
+                "p99": 1900.5027357541258
+              },
+              "peak_memory_mb": {
+                "mean": 0.0,
+                "median": 0.0,
+                "p95": 0.0,
+                "p99": 0.0
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -536,12 +536,47 @@ class BlockPoolBatchEngine:
                         sum(len(blocks) for blocks in cache.blocks.values()),
                     )
 
-                    # Reuse bytes_per_token_q4 calculated above
-                    q4_memory_mb = (cache.total_tokens * bytes_per_token_q4) / (1024 * 1024)
-                    logger.debug("[Q4 BLOCKS] Estimated Q4 memory: %.1fMB for %d tokens", q4_memory_mb, cache.total_tokens)
+                    # Early EXACT match detection: if the stored prompt matches
+                    # the current prompt, only reconstruct prompt-token blocks.
+                    # Skips loading generated-token blocks that would be trimmed
+                    # anyway (saves 20-50% reconstruction at high output counts).
+                    stored_text = getattr(cache, 'prompt_text', '')
+                    n_prompt = len(prompt_tokens)
+                    max_reconstruct: int | None = None
+                    if stored_text and stored_text == prompt:
+                        max_reconstruct = n_prompt
+                        n_skipped = cache.total_tokens - n_prompt
+                        logger.debug(
+                            "[EARLY EXACT] Limiting reconstruction to %d prompt tokens "
+                            "(skipping %d generated tokens)",
+                            n_prompt, n_skipped,
+                        )
+                        # Free generated-token GPU memory BEFORE reconstruction
+                        # to reduce memory pressure. gc.collect() releases Python
+                        # wrappers so MLX can reclaim GPU memory. Do NOT call
+                        # mx.clear_cache() — that would destroy the warmed Metal
+                        # memory pool and degrade all subsequent allocations.
+                        if n_skipped > 0:
+                            freed_blocks = 0
+                            for layer_blocks in cache.blocks.values():
+                                tokens_seen = 0
+                                for block in layer_blocks:
+                                    tokens_seen += block.token_count
+                                    if tokens_seen > n_prompt and block.layer_data is not None:
+                                        block.layer_data = None
+                                        freed_blocks += 1
+                            if freed_blocks > 0:
+                                gc.collect()
+                                logger.debug(
+                                    "[EARLY EXACT FREE] Freed %d generated-token blocks before reconstruction",
+                                    freed_blocks,
+                                )
 
-                    # FIX: Reconstruct cache without dequantization
-                    kv_cache = self._reconstruct_cache(cache)
+                    reconstruct_tokens = max_reconstruct or cache.total_tokens
+                    q4_memory_mb = (reconstruct_tokens * bytes_per_token_q4) / (1024 * 1024)
+                    logger.debug("[Q4 BLOCKS] Estimated Q4 memory: %.1fMB for %d tokens", q4_memory_mb, reconstruct_tokens)
+
+                    kv_cache = self._reconstruct_cache(cache, max_tokens=max_reconstruct)
 
                     # Memory tracking AFTER reconstruction (should be SAME as before - no dequant!)
                     mem_after_reconstruct = mx.get_active_memory() / (1024**3)
@@ -564,23 +599,34 @@ class BlockPoolBatchEngine:
                         first_layer = kv_cache[0]
                         first_offset = getattr(first_layer, 'offset', None)
                         first_size = first_layer.size() if hasattr(first_layer, 'size') else None
-                        expected_tokens = cache.total_tokens
                         logger.debug(
-                            "[CACHE VALIDATION] Layer 0: offset=%s, size()=%s, expected=%s",
-                            first_offset, first_size, expected_tokens,
+                            "[CACHE VALIDATION] Layer 0: offset=%s, size()=%s, total=%s, max_reconstruct=%s",
+                            first_offset, first_size, cache.total_tokens, max_reconstruct,
                         )
-                        if first_offset is not None and first_offset != expected_tokens:
-                            raise GenerationError(
-                                f"Cache offset mismatch: layer 0 offset ({first_offset}) != "
-                                f"expected tokens ({expected_tokens}). This would cause shape mismatch."
-                            )
+                        if max_reconstruct is not None:
+                            # Partial reconstruction (EARLY EXACT): offset may exceed
+                            # max_reconstruct due to block alignment (256-token blocks)
+                            # but must be <= total_tokens and >= max_reconstruct.
+                            if first_offset is not None and first_offset < max_reconstruct:
+                                raise GenerationError(
+                                    f"Cache offset too small: layer 0 offset ({first_offset}) < "
+                                    f"requested reconstruction ({max_reconstruct})."
+                                )
+                        else:
+                            # Full reconstruction: offset must exactly match total_tokens.
+                            if first_offset is not None and first_offset != cache.total_tokens:
+                                raise GenerationError(
+                                    f"Cache offset mismatch: layer 0 offset ({first_offset}) != "
+                                    f"expected tokens ({cache.total_tokens}). This would cause shape mismatch."
+                                )
                         if first_size is not None and first_offset is not None and first_size != first_offset:
                             raise GenerationError(
                                 f"Cache size/offset mismatch: layer 0 size() ({first_size}) != "
                                 f"offset ({first_offset}). BatchGenerator won't recognize cache."
                             )
 
-                    logger.debug("[RECONSTRUCT COMPLETE] Loaded %d tokens across %d layers as QuantizedKVCache (Q4)", cache.total_tokens, len(cache.blocks))
+                    loaded_desc = f"{first_offset} (partial)" if max_reconstruct is not None else str(cache.total_tokens)
+                    logger.debug("[RECONSTRUCT COMPLETE] Loaded %s tokens across %d layers as QuantizedKVCache (Q4)", loaded_desc, len(cache.blocks))
 
                     # Free Q4 GPU memory by clearing layer_data references.
                     # IMPORTANT: Do NOT call cache.blocks.clear() here!
@@ -764,16 +810,20 @@ class BlockPoolBatchEngine:
                     char_match = cache.common_prefix_chars(prompt)
 
                     if char_match == len(stored_text) == len(prompt):
-                        # EXACT MATCH: Same prompt text → treat as cache miss for fresh generation
-                        logger.debug("[CACHE EXACT MATCH MISS] %d chars match exactly", char_match)
-                        if kv_cache is not None:
-                            import mlx.core as mx
-                            del kv_cache
-                            gc.collect()
-                            mx.clear_cache()
-                        kv_cache = None
-                        cache = None
-                        tokens_to_process = prompt_tokens
+                        # EXACT MATCH: Reuse prompt portion of cache only.
+                        # With early EXACT detection, reconstruction already
+                        # limited to prompt tokens (trim is just 1 token).
+                        # Without it, cached_tokens includes generated tokens
+                        # and this trim removes the generated portion.
+                        n_prompt = len(prompt_tokens)
+                        trim_to = max(n_prompt - 1, 0)
+                        logger.debug(
+                            "[CACHE EXACT HIT] %d chars match, trimming %d→%d "
+                            "(prompt=%d, cached=%d)",
+                            char_match, cached_tokens, trim_to, n_prompt, cached_tokens,
+                        )
+                        self._slice_cache_to_length(kv_cache, trim_to)
+                        tokens_to_process = [prompt_tokens[-1]]
 
                     elif char_match == len(stored_text) < len(prompt):
                         # EXTEND: Full stored text matches, new text appended
@@ -1354,11 +1404,31 @@ class BlockPoolBatchEngine:
             # Update offset to match sliced length
             layer_cache.offset = target_length
 
-        # Force evaluation to materialize sliced tensors
-        mx.eval(*[c.keys for c in kv_cache if c.keys is not None])
+        # Force evaluation to materialize ALL sliced tensors (keys AND values).
+        # Both must be concrete before BatchGenerator uses them for attention.
+        tensors_to_eval: list[Any] = []
+        for c in kv_cache:
+            if c.keys is not None:
+                if isinstance(c.keys, tuple):
+                    tensors_to_eval.extend(t for t in c.keys if t is not None)
+                    tensors_to_eval.extend(t for t in c.values if t is not None)
+                else:
+                    tensors_to_eval.extend([c.keys, c.values])
+        if tensors_to_eval:
+            mx.eval(*tensors_to_eval)
 
-    def _reconstruct_cache(self, agent_blocks: AgentBlocks) -> list[Any]:
+    def _reconstruct_cache(
+        self,
+        agent_blocks: AgentBlocks,
+        max_tokens: int | None = None,
+    ) -> list[Any]:
         """Reconstruct MLX cache objects from blocks.
+
+        Args:
+            agent_blocks: Blocks to reconstruct from.
+            max_tokens: If set, only load blocks up to this token count.
+                Skips remaining blocks to avoid reconstructing generated
+                tokens that will be trimmed anyway (EXACT match optimization).
 
         Returns:
             List[KVCache]: List of cache objects (one per layer) in production
@@ -1395,14 +1465,19 @@ class BlockPoolBatchEngine:
                     cache.append((None, None))
                 continue
 
-            # Extract K and V tensors from all blocks
+            # Extract K and V tensors from blocks (respecting max_tokens limit)
             k_tensors = []
             v_tensors = []
+            tokens_loaded = 0
             for block in layer_blocks:
+                if max_tokens is not None and tokens_loaded >= max_tokens:
+                    break  # Skip generated-token blocks (EXACT match optimization)
+
                 if block.layer_data is None or "k" not in block.layer_data:
                     raise GenerationError(
                         f"Block {block.block_id} for layer {layer_id} has no K/V data"
                     )
+                tokens_loaded += block.token_count
 
                 k_data = block.layer_data["k"]
                 v_data = block.layer_data["v"]
@@ -1453,7 +1528,7 @@ class BlockPoolBatchEngine:
             )
 
             if use_kv_cache:
-                actual_tokens = agent_blocks.total_tokens
+                actual_tokens = tokens_loaded if max_tokens is not None else agent_blocks.total_tokens
 
                 if isinstance(k_full, tuple) and len(k_full) == 3:
                     k_weights, k_scales, k_biases = k_full
