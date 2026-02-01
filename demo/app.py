@@ -1,0 +1,357 @@
+"""Semantic Cache Multi-Agent Demo.
+
+Demonstrates multi-agent conversation with per-agent KV cache persistence.
+Each column represents an independent agent with its own session, showing
+cache state transitions (COLD -> WARM -> HOT) and real-time performance metrics.
+
+Usage:
+    pip install -r demo/requirements.txt
+    semantic serve  # start the server on :8000
+    streamlit run demo/app.py
+"""
+
+import json
+import time
+from uuid import uuid4
+
+import httpx
+import streamlit as st
+
+SERVER_URL = "http://127.0.0.1:8000"
+NUM_AGENTS = 4
+AGENT_NAMES = ["Alpha", "Beta", "Gamma", "Delta"]
+AGENT_COLORS = ["#3b82f6", "#f59e0b", "#10b981", "#ef4444"]
+SUGGESTED_PROMPTS = [
+    "Explain quantum computing basics",
+    "Write a Python linked list implementation",
+    "What caused World War I?",
+    "Describe the water cycle step by step",
+]
+
+
+def init_session_state() -> None:
+    """Initialize per-agent session state on first load."""
+    if "initialized" in st.session_state:
+        return
+    st.session_state.initialized = True
+    st.session_state.server_status = "unknown"
+    for i in range(NUM_AGENTS):
+        prefix = f"agent_{i}"
+        st.session_state[f"{prefix}_sid"] = f"{AGENT_NAMES[i].lower()}_{uuid4().hex[:8]}"
+        st.session_state[f"{prefix}_messages"] = []
+        st.session_state[f"{prefix}_turn"] = 0
+        st.session_state[f"{prefix}_metrics"] = []
+        st.session_state[f"{prefix}_generating"] = False
+
+
+def get_cache_state(turn: int) -> tuple[str, str]:
+    """Return (label, color) based on turn count."""
+    if turn == 0:
+        return "COLD", "#3b82f6"
+    if turn <= 2:
+        return "WARM", "#f59e0b"
+    return "HOT", "#ef4444"
+
+
+def check_server() -> dict | None:
+    """Check server health and return memory info."""
+    try:
+        with httpx.Client(timeout=3.0) as client:
+            health = client.get(f"{SERVER_URL}/health/ready")
+            if health.status_code != 200:
+                return None
+            mem = client.get(f"{SERVER_URL}/debug/memory")
+            if mem.status_code == 200:
+                return mem.json()
+            return {}
+    except Exception:
+        return None
+
+
+def stream_response(
+    messages: list[dict], session_id: str
+) -> tuple[str, dict]:
+    """Send a streaming chat request and yield tokens.
+
+    Returns (full_text, usage_dict).
+    """
+    body = {
+        "model": "default",
+        "messages": messages,
+        "max_tokens": 512,
+        "temperature": 0.7,
+        "stream": True,
+    }
+    headers = {"X-Session-ID": session_id}
+
+    full_text = ""
+    usage: dict = {}
+    first_token_time: float | None = None
+    start = time.perf_counter()
+
+    with httpx.Client(timeout=120.0) as client:
+        with client.stream(
+            "POST", f"{SERVER_URL}/v1/chat/completions", json=body, headers=headers
+        ) as resp:
+            if resp.status_code != 200:
+                return f"[Error: HTTP {resp.status_code}]", {}
+            for line in resp.iter_lines():
+                if not line.startswith("data: "):
+                    continue
+                data = line[6:]
+                if data == "[DONE]":
+                    break
+                try:
+                    chunk = json.loads(data)
+                except json.JSONDecodeError:
+                    continue
+                if "usage" in chunk:
+                    usage = chunk["usage"]
+                choices = chunk.get("choices", [])
+                if not choices:
+                    continue
+                delta = choices[0].get("delta", {})
+                token = delta.get("content", "")
+                if token:
+                    if first_token_time is None:
+                        first_token_time = time.perf_counter()
+                    full_text += token
+
+    elapsed = time.perf_counter() - start
+    ttft = (first_token_time - start) * 1000 if first_token_time else 0
+    out_tokens = usage.get("completion_tokens", 0)
+    tps = out_tokens / elapsed if elapsed > 0 and out_tokens > 0 else 0
+
+    metrics = {
+        "ttft_ms": round(ttft),
+        "e2e_ms": round(elapsed * 1000),
+        "tps": round(tps, 1),
+        "input_tokens": usage.get("prompt_tokens", 0),
+        "output_tokens": out_tokens,
+    }
+    return full_text, metrics
+
+
+def non_stream_response(
+    messages: list[dict], session_id: str
+) -> tuple[str, dict]:
+    """Send a non-streaming chat request.
+
+    Fallback if streaming has issues.
+    """
+    body = {
+        "model": "default",
+        "messages": messages,
+        "max_tokens": 512,
+        "temperature": 0.7,
+        "stream": False,
+    }
+    headers = {"X-Session-ID": session_id}
+
+    start = time.perf_counter()
+    with httpx.Client(timeout=120.0) as client:
+        resp = client.post(
+            f"{SERVER_URL}/v1/chat/completions", json=body, headers=headers
+        )
+        elapsed = time.perf_counter() - start
+
+    if resp.status_code != 200:
+        return f"[Error: HTTP {resp.status_code}: {resp.text[:200]}]", {}
+
+    data = resp.json()
+    usage = data.get("usage", {})
+    text = data["choices"][0]["message"]["content"] or ""
+    out_tokens = usage.get("completion_tokens", 0)
+    tps = out_tokens / elapsed if elapsed > 0 and out_tokens > 0 else 0
+
+    return text, {
+        "ttft_ms": round(elapsed * 1000),
+        "e2e_ms": round(elapsed * 1000),
+        "tps": round(tps, 1),
+        "input_tokens": usage.get("prompt_tokens", 0),
+        "output_tokens": out_tokens,
+    }
+
+
+def render_agent_column(agent_idx: int) -> None:
+    """Render a single agent's conversation column."""
+    prefix = f"agent_{agent_idx}"
+    name = AGENT_NAMES[agent_idx]
+    sid = st.session_state[f"{prefix}_sid"]
+    messages = st.session_state[f"{prefix}_messages"]
+    turn = st.session_state[f"{prefix}_turn"]
+    all_metrics = st.session_state[f"{prefix}_metrics"]
+
+    # Header with cache state badge
+    cache_label, cache_color = get_cache_state(turn)
+    st.markdown(
+        f"### {name} "
+        f'<span style="background:{cache_color};color:white;padding:2px 8px;'
+        f'border-radius:10px;font-size:0.7em;">{cache_label}</span>',
+        unsafe_allow_html=True,
+    )
+    st.caption(f"Session: `{sid}` | Turns: {turn}")
+
+    # Chat history
+    chat_container = st.container(height=350)
+    with chat_container:
+        for msg in messages:
+            with st.chat_message(msg["role"]):
+                st.markdown(msg["content"])
+
+    # Latest metrics
+    if all_metrics:
+        m = all_metrics[-1]
+        cols = st.columns(3)
+        cols[0].metric("TTFT", f"{m['ttft_ms']}ms")
+        cols[1].metric("TPS", f"{m['tps']}")
+        cols[2].metric("Tokens", f"{m['input_tokens']}+{m['output_tokens']}")
+
+    # Input
+    user_input = st.chat_input(
+        f"Message {name}...",
+        key=f"{prefix}_input",
+    )
+
+    # Suggested prompt button (only show when no messages)
+    if not messages:
+        if st.button(
+            f"Try: \"{SUGGESTED_PROMPTS[agent_idx][:40]}...\"",
+            key=f"{prefix}_suggest",
+            use_container_width=True,
+        ):
+            user_input = SUGGESTED_PROMPTS[agent_idx]
+
+    if user_input:
+        # Add user message
+        messages.append({"role": "user", "content": user_input})
+        st.session_state[f"{prefix}_messages"] = messages
+
+        # Generate response
+        with st.spinner(f"{name} thinking..."):
+            text, metrics = non_stream_response(messages, sid)
+
+        # Add assistant response
+        messages.append({"role": "assistant", "content": text})
+        st.session_state[f"{prefix}_messages"] = messages
+        st.session_state[f"{prefix}_turn"] = turn + 1
+        if metrics:
+            all_metrics.append(metrics)
+            st.session_state[f"{prefix}_metrics"] = all_metrics
+
+        st.rerun()
+
+
+def render_sidebar() -> None:
+    """Render the sidebar with server status and global stats."""
+    with st.sidebar:
+        st.title("Semantic Cache Demo")
+        st.markdown("Multi-agent KV cache persistence on Apple Silicon")
+
+        st.divider()
+
+        # Server status
+        st.subheader("Server Status")
+        mem_info = check_server()
+        if mem_info is None:
+            st.error("Server offline")
+            st.caption(f"Expected at {SERVER_URL}")
+            st.markdown("Start with: `semantic serve`")
+        else:
+            st.success("Server online")
+            if mem_info:
+                c1, c2 = st.columns(2)
+                active = mem_info.get("active_memory_mb", 0)
+                peak = mem_info.get("peak_memory_mb", 0)
+                used = mem_info.get("pool_used_blocks", 0)
+                total = mem_info.get("pool_total_blocks", 0)
+                c1.metric("GPU Memory", f"{active:.0f} MB")
+                c2.metric("Peak", f"{peak:.0f} MB")
+                if total > 0:
+                    pct = used / total * 100
+                    st.progress(pct / 100, text=f"Pool: {used}/{total} blocks ({pct:.0f}%)")
+
+        st.divider()
+
+        # Per-agent metrics summary
+        st.subheader("Agent Metrics")
+        for i in range(NUM_AGENTS):
+            prefix = f"agent_{i}"
+            turn = st.session_state.get(f"{prefix}_turn", 0)
+            metrics = st.session_state.get(f"{prefix}_metrics", [])
+            label, color = get_cache_state(turn)
+            if metrics:
+                avg_tps = sum(m["tps"] for m in metrics) / len(metrics)
+                avg_ttft = sum(m["ttft_ms"] for m in metrics) / len(metrics)
+                st.markdown(
+                    f"**{AGENT_NAMES[i]}** "
+                    f'<span style="background:{color};color:white;padding:1px 6px;'
+                    f'border-radius:8px;font-size:0.7em;">{label}</span> '
+                    f"| {turn} turns | {avg_tps:.0f} TPS | {avg_ttft:.0f}ms TTFT",
+                    unsafe_allow_html=True,
+                )
+            else:
+                st.markdown(
+                    f"**{AGENT_NAMES[i]}** "
+                    f'<span style="background:{color};color:white;padding:1px 6px;'
+                    f'border-radius:8px;font-size:0.7em;">{label}</span> '
+                    f"| No messages yet",
+                    unsafe_allow_html=True,
+                )
+
+        st.divider()
+
+        # Reset button
+        if st.button("Reset All Agents", use_container_width=True):
+            # Delete agents from server
+            try:
+                with httpx.Client(timeout=5.0) as client:
+                    for i in range(NUM_AGENTS):
+                        sid = st.session_state.get(f"agent_{i}_sid", "")
+                        if sid:
+                            try:
+                                client.delete(f"{SERVER_URL}/v1/agents/oai_{sid}")
+                            except Exception:
+                                pass
+            except Exception:
+                pass
+            # Clear session state
+            for key in list(st.session_state.keys()):
+                del st.session_state[key]
+            st.rerun()
+
+        st.divider()
+        st.caption(
+            "Built with [Streamlit](https://streamlit.io) | "
+            "[Semantic Cache API](https://github.com/yshk-mxim/rdic)"
+        )
+
+
+def main() -> None:
+    st.set_page_config(
+        page_title="Semantic Cache - Multi-Agent Demo",
+        page_icon="$",
+        layout="wide",
+        initial_sidebar_state="expanded",
+    )
+
+    init_session_state()
+    render_sidebar()
+
+    # Title
+    st.markdown(
+        "## Multi-Agent Conversation Demo\n"
+        "Each agent maintains an independent conversation with **persistent KV cache**. "
+        "Watch cache states transition from **COLD** (first message) to **WARM** (cache hit) "
+        "to **HOT** (deep conversation) as turn count increases."
+    )
+
+    # 4 agent columns
+    cols = st.columns(NUM_AGENTS, gap="medium")
+    for i, col in enumerate(cols):
+        with col:
+            render_agent_column(i)
+
+
+if __name__ == "__main__":
+    main()
