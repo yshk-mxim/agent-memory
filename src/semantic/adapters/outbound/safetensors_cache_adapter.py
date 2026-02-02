@@ -382,3 +382,92 @@ class SafetensorsCacheAdapter:
                             total_bytes += arr.size * 2  # float16 = 2 bytes
 
         return total_bytes
+
+    def get_cache_file_metadata(self, agent_id: str) -> dict[str, Any] | None:
+        """Read safetensors header metadata without loading tensors.
+
+        Performs header-only read of safetensors file (8-byte length + JSON metadata).
+        Does NOT deserialize tensor data, making it fast for browsing/inspection.
+
+        Args:
+            agent_id: Agent identifier
+
+        Returns:
+            Metadata dict or None if file doesn't exist. Keys:
+                - model_id: Model identifier
+                - total_tokens: Total tokens cached
+                - token_sequence: Token IDs (if stored)
+                - prompt_text: Prompt text (if stored)
+
+        Example:
+            >>> meta = adapter.get_cache_file_metadata("agent_123")
+            >>> if meta:
+            ...     print(f"Agent has {meta['total_tokens']} tokens")
+        """
+        self._validate_agent_id(agent_id)
+        cache_path = self.cache_dir / f"{agent_id}.safetensors"
+
+        if not cache_path.exists():
+            return None
+
+        try:
+            # Read 8-byte header (little-endian uint64)
+            with open(cache_path, "rb") as f:
+                header_size_bytes = f.read(8)
+                if len(header_size_bytes) < 8:
+                    return None
+
+                header_size = struct.unpack("<Q", header_size_bytes)[0]
+
+                # Read JSON metadata (header_size bytes)
+                if header_size > 100_000_000:  # Sanity check: 100MB max
+                    logger.warning(f"Suspiciously large header for {agent_id}: {header_size} bytes")
+                    return None
+
+                metadata_bytes = f.read(header_size)
+                if len(metadata_bytes) < header_size:
+                    return None
+
+                # Parse JSON
+                metadata_str = metadata_bytes.decode("utf-8")
+                full_metadata = json.loads(metadata_str)
+
+                # Extract __metadata__ section (our custom fields)
+                user_metadata = full_metadata.get("__metadata__", {})
+
+                return {
+                    "model_id": user_metadata.get("model_id", "unknown"),
+                    "total_tokens": int(user_metadata.get("total_tokens", 0)),
+                    "token_sequence": user_metadata.get("token_sequence", []),
+                    "prompt_text": user_metadata.get("prompt_text", ""),
+                }
+
+        except (OSError, IOError, struct.error, json.JSONDecodeError, UnicodeDecodeError) as e:
+            logger.warning(f"Failed to read metadata for {agent_id}: {e}")
+            return None
+
+    def get_file_size(self, agent_id: str) -> int | None:
+        """Get file size for cached agent.
+
+        Args:
+            agent_id: Agent identifier
+
+        Returns:
+            File size in bytes, or None if file doesn't exist.
+
+        Example:
+            >>> size = adapter.get_file_size("agent_123")
+            >>> if size:
+            ...     print(f"Cache file is {size / 1024 / 1024:.2f} MB")
+        """
+        self._validate_agent_id(agent_id)
+        cache_path = self.cache_dir / f"{agent_id}.safetensors"
+
+        if not cache_path.exists():
+            return None
+
+        try:
+            return cache_path.stat().st_size
+        except OSError as e:
+            logger.warning(f"Failed to stat file for {agent_id}: {e}")
+            return None

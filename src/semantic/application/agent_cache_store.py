@@ -586,3 +586,147 @@ class AgentCacheStore:
         except Exception as e:
             logger.error(f"Unexpected error loading cache for {agent_id}: {e}", exc_info=True)
             return None
+
+    def list_all_agents(self) -> list[dict[str, Any]]:
+        """List all cached agents across hot, warm, and cold tiers.
+
+        Returns union of hot (in-memory) and warm (on-disk) agents with metadata.
+
+        Returns:
+            List of agent metadata dicts with keys:
+                - agent_id: Agent identifier
+                - tier: "hot" or "warm"
+                - tokens: Total tokens cached (0 if warm)
+                - last_accessed: Unix timestamp (0 if warm)
+                - access_count: Number of accesses (0 if warm)
+                - dirty: True if has unsaved changes (False if warm)
+                - model_id: Model identifier from tag
+                - file_size_bytes: Disk size (0 if hot-only)
+
+        Example:
+            >>> agents = store.list_all_agents()
+            >>> hot = [a for a in agents if a["tier"] == "hot"]
+            >>> warm = [a for a in agents if a["tier"] == "warm"]
+        """
+        with self._lock:
+            result = []
+
+            # Hot tier agents
+            for agent_id, entry in self._hot_cache.items():
+                tokens = entry.blocks.total_tokens if entry.blocks else 0
+                file_size = 0
+                cache_path = self.cache_dir / f"{agent_id}.safetensors"
+                if cache_path.exists():
+                    file_size = cache_path.stat().st_size
+
+                result.append({
+                    "agent_id": agent_id,
+                    "tier": "hot",
+                    "tokens": tokens,
+                    "last_accessed": entry.last_accessed,
+                    "access_count": entry.access_count,
+                    "dirty": entry.dirty,
+                    "model_id": entry.model_tag.model_id,
+                    "file_size_bytes": file_size,
+                })
+
+            # Warm tier agents (on disk, not in memory)
+            warm_ids = set(self._warm_cache.keys()) - set(self._hot_cache.keys())
+            for agent_id in warm_ids:
+                cache_path = self._warm_cache[agent_id]
+                file_size = 0
+                if cache_path.exists():
+                    file_size = cache_path.stat().st_size
+
+                result.append({
+                    "agent_id": agent_id,
+                    "tier": "warm",
+                    "tokens": 0,  # Unknown without loading
+                    "last_accessed": 0.0,
+                    "access_count": 0,
+                    "dirty": False,
+                    "model_id": self.model_tag.model_id,
+                    "file_size_bytes": file_size,
+                })
+
+            return result
+
+    def get_agent_metadata(self, agent_id: str) -> dict[str, Any] | None:
+        """Get agent cache metadata without loading tensors.
+
+        Performs header-only read for warm-tier agents (no tensor deserialization).
+
+        Args:
+            agent_id: Agent identifier
+
+        Returns:
+            Metadata dict or None if not found. Keys:
+                - agent_id: Agent identifier
+                - tier: "hot" or "warm"
+                - tokens: Total tokens cached
+                - last_accessed: Unix timestamp
+                - access_count: Number of accesses
+                - dirty: True if has unsaved changes
+                - model_id: Model identifier
+                - file_size_bytes: Disk size (0 if hot-only)
+                - prompt_preview: First 100 chars of prompt (if available)
+
+        Example:
+            >>> meta = store.get_agent_metadata("agent_123")
+            >>> if meta:
+            ...     print(f"{meta['agent_id']}: {meta['tokens']} tokens")
+        """
+        with self._lock:
+            # Check hot tier first
+            if agent_id in self._hot_cache:
+                entry = self._hot_cache[agent_id]
+                tokens = entry.blocks.total_tokens if entry.blocks else 0
+                prompt_preview = ""
+                if entry.blocks and entry.blocks.prompt_text:
+                    prompt_preview = entry.blocks.prompt_text[:100]
+
+                file_size = 0
+                cache_path = self.cache_dir / f"{agent_id}.safetensors"
+                if cache_path.exists():
+                    file_size = cache_path.stat().st_size
+
+                return {
+                    "agent_id": agent_id,
+                    "tier": "hot",
+                    "tokens": tokens,
+                    "last_accessed": entry.last_accessed,
+                    "access_count": entry.access_count,
+                    "dirty": entry.dirty,
+                    "model_id": entry.model_tag.model_id,
+                    "file_size_bytes": file_size,
+                    "prompt_preview": prompt_preview,
+                }
+
+            # Check warm tier (header-only read)
+            if agent_id in self._warm_cache:
+                cache_path = self._warm_cache[agent_id]
+                if not cache_path.exists():
+                    return None
+
+                try:
+                    # Use cache adapter for header-only read
+                    if self._cache_adapter:
+                        metadata = self._cache_adapter.get_cache_file_metadata(agent_id)
+                        if metadata:
+                            file_size = cache_path.stat().st_size
+                            return {
+                                "agent_id": agent_id,
+                                "tier": "warm",
+                                "tokens": metadata.get("total_tokens", 0),
+                                "last_accessed": 0.0,
+                                "access_count": 0,
+                                "dirty": False,
+                                "model_id": metadata.get("model_id", self.model_tag.model_id),
+                                "file_size_bytes": file_size,
+                                "prompt_preview": metadata.get("prompt_text", "")[:100],
+                            }
+                except Exception as e:
+                    logger.warning(f"Failed to read metadata for {agent_id}: {e}")
+                    return None
+
+            return None
