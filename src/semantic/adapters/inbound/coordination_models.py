@@ -59,7 +59,7 @@ class CreateSessionRequest(BaseModel):
     initial_prompt: str = Field(
         default="",
         description="Optional initial prompt/topic for discussion",
-        max_length=5000,
+        max_length=50000,
     )
     max_turns: int = Field(
         default=0,

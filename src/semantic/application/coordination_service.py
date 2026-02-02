@@ -253,81 +253,44 @@ class CoordinationService:
         """
         instructions = []
 
-        # Role-specific instruction
+        # Identity and role-specific instruction
         if agent_role.system_prompt:
-            instructions.append(agent_role.system_prompt)
+            instructions.append(f"You are {agent_role.display_name}. {agent_role.system_prompt}")
         else:
             instructions.append(f"You are {agent_role.display_name}, a {agent_role.role}.")
 
         # Enhanced debate format instruction with concrete examples
         if debate_format == DebateFormat.STRUCTURED:
-            instructions.append("""
-STRUCTURED DEBATE FORMAT - Required Structure:
-
-Your response must:
-1. CITE other agents: "As [Agent] said in Turn X..."
-2. PROVIDE evidence: Support claims with clear reasoning
-3. ADDRESS counterarguments: "While [Agent] raises a valid concern about X..."
-4. BUILD logical chains: "Building on [Agent]'s point..."
-
-Example structure:
-"Alice argued in Turn 2 that [X]. I agree/disagree because [reasoning with evidence].
-Bob's point in Turn 4 about [Y] is valid, but we must also consider [Z].
-Therefore, my position is [clear conclusion]."
-""")
+            instructions.append(
+                "STRUCTURED DEBATE FORMAT: "
+                "Cite others' points, provide evidence, address counterarguments, "
+                "and build logical chains. State your position with clear reasoning."
+            )
         elif debate_format == DebateFormat.SOCRATIC:
-            instructions.append("""
-SOCRATIC METHOD - Question-Driven Discussion:
-
-Your response must be PRIMARILY QUESTIONS that probe others' reasoning:
-
-Required elements:
-1. QUESTION premises: "You stated X. What exactly do you mean by X?"
-2. EXPLORE assumptions: "Why do you assume Y?"
-3. TEST implications: "If X is true, wouldn't that mean Z?"
-4. SEEK clarity: "Help me understand your reasoning about..."
-
-Example:
-"Alice, you argued for option X in Turn 2. What specific problem does X solve?
-If we choose X, what trade-offs are we accepting?
-Bob disagreed in Turn 3, citing concern Y. How would you respond to Bob's concern?"
-""")
+            instructions.append(
+                "SOCRATIC METHOD: Respond primarily with questions that probe others' "
+                "reasoning. Question premises, explore assumptions, test implications, "
+                "and seek clarity."
+            )
         elif debate_format == DebateFormat.DEVILS_ADVOCATE:
             if agent_role.role == "critic":
-                instructions.append("""
-DEVIL'S ADVOCATE ROLE - Critical Challenge:
-
-Your task is to challenge proposals and find weaknesses:
-
-1. IDENTIFY assumptions: What is being taken for granted?
-2. FIND edge cases: Where might this fail?
-3. PRESENT alternatives: What other approaches exist?
-4. STRESS TEST arguments: What happens in worst-case scenarios?
-
-Always reference specific claims from other agents and explain WHY they might be problematic.
-""")
+                instructions.append(
+                    "DEVIL'S ADVOCATE: Challenge proposals and find weaknesses. "
+                    "Identify assumptions, find edge cases, present alternatives, "
+                    "and stress test arguments."
+                )
         elif debate_format == DebateFormat.PARLIAMENTARY:
-            instructions.append("""
-PARLIAMENTARY PROCEDURE:
-
-Use formal structure:
-1. Address the moderator: "Madam/Mr. Moderator..."
-2. Reference previous speakers: "The honorable [Agent] from [Role] stated..."
-3. Use formal language: "I propose...", "I submit that...", "With respect to..."
-4. Structure your argument: Opening statement, evidence, conclusion
-
-Follow debate etiquette and maintain formal tone throughout.
-""")
+            instructions.append(
+                "PARLIAMENTARY PROCEDURE: Use formal structure. "
+                "Address the moderator, reference previous speakers formally, "
+                "and structure your argument with opening statement, evidence, "
+                "and conclusion."
+            )
         elif debate_format == DebateFormat.FREE_FORM:
-            instructions.append("""
-FREE-FORM DISCUSSION:
-
-While this is a free-form discussion, please:
-- Reference other agents' points by name and turn number
-- Build on or respond to specific arguments made
-- Maintain a constructive and collaborative tone
-- Contribute unique insights rather than merely agreeing
-""")
+            instructions.append(
+                "FREE-FORM DISCUSSION: Respond naturally to the conversation. "
+                "Build on or respond to specific points others have made."
+            )
 
         return "\n\n".join(instructions)
 
@@ -351,31 +314,16 @@ While this is a free-form discussion, please:
         Returns:
             List of message dicts in OpenAI format.
         """
-        # Build system message with identity and instructions
-        system_content = f"You are {agent_role.display_name}, a {agent_role.role}.\n\n"
-
-        # Add metacognitive prompts
-        system_content += """ANALYSIS TASK - Before responding, consider:
-1. What position has each agent taken?
-2. What are the key arguments from each agent?
-3. Where do you agree or disagree with each agent?
-4. What specific points should you address?
-5. What is your unique perspective that adds to this discussion?
-
-"""
-
-        # Add debate format instructions
+        # Build system message from directive (includes identity + debate format)
+        system_content = ""
         if directive.system_instruction:
-            system_content += f"{directive.system_instruction}\n\n"
+            system_content += directive.system_instruction
 
-        # Add response instructions
-        system_content += """YOUR RESPONSE:
-Please share your perspective, making sure to:
-- Reference specific agents by name (e.g., "As Alice said in Turn 2...")
-- Address the arguments made by other agents
-- Build on or counter specific points raised
-- Explain your reasoning clearly
-"""
+        # Add first-person instruction
+        system_content += (
+            "\n\nRespond in first person as yourself. "
+            "Address other participants by name when responding to their points."
+        )
 
         messages = [{"role": "system", "content": system_content}]
 

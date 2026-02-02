@@ -224,6 +224,7 @@ async def get_session_status(
                 display_name=agent.display_name,
                 role=agent.role,
                 message_count=message_count,
+                lifecycle=agent.lifecycle.value,
             )
         )
 

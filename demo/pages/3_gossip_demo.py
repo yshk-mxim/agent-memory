@@ -57,7 +57,7 @@ def create_session(agents: list[dict], initial_prompt: str, max_turns: int = 10)
                 f"{SERVER_URL}/v1/coordination/sessions",
                 json={
                     "topology": "round_robin",
-                    "debate_format": "open",
+                    "debate_format": "free_form",
                     "decision_mode": "consensus",
                     "agents": agents,
                     "initial_prompt": initial_prompt,

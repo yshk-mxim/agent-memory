@@ -226,7 +226,7 @@ def delete_coordination_session(session_id: str) -> bool:
     try:
         with httpx.Client(timeout=10.0) as client:
             resp = client.delete(f"{SERVER_URL}/v1/coordination/sessions/{session_id}")
-            if resp.status_code == 200:
+            if resp.status_code == 204:
                 return True
             else:
                 st.error(f"Failed to delete session: {resp.status_code} {resp.text}")

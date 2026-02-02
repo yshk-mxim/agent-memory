@@ -92,6 +92,90 @@ async def create_agent(request_body: CreateAgentRequest, request: Request) -> Ag
         ) from e
 
 
+@router.get("/list", status_code=status.HTTP_200_OK)
+async def list_agents(request: Request) -> dict:
+    """List all cached agents across memory tiers (GET /v1/agents/list).
+
+    Returns union of hot (in-memory) and warm (on-disk) agents with metadata.
+
+    Args:
+        request: FastAPI request (for accessing app state)
+
+    Returns:
+        Dict with agents list and total count.
+    """
+    try:
+        semantic_state = get_semantic_state(request)
+        cache_store: AgentCacheStore = semantic_state.cache_store
+
+        agents = cache_store.list_all_agents()
+
+        return {
+            "agents": agents,
+            "total": len(agents),
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to list agents: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to list agents: {e!s}",
+        ) from e
+
+
+@router.get("/stats", status_code=status.HTTP_200_OK)
+async def get_agent_stats(request: Request) -> dict:
+    """Get aggregate agent cache statistics (GET /v1/agents/stats).
+
+    Returns tier counts, pool utilization, and total cache size.
+
+    Args:
+        request: FastAPI request (for accessing app state)
+
+    Returns:
+        Dict with hot_count, warm_count, total_count, dirty_count,
+        pool_utilization_pct, total_cache_size_mb.
+    """
+    try:
+        semantic_state = get_semantic_state(request)
+        cache_store: AgentCacheStore = semantic_state.cache_store
+        block_pool = semantic_state.block_pool
+
+        # Get all agents
+        agents = cache_store.list_all_agents()
+
+        # Count by tier
+        hot_count = sum(1 for a in agents if a["tier"] == "hot")
+        warm_count = sum(1 for a in agents if a["tier"] == "warm")
+        dirty_count = sum(1 for a in agents if a.get("dirty", False))
+
+        # Calculate total cache size
+        total_size_bytes = sum(a["file_size_bytes"] for a in agents)
+        total_size_mb = total_size_bytes / (1024 * 1024)
+
+        # Pool utilization
+        pool_utilization = 0.0
+        if block_pool.total_blocks > 0:
+            used_blocks = block_pool.total_blocks - len(block_pool.free_list)
+            pool_utilization = (used_blocks / block_pool.total_blocks) * 100
+
+        return {
+            "hot_count": hot_count,
+            "warm_count": warm_count,
+            "total_count": len(agents),
+            "dirty_count": dirty_count,
+            "pool_utilization_pct": round(pool_utilization, 2),
+            "total_cache_size_mb": round(total_size_mb, 2),
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to get agent stats: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get agent stats: {e!s}",
+        ) from e
+
+
 @router.get("/{agent_id}", status_code=status.HTTP_200_OK)
 async def get_agent(agent_id: str, request: Request) -> AgentResponse:
     """Get agent info (GET /v1/agents/{agent_id}).
@@ -309,123 +393,4 @@ async def delete_agent(agent_id: str, request: Request):
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to delete agent: {e!s}",
-        ) from e
-
-
-@router.get("/list", status_code=status.HTTP_200_OK)
-async def list_agents(request: Request) -> dict:
-    """List all cached agents across memory tiers (GET /v1/agents/list).
-
-    Returns union of hot (in-memory) and warm (on-disk) agents with metadata.
-
-    Args:
-        request: FastAPI request (for accessing app state)
-
-    Returns:
-        Dict with keys:
-            - agents: List of agent metadata dicts
-            - total: Total agent count
-
-    Example response:
-        {
-            "agents": [
-                {
-                    "agent_id": "agent_123",
-                    "tier": "hot",
-                    "tokens": 1024,
-                    "last_accessed": 1704110400.0,
-                    "access_count": 5,
-                    "dirty": false,
-                    "model_id": "DeepSeek-Coder-V2-Lite",
-                    "file_size_bytes": 524288
-                },
-                ...
-            ],
-            "total": 15
-        }
-    """
-    try:
-        semantic_state = get_semantic_state(request)
-        cache_store: AgentCacheStore = semantic_state.cache_store
-
-        agents = cache_store.list_all_agents()
-
-        return {
-            "agents": agents,
-            "total": len(agents),
-        }
-
-    except Exception as e:
-        logger.error(f"Failed to list agents: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to list agents: {e!s}",
-        ) from e
-
-
-@router.get("/stats", status_code=status.HTTP_200_OK)
-async def get_agent_stats(request: Request) -> dict:
-    """Get aggregate agent cache statistics (GET /v1/agents/stats).
-
-    Returns tier counts, pool utilization, and total cache size.
-
-    Args:
-        request: FastAPI request (for accessing app state)
-
-    Returns:
-        Dict with keys:
-            - hot_count: Number of agents in memory
-            - warm_count: Number of agents on disk only
-            - total_count: Total agents across all tiers
-            - dirty_count: Number of agents with unsaved changes
-            - pool_utilization_pct: Percentage of block pool in use
-            - total_cache_size_mb: Total disk size in MB
-
-    Example response:
-        {
-            "hot_count": 8,
-            "warm_count": 7,
-            "total_count": 15,
-            "dirty_count": 2,
-            "pool_utilization_pct": 34.5,
-            "total_cache_size_mb": 128.3
-        }
-    """
-    try:
-        semantic_state = get_semantic_state(request)
-        cache_store: AgentCacheStore = semantic_state.cache_store
-        block_pool = semantic_state.block_pool
-
-        # Get all agents
-        agents = cache_store.list_all_agents()
-
-        # Count by tier
-        hot_count = sum(1 for a in agents if a["tier"] == "hot")
-        warm_count = sum(1 for a in agents if a["tier"] == "warm")
-        dirty_count = sum(1 for a in agents if a.get("dirty", False))
-
-        # Calculate total cache size
-        total_size_bytes = sum(a["file_size_bytes"] for a in agents)
-        total_size_mb = total_size_bytes / (1024 * 1024)
-
-        # Pool utilization
-        pool_utilization = 0.0
-        if block_pool.total_blocks > 0:
-            used_blocks = block_pool.total_blocks - len(block_pool._free_blocks)
-            pool_utilization = (used_blocks / block_pool.total_blocks) * 100
-
-        return {
-            "hot_count": hot_count,
-            "warm_count": warm_count,
-            "total_count": len(agents),
-            "dirty_count": dirty_count,
-            "pool_utilization_pct": round(pool_utilization, 2),
-            "total_cache_size_mb": round(total_size_mb, 2),
-        }
-
-    except Exception as e:
-        logger.error(f"Failed to get agent stats: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get agent stats: {e!s}",
         ) from e
