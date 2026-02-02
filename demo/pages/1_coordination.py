@@ -137,6 +137,26 @@ def execute_round(session_id: str) -> dict | None:
         return None
 
 
+def get_session_status(session_id: str) -> dict | None:
+    """Get status of a coordination session.
+
+    Args:
+        session_id: Session identifier.
+
+    Returns:
+        Session status dict, or None if error.
+    """
+    try:
+        with httpx.Client(timeout=10.0) as client:
+            resp = client.get(f"{SERVER_URL}/v1/coordination/sessions/{session_id}")
+            if resp.status_code == 200:
+                return resp.json()
+            else:
+                return None
+    except Exception:
+        return None
+
+
 def get_session_messages(session_id: str) -> list[dict]:
     """Get all messages in a coordination session.
 
@@ -295,8 +315,23 @@ def render_sidebar() -> None:
                     )
 
                     if response:
-                        st.session_state.coord_session_id = response["session_id"]
+                        session_id = response["session_id"]
+                        st.session_state.coord_session_id = session_id
                         st.session_state.coord_messages = []
+
+                        # Fetch actual session status from server
+                        status = get_session_status(session_id)
+                        if status:
+                            st.session_state.coord_session_status = status
+                        else:
+                            # Fallback initialization if status fetch fails
+                            st.session_state.coord_session_status = {
+                                "is_active": True,
+                                "current_turn": 0,
+                                "next_speaker": None,
+                                "agent_states": [],
+                            }
+
                         st.success("Session created!")
                         st.rerun()
 
