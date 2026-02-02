@@ -23,6 +23,22 @@ logger = logging.getLogger(__name__)
 _VALID_AGENT_ID_PATTERN = re.compile(r"^[a-zA-Z0-9_-]+$")
 
 
+def _mlx_to_numpy(arr: Any) -> "np.ndarray[Any, Any]":
+    """Convert MLX array to numpy, handling bfloat16 which numpy doesn't support.
+
+    MLX models may use bfloat16 internally (e.g., SmolLM2-135M). When quantizing
+    their KV cache, the scales and biases inherit bfloat16 dtype. Since numpy and
+    safetensors don't support bfloat16, we convert to float16 first. This is safe
+    because scales/biases are small values where bfloat16→float16 is lossless for
+    the precision needed.
+    """
+    import mlx.core as mx
+
+    if hasattr(arr, "dtype") and arr.dtype == mx.bfloat16:
+        arr = arr.astype(mx.float16)
+    return np.asarray(arr)
+
+
 class SafetensorsCacheAdapter:
     """Adapter for cache persistence using safetensors format."""
 
@@ -113,15 +129,16 @@ class SafetensorsCacheAdapter:
                         v_weights, v_scales, v_biases = v_data
 
                         # Save all quantized components separately
-                        tensors[f"L{layer_id}_B{block_idx}_K_weights"] = np.asarray(k_weights)
-                        tensors[f"L{layer_id}_B{block_idx}_K_scales"] = np.asarray(k_scales)
+                        # Uses _mlx_to_numpy to handle bfloat16→float16 conversion
+                        tensors[f"L{layer_id}_B{block_idx}_K_weights"] = _mlx_to_numpy(k_weights)
+                        tensors[f"L{layer_id}_B{block_idx}_K_scales"] = _mlx_to_numpy(k_scales)
                         if k_biases is not None:
-                            tensors[f"L{layer_id}_B{block_idx}_K_biases"] = np.asarray(k_biases)
+                            tensors[f"L{layer_id}_B{block_idx}_K_biases"] = _mlx_to_numpy(k_biases)
 
-                        tensors[f"L{layer_id}_B{block_idx}_V_weights"] = np.asarray(v_weights)
-                        tensors[f"L{layer_id}_B{block_idx}_V_scales"] = np.asarray(v_scales)
+                        tensors[f"L{layer_id}_B{block_idx}_V_weights"] = _mlx_to_numpy(v_weights)
+                        tensors[f"L{layer_id}_B{block_idx}_V_scales"] = _mlx_to_numpy(v_scales)
                         if v_biases is not None:
-                            tensors[f"L{layer_id}_B{block_idx}_V_biases"] = np.asarray(v_biases)
+                            tensors[f"L{layer_id}_B{block_idx}_V_biases"] = _mlx_to_numpy(v_biases)
 
                     else:
                         # Float16/float32 array - QUANTIZE it before saving
@@ -135,15 +152,15 @@ class SafetensorsCacheAdapter:
                         v_weights, v_scales, v_biases = mx.quantize(v_data, group_size=64, bits=4)
 
                         # Save quantized components
-                        tensors[f"L{layer_id}_B{block_idx}_K_weights"] = np.asarray(k_weights)
-                        tensors[f"L{layer_id}_B{block_idx}_K_scales"] = np.asarray(k_scales)
+                        tensors[f"L{layer_id}_B{block_idx}_K_weights"] = _mlx_to_numpy(k_weights)
+                        tensors[f"L{layer_id}_B{block_idx}_K_scales"] = _mlx_to_numpy(k_scales)
                         if k_biases is not None:
-                            tensors[f"L{layer_id}_B{block_idx}_K_biases"] = np.asarray(k_biases)
+                            tensors[f"L{layer_id}_B{block_idx}_K_biases"] = _mlx_to_numpy(k_biases)
 
-                        tensors[f"L{layer_id}_B{block_idx}_V_weights"] = np.asarray(v_weights)
-                        tensors[f"L{layer_id}_B{block_idx}_V_scales"] = np.asarray(v_scales)
+                        tensors[f"L{layer_id}_B{block_idx}_V_weights"] = _mlx_to_numpy(v_weights)
+                        tensors[f"L{layer_id}_B{block_idx}_V_scales"] = _mlx_to_numpy(v_scales)
                         if v_biases is not None:
-                            tensors[f"L{layer_id}_B{block_idx}_V_biases"] = np.asarray(v_biases)
+                            tensors[f"L{layer_id}_B{block_idx}_V_biases"] = _mlx_to_numpy(v_biases)
 
                 except (TypeError, ValueError) as e:
                     # Expected errors from invalid tensor shapes/types - log and skip block

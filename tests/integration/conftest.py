@@ -253,7 +253,7 @@ def _patch_for_integration(monkeypatch):
     from semantic.domain.entities import AgentBlocks
     from semantic.domain.errors import GenerationError
 
-    def _fake_extract_cache(self, uid, cache=None, token_sequence=None):
+    def _fake_extract_cache(self, uid, cache=None, token_sequence=None, prompt_text=""):
         if uid not in self._active_requests:
             raise GenerationError(f"UID {uid} not found")
         agent_id, _, _, _, _ = self._active_requests[uid]
@@ -273,6 +273,7 @@ def _patch_for_integration(monkeypatch):
             blocks=blocks,
             total_tokens=n_tokens,
             token_sequence=tok_seq,
+            prompt_text=prompt_text,
         )
 
     monkeypatch.setattr(BlockPoolBatchEngine, "_extract_cache", _fake_extract_cache)

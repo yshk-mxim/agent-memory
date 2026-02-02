@@ -318,6 +318,79 @@ Before approving any PR, verify:
 
 ---
 
+## Testing Standards (CRITICAL)
+
+### Test Tier Architecture
+
+Tests are organized in tiers with DIFFERENT infrastructure:
+
+| Tier | Directory | MLX | Model | Speed | Sandbox |
+|------|-----------|-----|-------|-------|---------|
+| **Unit** | `tests/unit/` | Fully mocked | No | <5s | Normal |
+| **Integration (mocked)** | `tests/integration/` | Mocked by conftest.py | No | <5s | Normal |
+| **Integration (real MLX)** | `tests/mlx/` | Real MLX + Metal GPU | Yes (SmolLM2-135M) | 30-120s | `dangerouslyDisableSandbox: true` |
+| **E2E** | `tests/e2e/` | Real server | Yes | 60-300s | `dangerouslyDisableSandbox: true` |
+
+**CRITICAL**: `tests/integration/conftest.py` replaces ALL MLX modules with MagicMock at the module level. Any test under `tests/integration/` will NEVER run real MLX. If a test needs real MLX tensors, real quantization, or real model inference, it MUST go in `tests/mlx/` which has NO mocking conftest.
+
+### Anti-Pattern: Fake "Integration" Tests
+
+```python
+# BAD: Claims to test Q4 round-trip but uses fake numpy data
+def test_q4_round_trip():
+    weights = np.random.randint(0, 2**32, size=(10,), dtype=np.uint32)  # FAKE
+    # This proves nothing about real MLX Q4 quantization
+
+# GOOD: Actually quantizes with MLX and verifies
+def test_q4_round_trip():
+    import mlx.core as mx
+    data = mx.random.normal((4, 256, 256))
+    weights, scales, biases = mx.quantize(data, group_size=64, bits=4)
+    # Now verify the REAL quantized output round-trips through safetensors
+```
+
+### Verification: Is a Test Actually Running MLX?
+
+If a test completes in under 1 second, it is NOT running real MLX. Real model operations take:
+- Model load: 2-10 seconds (SmolLM2-135M)
+- Single inference: 1-5 seconds
+- Cache quantization: 0.1-1 second
+
+**If your entire test suite runs in 2 seconds, everything is mocked.**
+
+### Running Real MLX Tests
+
+```bash
+# Real MLX tests — MUST use sandbox bypass, run ONE AT A TIME
+pytest tests/mlx/test_real_cache_round_trip.py -v -x --timeout=120
+
+# Environment cleanup BEFORE each real MLX test
+pkill -f "semantic.entrypoints" || true
+pkill -f "uvicorn.*semantic" || true
+sleep 2
+```
+
+### Test Content Requirements
+
+1. **Unit tests**: Test logic with mocked dependencies. Fast, no GPU needed.
+2. **Real MLX tests**: Must actually load a model, generate real tokens, and verify:
+   - Generated text is coherent (not empty, not garbage, answers the prompt)
+   - Q4 quantized data survives save→load→restore with correct dtypes
+   - Cache reuse produces valid inference (not corrupt output)
+3. **Never claim "integration" for mocked tests** — if conftest.py mocks MLX, the test is a unit test with extra steps.
+
+### Conftest Mock Awareness
+
+`tests/integration/conftest.py` patches these critical paths:
+- `sys.modules["mlx"]` → MagicMock
+- `sys.modules["mlx_lm"]` → MagicMock with FakeBatchGenerator
+- `BlockPoolBatchEngine._extract_cache` → fake that returns synthetic blocks
+- `SafetensorsCacheAdapter.save/load` → in-memory dict (no real safetensors)
+
+**Any change to `_extract_cache`, `_finalize_sequence`, or cache adapter signatures MUST be mirrored in the conftest fake.** Signature mismatches cause silent test failures.
+
+---
+
 ## File Organization
 
 ### Correct Structure (Sprint 4+)

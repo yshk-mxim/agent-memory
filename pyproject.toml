@@ -226,6 +226,14 @@ max-public-methods = 20 # Detect large classes
     "SIM108",  # if-else blocks clearer than ternary in manual tests
     "S104",    # Binding to 0.0.0.0 intentional for manual test server
 ]
+"tests/mlx/**/*.py" = [
+    "PLC0415", # Runtime imports needed for real MLX lazy loading
+    "S101",    # Assertions in tests
+    "PLR2004", # Magic values in test data
+    "D101",    # Test classes use descriptive names
+    "D102",    # Test methods use descriptive names
+    "D103",    # Test helper functions use descriptive names
+]
 # MLX adapters use runtime imports to avoid ImportError when MLX not installed
 "src/semantic/adapters/outbound/mlx_*.py" = [
     "PLC0415", # Runtime imports are intentional for optional dependencies
