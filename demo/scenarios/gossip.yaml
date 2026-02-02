@@ -1,0 +1,72 @@
+id: gossip
+title: "The Gossip Network"
+description: "Three friends, two private conversations, one awkward reunion"
+
+agents:
+  alice:
+    display_name: Alice
+    role: participant
+    system_prompt: "You are Alice. Witty, loves gossip and inside jokes. Keep responses under 4 sentences."
+    lifecycle: permanent
+    color: "#FF6B6B"
+  bob:
+    display_name: Bob
+    role: participant
+    system_prompt: "You are Bob. Friendly but a bit oblivious. Keep responses under 4 sentences."
+    lifecycle: permanent
+    color: "#4ECDC4"
+  eve:
+    display_name: Eve
+    role: participant
+    system_prompt: "You are Eve. Perceptive and curious. Notices when people hide things. Keep responses under 4 sentences."
+    lifecycle: permanent
+    color: "#45B7D1"
+
+phases:
+  - name: alice_bob
+    label: "Phase 1: Alice & Bob (Private)"
+    agents: [alice, bob]
+    topology: round_robin
+    debate_format: free_form
+    initial_prompt: "Alice and Bob are catching up privately. They start gossiping about their mutual friend Eve."
+    auto_rounds: 3
+
+  - name: alice_eve
+    label: "Phase 2: Alice & Eve (Private)"
+    agents: [alice, eve]
+    topology: round_robin
+    debate_format: free_form
+    initial_prompt: "Alice and Eve are catching up privately. They start gossiping about their mutual friend Bob."
+    auto_rounds: 3
+
+  - name: reunion
+    label: "Phase 3: The Reunion"
+    agents: [alice, bob, eve]
+    topology: round_robin
+    debate_format: free_form
+    initial_prompt_template: |
+      The three of you are meeting together.
+
+      IMPORTANT: You have private knowledge from earlier conversations,
+      but ONLY say things you'd be comfortable saying in front of everyone.
+      Do NOT repeat private gossip directly. You may hint at inside jokes.
+
+      Alice remembers (from private chat with Bob):
+      ${alice_bob.messages[alice]}
+
+      Alice remembers (from private chat with Eve):
+      ${alice_eve.messages[alice]}
+
+      Bob remembers (from private chat with Alice):
+      ${alice_bob.messages[bob]}
+
+      Eve remembers (from private chat with Alice):
+      ${alice_eve.messages[eve]}
+
+      Now you're all in the same room. Be natural.
+    auto_rounds: 3
+
+ui:
+  layout: columns
+  column_count: 2
+  show_memory_panel: true

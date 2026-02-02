@@ -315,6 +315,7 @@ markers = [
     "e2e: Full-stack multi-agent tests (slow, Apple Silicon only)",
     "stress: Load and concurrency stress tests (very slow, Apple Silicon only)",
     "benchmark: Performance benchmarks (very slow, Apple Silicon only)",
+    "property: Hypothesis property-based tests",
 ]
 addopts = [
     "--strict-markers",

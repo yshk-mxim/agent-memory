@@ -1,0 +1,288 @@
+"""End-to-end integration tests for the scenario pipeline.
+
+Validates the full flow: YAML -> Pydantic -> Domain -> Template Resolution
+without requiring a running server or network access.
+"""
+
+from __future__ import annotations
+
+import logging
+from pathlib import Path
+
+logger = logging.getLogger(__name__)
+
+import pytest
+from demo.lib.template_resolver import (
+    extract_phase_refs,
+    has_template_refs,
+    resolve_template,
+)
+
+from semantic.adapters.config.scenario_loader import discover_scenarios, load_scenario
+from semantic.domain.scenario import PhaseSpec, ScenarioSpec
+
+pytestmark = pytest.mark.integration
+
+SCENARIOS_DIR = Path(__file__).resolve().parents[2] / "demo" / "scenarios"
+
+
+class TestGossipFullPipeline:
+    """YAML -> Pydantic -> Domain -> Template for gossip.yaml."""
+
+    @pytest.fixture(scope="class")
+    def gossip(self) -> ScenarioSpec:
+        return load_scenario(SCENARIOS_DIR / "gossip.yaml")
+
+    def test_three_agents(self, gossip: ScenarioSpec) -> None:
+        assert set(gossip.agents.keys()) == {"alice", "bob", "eve"}
+
+    def test_three_phases(self, gossip: ScenarioSpec) -> None:
+        assert len(gossip.phases) == 3
+        phase_names = [p.name for p in gossip.phases]
+        assert phase_names == ["alice_bob", "alice_eve", "reunion"]
+
+    def test_phase_agent_membership(self, gossip: ScenarioSpec) -> None:
+        alice_bob, alice_eve, reunion = gossip.phases
+        assert alice_bob.agents == ("alice", "bob")
+        assert alice_eve.agents == ("alice", "eve")
+        assert reunion.agents == ("alice", "bob", "eve")
+
+    def test_reunion_has_template(self, gossip: ScenarioSpec) -> None:
+        reunion = gossip.phases[2]
+        assert reunion.initial_prompt_template
+        assert has_template_refs(reunion.initial_prompt_template)
+
+    def test_reunion_template_refs_both_prior_phases(self, gossip: ScenarioSpec) -> None:
+        reunion = gossip.phases[2]
+        refs = extract_phase_refs(reunion.initial_prompt_template)
+        assert refs == {"alice_bob", "alice_eve"}
+
+    def test_reunion_template_resolves_with_all_agent_context(
+        self, gossip: ScenarioSpec,
+    ) -> None:
+        reunion = gossip.phases[2]
+        phase_messages = {
+            "alice_bob": [
+                {"sender_name": "Alice", "content": "Bob is so forgetful."},
+                {"sender_name": "Bob", "content": "Don't tell Eve I said this."},
+            ],
+            "alice_eve": [
+                {"sender_name": "Alice", "content": "Eve, you won't believe this."},
+                {"sender_name": "Eve", "content": "Tell me everything!"},
+            ],
+        }
+        resolved = resolve_template(reunion.initial_prompt_template, phase_messages)
+
+        assert "Alice: Bob is so forgetful." in resolved
+        assert "Bob: Don't tell Eve I said this." in resolved
+        assert "Alice: Eve, you won't believe this." in resolved
+        assert "Eve: Tell me everything!" in resolved
+        assert "${" not in resolved
+
+    def test_non_template_phases_have_initial_prompt(self, gossip: ScenarioSpec) -> None:
+        alice_bob, alice_eve, _ = gossip.phases
+        assert alice_bob.initial_prompt
+        assert alice_eve.initial_prompt
+        assert not has_template_refs(alice_bob.initial_prompt)
+
+
+class TestPrisonersDilemmaFullPipeline:
+    """YAML -> Pydantic -> Domain -> Template for prisoners_dilemma.yaml."""
+
+    @pytest.fixture(scope="class")
+    def pd_spec(self) -> ScenarioSpec:
+        return load_scenario(SCENARIOS_DIR / "prisoners_dilemma.yaml")
+
+    def test_agents(self, pd_spec: ScenarioSpec) -> None:
+        assert set(pd_spec.agents.keys()) == {"warden", "marco", "danny"}
+
+    def test_warden_is_moderator(self, pd_spec: ScenarioSpec) -> None:
+        assert pd_spec.agents["warden"].role == "moderator"
+
+    def test_marco_and_danny_are_participants(self, pd_spec: ScenarioSpec) -> None:
+        assert pd_spec.agents["marco"].role == "participant"
+        assert pd_spec.agents["danny"].role == "participant"
+
+    def test_interrogation_danny_template_refs_marco(self, pd_spec: ScenarioSpec) -> None:
+        danny_phase = pd_spec.phases[1]
+        assert danny_phase.name == "interrogation_danny"
+        refs = extract_phase_refs(danny_phase.initial_prompt_template)
+        assert refs == {"interrogation_marco"}
+
+    def test_wardens_knowledge_injected(self, pd_spec: ScenarioSpec) -> None:
+        danny_phase = pd_spec.phases[1]
+        phase_messages = {
+            "interrogation_marco": [
+                {"sender_name": "Warden", "content": "Here's the deal, Marco."},
+                {"sender_name": "Marco", "content": "I'm not saying anything."},
+                {"sender_name": "Warden", "content": "Marco seems nervous."},
+            ],
+        }
+        resolved = resolve_template(danny_phase.initial_prompt_template, phase_messages)
+
+        assert "Warden: Here's the deal, Marco." in resolved
+        assert "Marco: I'm not saying anything." in resolved
+        assert "Warden: Marco seems nervous." in resolved
+        assert "${" not in resolved
+
+    def test_payoff_matrix_present(self, pd_spec: ScenarioSpec) -> None:
+        assert pd_spec.payoff is not None
+        assert pd_spec.payoff.labels == ("Cooperate", "Defect")
+        assert len(pd_spec.payoff.matrix) == 2
+
+    def test_outcome_rule_present(self, pd_spec: ScenarioSpec) -> None:
+        assert pd_spec.outcome is not None
+        assert pd_spec.outcome.type == "parse_choice"
+        assert pd_spec.outcome.display == "matrix"
+
+    def test_the_yard_has_plain_prompt(self, pd_spec: ScenarioSpec) -> None:
+        yard = pd_spec.phases[2]
+        assert yard.name == "the_yard"
+        assert yard.initial_prompt
+        assert not has_template_refs(yard.initial_prompt)
+
+
+class TestTemplateResolutionWithRealisticMessages:
+    """Template resolution with multi-turn, realistic message data."""
+
+    def test_multi_turn_transcript_format(self) -> None:
+        template = "Prior context:\n${debate.messages[judge]}"
+        messages = [
+            {"sender_name": "Alice", "content": "I believe the answer is 42."},
+            {"sender_name": "Bob", "content": "No, it should be 7."},
+            {"sender_name": "Alice", "content": "Let me explain my reasoning..."},
+            {"sender_name": "Bob", "content": "Fair point, but consider this."},
+        ]
+        resolved = resolve_template(template, {"debate": messages})
+
+        lines = resolved.split("\n")
+        assert lines[0] == "Prior context:"
+        assert lines[1] == "Alice: I believe the answer is 42."
+        assert lines[2] == "Bob: No, it should be 7."
+        assert lines[3] == "Alice: Let me explain my reasoning..."
+        assert lines[4] == "Bob: Fair point, but consider this."
+
+    def test_special_characters_preserved(self) -> None:
+        template = "${chat.messages[x]}"
+        messages = [
+            {"sender_name": "Bot", "content": "Price: $50 (25% off!) & free shipping"},
+            {"sender_name": "User", "content": "What about <html> tags & \"quotes\"?"},
+        ]
+        resolved = resolve_template(template, {"chat": messages})
+
+        assert "$50" in resolved
+        assert "<html>" in resolved
+        assert '"quotes"' in resolved
+
+    def test_empty_prior_phase_yields_placeholder(self) -> None:
+        template = "History:\n${empty_phase.messages[agent]}"
+        resolved = resolve_template(template, {"empty_phase": []})
+        assert resolved == "History:\n(no messages yet)"
+
+    def test_multiple_phase_refs_in_single_template(self) -> None:
+        template = (
+            "Phase A:\n${phase_a.messages[x]}\n\n"
+            "Phase B:\n${phase_b.messages[y]}"
+        )
+        phase_messages = {
+            "phase_a": [{"sender_name": "Host", "content": "Welcome"}],
+            "phase_b": [{"sender_name": "Host", "content": "Goodbye"}],
+        }
+        resolved = resolve_template(template, phase_messages)
+
+        assert "Phase A:\nHost: Welcome" in resolved
+        assert "Phase B:\nHost: Goodbye" in resolved
+
+
+class TestCrossPhaseDependencyChecking:
+    """Verify extract_phase_refs correctly identifies dependencies."""
+
+    def test_linear_dependency_chain(self) -> None:
+        phase_a = PhaseSpec(
+            name="phase_a",
+            label="A",
+            agents=("x",),
+            initial_prompt="Start here.",
+        )
+        phase_b = PhaseSpec(
+            name="phase_b",
+            label="B",
+            agents=("x",),
+            initial_prompt_template="Prior: ${phase_a.messages[x]}",
+        )
+        phase_c = PhaseSpec(
+            name="phase_c",
+            label="C",
+            agents=("x",),
+            initial_prompt_template=(
+                "From A: ${phase_a.messages[x]}\nFrom B: ${phase_b.messages[x]}"
+            ),
+        )
+
+        assert extract_phase_refs(phase_a.initial_prompt) == set()
+        assert extract_phase_refs(phase_b.initial_prompt_template) == {"phase_a"}
+        assert extract_phase_refs(phase_c.initial_prompt_template) == {"phase_a", "phase_b"}
+
+    def test_self_reference_detected(self) -> None:
+        template = "Recap: ${my_phase.messages[agent]}"
+        assert extract_phase_refs(template) == {"my_phase"}
+
+    def test_no_dependencies_for_plain_prompt(self) -> None:
+        phase = PhaseSpec(
+            name="standalone",
+            label="Standalone",
+            agents=("a",),
+            initial_prompt="No dependencies here.",
+        )
+        assert extract_phase_refs(phase.initial_prompt) == set()
+        assert not has_template_refs(phase.initial_prompt)
+
+    def test_gossip_reunion_depends_on_both_private_phases(self) -> None:
+        gossip = load_scenario(SCENARIOS_DIR / "gossip.yaml")
+        reunion = gossip.phases[2]
+        deps = extract_phase_refs(reunion.initial_prompt_template)
+        prior_phase_names = {p.name for p in gossip.phases[:2]}
+        assert deps == prior_phase_names
+
+
+class TestScenarioDiscoveryPipeline:
+    """discover_scenarios -> load_scenario -> validate ScenarioSpec."""
+
+    def test_discovers_yaml_files(self) -> None:
+        discovered = discover_scenarios(SCENARIOS_DIR)
+        assert len(discovered) >= 2
+        assert "gossip" in discovered
+        assert "prisoners_dilemma" in discovered
+
+    def test_discovered_paths_exist(self) -> None:
+        discovered = discover_scenarios(SCENARIOS_DIR)
+        for stem, path in discovered.items():
+            assert path.exists(), f"{stem} path does not exist: {path}"
+            assert path.suffix == ".yaml"
+
+    def test_all_loadable_scenarios_are_valid_specs(self) -> None:
+        discovered = discover_scenarios(SCENARIOS_DIR)
+        loaded_count = 0
+        for stem, path in discovered.items():
+            try:
+                spec = load_scenario(path)
+            except Exception:
+                logger.debug("Skipping %s: load failed", stem, exc_info=True)
+                continue
+            loaded_count += 1
+            assert isinstance(spec, ScenarioSpec), f"{stem} is not a ScenarioSpec"
+            assert spec.id, f"{stem} has empty id"
+            assert spec.title, f"{stem} has empty title"
+            assert len(spec.phases) >= 1, f"{stem} has no phases"
+            for phase in spec.phases:
+                for agent_key in phase.agents:
+                    assert agent_key in spec.agents, (
+                        f"{stem}: phase '{phase.name}' refs unknown agent '{agent_key}'"
+                    )
+        assert loaded_count >= 2
+
+    def test_empty_directory_returns_empty_dict(self, tmp_path: Path) -> None:
+        assert discover_scenarios(tmp_path) == {}
+
+    def test_nonexistent_directory_returns_empty_dict(self, tmp_path: Path) -> None:
+        assert discover_scenarios(tmp_path / "nonexistent") == {}

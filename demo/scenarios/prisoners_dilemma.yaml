@@ -1,0 +1,77 @@
+id: prisoners-dilemma
+title: "The Prisoner's Dilemma"
+description: "Two suspects, one warden, a classic game theory scenario"
+
+agents:
+  warden:
+    display_name: Warden
+    role: moderator
+    system_prompt: "You are a pragmatic corrections officer. Explain the deal plainly. Under 3 sentences."
+    lifecycle: permanent
+    color: "#95A5A6"
+  marco:
+    display_name: Marco
+    role: participant
+    system_prompt: "You are Marco. Blue-collar, 34, first offense, anxious about family. Under 3 sentences."
+    lifecycle: permanent
+    color: "#3498DB"
+  danny:
+    display_name: Danny
+    role: participant
+    system_prompt: "You are Danny. Street-smart, 41, been through the system. Under 3 sentences."
+    lifecycle: permanent
+    color: "#E74C3C"
+
+phases:
+  - name: interrogation_marco
+    label: "Room A: Warden & Marco"
+    agents: [warden, marco]
+    topology: round_robin
+    debate_format: free_form
+    initial_prompt: >-
+      The warden enters Marco's interrogation room to present the deal:
+      Both quiet = 2yr each. One talks = talker free, other 10yr. Both talk = 5yr each.
+    auto_rounds: 3
+
+  - name: interrogation_danny
+    label: "Room B: Warden & Danny"
+    agents: [warden, danny]
+    topology: round_robin
+    debate_format: free_form
+    initial_prompt_template: |
+      The warden enters Danny's interrogation room.
+      The warden has already spoken with Marco.
+
+      What the warden knows from Marco's interrogation:
+      ${interrogation_marco.messages[warden]}
+
+      Present the same deal: Both quiet = 2yr each.
+      One talks = talker free, other 10yr. Both talk = 5yr each.
+    auto_rounds: 3
+
+  - name: the_yard
+    label: "The Yard (Optional)"
+    agents: [marco, danny]
+    topology: round_robin
+    debate_format: free_form
+    initial_prompt: >-
+      Marco and Danny meet in the yard.
+      They can discuss strategy but the guards might be listening.
+    auto_rounds: 2
+
+outcome:
+  type: parse_choice
+  pattern: "(?i)(cooperate|defect|silent|talk|quiet|confess)"
+  choices: [cooperate, defect]
+  display: matrix
+
+payoff:
+  labels: [Cooperate, Defect]
+  matrix:
+    - ["2yr / 2yr", "10yr / Free"]
+    - ["Free / 10yr", "5yr / 5yr"]
+
+ui:
+  layout: columns
+  column_count: 2
+  show_memory_panel: false

@@ -54,7 +54,7 @@ class CreateSessionRequest(BaseModel):
         ...,
         description="List of agents participating in this session",
         min_length=2,
-        max_length=10,
+        max_length=30,
     )
     initial_prompt: str = Field(
         default="",

@@ -114,6 +114,11 @@ Runtime monkey-patch enabling Q4 quantized KV cache for models with attention si
 
 Unified document tying all five techniques together around the Apple Silicon Unified Memory Architecture thesis. Covers why UMA fundamentally changes the design space for persistent KV cache management: zero-copy disk↔GPU, compute-bound prefill making cache reuse 10-50x more valuable than datacenter, MLX lazy evaluation discipline, three-step memory reclamation, and the co-designed system synergy across all techniques.
 
+### 9. Config-Driven Multi-Agent Coordination
+**File**: `multi_agent_coordination.md`
+
+YAML-driven multi-agent scenario specification with cross-phase context injection via a template system (`${phase.messages[agent]}` patterns). Separates agent definitions, interaction topology, prompt construction, and UI layout into declarative config. Integrates with persistent KV cache: cross-phase prompts share long prefixes that the EXTEND path (character-level prefix matching) reuses efficiently, turning context injection into incremental cache extensions rather than full re-prefill.
+
 ---
 
 ## Related Documentation
@@ -124,4 +129,4 @@ Unified document tying all five techniques together around the Apple Silicon Uni
 
 ---
 
-**Last Updated**: February 1, 2026
+**Last Updated**: February 2, 2026
