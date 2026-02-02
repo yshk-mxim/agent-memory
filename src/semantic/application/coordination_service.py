@@ -11,6 +11,7 @@ No MLX / infrastructure imports — interacts with adapters through ports.
 """
 
 import structlog
+from typing import AsyncIterator
 from uuid import uuid4
 
 from semantic.domain.coordination import (
@@ -26,6 +27,7 @@ from semantic.domain.coordination import (
     VoteTally,
 )
 from semantic.domain.errors import InvalidTurnError, SessionNotFoundError
+from semantic.domain.value_objects import StreamDelta
 
 logger = structlog.get_logger(__name__)
 
@@ -297,70 +299,28 @@ While this is a free-form discussion, please:
     def build_agent_prompt(
         self, directive: TurnDirective, agent_role: AgentRole
     ) -> list[dict]:
-        """Build enhanced prompt with perspective-taking and mental state attribution.
+        """Build multi-turn prompt with proper role attribution.
 
-        Constructs a structured prompt that helps agents:
-        1. Distinguish their own previous messages from others'
-        2. Track other agents' positions and arguments
-        3. Build mental models of other agents' perspectives
-        4. Reference specific turns and arguments
+        Uses standard chat format where:
+        - System message: identity, rules, metacognitive prompts
+        - Conversation history: alternating user/assistant turns
+        - Agent's own messages: "assistant" role
+        - Others' messages: "user" role
+
+        This leverages the model's natural understanding of conversation roles.
 
         Args:
             directive: Turn directive with context.
             agent_role: The agent's role.
 
         Returns:
-            List of message dicts in OpenAI format with enhanced context structure.
+            List of message dicts in OpenAI format.
         """
-        from collections import defaultdict
-
-        # Separate messages by speaker for structured presentation
-        my_messages = []
-        other_agents_messages = defaultdict(list)
-        system_messages = []
-
-        for msg in directive.visible_messages:
-            if msg.sender_id == "system":
-                system_messages.append(msg)
-            elif msg.sender_id == agent_role.agent_id:
-                my_messages.append(msg)
-            else:
-                sender_name = self._get_agent_name(directive.session_id, msg.sender_id)
-                other_agents_messages[sender_name].append(msg)
-
-        # Build structured system prompt with perspective-taking scaffolding
+        # Build system message with identity and instructions
         system_content = f"You are {agent_role.display_name}, a {agent_role.role}.\n\n"
 
-        # Add topic/initial prompt
-        if system_messages:
-            system_content += "DISCUSSION TOPIC:\n"
-            for msg in system_messages:
-                system_content += f"{msg.content}\n\n"
-
-        # Add self-reflection context
-        if my_messages:
-            system_content += "YOUR PREVIOUS CONTRIBUTIONS:\n"
-            for msg in my_messages:
-                # Truncate long messages for context window management
-                content_preview = msg.content[:200] + ("..." if len(msg.content) > 200 else "")
-                system_content += f"  [Turn {msg.turn_number}] You said: \"{content_preview}\"\n"
-            system_content += "\n"
-        else:
-            system_content += "This is your first contribution to the discussion.\n\n"
-
-        # Add other agents' perspectives with explicit attribution
-        if other_agents_messages:
-            system_content += "OTHER AGENTS' PERSPECTIVES:\n"
-            for agent_name, messages in sorted(other_agents_messages.items()):
-                system_content += f"\n{agent_name} ({self._get_agent_role(directive.session_id, agent_name)}):\n"
-                for msg in messages:
-                    content_preview = msg.content[:200] + ("..." if len(msg.content) > 200 else "")
-                    system_content += f"  [Turn {msg.turn_number}] \"{content_preview}\"\n"
-            system_content += "\n"
-
-        # Add metacognitive prompts for perspective-taking
-        if other_agents_messages:
-            system_content += """ANALYSIS TASK - Before responding, consider:
+        # Add metacognitive prompts
+        system_content += """ANALYSIS TASK - Before responding, consider:
 1. What position has each agent taken?
 2. What are the key arguments from each agent?
 3. Where do you agree or disagree with each agent?
@@ -373,7 +333,7 @@ While this is a free-form discussion, please:
         if directive.system_instruction:
             system_content += f"{directive.system_instruction}\n\n"
 
-        # Add explicit response instructions
+        # Add response instructions
         system_content += """YOUR RESPONSE:
 Please share your perspective, making sure to:
 - Reference specific agents by name (e.g., "As Alice said in Turn 2...")
@@ -382,14 +342,47 @@ Please share your perspective, making sure to:
 - Explain your reasoning clearly
 """
 
-        # Build message list
-        messages = [
-            {"role": "system", "content": system_content},
-            {
+        messages = [{"role": "system", "content": system_content}]
+
+        # Replay conversation history as alternating user/assistant turns
+        # Keep only recent messages if conversation is very long
+        MAX_CONTEXT_MESSAGES = 40  # Total across all speakers
+        visible_messages = directive.visible_messages
+        if len(visible_messages) > MAX_CONTEXT_MESSAGES:
+            omitted_count = len(visible_messages) - MAX_CONTEXT_MESSAGES
+            visible_messages = visible_messages[-MAX_CONTEXT_MESSAGES:]
+            messages.append({
                 "role": "user",
-                "content": "Please share your analysis and response to the discussion above.",
-            },
-        ]
+                "content": f"[{omitted_count} earlier messages omitted for brevity]"
+            })
+
+        for msg in visible_messages:
+            if msg.sender_id == "system":
+                # System messages about the topic appear as user turns
+                messages.append({
+                    "role": "user",
+                    "content": f"[Turn {msg.turn_number}] Discussion topic: {msg.content}"
+                })
+            elif msg.sender_id == agent_role.agent_id:
+                # Agent's own messages appear as assistant turns
+                messages.append({
+                    "role": "assistant",
+                    "content": f"[Turn {msg.turn_number}] {msg.content}"
+                })
+            else:
+                # Other agents' messages appear as user turns with attribution
+                sender_name = self._get_agent_name(directive.session_id, msg.sender_id)
+                sender_role = self._get_agent_role(directive.session_id, sender_name)
+                messages.append({
+                    "role": "user",
+                    "content": f"[Turn {msg.turn_number}] {sender_name} ({sender_role}): {msg.content}"
+                })
+
+        # Final user turn prompting response
+        messages.append({
+            "role": "user",
+            "content": "Please share your analysis and response."
+        })
 
         return messages
 
@@ -502,6 +495,101 @@ Please share your perspective, making sure to:
 
         return message
 
+    async def execute_turn_stream(self, session_id: str) -> AsyncIterator[StreamDelta]:
+        """Execute the next turn with token-by-token streaming.
+
+        Streams tokens as they're generated using the scheduler's streaming API.
+        After streaming completes, saves the cache and records the message.
+
+        Args:
+            session_id: Session identifier.
+
+        Yields:
+            StreamDelta objects with accumulated text and token count.
+
+        Raises:
+            SessionNotFoundError: If session does not exist.
+            InvalidTurnError: If no valid next turn.
+        """
+        session = self.get_session(session_id)
+        directive = self.get_next_turn(session_id)
+        agent_role = session.agents[directive.agent_id]
+
+        # Build prompt
+        prompt_messages = self.build_agent_prompt(directive, agent_role)
+
+        # Tokenize prompt
+        prompt_text = self._format_messages_as_text(prompt_messages)
+        prompt_tokens = self._engine.tokenizer.encode(prompt_text)
+
+        # Load agent's cache
+        namespaced_agent_id = f"coord_{session_id}_{directive.agent_id}"
+        cached_blocks = self._cache_store.load(namespaced_agent_id)
+
+        # Log cache reuse for debugging
+        if cached_blocks:
+            logger.debug(
+                "cache_reuse",
+                agent_id=namespaced_agent_id,
+                cached_tokens=cached_blocks.total_tokens,
+                prompt_tokens=len(prompt_tokens),
+            )
+
+        accumulated_text = ""
+
+        # Stream tokens via scheduler
+        if self._scheduler is not None:
+            async for delta in self._scheduler.submit_and_stream(
+                agent_id=namespaced_agent_id,
+                prompt_tokens=prompt_tokens,
+                cache=cached_blocks,
+                max_tokens=512,
+                prompt_text=prompt_text,
+                temperature=0.7,
+                top_p=1.0,
+            ):
+                accumulated_text = delta.text
+                yield delta
+        else:
+            # Fallback: non-streaming direct generation
+            result = await self._generate_direct(
+                agent_id=namespaced_agent_id,
+                prompt_tokens=prompt_tokens,
+                cache=cached_blocks,
+                max_tokens=512,
+                temperature=0.7,
+                top_p=1.0,
+            )
+            accumulated_text = result.text
+            # Yield single delta with final text
+            yield StreamDelta(text=result.text, token_count=len(result.text.split()), finish_reason="stop")
+
+        # Post-stream: save cache using engine's stored blocks
+        updated_blocks = self._engine.get_agent_blocks(namespaced_agent_id)
+        if updated_blocks:
+            self._cache_store.save(namespaced_agent_id, updated_blocks)
+
+        # Record message in public channel
+        public_channel = next(
+            c for c in session.channels.values() if c.channel_type == "public"
+        )
+        public_channel.add_message(
+            sender_id=directive.agent_id,
+            content=accumulated_text,
+            turn_number=session.current_turn,
+        )
+
+        # Advance turn
+        session.advance_turn()
+
+        logger.info(
+            "coordination_turn_streamed",
+            session_id=session_id,
+            agent_id=directive.agent_id,
+            turn=directive.turn_number,
+            text_length=len(accumulated_text),
+        )
+
     async def execute_round(self, session_id: str) -> list[ChannelMessage]:
         """Execute a full round (all agents get one turn each).
 
@@ -529,6 +617,38 @@ Please share your perspective, making sure to:
             messages_generated=len(messages),
         )
         return messages
+
+    async def execute_round_stream(
+        self, session_id: str
+    ) -> AsyncIterator[tuple[str, str, StreamDelta]]:
+        """Execute a full round with streaming for each agent.
+
+        Yields tuples of (agent_id, agent_name, StreamDelta) for each token.
+
+        Args:
+            session_id: Session identifier.
+
+        Yields:
+            Tuples of (agent_id, agent_name, StreamDelta) as tokens are generated.
+
+        Raises:
+            SessionNotFoundError: If session does not exist.
+        """
+        session = self.get_session(session_id)
+
+        for _ in range(len(session.agents)):
+            if not session.is_active:
+                break
+
+            # Get next speaker info before streaming
+            directive = self.get_next_turn(session_id)
+            agent_role = session.agents[directive.agent_id]
+
+            # Stream this agent's turn
+            async for delta in self.execute_turn_stream(session_id):
+                yield (directive.agent_id, agent_role.display_name, delta)
+
+        logger.info("coordination_round_streamed", session_id=session_id)
 
     def add_whisper(
         self, session_id: str, from_id: str, to_id: str, content: str
@@ -702,6 +822,6 @@ Please share your perspective, making sure to:
         @dataclass
         class DirectResult:
             text: str
-            cache: any
+            blocks: any
 
-        return DirectResult(text=result.text, cache=result.blocks)
+        return DirectResult(text=result.text, blocks=result.blocks)

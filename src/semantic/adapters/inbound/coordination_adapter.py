@@ -15,10 +15,13 @@ Routes:
   GET    /v1/coordination/sessions/{id}/messages - Get all messages
 """
 
+import json
 import logging
+from typing import AsyncIterator
 from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, Request, status
+from sse_starlette.sse import EventSourceResponse
 
 from semantic.adapters.inbound.adapter_helpers import get_coordination_service
 from semantic.adapters.inbound.coordination_models import (
@@ -418,6 +421,133 @@ async def execute_round(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e),
         ) from e
+
+
+async def stream_turn_events(
+    service, session_id: str
+) -> AsyncIterator[dict[str, str]]:
+    """Generate SSE events for streaming a single turn.
+
+    Yields:
+        SSE event dicts with 'event' and 'data' keys.
+    """
+    # Get next speaker info before streaming
+    try:
+        directive = service.get_next_turn(session_id)
+        session = service.get_session(session_id)
+        agent_role = session.agents[directive.agent_id]
+
+        # Send turn_start event
+        yield {
+            "event": "turn_start",
+            "data": json.dumps({
+                "agent_id": directive.agent_id,
+                "agent_name": agent_role.display_name,
+                "turn": session.current_turn + 1,
+            }),
+        }
+
+        accumulated_text = ""
+
+        # Stream tokens
+        async for delta in service.execute_turn_stream(session_id):
+            new_text = delta.text[len(accumulated_text):]
+            accumulated_text = delta.text
+
+            if new_text:
+                yield {
+                    "event": "token",
+                    "data": json.dumps({
+                        "text": new_text,
+                        "accumulated": accumulated_text,
+                    }),
+                }
+
+        # Send turn_complete event
+        yield {
+            "event": "turn_complete",
+            "data": json.dumps({
+                "agent_id": directive.agent_id,
+                "agent_name": agent_role.display_name,
+                "content": accumulated_text,
+                "turn": directive.turn_number,
+            }),
+        }
+
+    except CoordinationError as e:
+        yield {
+            "event": "error",
+            "data": json.dumps({"error": str(e)}),
+        }
+
+
+async def stream_round_events(
+    service, session_id: str
+) -> AsyncIterator[dict[str, str]]:
+    """Generate SSE events for streaming a full round.
+
+    Yields:
+        SSE event dicts with 'event' and 'data' keys.
+    """
+    try:
+        async for agent_id, agent_name, delta in service.execute_round_stream(session_id):
+            # These events come from execute_turn_stream within execute_round_stream
+            yield {
+                "event": "token",
+                "data": json.dumps({
+                    "agent_id": agent_id,
+                    "agent_name": agent_name,
+                    "text": delta.text,
+                    "token_count": delta.token_count,
+                }),
+            }
+
+        yield {
+            "event": "round_complete",
+            "data": json.dumps({"status": "complete"}),
+        }
+
+    except CoordinationError as e:
+        yield {
+            "event": "error",
+            "data": json.dumps({"error": str(e)}),
+        }
+
+
+@router.post("/sessions/{session_id}/turn/stream")
+async def execute_turn_stream(
+    request: Request,
+    session_id: str,
+):
+    """Execute the next turn with Server-Sent Events streaming.
+
+    Args:
+        request: FastAPI request.
+        session_id: Session identifier.
+
+    Returns:
+        EventSourceResponse with streaming tokens.
+    """
+    service = get_coordination_service(request)
+    return EventSourceResponse(stream_turn_events(service, session_id))
+
+
+@router.post("/sessions/{session_id}/round/stream")
+async def execute_round_stream(
+    request: Request,
+    session_id: str,
+):
+    """Execute a full round with Server-Sent Events streaming.
+
+    Args:
+        request: FastAPI request.
+        session_id: Session identifier.
+
+    Returns:
+        EventSourceResponse with streaming tokens for each agent.
+    """
+    service = get_coordination_service(request)
+    return EventSourceResponse(stream_round_events(service, session_id))
 
 
 @router.post("/sessions/{session_id}/whisper")
