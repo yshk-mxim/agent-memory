@@ -191,6 +191,8 @@ max-public-methods = 20 # Detect large classes
     "B905",    # zip without strict= acceptable in tests
     "B007",    # Unused loop variables acceptable in tests
     "C401",    # Generator-to-set acceptable in tests
+    "RUF012", # Mutable class attributes in test classes (parametrize data)
+    "PLW1510", # subprocess.run without check= in test validation code
 ]
 "tests/benchmarks/**/*.py" = [
     "S603",    # Allow subprocess calls (needed for server startup)
@@ -217,6 +219,12 @@ max-public-methods = 20 # Detect large classes
     "B007",    # Allow unused loop variables in stress tests
     "RUF001",  # Allow ambiguous characters (× for multiplication)
     "RUF002",  # Allow ambiguous characters in docstrings
+]
+"demo/**/*.py" = [
+    "E402",    # sys.path must be set before demo.lib imports (Streamlit runtime)
+    "D100",    # Demo modules don't need module docstrings
+    "D101",    # Demo classes don't need class docstrings
+    "D103",    # Demo helper functions don't need docstrings
 ]
 "tests/manual/**/*.py" = [
     "PLW2901", # Loop variable reassignment common in stream parsing

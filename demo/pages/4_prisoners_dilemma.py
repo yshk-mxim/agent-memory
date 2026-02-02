@@ -5,8 +5,14 @@ Two suspects, one warden, classic prisoner's dilemma with optional yard session.
 
 from __future__ import annotations
 
-import logging
+import sys
 from pathlib import Path
+
+_PROJECT_ROOT = str(Path(__file__).resolve().parent.parent.parent)
+if _PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, _PROJECT_ROOT)
+
+import logging
 
 import streamlit as st
 from demo.lib.scenario_renderer import ScenarioRenderer

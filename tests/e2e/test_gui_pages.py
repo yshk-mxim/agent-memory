@@ -8,11 +8,112 @@ Run with: pytest tests/e2e/test_gui_pages.py -v --timeout=120
 
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 
 pytestmark = [pytest.mark.e2e, pytest.mark.live]
+
+PROJECT_ROOT = str(Path(__file__).resolve().parent.parent.parent)
+
+
+# ---------------------------------------------------------------------------
+# 0. Streamlit Import Path Simulation — catch ModuleNotFoundError in real runtime
+# ---------------------------------------------------------------------------
+
+
+class TestStreamlitImportPath:
+    """Verify page files import correctly WITHOUT project root on sys.path.
+
+    Streamlit does NOT put the project root on sys.path when loading page
+    files. Only the editable-install path (src/) is available. Each page
+    must set up its own sys.path to import from demo.lib.
+
+    These tests run each page file in a subprocess with a restricted
+    sys.path that mimics Streamlit's actual runtime environment, catching
+    ModuleNotFoundError that pytest's privileged sys.path would hide.
+    """
+
+    PAGE_FILES = [
+        "demo/app.py",
+        "demo/pages/1_coordination.py",
+        "demo/pages/2_agent_memory.py",
+        "demo/pages/3_gossip_demo.py",
+        "demo/pages/4_prisoners_dilemma.py",
+    ]
+
+    @pytest.mark.parametrize("page_path", PAGE_FILES)
+    def test_page_imports_without_project_root(self, page_path: str) -> None:
+        """Each page must resolve its imports via its own sys.path setup.
+
+        Runs the page file as a subprocess with PYTHONPATH stripped of the
+        project root. Python adds the page's own directory to sys.path[0]
+        (like Streamlit), and __file__ is set automatically. The page's
+        own sys.path fix must resolve demo.lib imports; if it doesn't,
+        the subprocess will fail with ModuleNotFoundError.
+        """
+        abs_page = str(Path(PROJECT_ROOT) / page_path)
+
+        # Build PYTHONPATH excluding the project root.
+        # Keep only the editable-install path (src/) and system paths.
+        existing = os.environ.get("PYTHONPATH", "")
+        filtered = [
+            p
+            for p in existing.split(os.pathsep)
+            if p and os.path.realpath(p) != os.path.realpath(PROJECT_ROOT)
+        ]
+        env = {**os.environ, "PYTHONPATH": os.pathsep.join(filtered)}
+
+        # Run the page file from a neutral CWD (not the project root)
+        result = subprocess.run(
+            [sys.executable, abs_page],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            cwd="/tmp",
+            env=env,
+        )
+
+        if result.returncode != 0:
+            stderr = result.stderr
+            # ModuleNotFoundError or ImportError = the bug class we catch
+            if "ModuleNotFoundError" in stderr or "ImportError" in stderr:
+                pytest.fail(f"{page_path} has import errors in Streamlit-like runtime:\n{stderr}")
+
+    @pytest.mark.parametrize("page_path", PAGE_FILES)
+    def test_page_has_sys_path_setup(self, page_path: str) -> None:
+        """Each page must have sys.path setup before demo.lib imports."""
+        abs_page = Path(PROJECT_ROOT) / page_path
+        source = abs_page.read_text()
+
+        # Verify the sys.path setup pattern exists
+        assert "sys.path" in source, (
+            f"{page_path} is missing sys.path setup for Streamlit compatibility"
+        )
+        assert "_PROJECT_ROOT" in source, f"{page_path} is missing _PROJECT_ROOT definition"
+
+        # Verify sys.path setup comes BEFORE demo.lib imports
+        lines = source.splitlines()
+        path_setup_line = -1
+        first_demo_import_line = -1
+        for i, line in enumerate(lines):
+            if "sys.path.insert" in line and path_setup_line == -1:
+                path_setup_line = i
+            if line.strip().startswith(("from demo.", "import demo.")):
+                if first_demo_import_line == -1:
+                    first_demo_import_line = i
+
+        if first_demo_import_line >= 0:
+            assert path_setup_line >= 0, (
+                f"{page_path} imports from demo.* but has no sys.path.insert"
+            )
+            assert path_setup_line < first_demo_import_line, (
+                f"{page_path}: sys.path.insert (line {path_setup_line + 1}) "
+                f"must come before demo import (line {first_demo_import_line + 1})"
+            )
 
 
 # ---------------------------------------------------------------------------

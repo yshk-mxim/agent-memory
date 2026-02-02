@@ -10,9 +10,19 @@ Usage:
     streamlit run demo/app.py
 """
 
+import sys
+from pathlib import Path
+
+# Ensure project root is on sys.path so page files can import demo.lib
+_PROJECT_ROOT = str(Path(__file__).resolve().parent.parent)
+if _PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, _PROJECT_ROOT)
+
+import contextlib
 import json
 import time
 from concurrent.futures import ThreadPoolExecutor
+from http import HTTPStatus
 from uuid import uuid4
 
 import httpx
@@ -20,6 +30,7 @@ import streamlit as st
 
 SERVER_URL = "http://127.0.0.1:8000"
 NUM_AGENTS = 4
+_WARM_TURN_THRESHOLD = 2
 AGENT_NAMES = ["Alpha", "Beta", "Gamma", "Delta"]
 AGENT_COLORS = ["#3b82f6", "#f59e0b", "#10b981", "#ef4444"]
 SUGGESTED_PROMPTS = [
@@ -68,7 +79,7 @@ def get_cache_state(turn: int) -> tuple[str, str]:
     """Return (label, color) based on turn count."""
     if turn == 0:
         return "COLD", "#3b82f6"
-    if turn <= 2:
+    if turn <= _WARM_TURN_THRESHOLD:
         return "WARM", "#f59e0b"
     return "HOT", "#ef4444"
 
@@ -78,10 +89,10 @@ def check_server() -> dict | None:
     try:
         with httpx.Client(timeout=3.0) as client:
             health = client.get(f"{SERVER_URL}/health/ready")
-            if health.status_code != 200:
+            if health.status_code != HTTPStatus.OK:
                 return None
             mem = client.get(f"{SERVER_URL}/debug/memory")
-            if mem.status_code == 200:
+            if mem.status_code == HTTPStatus.OK:
                 return mem.json()
             return {}
     except Exception:
@@ -93,13 +104,13 @@ def fetch_model_info() -> dict | None:
     try:
         with httpx.Client(timeout=3.0) as client:
             resp = client.get(f"{SERVER_URL}/v1/models")
-            if resp.status_code == 200:
+            if resp.status_code == HTTPStatus.OK:
                 data = resp.json()
                 models = data.get("data", [])
                 if models:
                     return models[0]
     except Exception:
-        pass
+        return None
     return None
 
 
@@ -134,33 +145,35 @@ def stream_response(
     first_token_time: float | None = None
     start = time.perf_counter()
 
-    with httpx.Client(timeout=120.0) as client:
-        with client.stream(
+    with (
+        httpx.Client(timeout=120.0) as client,
+        client.stream(
             "POST", f"{SERVER_URL}/v1/chat/completions", json=body, headers=headers
-        ) as resp:
-            if resp.status_code != 200:
-                return f"[Error: HTTP {resp.status_code}]", {}
-            for line in resp.iter_lines():
-                if not line.startswith("data: "):
-                    continue
-                data = line[6:]
-                if data == "[DONE]":
-                    break
-                try:
-                    chunk = json.loads(data)
-                except json.JSONDecodeError:
-                    continue
-                if "usage" in chunk:
-                    usage = chunk["usage"]
-                choices = chunk.get("choices", [])
-                if not choices:
-                    continue
-                delta = choices[0].get("delta", {})
-                token = delta.get("content", "")
-                if token:
-                    if first_token_time is None:
-                        first_token_time = time.perf_counter()
-                    full_text += token
+        ) as resp,
+    ):
+        if resp.status_code != HTTPStatus.OK:
+            return f"[Error: HTTP {resp.status_code}]", {}
+        for line in resp.iter_lines():
+            if not line.startswith("data: "):
+                continue
+            data = line[6:]
+            if data == "[DONE]":
+                break
+            try:
+                chunk = json.loads(data)
+            except json.JSONDecodeError:
+                continue
+            if "usage" in chunk:
+                usage = chunk["usage"]
+            choices = chunk.get("choices", [])
+            if not choices:
+                continue
+            delta = choices[0].get("delta", {})
+            token = delta.get("content", "")
+            if token:
+                if first_token_time is None:
+                    first_token_time = time.perf_counter()
+                full_text += token
 
     elapsed = time.perf_counter() - start
     ttft = (first_token_time - start) * 1000 if first_token_time else 0
@@ -197,12 +210,10 @@ def non_stream_response(
 
     start = time.perf_counter()
     with httpx.Client(timeout=120.0) as client:
-        resp = client.post(
-            f"{SERVER_URL}/v1/chat/completions", json=body, headers=headers
-        )
+        resp = client.post(f"{SERVER_URL}/v1/chat/completions", json=body, headers=headers)
         elapsed = time.perf_counter() - start
 
-    if resp.status_code != 200:
+    if resp.status_code != HTTPStatus.OK:
         return f"[Error: HTTP {resp.status_code}: {resp.text[:200]}]", {}
 
     data = resp.json()
@@ -229,9 +240,8 @@ def estimate_token_count(messages: list[dict]) -> int:
 def render_agent_settings(agent_idx: int) -> None:
     """Render per-agent inference settings in an expander."""
     prefix = f"agent_{agent_idx}"
-    name = AGENT_NAMES[agent_idx]
 
-    with st.expander(f"Settings", expanded=False):
+    with st.expander("Settings", expanded=False):
         st.session_state[f"{prefix}_temperature"] = st.slider(
             "Temperature",
             min_value=0.0,
@@ -340,13 +350,12 @@ def render_agent_column(agent_idx: int) -> None:
     )
 
     # Suggested prompt button (only show when no messages)
-    if not messages:
-        if st.button(
-            f"Try: \"{SUGGESTED_PROMPTS[agent_idx][:40]}...\"",
-            key=f"{prefix}_suggest",
-            use_container_width=True,
-        ):
-            user_input = SUGGESTED_PROMPTS[agent_idx]
+    if not messages and st.button(
+        f'Try: "{SUGGESTED_PROMPTS[agent_idx][:40]}..."',
+        key=f"{prefix}_suggest",
+        use_container_width=True,
+    ):
+        user_input = SUGGESTED_PROMPTS[agent_idx]
 
     # Show generating indicator if request is in progress
     if st.session_state.get(f"{prefix}_generating", False):
@@ -355,7 +364,7 @@ def render_agent_column(agent_idx: int) -> None:
     if user_input:
         # Check context length limit before sending
         max_context = st.session_state.get(f"{prefix}_max_context", DEFAULT_MAX_CONTEXT)
-        est_tokens = estimate_token_count(messages + [{"role": "user", "content": user_input}])
+        est_tokens = estimate_token_count([*messages, {"role": "user", "content": user_input}])
         if est_tokens > max_context:
             st.warning(
                 f"Context length (~{est_tokens} tokens) exceeds limit ({max_context}). "
@@ -439,109 +448,124 @@ def check_agent_completions() -> None:
                 st.rerun()
 
 
+def _render_server_status() -> None:
+    """Render server status section in sidebar."""
+    st.subheader("Server Status")
+    mem_info = check_server()
+    if mem_info is None:
+        st.error("Server offline")
+        st.caption(f"Expected at {SERVER_URL}")
+        st.markdown("Start with: `semantic serve`")
+        return
+
+    st.success("Server online")
+    if not mem_info:
+        return
+
+    c1, c2 = st.columns(2)
+    active = mem_info.get("active_memory_mb", 0)
+    peak = mem_info.get("peak_memory_mb", 0)
+    used = mem_info.get("pool_used_blocks", 0)
+    total = mem_info.get("pool_total_blocks", 0)
+    c1.metric("GPU Memory", f"{active:.0f} MB")
+    c2.metric("Peak", f"{peak:.0f} MB")
+    if total > 0:
+        pct = used / total * 100
+        st.progress(pct / 100, text=f"Pool: {used}/{total} blocks ({pct:.0f}%)")
+
+
+def _render_model_info() -> None:
+    """Render model information section in sidebar."""
+    st.subheader("Model")
+    model_info = fetch_model_info()
+    st.session_state.model_info = model_info
+    if not model_info:
+        st.caption("Model info unavailable")
+        return
+
+    model_id = model_info.get("id", "unknown")
+    short_name = get_model_short_name(model_id)
+    st.markdown(f"**{short_name}**")
+    st.caption(model_id)
+    spec = model_info.get("spec", {})
+    if not spec:
+        return
+
+    s1, s2 = st.columns(2)
+    s1.markdown(f"Layers: **{spec.get('n_layers', '?')}**")
+    s2.markdown(f"KV heads: **{spec.get('n_kv_heads', '?')}**")
+    s3, s4 = st.columns(2)
+    kv_bits = spec.get("kv_bits")
+    quant_label = f"Q{kv_bits}" if kv_bits else "FP16"
+    s3.markdown(f"Quantization: **{quant_label}**")
+    s4.markdown(f"Head dim: **{spec.get('head_dim', '?')}**")
+    max_ctx = spec.get("max_context_length", "?")
+    ctx_text = (
+        f"Max context: **{max_ctx:,}** tokens"
+        if isinstance(max_ctx, int)
+        else f"Max context: **{max_ctx}**"
+    )
+    st.markdown(ctx_text)
+
+
+def _render_agent_metrics() -> None:
+    """Render per-agent metrics summary in sidebar."""
+    st.subheader("Agent Metrics")
+    for i in range(NUM_AGENTS):
+        prefix = f"agent_{i}"
+        turn = st.session_state.get(f"{prefix}_turn", 0)
+        metrics = st.session_state.get(f"{prefix}_metrics", [])
+        label, color = get_cache_state(turn)
+        badge = (
+            f'<span style="background:{color};color:white;padding:1px 6px;'
+            f'border-radius:8px;font-size:0.7em;">{label}</span>'
+        )
+        if metrics:
+            avg_tps = sum(m["tps"] for m in metrics) / len(metrics)
+            avg_ttft = sum(m["ttft_ms"] for m in metrics) / len(metrics)
+            detail = f"| {turn} turns | {avg_tps:.0f} TPS | {avg_ttft:.0f}ms TTFT"
+        else:
+            detail = "| No messages yet"
+        st.markdown(
+            f"**{AGENT_NAMES[i]}** {badge} {detail}",
+            unsafe_allow_html=True,
+        )
+
+
+def _reset_all_agents() -> None:
+    """Delete all agents from server and clear session state."""
+    try:
+        with httpx.Client(timeout=5.0) as client:
+            for i in range(NUM_AGENTS):
+                sid = st.session_state.get(f"agent_{i}_sid", "")
+                if sid:
+                    with contextlib.suppress(Exception):
+                        client.delete(f"{SERVER_URL}/v1/agents/oai_{sid}")
+    except httpx.HTTPError:
+        pass
+    for key in list(st.session_state.keys()):
+        del st.session_state[key]
+    st.rerun()
+
+
 def render_sidebar() -> None:
     """Render the sidebar with server status, model info, and global stats."""
     with st.sidebar:
         st.title("Semantic Cache Demo")
         st.markdown("Multi-agent KV cache persistence on Apple Silicon")
-
         st.divider()
 
-        # Server status
-        st.subheader("Server Status")
-        mem_info = check_server()
-        if mem_info is None:
-            st.error("Server offline")
-            st.caption(f"Expected at {SERVER_URL}")
-            st.markdown("Start with: `semantic serve`")
-        else:
-            st.success("Server online")
-            if mem_info:
-                c1, c2 = st.columns(2)
-                active = mem_info.get("active_memory_mb", 0)
-                peak = mem_info.get("peak_memory_mb", 0)
-                used = mem_info.get("pool_used_blocks", 0)
-                total = mem_info.get("pool_total_blocks", 0)
-                c1.metric("GPU Memory", f"{active:.0f} MB")
-                c2.metric("Peak", f"{peak:.0f} MB")
-                if total > 0:
-                    pct = used / total * 100
-                    st.progress(pct / 100, text=f"Pool: {used}/{total} blocks ({pct:.0f}%)")
-
+        _render_server_status()
         st.divider()
 
-        # Model info
-        st.subheader("Model")
-        model_info = fetch_model_info()
-        st.session_state.model_info = model_info
-        if model_info:
-            model_id = model_info.get("id", "unknown")
-            short_name = get_model_short_name(model_id)
-            st.markdown(f"**{short_name}**")
-            st.caption(model_id)
-            spec = model_info.get("spec", {})
-            if spec:
-                s1, s2 = st.columns(2)
-                s1.markdown(f"Layers: **{spec.get('n_layers', '?')}**")
-                s2.markdown(f"KV heads: **{spec.get('n_kv_heads', '?')}**")
-                s3, s4 = st.columns(2)
-                kv_bits = spec.get("kv_bits")
-                quant_label = f"Q{kv_bits}" if kv_bits else "FP16"
-                s3.markdown(f"Quantization: **{quant_label}**")
-                s4.markdown(f"Head dim: **{spec.get('head_dim', '?')}**")
-                max_ctx = spec.get("max_context_length", "?")
-                st.markdown(f"Max context: **{max_ctx:,}** tokens" if isinstance(max_ctx, int) else f"Max context: **{max_ctx}**")
-        else:
-            st.caption("Model info unavailable")
-
+        _render_model_info()
         st.divider()
 
-        # Per-agent metrics summary
-        st.subheader("Agent Metrics")
-        for i in range(NUM_AGENTS):
-            prefix = f"agent_{i}"
-            turn = st.session_state.get(f"{prefix}_turn", 0)
-            metrics = st.session_state.get(f"{prefix}_metrics", [])
-            label, color = get_cache_state(turn)
-            if metrics:
-                avg_tps = sum(m["tps"] for m in metrics) / len(metrics)
-                avg_ttft = sum(m["ttft_ms"] for m in metrics) / len(metrics)
-                st.markdown(
-                    f"**{AGENT_NAMES[i]}** "
-                    f'<span style="background:{color};color:white;padding:1px 6px;'
-                    f'border-radius:8px;font-size:0.7em;">{label}</span> '
-                    f"| {turn} turns | {avg_tps:.0f} TPS | {avg_ttft:.0f}ms TTFT",
-                    unsafe_allow_html=True,
-                )
-            else:
-                st.markdown(
-                    f"**{AGENT_NAMES[i]}** "
-                    f'<span style="background:{color};color:white;padding:1px 6px;'
-                    f'border-radius:8px;font-size:0.7em;">{label}</span> '
-                    f"| No messages yet",
-                    unsafe_allow_html=True,
-                )
-
+        _render_agent_metrics()
         st.divider()
 
-        # Reset button
         if st.button("Reset All Agents", use_container_width=True):
-            # Delete agents from server
-            try:
-                with httpx.Client(timeout=5.0) as client:
-                    for i in range(NUM_AGENTS):
-                        sid = st.session_state.get(f"agent_{i}_sid", "")
-                        if sid:
-                            try:
-                                client.delete(f"{SERVER_URL}/v1/agents/oai_{sid}")
-                            except Exception:
-                                pass
-            except Exception:
-                pass
-            # Clear session state
-            for key in list(st.session_state.keys()):
-                del st.session_state[key]
-            st.rerun()
+            _reset_all_agents()
 
         st.divider()
         st.caption(
@@ -573,7 +597,7 @@ def main() -> None:
         model_badge = (
             f' <span style="background:#6366f1;color:white;padding:2px 10px;'
             f'border-radius:10px;font-size:0.5em;vertical-align:middle;">'
-            f'{short_name} ({quant_label})</span>'
+            f"{short_name} ({quant_label})</span>"
         )
 
     st.markdown(
@@ -586,7 +610,7 @@ def main() -> None:
     )
 
     # Send All button for concurrent batch requests
-    btn_col1, btn_col2, btn_col3 = st.columns([1, 2, 1])
+    _btn_col1, btn_col2, _btn_col3 = st.columns([1, 2, 1])
     with btn_col2:
         if st.button("🚀 Send All (Concurrent Test)", use_container_width=True, type="primary"):
             # Submit all agents with suggested prompts simultaneously
