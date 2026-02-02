@@ -316,6 +316,7 @@ markers = [
     "stress: Load and concurrency stress tests (very slow, Apple Silicon only)",
     "benchmark: Performance benchmarks (very slow, Apple Silicon only)",
     "property: Hypothesis property-based tests",
+    "live: Tests requiring a running server on localhost:8000",
 ]
 addopts = [
     "--strict-markers",
