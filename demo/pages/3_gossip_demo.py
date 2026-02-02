@@ -259,6 +259,7 @@ def main() -> None:
                 "Create Session 1",
                 disabled=st.session_state.gossip_session_1 is not None,
                 use_container_width=True,
+                key="gossip_create_s1",
             ):
                 session_id = create_session(
                     agents=[ALICE, BOB],
@@ -275,6 +276,7 @@ def main() -> None:
                 "Run 3 Turns",
                 disabled=st.session_state.gossip_session_1 is None or st.session_state.gossip_executing,
                 use_container_width=True,
+                key="gossip_run_s1",
             ):
                 st.session_state.gossip_executing = True
                 with st.spinner("Generating conversation..."):
@@ -297,6 +299,7 @@ def main() -> None:
                 "Create Session 2",
                 disabled=st.session_state.gossip_session_2 is not None,
                 use_container_width=True,
+                key="gossip_create_s2",
             ):
                 session_id = create_session(
                     agents=[ALICE, EVE],
@@ -313,6 +316,7 @@ def main() -> None:
                 "Run 3 Turns",
                 disabled=st.session_state.gossip_session_2 is None or st.session_state.gossip_executing,
                 use_container_width=True,
+                key="gossip_run_s2",
             ):
                 st.session_state.gossip_executing = True
                 with st.spinner("Generating conversation..."):
@@ -342,6 +346,7 @@ def main() -> None:
             ),
             use_container_width=True,
             type="primary",
+            key="gossip_create_s3",
         ):
             # Create reunion prompt with cross-session context
             reunion_prompt = create_reunion_prompt(
@@ -364,6 +369,7 @@ def main() -> None:
             "Run 3 Turns",
             disabled=st.session_state.gossip_session_3 is None or st.session_state.gossip_executing,
             use_container_width=True,
+            key="gossip_run_s3",
         ):
             st.session_state.gossip_executing = True
             with st.spinner("Generating reunion conversation..."):
@@ -380,7 +386,7 @@ def main() -> None:
     st.divider()
 
     # Reset button
-    if st.button("🔄 Reset All Sessions", use_container_width=True):
+    if st.button("🔄 Reset All Sessions", use_container_width=True, key="gossip_reset"):
         st.session_state.gossip_session_1 = None
         st.session_state.gossip_session_2 = None
         st.session_state.gossip_session_3 = None
