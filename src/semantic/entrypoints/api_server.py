@@ -287,30 +287,37 @@ async def lifespan(app: FastAPI):
         app.state.semantic.prefix_cache = prefix_cache
         logger.info("prefix_cache_initialized")
 
-        # Conditionally start ConcurrentScheduler for interleaved prefill
+        # Start ConcurrentScheduler — serializes all engine access through
+        # a single worker thread, preventing concurrent Metal GPU crashes.
         scheduler = None
         if settings.mlx.scheduler_enabled:
-            from semantic.adapters.outbound.mlx_prefill_adapter import MLXPrefillAdapter
+            try:
+                from semantic.adapters.outbound.mlx_prefill_adapter import MLXPrefillAdapter
 
-            prefill_adapter = MLXPrefillAdapter(
-                model=model,
-                kv_bits=settings.mlx.kv_bits or 4,
-                kv_group_size=settings.mlx.kv_group_size,
-                min_chunk=settings.mlx.chunked_prefill_min_chunk,
-                max_chunk=settings.mlx.chunked_prefill_max_chunk,
-            )
-            scheduler = ConcurrentScheduler(
-                engine=batch_engine,
-                prefill_adapter=prefill_adapter,
-                n_layers=model_spec.n_layers,
-                interleave_threshold=settings.mlx.scheduler_interleave_threshold,
-            )
-            scheduler.start()
-            app.state.semantic.scheduler = scheduler
-            logger.info(
-                "scheduler_started",
-                interleave_threshold=settings.mlx.scheduler_interleave_threshold,
-            )
+                prefill_adapter = MLXPrefillAdapter(
+                    model=model,
+                    kv_bits=settings.mlx.kv_bits or 4,
+                    kv_group_size=settings.mlx.kv_group_size,
+                    min_chunk=settings.mlx.chunked_prefill_min_chunk,
+                    max_chunk=settings.mlx.chunked_prefill_max_chunk,
+                )
+                scheduler = ConcurrentScheduler(
+                    engine=batch_engine,
+                    prefill_adapter=prefill_adapter,
+                    n_layers=model_spec.n_layers,
+                    interleave_threshold=settings.mlx.scheduler_interleave_threshold,
+                )
+                scheduler.start()
+                app.state.semantic.scheduler = scheduler
+                logger.info(
+                    "scheduler_started",
+                    interleave_threshold=settings.mlx.scheduler_interleave_threshold,
+                )
+            except ImportError:
+                logger.warning(
+                    "scheduler_unavailable",
+                    reason="MLXPrefillAdapter not importable — falling back to direct engine path",
+                )
 
         logger.info("server_ready")
 
@@ -648,6 +655,33 @@ def _register_routes(app: FastAPI):
                 "agents": "/v1/agents",
             },
         }
+
+    @app.get("/v1/models", status_code=status.HTTP_200_OK)
+    async def list_models():
+        """OpenAI-compatible models endpoint — returns loaded model info."""
+        semantic = getattr(app.state, "semantic", None)
+        engine = semantic.batch_engine if semantic else None
+        settings = get_settings()
+        model_id = settings.mlx.model_id
+
+        model_entry = {
+            "id": model_id,
+            "object": "model",
+            "owned_by": "local",
+        }
+
+        if engine:
+            spec = engine._spec
+            model_entry["spec"] = {
+                "n_layers": spec.n_layers,
+                "n_kv_heads": spec.n_kv_heads,
+                "head_dim": spec.head_dim,
+                "block_tokens": spec.block_tokens,
+                "kv_bits": spec.kv_bits,
+                "max_context_length": settings.mlx.max_context_length,
+            }
+
+        return {"object": "list", "data": [model_entry]}
 
     app.include_router(anthropic_router)
     logger.info("routes_registered", router="anthropic", path="/v1/messages")

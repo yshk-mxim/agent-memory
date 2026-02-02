@@ -1,19 +1,11 @@
 """Anthropic Messages API adapter (POST /v1/messages).
 
 Implements the Anthropic Messages API with:
-- Non-streaming generation
-- SSE streaming
+- Non-streaming generation via ConcurrentScheduler
+- SSE streaming via ConcurrentScheduler
 - Tool use support
 - Extended thinking
 - Prompt caching
-
-TODO: Wire ConcurrentScheduler for interleaved prefill/decode.
-      Currently routes directly to batch_engine.submit().
-      See openai_adapter.py for scheduler integration pattern:
-      - Non-streaming: scheduler.submit_and_wait()
-      - Streaming: scheduler.submit_and_stream() → StreamDelta
-      Requires: get scheduler from semantic_state.scheduler,
-      route through it when not None, fall back to batch_engine.
 """
 
 import asyncio
@@ -633,8 +625,8 @@ async def create_message(request_body: MessagesRequest, request: Request):  # no
                         cached_blocks,
                     )
                 )
-            # Legacy direct streaming (batch=1 only)
-            logger.info("Returning SSE stream (direct)")
+            # Legacy direct streaming (no scheduler) — unsafe for concurrent requests
+            logger.warning("Returning SSE stream (direct, no scheduler) — concurrent requests unsafe")
             return EventSourceResponse(
                 stream_generation(
                     request_body, batch_engine, cache_store, tokens, agent_id, cached_blocks
@@ -665,7 +657,9 @@ async def create_message(request_body: MessagesRequest, request: Request):  # no
             if cached_blocks is not None:
                 cache_store.invalidate_hot(agent_id)
         else:
-            # Legacy direct path: single-request engine
+            # Legacy direct path: no concurrency protection — unsafe for
+            # simultaneous requests. Enable SEMANTIC_MLX_SCHEDULER_ENABLED=true.
+            logger.warning("Using direct batch_engine path (no scheduler) — concurrent requests unsafe")
             uid = await asyncio.to_thread(
                 batch_engine.submit,
                 agent_id=agent_id,

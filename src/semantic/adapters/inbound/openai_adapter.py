@@ -356,7 +356,8 @@ async def stream_chat_completion(  # noqa: C901, PLR0912, PLR0915
                 yield event
             return
 
-        # --- Direct batch engine path (no scheduler) ---
+        # --- Direct batch engine path (no scheduler) — unsafe for concurrent requests ---
+        logger.warning("Using direct batch_engine streaming (no scheduler) — concurrent requests unsafe")
         uid = batch_engine.submit(
             agent_id=agent_id,
             prompt=prompt,
@@ -619,6 +620,9 @@ async def create_chat_completion(  # noqa: C901, PLR0912, PLR0915
                 top_p=request_body.top_p,
             )
         else:
+            # Legacy direct path: no concurrency protection — unsafe for
+            # simultaneous requests. Enable SEMANTIC_MLX_SCHEDULER_ENABLED=true.
+            logger.warning("Using direct batch_engine path (no scheduler) — concurrent requests unsafe")
             uid = await asyncio.to_thread(
                 batch_engine.submit,
                 agent_id=agent_id,

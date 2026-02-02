@@ -175,7 +175,8 @@ class TestNonStreamResponse:
 
         with patch("httpx.Client", return_value=mock_client):
             text, metrics = app.non_stream_response(
-                [{"role": "user", "content": "test"}], "session_1"
+                [{"role": "user", "content": "test"}], "session_1",
+                temperature=0.7, top_p=1.0, max_tokens=512,
             )
 
         assert "[Error: HTTP 500" in text
@@ -195,7 +196,8 @@ class TestNonStreamResponse:
         with patch("httpx.Client", return_value=mock_client):
             with pytest.raises(httpx.ConnectError):
                 app.non_stream_response(
-                    [{"role": "user", "content": "test"}], "session_1"
+                    [{"role": "user", "content": "test"}], "session_1",
+                    temperature=0.7, top_p=1.0, max_tokens=512,
                 )
 
 

@@ -133,7 +133,7 @@ class MLXSettings(BaseSettings):
 
     # Scheduler settings (interleaved prefill + decode)
     scheduler_enabled: bool = Field(
-        default=False,
+        default=True,
         description="Enable ConcurrentScheduler for interleaved prefill/decode",
     )
 

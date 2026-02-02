@@ -28,6 +28,12 @@ SUGGESTED_PROMPTS = [
     "Describe the water cycle step by step",
 ]
 
+# Default inference parameters
+DEFAULT_TEMPERATURE = 0.7
+DEFAULT_TOP_P = 1.0
+DEFAULT_MAX_TOKENS = 512
+DEFAULT_MAX_CONTEXT = 32768
+
 
 def init_session_state() -> None:
     """Initialize per-agent session state on first load."""
@@ -35,6 +41,7 @@ def init_session_state() -> None:
         return
     st.session_state.initialized = True
     st.session_state.server_status = "unknown"
+    st.session_state.model_info = None
     for i in range(NUM_AGENTS):
         prefix = f"agent_{i}"
         st.session_state[f"{prefix}_sid"] = f"{AGENT_NAMES[i].lower()}_{uuid4().hex[:8]}"
@@ -42,6 +49,12 @@ def init_session_state() -> None:
         st.session_state[f"{prefix}_turn"] = 0
         st.session_state[f"{prefix}_metrics"] = []
         st.session_state[f"{prefix}_generating"] = False
+        # Per-agent inference settings
+        st.session_state[f"{prefix}_temperature"] = DEFAULT_TEMPERATURE
+        st.session_state[f"{prefix}_top_p"] = DEFAULT_TOP_P
+        st.session_state[f"{prefix}_max_tokens"] = DEFAULT_MAX_TOKENS
+        st.session_state[f"{prefix}_max_context"] = DEFAULT_MAX_CONTEXT
+        st.session_state[f"{prefix}_thinking"] = False
 
 
 def get_cache_state(turn: int) -> tuple[str, str]:
@@ -68,8 +81,32 @@ def check_server() -> dict | None:
         return None
 
 
+def fetch_model_info() -> dict | None:
+    """Fetch model information from the server."""
+    try:
+        with httpx.Client(timeout=3.0) as client:
+            resp = client.get(f"{SERVER_URL}/v1/models")
+            if resp.status_code == 200:
+                data = resp.json()
+                models = data.get("data", [])
+                if models:
+                    return models[0]
+    except Exception:
+        pass
+    return None
+
+
+def get_model_short_name(model_id: str) -> str:
+    """Extract a short display name from a HuggingFace model ID."""
+    return model_id.rsplit("/", 1)[-1] if "/" in model_id else model_id
+
+
 def stream_response(
-    messages: list[dict], session_id: str
+    messages: list[dict],
+    session_id: str,
+    temperature: float,
+    top_p: float,
+    max_tokens: int,
 ) -> tuple[str, dict]:
     """Send a streaming chat request and yield tokens.
 
@@ -78,8 +115,9 @@ def stream_response(
     body = {
         "model": "default",
         "messages": messages,
-        "max_tokens": 512,
-        "temperature": 0.7,
+        "max_tokens": max_tokens,
+        "temperature": temperature,
+        "top_p": top_p,
         "stream": True,
     }
     headers = {"X-Session-ID": session_id}
@@ -133,17 +171,19 @@ def stream_response(
 
 
 def non_stream_response(
-    messages: list[dict], session_id: str
+    messages: list[dict],
+    session_id: str,
+    temperature: float,
+    top_p: float,
+    max_tokens: int,
 ) -> tuple[str, dict]:
-    """Send a non-streaming chat request.
-
-    Fallback if streaming has issues.
-    """
+    """Send a non-streaming chat request."""
     body = {
         "model": "default",
         "messages": messages,
-        "max_tokens": 512,
-        "temperature": 0.7,
+        "max_tokens": max_tokens,
+        "temperature": temperature,
+        "top_p": top_p,
         "stream": False,
     }
     headers = {"X-Session-ID": session_id}
@@ -173,8 +213,84 @@ def non_stream_response(
     }
 
 
+def estimate_token_count(messages: list[dict]) -> int:
+    """Rough estimate of token count from messages (4 chars per token)."""
+    total_chars = sum(len(m.get("content", "")) for m in messages)
+    return total_chars // 4
+
+
+def render_agent_settings(agent_idx: int) -> None:
+    """Render per-agent inference settings in an expander."""
+    prefix = f"agent_{agent_idx}"
+    name = AGENT_NAMES[agent_idx]
+
+    with st.expander(f"Settings", expanded=False):
+        st.session_state[f"{prefix}_temperature"] = st.slider(
+            "Temperature",
+            min_value=0.0,
+            max_value=2.0,
+            value=st.session_state.get(f"{prefix}_temperature", DEFAULT_TEMPERATURE),
+            step=0.1,
+            key=f"{prefix}_temp_slider",
+            help="0.0 = deterministic, 2.0 = very creative",
+        )
+
+        st.session_state[f"{prefix}_top_p"] = st.slider(
+            "Top P",
+            min_value=0.0,
+            max_value=1.0,
+            value=st.session_state.get(f"{prefix}_top_p", DEFAULT_TOP_P),
+            step=0.05,
+            key=f"{prefix}_topp_slider",
+            help="Nucleus sampling: 1.0 = all tokens, 0.1 = top 10%",
+        )
+
+        st.session_state[f"{prefix}_max_tokens"] = st.number_input(
+            "Max tokens",
+            min_value=1,
+            max_value=4096,
+            value=st.session_state.get(f"{prefix}_max_tokens", DEFAULT_MAX_TOKENS),
+            step=64,
+            key=f"{prefix}_maxtok_input",
+            help="Maximum tokens to generate per response",
+        )
+
+        # Context length limit
+        model_info = st.session_state.get("model_info")
+        max_ctx_limit = DEFAULT_MAX_CONTEXT
+        if model_info and "spec" in model_info:
+            max_ctx_limit = model_info["spec"].get("max_context_length", DEFAULT_MAX_CONTEXT)
+
+        st.session_state[f"{prefix}_max_context"] = st.number_input(
+            "Max context length",
+            min_value=256,
+            max_value=max_ctx_limit,
+            value=min(
+                st.session_state.get(f"{prefix}_max_context", DEFAULT_MAX_CONTEXT),
+                max_ctx_limit,
+            ),
+            step=1024,
+            key=f"{prefix}_maxctx_input",
+            help="Stop inference if conversation exceeds this token count",
+        )
+
+        # Thinking toggle — only meaningful for models that support it
+        st.session_state[f"{prefix}_thinking"] = st.toggle(
+            "Extended thinking",
+            value=st.session_state.get(f"{prefix}_thinking", False),
+            key=f"{prefix}_thinking_toggle",
+            help="Enable chain-of-thought reasoning (model must support it)",
+        )
+
+
+@st.fragment
 def render_agent_column(agent_idx: int) -> None:
-    """Render a single agent's conversation column."""
+    """Render a single agent's conversation column.
+
+    Decorated with @st.fragment so each agent reruns independently —
+    clicking a button in one column won't interrupt an in-progress
+    HTTP request in another column.
+    """
     prefix = f"agent_{agent_idx}"
     name = AGENT_NAMES[agent_idx]
     sid = st.session_state[f"{prefix}_sid"]
@@ -191,6 +307,9 @@ def render_agent_column(agent_idx: int) -> None:
         unsafe_allow_html=True,
     )
     st.caption(f"Session: `{sid}` | Turns: {turn}")
+
+    # Per-agent settings
+    render_agent_settings(agent_idx)
 
     # Chat history
     chat_container = st.container(height=350)
@@ -223,13 +342,39 @@ def render_agent_column(agent_idx: int) -> None:
             user_input = SUGGESTED_PROMPTS[agent_idx]
 
     if user_input:
+        # Check context length limit before sending
+        max_context = st.session_state.get(f"{prefix}_max_context", DEFAULT_MAX_CONTEXT)
+        est_tokens = estimate_token_count(messages + [{"role": "user", "content": user_input}])
+        if est_tokens > max_context:
+            st.warning(
+                f"Context length (~{est_tokens} tokens) exceeds limit ({max_context}). "
+                "Clear history or increase the limit."
+            )
+            return
+
         # Add user message
         messages.append({"role": "user", "content": user_input})
         st.session_state[f"{prefix}_messages"] = messages
 
+        # Read per-agent settings
+        temperature = st.session_state.get(f"{prefix}_temperature", DEFAULT_TEMPERATURE)
+        top_p = st.session_state.get(f"{prefix}_top_p", DEFAULT_TOP_P)
+        max_tokens = st.session_state.get(f"{prefix}_max_tokens", DEFAULT_MAX_TOKENS)
+        thinking = st.session_state.get(f"{prefix}_thinking", False)
+
+        # Prepend thinking instruction if enabled
+        api_messages = list(messages)
+        if thinking and api_messages:
+            api_messages = [
+                {"role": "system", "content": "Think step by step before answering."},
+                *api_messages,
+            ]
+
         # Generate response
         with st.spinner(f"{name} thinking..."):
-            text, metrics = non_stream_response(messages, sid)
+            text, metrics = non_stream_response(
+                api_messages, sid, temperature, top_p, max_tokens
+            )
 
         # Add assistant response
         messages.append({"role": "assistant", "content": text})
@@ -243,7 +388,7 @@ def render_agent_column(agent_idx: int) -> None:
 
 
 def render_sidebar() -> None:
-    """Render the sidebar with server status and global stats."""
+    """Render the sidebar with server status, model info, and global stats."""
     with st.sidebar:
         st.title("Semantic Cache Demo")
         st.markdown("Multi-agent KV cache persistence on Apple Silicon")
@@ -270,6 +415,32 @@ def render_sidebar() -> None:
                 if total > 0:
                     pct = used / total * 100
                     st.progress(pct / 100, text=f"Pool: {used}/{total} blocks ({pct:.0f}%)")
+
+        st.divider()
+
+        # Model info
+        st.subheader("Model")
+        model_info = fetch_model_info()
+        st.session_state.model_info = model_info
+        if model_info:
+            model_id = model_info.get("id", "unknown")
+            short_name = get_model_short_name(model_id)
+            st.markdown(f"**{short_name}**")
+            st.caption(model_id)
+            spec = model_info.get("spec", {})
+            if spec:
+                s1, s2 = st.columns(2)
+                s1.markdown(f"Layers: **{spec.get('n_layers', '?')}**")
+                s2.markdown(f"KV heads: **{spec.get('n_kv_heads', '?')}**")
+                s3, s4 = st.columns(2)
+                kv_bits = spec.get("kv_bits")
+                quant_label = f"Q{kv_bits}" if kv_bits else "FP16"
+                s3.markdown(f"Quantization: **{quant_label}**")
+                s4.markdown(f"Head dim: **{spec.get('head_dim', '?')}**")
+                max_ctx = spec.get("max_context_length", "?")
+                st.markdown(f"Max context: **{max_ctx:,}** tokens" if isinstance(max_ctx, int) else f"Max context: **{max_ctx}**")
+        else:
+            st.caption("Model info unavailable")
 
         st.divider()
 
@@ -338,12 +509,27 @@ def main() -> None:
     init_session_state()
     render_sidebar()
 
-    # Title
+    # Title with model badge
+    model_info = st.session_state.get("model_info")
+    model_badge = ""
+    if model_info:
+        short_name = get_model_short_name(model_info.get("id", ""))
+        spec = model_info.get("spec", {})
+        kv_bits = spec.get("kv_bits")
+        quant_label = f"Q{kv_bits}" if kv_bits else "FP16"
+        model_badge = (
+            f' <span style="background:#6366f1;color:white;padding:2px 10px;'
+            f'border-radius:10px;font-size:0.5em;vertical-align:middle;">'
+            f'{short_name} ({quant_label})</span>'
+        )
+
     st.markdown(
-        "## Multi-Agent Conversation Demo\n"
+        f"## Multi-Agent Conversation Demo{model_badge}\n"
         "Each agent maintains an independent conversation with **persistent KV cache**. "
         "Watch cache states transition from **COLD** (first message) to **WARM** (cache hit) "
-        "to **HOT** (deep conversation) as turn count increases."
+        "to **HOT** (deep conversation) as turn count increases. "
+        "Expand **Settings** under each agent to tune inference parameters.",
+        unsafe_allow_html=True,
     )
 
     # 4 agent columns
