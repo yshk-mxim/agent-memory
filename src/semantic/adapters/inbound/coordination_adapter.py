@@ -160,6 +160,7 @@ async def list_sessions(request: Request) -> SessionListResponse:
                     display_name=agent.display_name,
                     role=agent.role,
                     message_count=message_count,
+                    lifecycle=agent.lifecycle.value,
                 )
             )
 
@@ -313,6 +314,7 @@ async def execute_turn(
                     display_name=agent.display_name,
                     role=agent.role,
                     message_count=message_count,
+                    lifecycle=agent.lifecycle.value,
                 )
             )
 
@@ -396,6 +398,7 @@ async def execute_round(
                     display_name=agent.display_name,
                     role=agent.role,
                     message_count=message_count,
+                    lifecycle=agent.lifecycle.value,
                 )
             )
 

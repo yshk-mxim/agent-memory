@@ -101,6 +101,7 @@ class AgentStateResponse(BaseModel):
     display_name: str = Field(..., description="Display name")
     role: str = Field(..., description="Role type")
     message_count: int = Field(..., description="Number of messages sent")
+    lifecycle: str = Field(..., description="Memory lifecycle (ephemeral or permanent)")
 
 
 class SessionStatusResponse(BaseModel):
