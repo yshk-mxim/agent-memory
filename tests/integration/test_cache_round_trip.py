@@ -331,7 +331,8 @@ class TestCharacterPrefixRoundTrip:
         store.invalidate_hot("agent_1")
         recovered = store.load("agent_1")
 
-        assert recovered is not None
+        assert recovered is not None, "Load returned None after invalidate_hot"
+        assert recovered.agent_id == "agent_1"
         assert recovered.prompt_text == original_text
         # Character-by-character verification
         for i, (c1, c2) in enumerate(zip(original_text, recovered.prompt_text)):
@@ -354,7 +355,8 @@ class TestCharacterPrefixRoundTrip:
         store.invalidate_hot("agent_1")
         recovered = store.load("agent_1")
 
-        assert recovered is not None
+        assert recovered is not None, "Load returned None after invalidate_hot"
+        assert recovered.agent_id == "agent_1"
         assert recovered.common_prefix_chars(text) == 25
 
     def test_common_prefix_chars_partial_match_after_round_trip(self, store_with_adapter) -> None:
@@ -373,7 +375,8 @@ class TestCharacterPrefixRoundTrip:
         store.invalidate_hot("agent_1")
         recovered = store.load("agent_1")
 
-        assert recovered is not None
+        assert recovered is not None, "Load returned None after invalidate_hot"
+        assert recovered.prompt_text == "Hello, how are you today?"
         # "Hello, how are you" = 18 chars, then ' ' vs '?' mismatch
         assert recovered.common_prefix_chars("Hello, how are you?") == 18
 
@@ -392,7 +395,8 @@ class TestCharacterPrefixRoundTrip:
         store.invalidate_hot("agent_1")
         recovered = store.load("agent_1")
 
-        assert recovered is not None
+        assert recovered is not None, "Load returned None after invalidate_hot"
+        assert recovered.prompt_text == "Hello, how are you today?"
         assert recovered.common_prefix_chars("Goodbye") == 0
 
     def test_bpe_boundary_space_handling(self, store_with_adapter) -> None:
@@ -410,7 +414,8 @@ class TestCharacterPrefixRoundTrip:
         store.invalidate_hot("agent_1")
         recovered = store.load("agent_1")
 
-        assert recovered is not None
+        assert recovered is not None, "Load returned None after invalidate_hot"
+        assert recovered.prompt_text == "Hello, world"
         # "Hello, " = 7 chars
         assert recovered.common_prefix_chars("Hello, ") == 7
 
@@ -429,7 +434,8 @@ class TestCharacterPrefixRoundTrip:
         store.invalidate_hot("agent_1")
         recovered = store.load("agent_1")
 
-        assert recovered is not None
+        assert recovered is not None, "Load returned None after invalidate_hot"
+        assert recovered.agent_id == "agent_1"
         assert recovered.prompt_text == "Caf\u00e9 au lait"
         assert recovered.common_prefix_chars("Caf\u00e9 au") == 7
 
@@ -471,7 +477,8 @@ class TestTokenSequenceFidelity:
         store.invalidate_hot("agent_1")
         recovered = store.load("agent_1")
 
-        assert recovered is not None
+        assert recovered is not None, "Load returned None after invalidate_hot"
+        assert recovered.agent_id == "agent_1"
         assert recovered.token_sequence == [101, 202, 303, 404, 505]
 
     def test_common_prefix_length_full_match(self, store_with_adapter) -> None:
@@ -490,7 +497,7 @@ class TestTokenSequenceFidelity:
         store.invalidate_hot("agent_1")
         recovered = store.load("agent_1")
 
-        assert recovered is not None
+        assert recovered is not None, "Load returned None after invalidate_hot"
         assert recovered.common_prefix_length([101, 202, 303, 404, 505]) == 5
 
     def test_common_prefix_length_partial_match(self, store_with_adapter) -> None:
@@ -509,7 +516,7 @@ class TestTokenSequenceFidelity:
         store.invalidate_hot("agent_1")
         recovered = store.load("agent_1")
 
-        assert recovered is not None
+        assert recovered is not None, "Load returned None after invalidate_hot"
         assert recovered.common_prefix_length([101, 202, 999]) == 2
 
     def test_common_prefix_length_no_match(self, store_with_adapter) -> None:
@@ -528,7 +535,7 @@ class TestTokenSequenceFidelity:
         store.invalidate_hot("agent_1")
         recovered = store.load("agent_1")
 
-        assert recovered is not None
+        assert recovered is not None, "Load returned None after invalidate_hot"
         assert recovered.common_prefix_length([999, 888, 777]) == 0
 
     def test_common_prefix_length_empty_query(self, store_with_adapter) -> None:
@@ -547,7 +554,7 @@ class TestTokenSequenceFidelity:
         store.invalidate_hot("agent_1")
         recovered = store.load("agent_1")
 
-        assert recovered is not None
+        assert recovered is not None, "Load returned None after invalidate_hot"
         assert recovered.common_prefix_length([]) == 0
 
     def test_empty_token_sequence_preserved(self, store_with_adapter) -> None:
@@ -565,7 +572,8 @@ class TestTokenSequenceFidelity:
         store.invalidate_hot("agent_1")
         recovered = store.load("agent_1")
 
-        assert recovered is not None
+        assert recovered is not None, "Load returned None after invalidate_hot"
+        assert recovered.agent_id == "agent_1"
         assert recovered.token_sequence == []
 
     def test_large_token_sequence_preserved(self, store_with_adapter) -> None:
@@ -584,7 +592,8 @@ class TestTokenSequenceFidelity:
         store.invalidate_hot("agent_1")
         recovered = store.load("agent_1")
 
-        assert recovered is not None
+        assert recovered is not None, "Load returned None after invalidate_hot"
+        assert recovered.agent_id == "agent_1"
         assert recovered.token_sequence == list(range(1000))
         assert recovered.common_prefix_length(list(range(500)) + [99999]) == 500
 
@@ -625,7 +634,7 @@ class TestAgentCacheStoreRoundTrip:
         store.save("agent_1", blocks)
         recovered = store.load("agent_1")
 
-        assert recovered is not None
+        assert recovered is not None, "Hot tier load returned None"
         assert recovered.agent_id == "agent_1"
         assert recovered.total_tokens == 256
         assert recovered.token_sequence == [10, 20, 30]
@@ -651,7 +660,7 @@ class TestAgentCacheStoreRoundTrip:
 
         recovered = store.load("agent_1")
 
-        assert recovered is not None
+        assert recovered is not None, "Warm tier load returned None"
         assert recovered.agent_id == "agent_1"
         assert recovered.total_tokens == 256
         assert recovered.token_sequence == [10, 20, 30]
@@ -721,13 +730,15 @@ class TestAgentCacheStoreRoundTrip:
         store.save("agent_1", blocks)
         store.invalidate_hot("agent_1")
         recovered1 = store.load("agent_1")
-        assert recovered1 is not None
+        assert recovered1 is not None, "Round 1 load returned None"
+        assert recovered1.agent_id == "agent_1"
 
         # Round 2: save recovered data, load again
         store.save("agent_1", recovered1)
         store.invalidate_hot("agent_1")
         recovered2 = store.load("agent_1")
-        assert recovered2 is not None
+        assert recovered2 is not None, "Round 2 load returned None"
+        assert recovered2.agent_id == "agent_1"
 
         # Compare: second recovery must match first
         assert recovered2.token_sequence == recovered1.token_sequence == seq
@@ -756,7 +767,8 @@ class TestAgentCacheStoreRoundTrip:
 
         # But it should still be loadable from warm tier
         recovered = store.load("agent_0")
-        assert recovered is not None
+        assert recovered is not None, "LRU-evicted agent_0 not recoverable from warm tier"
+        assert recovered.agent_id == "agent_0"
         assert recovered.token_sequence == [0, 1, 2]
 
     def test_multiple_agents_independent(self, store_with_adapter) -> None:
@@ -779,6 +791,7 @@ class TestAgentCacheStoreRoundTrip:
 
         for i in range(4):
             recovered = store.load(f"agent_{i}")
-            assert recovered is not None
+            assert recovered is not None, f"agent_{i} not recoverable after evict_lru"
+            assert recovered.agent_id == f"agent_{i}"
             assert recovered.token_sequence == [i * 100, i * 100 + 1]
             assert recovered.prompt_text == f"Prompt for agent {i}"
