@@ -222,62 +222,174 @@ class CoordinationService:
         else:
             instructions.append(f"You are {agent_role.display_name}, a {agent_role.role}.")
 
-        # Debate format instruction
+        # Enhanced debate format instruction with concrete examples
         if debate_format == DebateFormat.STRUCTURED:
-            instructions.append(
-                "This is a structured debate. Present arguments clearly with evidence. "
-                "Respond to points made by other participants."
-            )
+            instructions.append("""
+STRUCTURED DEBATE FORMAT - Required Structure:
+
+Your response must:
+1. CITE other agents: "As [Agent] said in Turn X..."
+2. PROVIDE evidence: Support claims with clear reasoning
+3. ADDRESS counterarguments: "While [Agent] raises a valid concern about X..."
+4. BUILD logical chains: "Building on [Agent]'s point..."
+
+Example structure:
+"Alice argued in Turn 2 that [X]. I agree/disagree because [reasoning with evidence].
+Bob's point in Turn 4 about [Y] is valid, but we must also consider [Z].
+Therefore, my position is [clear conclusion]."
+""")
         elif debate_format == DebateFormat.SOCRATIC:
-            instructions.append(
-                "Use the Socratic method: ask probing questions to explore ideas deeply. "
-                "Question assumptions and guide the discussion through inquiry."
-            )
+            instructions.append("""
+SOCRATIC METHOD - Question-Driven Discussion:
+
+Your response must be PRIMARILY QUESTIONS that probe others' reasoning:
+
+Required elements:
+1. QUESTION premises: "You stated X. What exactly do you mean by X?"
+2. EXPLORE assumptions: "Why do you assume Y?"
+3. TEST implications: "If X is true, wouldn't that mean Z?"
+4. SEEK clarity: "Help me understand your reasoning about..."
+
+Example:
+"Alice, you argued for option X in Turn 2. What specific problem does X solve?
+If we choose X, what trade-offs are we accepting?
+Bob disagreed in Turn 3, citing concern Y. How would you respond to Bob's concern?"
+""")
         elif debate_format == DebateFormat.DEVILS_ADVOCATE:
             if agent_role.role == "critic":
-                instructions.append(
-                    "Play devil's advocate: challenge proposals and arguments. "
-                    "Find weaknesses and alternative perspectives."
-                )
+                instructions.append("""
+DEVIL'S ADVOCATE ROLE - Critical Challenge:
+
+Your task is to challenge proposals and find weaknesses:
+
+1. IDENTIFY assumptions: What is being taken for granted?
+2. FIND edge cases: Where might this fail?
+3. PRESENT alternatives: What other approaches exist?
+4. STRESS TEST arguments: What happens in worst-case scenarios?
+
+Always reference specific claims from other agents and explain WHY they might be problematic.
+""")
         elif debate_format == DebateFormat.PARLIAMENTARY:
-            instructions.append(
-                "Follow parliamentary procedure. Use formal language and structure. "
-                "Address the moderator when speaking."
-            )
+            instructions.append("""
+PARLIAMENTARY PROCEDURE:
+
+Use formal structure:
+1. Address the moderator: "Madam/Mr. Moderator..."
+2. Reference previous speakers: "The honorable [Agent] from [Role] stated..."
+3. Use formal language: "I propose...", "I submit that...", "With respect to..."
+4. Structure your argument: Opening statement, evidence, conclusion
+
+Follow debate etiquette and maintain formal tone throughout.
+""")
+        elif debate_format == DebateFormat.FREE_FORM:
+            instructions.append("""
+FREE-FORM DISCUSSION:
+
+While this is a free-form discussion, please:
+- Reference other agents' points by name and turn number
+- Build on or respond to specific arguments made
+- Maintain a constructive and collaborative tone
+- Contribute unique insights rather than merely agreeing
+""")
 
         return "\n\n".join(instructions)
 
     def build_agent_prompt(
         self, directive: TurnDirective, agent_role: AgentRole
     ) -> list[dict]:
-        """Build the full prompt for an agent including visible messages and role instruction.
+        """Build enhanced prompt with perspective-taking and mental state attribution.
+
+        Constructs a structured prompt that helps agents:
+        1. Distinguish their own previous messages from others'
+        2. Track other agents' positions and arguments
+        3. Build mental models of other agents' perspectives
+        4. Reference specific turns and arguments
 
         Args:
             directive: Turn directive with context.
             agent_role: The agent's role.
 
         Returns:
-            List of message dicts in OpenAI format [{"role": ..., "content": ...}].
+            List of message dicts in OpenAI format with enhanced context structure.
         """
-        messages = []
+        from collections import defaultdict
 
-        # System message with role instruction
-        if directive.system_instruction:
-            messages.append({"role": "system", "content": directive.system_instruction})
+        # Separate messages by speaker for structured presentation
+        my_messages = []
+        other_agents_messages = defaultdict(list)
+        system_messages = []
 
-        # Visible channel messages formatted as conversation
         for msg in directive.visible_messages:
-            # System messages stay as system role
             if msg.sender_id == "system":
-                messages.append({"role": "system", "content": msg.content})
-            # Agent's own messages as assistant role
+                system_messages.append(msg)
             elif msg.sender_id == agent_role.agent_id:
-                messages.append({"role": "assistant", "content": msg.content})
-            # Other agents' messages as user role (with name prefix)
+                my_messages.append(msg)
             else:
                 sender_name = self._get_agent_name(directive.session_id, msg.sender_id)
-                content = f"[{sender_name}]: {msg.content}"
-                messages.append({"role": "user", "content": content})
+                other_agents_messages[sender_name].append(msg)
+
+        # Build structured system prompt with perspective-taking scaffolding
+        system_content = f"You are {agent_role.display_name}, a {agent_role.role}.\n\n"
+
+        # Add topic/initial prompt
+        if system_messages:
+            system_content += "DISCUSSION TOPIC:\n"
+            for msg in system_messages:
+                system_content += f"{msg.content}\n\n"
+
+        # Add self-reflection context
+        if my_messages:
+            system_content += "YOUR PREVIOUS CONTRIBUTIONS:\n"
+            for msg in my_messages:
+                # Truncate long messages for context window management
+                content_preview = msg.content[:200] + ("..." if len(msg.content) > 200 else "")
+                system_content += f"  [Turn {msg.turn_number}] You said: \"{content_preview}\"\n"
+            system_content += "\n"
+        else:
+            system_content += "This is your first contribution to the discussion.\n\n"
+
+        # Add other agents' perspectives with explicit attribution
+        if other_agents_messages:
+            system_content += "OTHER AGENTS' PERSPECTIVES:\n"
+            for agent_name, messages in sorted(other_agents_messages.items()):
+                system_content += f"\n{agent_name} ({self._get_agent_role(directive.session_id, agent_name)}):\n"
+                for msg in messages:
+                    content_preview = msg.content[:200] + ("..." if len(msg.content) > 200 else "")
+                    system_content += f"  [Turn {msg.turn_number}] \"{content_preview}\"\n"
+            system_content += "\n"
+
+        # Add metacognitive prompts for perspective-taking
+        if other_agents_messages:
+            system_content += """ANALYSIS TASK - Before responding, consider:
+1. What position has each agent taken?
+2. What are the key arguments from each agent?
+3. Where do you agree or disagree with each agent?
+4. What specific points should you address?
+5. What is your unique perspective that adds to this discussion?
+
+"""
+
+        # Add debate format instructions
+        if directive.system_instruction:
+            system_content += f"{directive.system_instruction}\n\n"
+
+        # Add explicit response instructions
+        system_content += """YOUR RESPONSE:
+Please share your perspective, making sure to:
+- Reference specific agents by name (e.g., "As Alice said in Turn 2...")
+- Address the arguments made by other agents
+- Build on or counter specific points raised
+- Explain your reasoning clearly
+"""
+
+        # Build message list
+        messages = [
+            {"role": "system", "content": system_content},
+            {
+                "role": "user",
+                "content": "Please share your analysis and response to the discussion above.",
+            },
+        ]
 
         return messages
 
@@ -295,6 +407,23 @@ class CoordinationService:
         if session and agent_id in session.agents:
             return session.agents[agent_id].display_name
         return agent_id
+
+    def _get_agent_role(self, session_id: str, agent_name: str) -> str:
+        """Get role for an agent by display name.
+
+        Args:
+            session_id: Session identifier.
+            agent_name: Agent display name.
+
+        Returns:
+            Agent role (participant, moderator, critic, etc).
+        """
+        session = self._sessions.get(session_id)
+        if session:
+            for agent in session.agents.values():
+                if agent.display_name == agent_name:
+                    return agent.role
+        return "participant"
 
     async def execute_turn(self, session_id: str) -> ChannelMessage:
         """Execute the next turn: determine speaker, build prompt, generate, record message.
