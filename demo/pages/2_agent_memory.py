@@ -150,10 +150,10 @@ def render_sidebar() -> tuple[str | None, str | None, str | None]:
 
         # Bulk actions
         st.subheader("Bulk Actions")
-        if st.button("Clear All Hot Caches", use_container_width=True):
+        if st.button("Clear All Hot Caches", use_container_width=True, key="memory_bulk_clear"):
             st.warning("Bulk clear not yet implemented")
 
-        if st.button("Flush Dirty to Disk", use_container_width=True):
+        if st.button("Flush Dirty to Disk", use_container_width=True, key="memory_bulk_flush"):
             st.warning("Flush not yet implemented")
 
         st.divider()
@@ -166,7 +166,7 @@ def render_sidebar() -> tuple[str | None, str | None, str | None]:
         )
         st.session_state.memory_auto_refresh = auto_refresh
 
-        if st.button("🔄 Refresh Now", use_container_width=True):
+        if st.button("🔄 Refresh Now", use_container_width=True, key="memory_refresh_now"):
             st.session_state.memory_last_refresh = time.time()
             st.rerun()
 
@@ -330,7 +330,7 @@ def render_agent_detail(agent_id: str, agents: list[dict]) -> None:
     # Actions
     col1, col2 = st.columns(2)
     with col1:
-        if st.button("🗑️ Delete Agent", use_container_width=True, type="primary"):
+        if st.button("🗑️ Delete Agent", use_container_width=True, type="primary", key=f"memory_detail_delete_{agent_id}"):
             if delete_agent(agent_id):
                 st.success("Agent deleted")
                 st.session_state.memory_selected_agent = None
@@ -339,7 +339,7 @@ def render_agent_detail(agent_id: str, agents: list[dict]) -> None:
 
     with col2:
         if agent["tier"] == "hot":
-            if st.button("💾 Evict to Disk", use_container_width=True):
+            if st.button("💾 Evict to Disk", use_container_width=True, key=f"memory_detail_evict_{agent_id}"):
                 st.warning("Manual eviction not yet implemented")
 
 

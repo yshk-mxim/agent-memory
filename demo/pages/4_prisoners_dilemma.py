@@ -503,7 +503,7 @@ def main() -> None:
     st.divider()
 
     # Reset button
-    if st.button("🔄 Reset Scenario", use_container_width=True):
+    if st.button("🔄 Reset Scenario", use_container_width=True, key="dilemma_reset"):
         st.session_state.dilemma_session_1 = None
         st.session_state.dilemma_session_2 = None
         st.session_state.dilemma_session_3 = None
