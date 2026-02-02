@@ -63,3 +63,19 @@ class BlockOperationError(SemanticError):
 
 class GenerationError(SemanticError):
     """Generation operation failed (prefill failed, no active generator, request not found)."""
+
+
+class CoordinationError(SemanticError):
+    """Base error for coordination operations."""
+
+
+class SessionNotFoundError(CoordinationError):
+    """Coordination session does not exist."""
+
+
+class InvalidTurnError(CoordinationError):
+    """Agent attempted to act out of turn."""
+
+
+class InterruptError(CoordinationError):
+    """Interrupt operation failed."""
