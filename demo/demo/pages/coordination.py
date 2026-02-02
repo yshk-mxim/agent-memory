@@ -297,11 +297,6 @@ def render_sidebar() -> None:
                     if response:
                         st.session_state.coord_session_id = response["session_id"]
                         st.session_state.coord_messages = []
-                        # Initialize session status
-                        st.session_state.coord_session_status = {
-                            "is_active": True,
-                            "current_turn": 0,
-                        }
                         st.success("Session created!")
                         st.rerun()
 
@@ -406,7 +401,7 @@ def render_controls() -> None:
     # Status message
     if st.session_state.coord_executing:
         st.info("⏳ Generating responses... This may take a minute.", icon="⏳")
-    elif status and not is_active:
+    elif not is_active:
         st.warning("Session has reached max turns or been ended.", icon="⚠️")
 
 
