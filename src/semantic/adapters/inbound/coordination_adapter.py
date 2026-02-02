@@ -42,6 +42,7 @@ from semantic.adapters.inbound.coordination_models import (
     WhisperResponse,
 )
 from semantic.domain.coordination import (
+    AgentLifecycle,
     AgentRole,
     DebateFormat,
     DecisionMode,
@@ -92,11 +93,12 @@ async def create_session(
                 display_name=agent_config.display_name,
                 role=agent_config.role,
                 system_prompt=agent_config.system_prompt,
+                lifecycle=AgentLifecycle(agent_config.lifecycle),
             )
         )
 
     # Create session
-    session = service.create_session(
+    session = await service.create_session(
         topology=topology,
         debate_format=debate_format,
         decision_mode=decision_mode,
@@ -138,9 +140,9 @@ async def list_sessions(request: Request) -> SessionListResponse:
     """
     service = get_coordination_service(request)
 
-    # Get all sessions (service stores them in _sessions dict)
+    # Get all sessions via public service method
     sessions = []
-    for session in service._sessions.values():
+    for session in service.list_sessions():
         # Build agent states
         agent_states = []
         public_channel = next(
@@ -253,7 +255,7 @@ async def delete_session(
     service = get_coordination_service(request)
 
     try:
-        service.delete_session(session_id)
+        await service.delete_session(session_id)
     except SessionNotFoundError as e:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

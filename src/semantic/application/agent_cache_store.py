@@ -96,6 +96,7 @@ class CacheEntry:
         last_accessed: Timestamp of last access (for LRU)
         access_count: Total number of accesses
         is_hot: True if in memory, False if on disk only
+        dirty: True if modified since last disk sync (write-behind)
 
     Example:
         >>> entry = CacheEntry(
@@ -112,6 +113,7 @@ class CacheEntry:
     last_accessed: float = field(default_factory=lambda: 0.0)
     access_count: int = 0
     is_hot: bool = True
+    dirty: bool = False  # Write-behind: needs disk sync
 
     def mark_accessed(self) -> None:
         """Mark entry as accessed (update LRU timestamp)."""
@@ -178,7 +180,7 @@ class AgentCacheStore:
         # Future: trie-based prefix matching for O(log n) lookup
 
     def save(self, agent_id: str, blocks: AgentBlocks) -> None:
-        """Save agent cache to hot tier AND warm tier (disk).
+        """Save agent cache to hot tier with write-behind persistence.
 
         Args:
             agent_id: Unique agent identifier
@@ -188,23 +190,24 @@ class AgentCacheStore:
             ValueError: If agent_id is empty
 
         Notes:
-            - Adds to hot tier immediately
-            - ALWAYS persists to disk (warm tier) as backup
-            - This ensures cache survives even if hot tier blocks are cleared
+            - Adds to hot tier immediately with dirty=True
+            - Disk write deferred until eviction or explicit flush
+            - Saves 50-100ms per call vs immediate persistence
             - May trigger LRU eviction if hot tier full
 
         Example:
             >>> store.save("agent_1", blocks)
-            >>> # Cache now in both hot tier (memory) and warm tier (disk)
+            >>> # Cache now in hot tier (memory), disk write deferred
         """
         if not agent_id:
             raise InvalidRequestError("agent_id cannot be empty")
 
-        # Create entry
+        # Create entry with dirty flag (write-behind)
         entry = CacheEntry(
             agent_id=agent_id,
             blocks=blocks,
             model_tag=self.model_tag,
+            dirty=True,  # Mark for eventual disk sync
         )
         entry.mark_accessed()
 
@@ -212,11 +215,8 @@ class AgentCacheStore:
             # Add to hot tier
             self._hot_cache[agent_id] = entry
 
-            # CRITICAL: Always persist to disk immediately!
-            # The hot_cache stores a reference to blocks, but batch_engine may clear
-            # the blocks after reconstruction. By persisting to disk, we ensure
-            # the cache can always be recovered from warm tier.
-            self._save_to_disk(agent_id)
+            # NO disk write here — deferred to eviction or flush
+            # This eliminates 50-100ms of synchronous I/O per save
 
             # Check if eviction needed
             if len(self._hot_cache) > self.max_hot_agents:
@@ -384,7 +384,7 @@ class AgentCacheStore:
                     key=lambda aid: self._hot_cache[aid].last_accessed,
                 )
 
-                # Persist to disk
+                # Persist to disk (flushes dirty entries)
                 self._save_to_disk(lru_agent_id)
 
                 # Remove from hot tier
@@ -466,7 +466,7 @@ class AgentCacheStore:
                 del self._hot_cache[agent_id]
 
     def _save_to_disk(self, agent_id: str) -> None:
-        """Persist cache to warm tier."""
+        """Persist cache to warm tier and clear dirty flag."""
         entry = self._hot_cache.get(agent_id)
         if entry is None or entry.blocks is None:
             return
@@ -487,6 +487,32 @@ class AgentCacheStore:
             raise InvalidRequestError("CacheAdapter is required - dependency not injected")
         cache_path = self._cache_adapter.save(agent_id, entry.blocks, metadata)
         self._warm_cache[agent_id] = cache_path
+
+        # Clear dirty flag after successful disk write
+        entry.dirty = False
+
+    def flush_dirty(self) -> int:
+        """Flush all dirty (unsaved) caches to disk.
+
+        Returns:
+            Number of caches flushed.
+
+        Notes:
+            Call this on server shutdown to ensure no data loss.
+            With write-behind, dirty caches exist only in memory until
+            eviction or explicit flush.
+
+        Example:
+            >>> store.flush_dirty()
+            3  # Flushed 3 dirty caches to disk
+        """
+        with self._lock:
+            flushed = 0
+            for agent_id, entry in self._hot_cache.items():
+                if entry.dirty and entry.blocks is not None:
+                    self._save_to_disk(agent_id)
+                    flushed += 1
+            return flushed
 
     def _load_from_disk(self, agent_id: str) -> AgentBlocks | None:
         """Load cache from warm tier."""

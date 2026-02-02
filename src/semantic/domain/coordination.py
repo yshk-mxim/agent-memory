@@ -44,6 +44,26 @@ class DecisionMode(Enum):
     CONSENSUS = "consensus"
 
 
+class AgentLifecycle(Enum):
+    """Agent memory lifecycle strategy.
+
+    EPHEMERAL: Session-only memory. Cache is deleted when session ends.
+               Used for temporary agents or testing.
+
+    PERMANENT: Persistent memory across sessions (future LTM support).
+               For now, behaves same as ephemeral (STM only).
+               Future: Will maintain long-term memory via summarization.
+    """
+
+    EPHEMERAL = "ephemeral"
+    PERMANENT = "permanent"
+
+    @classmethod
+    def _missing_(cls, value: object) -> "AgentLifecycle":
+        """Safe default for unknown values."""
+        return cls.EPHEMERAL
+
+
 @dataclass(frozen=True)
 class AgentRole:
     """Role assignment for an agent in a coordination session.
@@ -53,12 +73,14 @@ class AgentRole:
         display_name: Human-readable name shown in UI.
         role: Role type ("moderator", "critic", "advocate", "participant").
         system_prompt: Role-specific system prompt injected into context.
+        lifecycle: Memory lifecycle strategy (ephemeral or permanent).
     """
 
     agent_id: str
     display_name: str
     role: str = "participant"
     system_prompt: str = ""
+    lifecycle: AgentLifecycle = AgentLifecycle.EPHEMERAL
 
 
 @dataclass(frozen=True)

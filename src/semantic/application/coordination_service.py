@@ -10,6 +10,7 @@ Architecture layer: application service.
 No MLX / infrastructure imports — interacts with adapters through ports.
 """
 
+import asyncio
 import structlog
 from typing import AsyncIterator
 from uuid import uuid4
@@ -46,8 +47,22 @@ class CoordinationService:
         self._cache_store = cache_store
         self._engine = engine
         self._sessions: dict[str, CoordinationSession] = {}
+        self._lock = asyncio.Lock()  # Thread safety for concurrent requests
 
-    def create_session(
+    @staticmethod
+    def _agent_cache_key(session_id: str, agent_id: str) -> str:
+        """Construct namespaced cache key for coordination agent.
+
+        Args:
+            session_id: Session identifier.
+            agent_id: Agent identifier.
+
+        Returns:
+            Namespaced cache key (e.g., "coord_<session_id>_<agent_id>").
+        """
+        return f"coord_{session_id}_{agent_id}"
+
+    async def create_session(
         self,
         topology: Topology,
         debate_format: DebateFormat,
@@ -69,43 +84,44 @@ class CoordinationService:
         Returns:
             The created CoordinationSession.
         """
-        session_id = f"coord_{uuid4().hex[:12]}"
+        async with self._lock:
+            session_id = f"coord_{uuid4().hex[:12]}"
 
-        # Create public channel
-        public_channel = Channel(
-            channel_id=f"{session_id}_public",
-            channel_type="public",
-            participant_ids=frozenset(a.agent_id for a in agents),
-        )
-
-        # Add initial prompt as system message if provided
-        if initial_prompt:
-            public_channel.add_message(
-                sender_id="system",
-                content=initial_prompt,
-                turn_number=0,
-                visible_to=frozenset(),  # Empty = public
+            # Create public channel
+            public_channel = Channel(
+                channel_id=f"{session_id}_public",
+                channel_type="public",
+                participant_ids=frozenset(a.agent_id for a in agents),
             )
 
-        session = CoordinationSession(
-            session_id=session_id,
-            topology=topology,
-            debate_format=debate_format,
-            decision_mode=decision_mode,
-            agents={a.agent_id: a for a in agents},
-            channels={public_channel.channel_id: public_channel},
-            turn_order=[a.agent_id for a in agents],
-            max_turns=max_turns,
-        )
+            # Add initial prompt as system message if provided
+            if initial_prompt:
+                public_channel.add_message(
+                    sender_id="system",
+                    content=initial_prompt,
+                    turn_number=0,
+                    visible_to=frozenset(),  # Empty = public
+                )
 
-        self._sessions[session_id] = session
-        logger.info(
-            "coordination_session_created",
-            session_id=session_id,
-            topology=topology.value,
-            num_agents=len(agents),
-        )
-        return session
+            session = CoordinationSession(
+                session_id=session_id,
+                topology=topology,
+                debate_format=debate_format,
+                decision_mode=decision_mode,
+                agents={a.agent_id: a for a in agents},
+                channels={public_channel.channel_id: public_channel},
+                turn_order=[a.agent_id for a in agents],
+                max_turns=max_turns,
+            )
+
+            self._sessions[session_id] = session
+            logger.info(
+                "coordination_session_created",
+                session_id=session_id,
+                topology=topology.value,
+                num_agents=len(agents),
+            )
+            return session
 
     def get_session(self, session_id: str) -> CoordinationSession:
         """Get a coordination session by ID.
@@ -123,8 +139,8 @@ class CoordinationService:
             raise SessionNotFoundError(f"Session {session_id} not found")
         return self._sessions[session_id]
 
-    def delete_session(self, session_id: str) -> None:
-        """Delete a coordination session.
+    async def delete_session(self, session_id: str) -> None:
+        """Delete a coordination session and clean up all agent caches.
 
         Args:
             session_id: Session identifier.
@@ -132,10 +148,29 @@ class CoordinationService:
         Raises:
             SessionNotFoundError: If session does not exist.
         """
-        if session_id not in self._sessions:
-            raise SessionNotFoundError(f"Session {session_id} not found")
-        del self._sessions[session_id]
-        logger.info("coordination_session_deleted", session_id=session_id)
+        async with self._lock:
+            if session_id not in self._sessions:
+                raise SessionNotFoundError(f"Session {session_id} not found")
+            session = self._sessions[session_id]
+
+            # Clean up all agent caches (both ephemeral and permanent)
+            # Rationale: session-scoped STM caches are useless across sessions
+            # (only ~100 tokens of system prompt would match). Future LTM will
+            # use separate identity-addressed keys (ltm_{canonical_name}).
+            for agent_id in session.agents:
+                cache_key = self._agent_cache_key(session_id, agent_id)
+                self._cache_store.delete(cache_key)
+
+            del self._sessions[session_id]
+            logger.info("coordination_session_deleted", session_id=session_id)
+
+    def list_sessions(self) -> list[CoordinationSession]:
+        """List all active coordination sessions.
+
+        Returns:
+            List of CoordinationSession objects.
+        """
+        return list(self._sessions.values())
 
     def get_next_turn(self, session_id: str) -> TurnDirective:
         """Determine which agent speaks next based on topology and turn state.
@@ -443,7 +478,7 @@ Please share your perspective, making sure to:
         prompt_tokens = self._engine.tokenizer.encode(prompt_text)
 
         # Load agent's cache (if any)
-        namespaced_agent_id = f"coord_{session_id}_{directive.agent_id}"
+        namespaced_agent_id = self._agent_cache_key(session_id, directive.agent_id)
         cached_blocks = self._cache_store.load(namespaced_agent_id)
 
         # Submit to scheduler (or fall back to direct engine if no scheduler)
@@ -523,7 +558,7 @@ Please share your perspective, making sure to:
         prompt_tokens = self._engine.tokenizer.encode(prompt_text)
 
         # Load agent's cache
-        namespaced_agent_id = f"coord_{session_id}_{directive.agent_id}"
+        namespaced_agent_id = self._agent_cache_key(session_id, directive.agent_id)
         cached_blocks = self._cache_store.load(namespaced_agent_id)
 
         # Log cache reuse for debugging

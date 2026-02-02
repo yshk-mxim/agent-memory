@@ -28,6 +28,11 @@ class AgentRoleConfig(BaseModel):
         description="Optional role-specific system prompt",
         max_length=2000,
     )
+    lifecycle: str = Field(
+        default="ephemeral",
+        description="Memory lifecycle: ephemeral (session-only) or permanent (long-term memory)",
+        pattern="^(ephemeral|permanent)$",
+    )
 
 
 class CreateSessionRequest(BaseModel):

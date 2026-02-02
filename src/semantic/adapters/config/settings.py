@@ -174,7 +174,7 @@ class AgentSettings(BaseSettings):
     )
 
     max_agents_in_memory: int = Field(
-        default=5,
+        default=12,
         ge=1,
         le=50,
         description="Maximum agents with hot caches in memory",
