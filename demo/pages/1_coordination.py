@@ -43,10 +43,46 @@ def init_coordination_state() -> None:
 
     st.session_state.coord_initialized = True
     # Multi-session support: dict of session_id -> session data
-    st.session_state.coord_sessions = {}  # {session_id: {status, messages, executing, streaming_text}}
-    st.session_state.coord_active_tab = None  # Currently selected tab
+    st.session_state.coord_sessions = {}  # {session_id: {status, messages, executing, streaming_text, label, agent_names}}
+    st.session_state.coord_active_session = None  # Currently selected session_id
     st.session_state.coord_executor = ThreadPoolExecutor(max_workers=4)
-    st.session_state.coord_new_session_config = None  # Config for creating new session
+
+
+def discover_existing_sessions() -> None:
+    """Fetch existing sessions from server and populate coord_sessions dict."""
+    try:
+        with httpx.Client(timeout=5.0) as client:
+            resp = client.get(f"{SERVER_URL}/v1/coordination/sessions")
+            if resp.status_code == 200:
+                data = resp.json()
+                sessions = data.get("sessions", [])
+
+                # Populate coord_sessions dict for each server session
+                for session_status in sessions:
+                    session_id = session_status["session_id"]
+
+                    # Skip if already in our dict
+                    if session_id in st.session_state.coord_sessions:
+                        continue
+
+                    # Build label from agent names
+                    agent_states = session_status.get("agent_states", [])
+                    agent_names = [a["display_name"] for a in agent_states]
+                    label = " & ".join(agent_names[:3])  # First 3 names
+                    if len(agent_names) > 3:
+                        label += f" +{len(agent_names) - 3}"
+
+                    # Add to dict
+                    st.session_state.coord_sessions[session_id] = {
+                        "status": session_status,
+                        "messages": [],  # Will be fetched on demand
+                        "executing": False,
+                        "streaming_text": "",
+                        "label": label,
+                        "agent_names": agent_names,
+                    }
+    except Exception:
+        pass  # Silently ignore - server may not be running yet
 
 
 def create_coordination_session(
@@ -178,6 +214,28 @@ def get_session_messages(session_id: str) -> list[dict]:
         return []
 
 
+def delete_coordination_session(session_id: str) -> bool:
+    """Delete a coordination session.
+
+    Args:
+        session_id: Session identifier.
+
+    Returns:
+        True if successfully deleted, False otherwise.
+    """
+    try:
+        with httpx.Client(timeout=10.0) as client:
+            resp = client.delete(f"{SERVER_URL}/v1/coordination/sessions/{session_id}")
+            if resp.status_code == 200:
+                return True
+            else:
+                st.error(f"Failed to delete session: {resp.status_code} {resp.text}")
+                return False
+    except Exception as e:
+        st.error(f"Connection error: {e}")
+        return False
+
+
 def stream_turn(session_id: str) -> tuple[str, str, str]:
     """Stream a single turn via SSE, yielding tokens as they arrive.
 
@@ -237,79 +295,118 @@ def stream_turn(session_id: str) -> tuple[str, str, str]:
 
 
 def render_sidebar() -> None:
-    """Render the session configuration sidebar."""
+    """Render the multi-session coordination sidebar."""
     with st.sidebar:
-        st.title("Coordination Session")
+        st.title("Coordination Sessions")
 
-        # Check if session is active
-        if st.session_state.coord_session_id:
-            st.success(f"Active Session: {st.session_state.coord_session_id[:12]}...")
+        sessions = st.session_state.coord_sessions
+        active = st.session_state.coord_active_session
 
-            # Session controls
-            if st.button("End Session", type="secondary", use_container_width=True):
-                st.session_state.coord_session_id = None
-                st.session_state.coord_session_status = None
-                st.session_state.coord_messages = []
+        # Session selector
+        if sessions:
+            session_ids = list(sessions.keys())
+            session_labels = [sessions[sid]["label"] for sid in session_ids]
+
+            # Find current index
+            current_idx = 0
+            if active and active in session_ids:
+                current_idx = session_ids.index(active)
+
+            selected_idx = st.selectbox(
+                "Active Session",
+                options=range(len(session_ids)),
+                format_func=lambda i: f"{session_labels[i]} ({session_ids[i][:8]}...)",
+                index=current_idx,
+                key="coord_sidebar_session_selector",
+            )
+
+            selected_id = session_ids[selected_idx]
+            if selected_id != active:
+                st.session_state.coord_active_session = selected_id
                 st.rerun()
+
+            # Session info panel
+            session_data = sessions[selected_id]
+            status = session_data["status"]
+
+            st.markdown(f"**Turn:** {status['current_turn']}")
+            st.markdown(
+                f"**Status:** {'🟢 Active' if status['is_active'] else '🔴 Completed'}"
+            )
+
+            if status.get("next_speaker"):
+                agent_states = status.get("agent_states", [])
+                next_name = next(
+                    (
+                        a["display_name"]
+                        for a in agent_states
+                        if a["agent_id"] == status["next_speaker"]
+                    ),
+                    status["next_speaker"],
+                )
+                st.markdown(f"**Next:** {next_name}")
 
             st.divider()
 
-            # Display session status
-            if st.session_state.coord_session_status:
-                status = st.session_state.coord_session_status
-                st.markdown(f"**Turn:** {status['current_turn']}")
+            # Agent statistics
+            st.subheader("Agents")
+            agent_states = status.get("agent_states", [])
+            for agent in agent_states:
+                lifecycle = agent.get("lifecycle", "ephemeral")
+                lifecycle_emoji = "💾" if lifecycle == "permanent" else "⚡"
                 st.markdown(
-                    f"**Status:** {'🟢 Active' if status['is_active'] else '🔴 Completed'}"
+                    f"{lifecycle_emoji} **{agent['display_name']}** ({agent['role']}): "
+                    f"{agent['message_count']} msgs"
                 )
-                if status["next_speaker"]:
-                    # Find agent name
-                    agent_states = status.get("agent_states", [])
-                    next_name = next(
-                        (
-                            a["display_name"]
-                            for a in agent_states
-                            if a["agent_id"] == status["next_speaker"]
-                        ),
-                        status["next_speaker"],
-                    )
-                    st.markdown(f"**Next Speaker:** {next_name}")
 
-                st.divider()
+            st.divider()
 
-                # Agent statistics
-                st.subheader("Agents")
-                for agent in agent_states:
-                    st.markdown(
-                        f"**{agent['display_name']}** ({agent['role']}): "
-                        f"{agent['message_count']} messages"
-                    )
+            # Delete session button
+            if st.button(
+                "Delete Session",
+                type="secondary",
+                use_container_width=True,
+                key="coord_sidebar_delete",
+            ):
+                if delete_coordination_session(selected_id):
+                    del st.session_state.coord_sessions[selected_id]
+                    if st.session_state.coord_active_session == selected_id:
+                        st.session_state.coord_active_session = (
+                            list(sessions.keys())[0] if len(sessions) > 1 else None
+                        )
+                    st.success("Session deleted")
+                    st.rerun()
 
-        else:
-            # Session creation form
-            st.subheader("Create New Session")
+            st.divider()
 
+        # Collapsible creation form
+        with st.expander("➕ Create New Session", expanded=(not sessions)):
             topology = st.selectbox(
                 "Topology",
                 options=list(TOPOLOGIES.keys()),
                 format_func=lambda x: TOPOLOGIES[x],
+                key="coord_new_topology",
             )
 
             debate_format = st.selectbox(
                 "Debate Format",
                 options=list(DEBATE_FORMATS.keys()),
                 format_func=lambda x: DEBATE_FORMATS[x],
+                key="coord_new_debate_format",
             )
 
             decision_mode = st.selectbox(
                 "Decision Mode",
                 options=list(DECISION_MODES.keys()),
                 format_func=lambda x: DECISION_MODES[x],
+                key="coord_new_decision_mode",
             )
 
             initial_prompt = st.text_area(
                 "Topic / Question",
                 value="Should AI development be open source?",
                 height=100,
+                key="coord_new_prompt",
             )
 
             max_turns = st.number_input(
@@ -317,18 +414,18 @@ def render_sidebar() -> None:
                 min_value=0,
                 max_value=100,
                 value=10,
+                key="coord_new_max_turns",
             )
 
             st.divider()
 
-            # Agent configuration
             st.subheader("Configure Agents")
-
             num_agents = st.number_input(
                 "Number of Agents",
                 min_value=2,
-                max_value=5,
+                max_value=7,
                 value=3,
+                key="coord_new_num_agents",
             )
 
             agents = []
@@ -336,32 +433,45 @@ def render_sidebar() -> None:
                 with st.expander(f"Agent {i+1}", expanded=(i == 0)):
                     agent_name = st.text_input(
                         "Name",
-                        value=f"Agent {chr(65+i)}",  # A, B, C, ...
-                        key=f"agent_{i}_name",
+                        value=f"Agent {chr(65+i)}",
+                        key=f"coord_new_agent_{i}_name",
                     )
                     agent_role = st.selectbox(
                         "Role",
                         options=["participant", "moderator", "critic", "advocate"],
-                        key=f"agent_{i}_role",
+                        key=f"coord_new_agent_{i}_role",
                     )
                     agent_prompt = st.text_area(
                         "System Prompt (optional)",
                         value="",
                         height=80,
-                        key=f"agent_{i}_prompt",
+                        key=f"coord_new_agent_{i}_prompt",
+                    )
+                    lifecycle = st.radio(
+                        "Memory Lifecycle",
+                        options=["ephemeral", "permanent"],
+                        index=0,
+                        help="Ephemeral: session-only (STM). Permanent: long-term memory (future).",
+                        key=f"coord_new_agent_{i}_lifecycle",
+                        horizontal=True,
                     )
                     agents.append(
                         {
                             "display_name": agent_name,
                             "role": agent_role,
                             "system_prompt": agent_prompt,
+                            "lifecycle": lifecycle,
                         }
                     )
 
             st.divider()
 
-            # Create button
-            if st.button("Create Session", type="primary", use_container_width=True):
+            if st.button(
+                "Create Session",
+                type="primary",
+                use_container_width=True,
+                key="coord_new_create_btn",
+            ):
                 with st.spinner("Creating coordination session..."):
                     response = create_coordination_session(
                         topology=topology,
@@ -374,44 +484,46 @@ def render_sidebar() -> None:
 
                     if response:
                         session_id = response["session_id"]
-                        st.session_state.coord_session_id = session_id
-                        st.session_state.coord_messages = []
-
-                        # Fetch actual session status from server
                         status = get_session_status(session_id)
+
                         if status:
-                            st.session_state.coord_session_status = status
-                        else:
-                            # Fallback initialization if status fetch fails
-                            st.session_state.coord_session_status = {
-                                "is_active": True,
-                                "current_turn": 0,
-                                "next_speaker": None,
-                                "agent_states": [],
+                            agent_states = status.get("agent_states", [])
+                            agent_names = [a["display_name"] for a in agent_states]
+                            label = " & ".join(agent_names[:3])
+                            if len(agent_names) > 3:
+                                label += f" +{len(agent_names) - 3}"
+
+                            st.session_state.coord_sessions[session_id] = {
+                                "status": status,
+                                "messages": [],
+                                "executing": False,
+                                "streaming_text": "",
+                                "label": label,
+                                "agent_names": agent_names,
                             }
+                            st.session_state.coord_active_session = session_id
+                            st.success("Session created!")
+                            st.rerun()
+                        else:
+                            st.error("Failed to fetch session status")
 
-                        st.success("Session created!")
-                        st.rerun()
 
-
-def render_timeline() -> None:
-    """Render the conversation timeline."""
-    if not st.session_state.coord_session_id:
-        st.info(
-            "👈 Create a coordination session using the sidebar to get started.",
-            icon="ℹ️",
-        )
+def render_timeline(session_id: str) -> None:
+    """Render the conversation timeline for a specific session."""
+    if session_id not in st.session_state.coord_sessions:
         return
 
+    session_data = st.session_state.coord_sessions[session_id]
+
     # Fetch latest messages
-    messages = get_session_messages(st.session_state.coord_session_id)
-    st.session_state.coord_messages = messages
+    messages = get_session_messages(session_id)
+    session_data["messages"] = messages
 
     # Display messages
-    st.subheader("Conversation Timeline")
+    st.subheader(f"Conversation: {session_data['label']}")
 
     if not messages:
-        st.info("No messages yet. Click 'Next Turn' or 'Run Round' to start.", icon="💬")
+        st.info("No messages yet. Click 'Next Turn' or 'Stream Turn' to start.", icon="💬")
         return
 
     # Message display
@@ -436,41 +548,45 @@ def render_timeline() -> None:
             st.divider()
 
 
-def render_controls() -> None:
+def render_controls(session_id: str) -> None:
     """Render control buttons for session management with streaming support."""
-    if not st.session_state.coord_session_id:
+    if session_id not in st.session_state.coord_sessions:
         return
 
-    status = st.session_state.coord_session_status
-    is_active = status and status.get("is_active", False)
+    session_data = st.session_state.coord_sessions[session_id]
+    status = session_data["status"]
+    is_active = status.get("is_active", False)
+    is_executing = session_data["executing"]
 
     col1, col2, col3, col4 = st.columns(4)
 
     with col1:
-        next_turn_disabled = st.session_state.coord_executing or not is_active
+        next_turn_disabled = is_executing or not is_active
         if st.button(
             "⏭️ Next Turn",
             disabled=next_turn_disabled,
             use_container_width=True,
+            key=f"coord_{session_id}_next_turn",
         ):
-            st.session_state.coord_executing = True
+            session_data["executing"] = True
             with st.spinner("Executing turn..."):
-                result = execute_turn(st.session_state.coord_session_id)
+                result = execute_turn(session_id)
                 if result:
-                    st.session_state.coord_session_status = result.get("session_status")
+                    session_data["status"] = result.get("session_status")
                     st.success(f"Turn complete: {result['message']['sender_name']}")
-                st.session_state.coord_executing = False
+                session_data["executing"] = False
                 st.rerun()
 
     with col2:
-        stream_turn_disabled = st.session_state.coord_executing or not is_active
+        stream_turn_disabled = is_executing or not is_active
         if st.button(
             "▶️ Stream Turn",
             disabled=stream_turn_disabled,
             use_container_width=True,
             type="primary",
+            key=f"coord_{session_id}_stream_turn",
         ):
-            st.session_state.coord_executing = True
+            session_data["executing"] = True
             # Show streaming area
             stream_container = st.empty()
 
@@ -479,7 +595,7 @@ def render_controls() -> None:
                 text_placeholder = st.empty()
 
                 # Stream the turn
-                agent_id, agent_name, full_text = stream_turn(st.session_state.coord_session_id)
+                agent_id, agent_name, full_text = stream_turn(session_id)
 
                 if agent_name:
                     text_placeholder.markdown(f"**{agent_name}:** {full_text}")
@@ -487,33 +603,42 @@ def render_controls() -> None:
                 else:
                     st.error(full_text)  # Error message
 
-            st.session_state.coord_executing = False
+            session_data["executing"] = False
+            # Update status
+            updated_status = get_session_status(session_id)
+            if updated_status:
+                session_data["status"] = updated_status
             time.sleep(1)  # Brief pause to show result
             st.rerun()
 
     with col3:
-        run_round_disabled = st.session_state.coord_executing or not is_active
+        run_round_disabled = is_executing or not is_active
         if st.button(
             "🔄 Run Round",
             disabled=run_round_disabled,
             use_container_width=True,
+            key=f"coord_{session_id}_run_round",
         ):
-            st.session_state.coord_executing = True
+            session_data["executing"] = True
             with st.spinner("Executing round..."):
-                result = execute_round(st.session_state.coord_session_id)
+                result = execute_round(session_id)
                 if result:
-                    st.session_state.coord_session_status = result.get("session_status")
+                    session_data["status"] = result.get("session_status")
                     num_messages = len(result.get("messages", []))
                     st.success(f"Round complete: {num_messages} messages generated")
-                st.session_state.coord_executing = False
+                session_data["executing"] = False
                 st.rerun()
 
     with col4:
-        if st.button("🔄 Refresh", use_container_width=True):
+        if st.button(
+            "🔄 Refresh",
+            use_container_width=True,
+            key=f"coord_{session_id}_refresh",
+        ):
             st.rerun()
 
     # Status message
-    if st.session_state.coord_executing:
+    if is_executing:
         st.info("⏳ Generating... Please wait.", icon="⏳")
     elif not is_active:
         st.warning("Session has reached max turns or been ended.", icon="⚠️")
@@ -529,6 +654,7 @@ def main() -> None:
     )
 
     init_coordination_state()
+    discover_existing_sessions()
 
     # Page title
     st.title("🤝 Multi-Agent Coordination")
@@ -542,13 +668,17 @@ def main() -> None:
     # Sidebar for session config
     render_sidebar()
 
-    # Main content
-    render_timeline()
-
-    st.divider()
-
-    # Control buttons
-    render_controls()
+    # Main content - session-scoped rendering
+    active = st.session_state.coord_active_session
+    if active and active in st.session_state.coord_sessions:
+        render_timeline(active)
+        st.divider()
+        render_controls(active)
+    else:
+        st.info(
+            "👈 Create a coordination session using the sidebar to get started.",
+            icon="ℹ️",
+        )
 
 
 if __name__ == "__main__":
