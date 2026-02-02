@@ -476,8 +476,8 @@ Please share your perspective, making sure to:
             )
 
         # Save updated cache
-        if result.cache:
-            self._cache_store.save(namespaced_agent_id, result.cache)
+        if result.blocks:
+            self._cache_store.save(namespaced_agent_id, result.blocks)
 
         # Add message to public channel
         public_channel = next(
