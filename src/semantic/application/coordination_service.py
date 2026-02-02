@@ -10,7 +10,7 @@ Architecture layer: application service.
 No MLX / infrastructure imports — interacts with adapters through ports.
 """
 
-import logging
+import structlog
 from uuid import uuid4
 
 from semantic.domain.coordination import (
@@ -27,7 +27,7 @@ from semantic.domain.coordination import (
 )
 from semantic.domain.errors import InvalidTurnError, SessionNotFoundError
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger(__name__)
 
 
 class CoordinationService:
