@@ -14,6 +14,9 @@
 
 [model]
 model_id = "mlx-community/gpt-oss-20b-MXFP4-Q4"
+n_layers = 24
+n_kv_heads = 8
+head_dim = 64
 status = "compatible"
 note = "Requires mlx_sink_compat patch for Q4 KV + attention sinks"
 
@@ -65,4 +68,7 @@ nonthinking_64tok_tps = 59.1
 
 model_memory_gb = 10.6
 block_pool_blocks = 82850
-block_size_mb = 0.1
+# Q4 formula: (n_kv_heads * head_dim * block_tokens * 2(K+V) * 4bits/8)
+#   + scales/biases overhead = 147456 bytes ≈ 0.14 MB per block per layer
+# With n_kv_heads=8, head_dim=64: 8*64*256*2*0.5 + overhead
+block_size_mb = 0.14

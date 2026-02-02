@@ -42,6 +42,9 @@ class SchedulerRequest:
     prompt_text: str
     future: asyncio.Future[CompletedGeneration]
     loop: asyncio.AbstractEventLoop
+    temperature: float = 0.0
+    top_p: float = 0.0
+    top_k: int = 0
     token_queue: asyncio.Queue[StreamDelta | None] | None = None
 
 
@@ -87,6 +90,9 @@ class ConcurrentScheduler:
         cache: Any | None,
         max_tokens: int,
         prompt_text: str = "",
+        temperature: float = 0.0,
+        top_p: float = 0.0,
+        top_k: int = 0,
     ) -> CompletedGeneration:
         """Submit a request and await its completion.
 
@@ -102,6 +108,9 @@ class ConcurrentScheduler:
             prompt_text=prompt_text,
             future=future,
             loop=loop,
+            temperature=temperature,
+            top_p=top_p,
+            top_k=top_k,
         )
         self._request_queue.put(request)
         return await future
@@ -113,6 +122,9 @@ class ConcurrentScheduler:
         cache: Any | None,
         max_tokens: int,
         prompt_text: str = "",
+        temperature: float = 0.0,
+        top_p: float = 0.0,
+        top_k: int = 0,
     ) -> AsyncIterator[StreamDelta]:
         """Submit a request and yield per-token streaming deltas.
 
@@ -132,6 +144,9 @@ class ConcurrentScheduler:
             prompt_text=prompt_text,
             future=future,
             loop=loop,
+            temperature=temperature,
+            top_p=top_p,
+            top_k=top_k,
             token_queue=token_queue,
         )
         self._request_queue.put(request)
@@ -234,6 +249,9 @@ class ConcurrentScheduler:
                 cache=req.cache,
                 max_tokens=req.max_tokens,
                 prompt_tokens=req.prompt_tokens,
+                temperature=req.temperature,
+                top_p=req.top_p,
+                top_k=req.top_k,
             )
             self._uid_to_request[uid] = req
             logger.debug(
@@ -349,6 +367,9 @@ class ConcurrentScheduler:
                 kv_caches=state.kv_caches,
                 max_tokens=state.max_tokens,
                 prompt_text=req.prompt_text,
+                temperature=req.temperature,
+                top_p=req.top_p,
+                top_k=req.top_k,
             )
             self._uid_to_request[uid] = req
             logger.debug(

@@ -225,6 +225,9 @@ async def stream_generation(  # noqa: C901, PLR0912
             ),
             cache=cached_blocks,
             max_tokens=request_body.max_tokens,
+            temperature=request_body.temperature,
+            top_p=request_body.top_p,
+            top_k=request_body.top_k,
         )
         logger.debug(f"Submitted streaming generation: uid={uid}")
 
@@ -439,6 +442,9 @@ async def stream_generation_via_scheduler(  # noqa: C901, PLR0912
             cache=cached_blocks,
             max_tokens=request_body.max_tokens,
             prompt_text=prompt,
+            temperature=request_body.temperature,
+            top_p=request_body.top_p,
+            top_k=request_body.top_k,
         ):
             new_text = delta.text[len(accumulated_text) :]
             accumulated_text = delta.text
@@ -650,6 +656,9 @@ async def create_message(request_body: MessagesRequest, request: Request):  # no
                 cache=cached_blocks,
                 max_tokens=request_body.max_tokens,
                 prompt_text=prompt,
+                temperature=temperature,
+                top_p=top_p,
+                top_k=top_k,
             )
 
             # Invalidate hot cache if we passed one in

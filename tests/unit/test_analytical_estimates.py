@@ -37,7 +37,7 @@ def _load_toml(name: str) -> dict:
 
 GEMMA3_SPEC = ModelCacheSpec(
     n_layers=48,
-    n_kv_heads=4,
+    n_kv_heads=8,
     head_dim=256,
     block_tokens=256,
     layer_types=["global"] * 8 + ["sliding_window"] * 40,
@@ -48,7 +48,7 @@ GEMMA3_SPEC = ModelCacheSpec(
 GPT_OSS_SPEC = ModelCacheSpec(
     n_layers=24,
     n_kv_heads=8,
-    head_dim=45,
+    head_dim=64,
     block_tokens=256,
     layer_types=["global"] * 24,
     kv_bits=4,
@@ -57,7 +57,7 @@ GPT_OSS_SPEC = ModelCacheSpec(
 
 SMOLLM2_SPEC = ModelCacheSpec(
     n_layers=30,
-    n_kv_heads=9,
+    n_kv_heads=3,
     head_dim=64,
     block_tokens=256,
     layer_types=["global"] * 30,
@@ -95,7 +95,7 @@ class TestFormulaCorrectness:
         hand_computed = _compute_q4_bytes(GEMMA3_SPEC)
 
         assert formula_result == hand_computed
-        assert formula_result == 294_912  # 262144 + 16384 + 16384
+        assert formula_result == 589_824  # 524288 + 32768 + 32768
 
     def test_gpt_oss_q4_matches_hand_computation(self) -> None:
         """GPT-OSS-20B Q4: formula output matches step-by-step computation."""
@@ -103,7 +103,7 @@ class TestFormulaCorrectness:
         hand_computed = _compute_q4_bytes(GPT_OSS_SPEC)
 
         assert formula_result == hand_computed
-        assert formula_result == 103_680  # 92160 + 5760 + 5760
+        assert formula_result == 147_456  # 131072 + 8192 + 8192
 
     def test_smollm2_q4_matches_hand_computation(self) -> None:
         """SmolLM2-135M Q4: formula output matches step-by-step computation."""
@@ -111,7 +111,7 @@ class TestFormulaCorrectness:
         hand_computed = _compute_q4_bytes(SMOLLM2_SPEC)
 
         assert formula_result == hand_computed
-        assert formula_result == 165_888  # 147456 + 9216 + 9216
+        assert formula_result == 55_296  # 49152 + 3072 + 3072
 
     def test_gemma3_fp16_matches_hand_computation(self) -> None:
         """Gemma 3 FP16: formula output matches step-by-step computation."""
@@ -128,8 +128,8 @@ class TestFormulaCorrectness:
         hand_computed = _compute_fp16_bytes(GEMMA3_SPEC)
 
         assert formula_result == hand_computed
-        # 4 heads * 256 dim * 256 tokens * 2(K+V) * 2 bytes = 1,048,576
-        assert formula_result == 1_048_576
+        # 8 heads * 256 dim * 256 tokens * 2(K+V) * 2 bytes = 2,097,152
+        assert formula_result == 2_097_152
 
 
 class TestQ4FP16Ratio:
@@ -176,7 +176,7 @@ class TestQ4FP16Ratio:
         # Cross-validate with Gemma 3 (large enough that rounding is negligible)
         q4 = GEMMA3_SPEC.bytes_per_block_per_layer()
         fp16_spec = ModelCacheSpec(
-            n_layers=48, n_kv_heads=4, head_dim=256, block_tokens=256,
+            n_layers=48, n_kv_heads=8, head_dim=256, block_tokens=256,
             layer_types=["global"] * 48, kv_bits=None, kv_group_size=64,
         )
         fp16 = fp16_spec.bytes_per_block_per_layer()

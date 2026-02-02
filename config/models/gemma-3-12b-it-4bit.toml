@@ -9,7 +9,7 @@
 [model]
 model_id = "mlx-community/gemma-3-12b-it-4bit"
 n_layers = 48
-n_kv_heads = 4
+n_kv_heads = 8
 head_dim = 256
 
 [optimal]
@@ -56,6 +56,6 @@ multiturn_speedup = "2.8x"
 model_memory_gb = 6.8
 block_pool_blocks = 15534
 # Q4 formula: (n_kv_heads * head_dim * block_tokens * 2(K+V) * 4bits/8)
-#   + scales/biases overhead = 294912 bytes ≈ 0.28 MB per block per layer
-# Previous value (0.53) matched Q8 formula; corrected to Q4 (kv_bits=4).
-block_size_mb = 0.28
+#   + scales/biases overhead = 589824 bytes ≈ 0.56 MB per block per layer
+# With n_kv_heads=8, head_dim=256: 8*256*256*2*0.5 + overhead
+block_size_mb = 0.56

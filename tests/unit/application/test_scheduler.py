@@ -50,6 +50,9 @@ class FakeBatchEngine:
         cache: Any | None = None,
         max_tokens: int = 256,
         prompt_tokens: list[int] | None = None,
+        temperature: float = 0.0,
+        top_p: float = 0.0,
+        top_k: int = 0,
     ) -> str:
         self._uid_counter += 1
         uid = f"uid_{self._uid_counter}"
@@ -65,6 +68,9 @@ class FakeBatchEngine:
         prompt_tokens: list[int],
         kv_caches: list[Any],
         max_tokens: int = 256,
+        temperature: float = 0.0,
+        top_p: float = 0.0,
+        top_k: int = 0,
         prompt_text: str | None = None,
     ) -> str:
         self._uid_counter += 1

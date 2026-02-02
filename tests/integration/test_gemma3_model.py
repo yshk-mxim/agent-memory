@@ -208,10 +208,10 @@ class TestGemma3ModelInfo:
     def test_gemma3_model_spec_extraction(self):
         """Verify ModelCacheSpec extraction works correctly for Gemma 3.
 
-        Gemma 3 architecture:
-        - 42 layers
-        - 16 KV heads
-        - 256 head dimension
+        Gemma 3 12B architecture (from real model config):
+        - 48 layers (8 global + 40 sliding window)
+        - 8 KV heads
+        - 256 head dimension (from attn.head_dim, NOT hidden_size/num_heads)
         - Block size: 256 tokens (from ADR-002)
         """
         # This test verifies that the model loads and spec extraction works

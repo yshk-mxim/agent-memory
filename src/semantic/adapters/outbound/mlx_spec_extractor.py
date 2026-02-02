@@ -65,7 +65,7 @@ class MLXModelSpecExtractor:
         attrs = self._extract_model_attributes(args)
         self._validate_model_attributes(attrs)
 
-        head_dim = self._compute_head_dim(attrs["hidden_size"], attrs["num_attention_heads"])
+        head_dim = self._extract_head_dim(model, attrs)
         layer_types = self._detect_layer_types(model, args, attrs["n_layers"])
 
         return ModelCacheSpec(
@@ -110,9 +110,30 @@ class MLXModelSpecExtractor:
                 "Cannot compute head_dim: missing hidden_size or num_attention_heads"
             )
 
-    def _compute_head_dim(self, hidden_size: int, num_attention_heads: int) -> int:
-        """Compute attention head dimension."""
-        return hidden_size // num_attention_heads
+    def _extract_head_dim(self, model: Any, attrs: dict[str, Any]) -> int:
+        """Extract head_dim from model, preferring actual attention layer value.
+
+        Models like Gemma 3 have head_dim=256 but hidden_size=3840 and
+        num_attention_heads=16, so hidden_size//num_heads=240 is wrong.
+        The attention module's head_dim attribute is the ground truth.
+        """
+        # Try reading head_dim from attention layers (most reliable)
+        for path in [
+            lambda m: m.language_model.model.layers,  # Gemma 3 (nested)
+            lambda m: m.model.layers,                  # Standard models
+            lambda m: m.layers,                        # Direct layer access
+        ]:
+            try:
+                layers = path(model)
+                if layers and len(layers) > 0:
+                    attn = getattr(layers[0], "self_attn", None)
+                    if attn and hasattr(attn, "head_dim"):
+                        return attn.head_dim
+            except (AttributeError, TypeError):
+                continue
+
+        # Fall back to computing from config
+        return attrs["hidden_size"] // attrs["num_attention_heads"]
 
     def _detect_layer_types(self, model: Any, args: Any, n_layers: int) -> list[str]:
         """Detect layer attention types using three-tier approach."""

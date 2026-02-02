@@ -223,6 +223,8 @@ async def _stream_via_scheduler(  # noqa: C901, PLR0912
         cache=cached_blocks,
         max_tokens=max_tokens,
         prompt_text=prompt,
+        temperature=request_body.temperature,
+        top_p=request_body.top_p,
     ):
         new_text = delta.text[len(accumulated_text) :]
         accumulated_text = delta.text
@@ -360,6 +362,8 @@ async def stream_chat_completion(  # noqa: C901, PLR0912, PLR0915
             prompt=prompt,
             cache=cached_blocks,
             max_tokens=max_tokens,
+            temperature=request_body.temperature,
+            top_p=request_body.top_p,
         )
         logger.debug(f"Submitted streaming generation: uid={uid}")
 
@@ -611,6 +615,8 @@ async def create_chat_completion(  # noqa: C901, PLR0912, PLR0915
                 cache=cached_blocks,
                 max_tokens=max_tokens,
                 prompt_text=prompt,
+                temperature=request_body.temperature,
+                top_p=request_body.top_p,
             )
         else:
             uid = await asyncio.to_thread(
@@ -619,6 +625,8 @@ async def create_chat_completion(  # noqa: C901, PLR0912, PLR0915
                 prompt=prompt,
                 cache=cached_blocks,
                 max_tokens=max_tokens,
+                temperature=request_body.temperature,
+                top_p=request_body.top_p,
             )
             logger.debug(f"Submitted generation: uid={uid}")
             completion = await asyncio.to_thread(run_step_for_uid, batch_engine, uid)
