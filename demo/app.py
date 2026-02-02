@@ -12,6 +12,7 @@ Usage:
 
 import json
 import time
+from concurrent.futures import ThreadPoolExecutor
 from uuid import uuid4
 
 import httpx
@@ -42,6 +43,10 @@ def init_session_state() -> None:
     st.session_state.initialized = True
     st.session_state.server_status = "unknown"
     st.session_state.model_info = None
+
+    # ThreadPoolExecutor for concurrent HTTP requests
+    st.session_state.executor = ThreadPoolExecutor(max_workers=NUM_AGENTS)
+
     for i in range(NUM_AGENTS):
         prefix = f"agent_{i}"
         st.session_state[f"{prefix}_sid"] = f"{AGENT_NAMES[i].lower()}_{uuid4().hex[:8]}"
@@ -49,6 +54,8 @@ def init_session_state() -> None:
         st.session_state[f"{prefix}_turn"] = 0
         st.session_state[f"{prefix}_metrics"] = []
         st.session_state[f"{prefix}_generating"] = False
+        st.session_state[f"{prefix}_future"] = None
+        st.session_state[f"{prefix}_pending_input"] = None
         # Per-agent inference settings
         st.session_state[f"{prefix}_temperature"] = DEFAULT_TEMPERATURE
         st.session_state[f"{prefix}_top_p"] = DEFAULT_TOP_P
@@ -341,6 +348,10 @@ def render_agent_column(agent_idx: int) -> None:
         ):
             user_input = SUGGESTED_PROMPTS[agent_idx]
 
+    # Show generating indicator if request is in progress
+    if st.session_state.get(f"{prefix}_generating", False):
+        st.info(f"{name} is generating... (concurrent request)", icon="⏳")
+
     if user_input:
         # Check context length limit before sending
         max_context = st.session_state.get(f"{prefix}_max_context", DEFAULT_MAX_CONTEXT)
@@ -370,21 +381,62 @@ def render_agent_column(agent_idx: int) -> None:
                 *api_messages,
             ]
 
-        # Generate response
-        with st.spinner(f"{name} thinking..."):
-            text, metrics = non_stream_response(
-                api_messages, sid, temperature, top_p, max_tokens
-            )
+        # Submit request to background thread (non-blocking)
+        future = st.session_state.executor.submit(
+            non_stream_response, api_messages, sid, temperature, top_p, max_tokens
+        )
+        st.session_state[f"{prefix}_future"] = future
+        st.session_state[f"{prefix}_generating"] = True
 
-        # Add assistant response
-        messages.append({"role": "assistant", "content": text})
-        st.session_state[f"{prefix}_messages"] = messages
-        st.session_state[f"{prefix}_turn"] = turn + 1
-        if metrics:
-            all_metrics.append(metrics)
-            st.session_state[f"{prefix}_metrics"] = all_metrics
-
+        # Trigger rerun to show generating indicator
         st.rerun()
+
+
+@st.fragment(run_every="0.5s")
+def check_agent_completions() -> None:
+    """Poll for completed futures and update session state.
+
+    This fragment runs every 0.5s and checks if any agent's background
+    HTTP request has finished. When a future completes, extracts the
+    result, updates messages/metrics, and clears the generating flag.
+    """
+    for i in range(NUM_AGENTS):
+        prefix = f"agent_{i}"
+        future = st.session_state.get(f"{prefix}_future")
+
+        if future and future.done():
+            # Extract result from completed future
+            try:
+                text, metrics = future.result()
+
+                # Update session state with response
+                messages = st.session_state[f"{prefix}_messages"]
+                messages.append({"role": "assistant", "content": text})
+                st.session_state[f"{prefix}_messages"] = messages
+
+                turn = st.session_state[f"{prefix}_turn"]
+                st.session_state[f"{prefix}_turn"] = turn + 1
+
+                if metrics:
+                    all_metrics = st.session_state[f"{prefix}_metrics"]
+                    all_metrics.append(metrics)
+                    st.session_state[f"{prefix}_metrics"] = all_metrics
+
+                # Clear future and generating flag
+                st.session_state[f"{prefix}_future"] = None
+                st.session_state[f"{prefix}_generating"] = False
+
+                # Trigger rerun to display new message
+                st.rerun()
+
+            except Exception as e:
+                # Handle errors from HTTP request
+                messages = st.session_state[f"{prefix}_messages"]
+                messages.append({"role": "assistant", "content": f"[Error: {e}]"})
+                st.session_state[f"{prefix}_messages"] = messages
+                st.session_state[f"{prefix}_future"] = None
+                st.session_state[f"{prefix}_generating"] = False
+                st.rerun()
 
 
 def render_sidebar() -> None:
@@ -507,6 +559,7 @@ def main() -> None:
     )
 
     init_session_state()
+    check_agent_completions()  # Polling fragment for concurrent requests
     render_sidebar()
 
     # Title with model badge
@@ -531,6 +584,50 @@ def main() -> None:
         "Expand **Settings** under each agent to tune inference parameters.",
         unsafe_allow_html=True,
     )
+
+    # Send All button for concurrent batch requests
+    btn_col1, btn_col2, btn_col3 = st.columns([1, 2, 1])
+    with btn_col2:
+        if st.button("🚀 Send All (Concurrent Test)", use_container_width=True, type="primary"):
+            # Submit all agents with suggested prompts simultaneously
+            for i in range(NUM_AGENTS):
+                prefix = f"agent_{i}"
+                messages = st.session_state[f"{prefix}_messages"]
+                sid = st.session_state[f"{prefix}_sid"]
+
+                # Skip if already generating
+                if st.session_state.get(f"{prefix}_generating", False):
+                    continue
+
+                # Use suggested prompt for this agent
+                user_input = SUGGESTED_PROMPTS[i]
+                messages.append({"role": "user", "content": user_input})
+                st.session_state[f"{prefix}_messages"] = messages
+
+                # Read per-agent settings
+                temperature = st.session_state.get(f"{prefix}_temperature", DEFAULT_TEMPERATURE)
+                top_p = st.session_state.get(f"{prefix}_top_p", DEFAULT_TOP_P)
+                max_tokens = st.session_state.get(f"{prefix}_max_tokens", DEFAULT_MAX_TOKENS)
+                thinking = st.session_state.get(f"{prefix}_thinking", False)
+
+                # Prepend thinking instruction if enabled
+                api_messages = list(messages)
+                if thinking and api_messages:
+                    api_messages = [
+                        {"role": "system", "content": "Think step by step before answering."},
+                        *api_messages,
+                    ]
+
+                # Submit to executor (non-blocking)
+                future = st.session_state.executor.submit(
+                    non_stream_response, api_messages, sid, temperature, top_p, max_tokens
+                )
+                st.session_state[f"{prefix}_future"] = future
+                st.session_state[f"{prefix}_generating"] = True
+
+            st.rerun()
+
+    st.divider()
 
     # 4 agent columns
     cols = st.columns(NUM_AGENTS, gap="medium")

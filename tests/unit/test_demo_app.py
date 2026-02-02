@@ -37,6 +37,21 @@ def _mock_streamlit():
     """Mock streamlit module so demo/app.py can be imported."""
     mock_st = MagicMock(spec=ModuleType)
     mock_st.session_state = _SessionState()
+
+    # Mock st.fragment decorator — it should be a passthrough
+    def fragment_decorator(*args, **kwargs):
+        # Handle both @st.fragment and @st.fragment(run_every="0.5s")
+        if len(args) == 1 and callable(args[0]) and not kwargs:
+            # Direct decoration: @st.fragment
+            return args[0]
+        else:
+            # Parametrized: @st.fragment(run_every=...)
+            def wrapper(func):
+                return func
+            return wrapper
+
+    mock_st.fragment = fragment_decorator
+
     sys.modules["streamlit"] = mock_st
     yield mock_st
     sys.modules.pop("streamlit", None)
@@ -156,6 +171,18 @@ class TestInitSessionState:
         second_sids = [session[f"agent_{i}_sid"] for i in range(4)]
 
         assert first_sids == second_sids
+
+    def test_creates_executor_for_concurrent_requests(self, _mock_streamlit) -> None:
+        """Session state should include ThreadPoolExecutor for concurrent HTTP."""
+        from concurrent.futures import ThreadPoolExecutor
+
+        app = _import_app()
+        session = _mock_streamlit.session_state
+
+        app.init_session_state()
+
+        assert "executor" in session
+        assert isinstance(session.executor, ThreadPoolExecutor)
 
 
 class TestNonStreamResponse:
