@@ -322,16 +322,17 @@ async def lifespan(app: FastAPI):
                     reason="MLXPrefillAdapter not importable — falling back to direct engine path",
                 )
 
-        # Initialize CoordinationService (requires scheduler, cache_store, engine)
-        coordination_service = None
-        if scheduler is not None:
-            coordination_service = CoordinationService(
-                scheduler=scheduler,
-                cache_store=cache_store,
-                engine=batch_engine,
-            )
-            app.state.coordination_service = coordination_service
-            logger.info("coordination_service_initialized")
+        # Initialize CoordinationService (can work with or without scheduler)
+        coordination_service = CoordinationService(
+            scheduler=scheduler,  # May be None if scheduler unavailable
+            cache_store=cache_store,
+            engine=batch_engine,
+        )
+        app.state.coordination_service = coordination_service
+        logger.info(
+            "coordination_service_initialized",
+            scheduler_enabled=(scheduler is not None),
+        )
 
         logger.info("server_ready")
 

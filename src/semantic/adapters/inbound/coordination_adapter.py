@@ -20,6 +20,7 @@ from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, Request, status
 
+from semantic.adapters.inbound.adapter_helpers import get_coordination_service
 from semantic.adapters.inbound.coordination_models import (
     AgentRoleConfig,
     AgentStateResponse,
@@ -65,7 +66,7 @@ async def create_session(
     Returns:
         CreateSessionResponse with session ID and configuration.
     """
-    service = request.app.state.coordination_service
+    service = get_coordination_service(request)
 
     # Convert topology/format/mode strings to enums
     try:
@@ -132,7 +133,7 @@ async def list_sessions(request: Request) -> SessionListResponse:
     Returns:
         SessionListResponse with list of sessions.
     """
-    service = request.app.state.coordination_service
+    service = get_coordination_service(request)
 
     # Get all sessions (service stores them in _sessions dict)
     sessions = []
@@ -190,7 +191,7 @@ async def get_session_status(
     Returns:
         SessionStatusResponse with current state.
     """
-    service = request.app.state.coordination_service
+    service = get_coordination_service(request)
 
     try:
         session = service.get_session(session_id)
@@ -246,7 +247,7 @@ async def delete_session(
         request: FastAPI request.
         session_id: Session identifier.
     """
-    service = request.app.state.coordination_service
+    service = get_coordination_service(request)
 
     try:
         service.delete_session(session_id)
@@ -271,7 +272,7 @@ async def execute_turn(
     Returns:
         ExecuteTurnResponse with generated message and updated status.
     """
-    service = request.app.state.coordination_service
+    service = get_coordination_service(request)
 
     try:
         # Execute turn
@@ -350,7 +351,7 @@ async def execute_round(
     Returns:
         ExecuteRoundResponse with all generated messages and updated status.
     """
-    service = request.app.state.coordination_service
+    service = get_coordination_service(request)
 
     try:
         # Execute round
@@ -435,7 +436,7 @@ async def send_whisper(
     Returns:
         WhisperResponse with the created message.
     """
-    service = request.app.state.coordination_service
+    service = get_coordination_service(request)
 
     try:
         message = service.add_whisper(
@@ -508,7 +509,7 @@ async def get_messages(
     Returns:
         MessageListResponse with all messages.
     """
-    service = request.app.state.coordination_service
+    service = get_coordination_service(request)
 
     try:
         session = service.get_session(session_id)

@@ -36,6 +36,29 @@ def get_semantic_state(request: Request) -> Any:
     return request.app.state.semantic
 
 
+def get_coordination_service(request: Request) -> Any:
+    """Safely get coordination service from request, raising clear error if not initialized.
+
+    Args:
+        request: FastAPI request object
+
+    Returns:
+        The coordination service object
+
+    Raises:
+        HTTPException: If coordination service is not initialized
+    """
+    if (
+        not hasattr(request.app.state, "coordination_service")
+        or request.app.state.coordination_service is None
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Coordination service is not available. Server may still be initializing.",
+        )
+    return request.app.state.coordination_service
+
+
 def run_step_for_uid(
     batch_engine: Any,
     uid: str,

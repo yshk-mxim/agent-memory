@@ -324,16 +324,27 @@ class CoordinationService:
         namespaced_agent_id = f"coord_{session_id}_{directive.agent_id}"
         cached_blocks = self._cache_store.load(namespaced_agent_id)
 
-        # Submit to scheduler and wait for completion
-        result = await self._scheduler.submit_and_wait(
-            agent_id=namespaced_agent_id,
-            prompt_tokens=prompt_tokens,
-            cache=cached_blocks,
-            max_tokens=512,
-            prompt_text=prompt_text,
-            temperature=0.7,
-            top_p=1.0,
-        )
+        # Submit to scheduler (or fall back to direct engine if no scheduler)
+        if self._scheduler is not None:
+            result = await self._scheduler.submit_and_wait(
+                agent_id=namespaced_agent_id,
+                prompt_tokens=prompt_tokens,
+                cache=cached_blocks,
+                max_tokens=512,
+                prompt_text=prompt_text,
+                temperature=0.7,
+                top_p=1.0,
+            )
+        else:
+            # Direct engine path (no scheduler available)
+            result = await self._generate_direct(
+                agent_id=namespaced_agent_id,
+                prompt_tokens=prompt_tokens,
+                cache=cached_blocks,
+                max_tokens=512,
+                temperature=0.7,
+                top_p=1.0,
+            )
 
         # Save updated cache
         if result.cache:
@@ -506,3 +517,62 @@ class CoordinationService:
             elif role == "assistant":
                 lines.append(f"Assistant: {content}")
         return "\n\n".join(lines)
+
+    async def _generate_direct(
+        self,
+        agent_id: str,
+        prompt_tokens: list[int],
+        cache,
+        max_tokens: int,
+        temperature: float,
+        top_p: float,
+    ):
+        """Generate text using batch engine directly (fallback when no scheduler).
+
+        Args:
+            agent_id: Agent identifier.
+            prompt_tokens: Tokenized prompt.
+            cache: Cached blocks from previous turns.
+            max_tokens: Maximum tokens to generate.
+            temperature: Sampling temperature.
+            top_p: Top-p sampling parameter.
+
+        Returns:
+            Generation result with text and cache.
+        """
+        import asyncio
+        from dataclasses import dataclass
+
+        # Submit request to batch engine
+        uid = self._engine.submit(
+            agent_id=agent_id,
+            prompt="",  # Empty string since we provide prompt_tokens
+            cache=cache,
+            max_tokens=max_tokens,
+            prompt_tokens=prompt_tokens,
+            temperature=temperature,
+            top_p=top_p,
+        )
+
+        # Poll engine until result is ready
+        result = None
+        max_steps = 10000  # Safety limit
+        for _ in range(max_steps):
+            for completion in self._engine.step():
+                if completion.uid == uid:
+                    result = completion
+                    break
+            if result:
+                break
+            await asyncio.sleep(0.01)  # Small delay to avoid busy-waiting
+
+        if result is None:
+            raise RuntimeError(f"Generation failed for agent {agent_id}")
+
+        # Build result object compatible with scheduler result
+        @dataclass
+        class DirectResult:
+            text: str
+            cache: any
+
+        return DirectResult(text=result.text, cache=result.blocks)
