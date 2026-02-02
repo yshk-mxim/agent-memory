@@ -21,6 +21,7 @@ from semantic.adapters.config.logging import configure_logging
 from semantic.adapters.config.settings import get_settings
 from semantic.adapters.inbound.anthropic_adapter import router as anthropic_router
 from semantic.adapters.inbound.auth_middleware import AuthenticationMiddleware
+from semantic.adapters.inbound.coordination_adapter import router as coordination_router
 from semantic.adapters.inbound.direct_agent_adapter import router as direct_router
 from semantic.adapters.inbound.metrics import agents_active, pool_utilization_ratio, registry
 from semantic.adapters.inbound.metrics_middleware import RequestMetricsMiddleware
@@ -33,6 +34,7 @@ from semantic.adapters.outbound.mlx_spec_extractor import get_extractor
 from semantic.adapters.outbound.safetensors_cache_adapter import SafetensorsCacheAdapter
 from semantic.application.agent_cache_store import AgentCacheStore, ModelTag
 from semantic.application.batch_engine import BlockPoolBatchEngine
+from semantic.application.coordination_service import CoordinationService
 from semantic.application.scheduler import ConcurrentScheduler
 from semantic.application.shared_prefix_cache import SharedPrefixCache
 from semantic.domain.errors import (
@@ -64,6 +66,7 @@ class AppState:
         self.cache_adapter: SafetensorsCacheAdapter | None = None
         self.scheduler: "ConcurrentScheduler | None" = None
         self.prefix_cache: SharedPrefixCache | None = None
+        self.coordination_service: "CoordinationService | None" = None
 
 
 def _load_model_and_extract_spec(settings):
@@ -318,6 +321,17 @@ async def lifespan(app: FastAPI):
                     "scheduler_unavailable",
                     reason="MLXPrefillAdapter not importable — falling back to direct engine path",
                 )
+
+        # Initialize CoordinationService (requires scheduler, cache_store, engine)
+        coordination_service = None
+        if scheduler is not None:
+            coordination_service = CoordinationService(
+                scheduler=scheduler,
+                cache_store=cache_store,
+                engine=batch_engine,
+            )
+            app.state.coordination_service = coordination_service
+            logger.info("coordination_service_initialized")
 
         logger.info("server_ready")
 
@@ -691,6 +705,9 @@ def _register_routes(app: FastAPI):
 
     app.include_router(direct_router)
     logger.info("routes_registered", router="direct_agent", path="/v1/agents")
+
+    app.include_router(coordination_router)
+    logger.info("routes_registered", router="coordination", path="/v1/coordination")
 
 
 def create_app() -> FastAPI:

@@ -1,0 +1,548 @@
+"""Coordination API adapter (FastAPI router).
+
+Implements REST endpoints for multi-agent coordination sessions at
+/v1/coordination/*.
+
+Routes:
+  POST   /v1/coordination/sessions          - Create session
+  GET    /v1/coordination/sessions          - List sessions
+  GET    /v1/coordination/sessions/{id}     - Get session status
+  DELETE /v1/coordination/sessions/{id}     - Delete session
+  POST   /v1/coordination/sessions/{id}/turn     - Execute next turn
+  POST   /v1/coordination/sessions/{id}/round    - Execute full round
+  POST   /v1/coordination/sessions/{id}/whisper  - Send whisper message
+  POST   /v1/coordination/sessions/{id}/vote     - Submit vote
+  GET    /v1/coordination/sessions/{id}/messages - Get all messages
+"""
+
+import logging
+from uuid import uuid4
+
+from fastapi import APIRouter, HTTPException, Request, status
+
+from semantic.adapters.inbound.coordination_models import (
+    AgentRoleConfig,
+    AgentStateResponse,
+    ChannelMessageResponse,
+    CreateSessionRequest,
+    CreateSessionResponse,
+    ExecuteRoundResponse,
+    ExecuteTurnResponse,
+    MessageListResponse,
+    SessionListResponse,
+    SessionStatusResponse,
+    TallyResponse,
+    VoteRequest,
+    VoteResponse,
+    WhisperRequest,
+    WhisperResponse,
+)
+from semantic.domain.coordination import (
+    AgentRole,
+    DebateFormat,
+    DecisionMode,
+    Topology,
+    Vote,
+)
+from semantic.domain.errors import CoordinationError, SessionNotFoundError
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter(prefix="/v1/coordination", tags=["coordination"])
+
+
+@router.post("/sessions", status_code=status.HTTP_201_CREATED)
+async def create_session(
+    request: Request,
+    body: CreateSessionRequest,
+) -> CreateSessionResponse:
+    """Create a new multi-agent coordination session.
+
+    Args:
+        request: FastAPI request (for accessing app state).
+        body: Session creation request.
+
+    Returns:
+        CreateSessionResponse with session ID and configuration.
+    """
+    service = request.app.state.coordination_service
+
+    # Convert topology/format/mode strings to enums
+    try:
+        topology = Topology(body.topology)
+        debate_format = DebateFormat(body.debate_format)
+        decision_mode = DecisionMode(body.decision_mode)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid topology/format/mode: {e}",
+        ) from e
+
+    # Convert agent configs to AgentRole domain objects
+    agents = []
+    for agent_config in body.agents:
+        agent_id = agent_config.agent_id or f"agent_{uuid4().hex[:8]}"
+        agents.append(
+            AgentRole(
+                agent_id=agent_id,
+                display_name=agent_config.display_name,
+                role=agent_config.role,
+                system_prompt=agent_config.system_prompt,
+            )
+        )
+
+    # Create session
+    session = service.create_session(
+        topology=topology,
+        debate_format=debate_format,
+        decision_mode=decision_mode,
+        agents=agents,
+        initial_prompt=body.initial_prompt,
+        max_turns=body.max_turns,
+    )
+
+    # Build response
+    agent_configs = [
+        AgentRoleConfig(
+            agent_id=a.agent_id,
+            display_name=a.display_name,
+            role=a.role,
+            system_prompt=a.system_prompt,
+        )
+        for a in agents
+    ]
+
+    return CreateSessionResponse(
+        session_id=session.session_id,
+        agents=agent_configs,
+        topology=session.topology.value,
+        debate_format=session.debate_format.value,
+        decision_mode=session.decision_mode.value,
+        status="active" if session.is_active else "completed",
+    )
+
+
+@router.get("/sessions")
+async def list_sessions(request: Request) -> SessionListResponse:
+    """List all active coordination sessions.
+
+    Args:
+        request: FastAPI request.
+
+    Returns:
+        SessionListResponse with list of sessions.
+    """
+    service = request.app.state.coordination_service
+
+    # Get all sessions (service stores them in _sessions dict)
+    sessions = []
+    for session in service._sessions.values():
+        # Build agent states
+        agent_states = []
+        public_channel = next(
+            (c for c in session.channels.values() if c.channel_type == "public"), None
+        )
+        for agent in session.agents.values():
+            message_count = 0
+            if public_channel:
+                message_count = sum(
+                    1 for msg in public_channel.messages if msg.sender_id == agent.agent_id
+                )
+            agent_states.append(
+                AgentStateResponse(
+                    agent_id=agent.agent_id,
+                    display_name=agent.display_name,
+                    role=agent.role,
+                    message_count=message_count,
+                )
+            )
+
+        # Determine next speaker
+        try:
+            next_speaker = session.get_next_speaker()
+        except Exception:
+            next_speaker = None
+
+        sessions.append(
+            SessionStatusResponse(
+                session_id=session.session_id,
+                current_turn=session.current_turn,
+                is_active=session.is_active,
+                next_speaker=next_speaker,
+                agent_states=agent_states,
+            )
+        )
+
+    return SessionListResponse(sessions=sessions)
+
+
+@router.get("/sessions/{session_id}")
+async def get_session_status(
+    request: Request,
+    session_id: str,
+) -> SessionStatusResponse:
+    """Get status of a coordination session.
+
+    Args:
+        request: FastAPI request.
+        session_id: Session identifier.
+
+    Returns:
+        SessionStatusResponse with current state.
+    """
+    service = request.app.state.coordination_service
+
+    try:
+        session = service.get_session(session_id)
+    except SessionNotFoundError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(e),
+        ) from e
+
+    # Build agent states
+    agent_states = []
+    public_channel = next(
+        (c for c in session.channels.values() if c.channel_type == "public"), None
+    )
+    for agent in session.agents.values():
+        message_count = 0
+        if public_channel:
+            message_count = sum(
+                1 for msg in public_channel.messages if msg.sender_id == agent.agent_id
+            )
+        agent_states.append(
+            AgentStateResponse(
+                agent_id=agent.agent_id,
+                display_name=agent.display_name,
+                role=agent.role,
+                message_count=message_count,
+            )
+        )
+
+    # Determine next speaker
+    try:
+        next_speaker = session.get_next_speaker()
+    except Exception:
+        next_speaker = None
+
+    return SessionStatusResponse(
+        session_id=session.session_id,
+        current_turn=session.current_turn,
+        is_active=session.is_active,
+        next_speaker=next_speaker,
+        agent_states=agent_states,
+    )
+
+
+@router.delete("/sessions/{session_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_session(
+    request: Request,
+    session_id: str,
+) -> None:
+    """Delete a coordination session.
+
+    Args:
+        request: FastAPI request.
+        session_id: Session identifier.
+    """
+    service = request.app.state.coordination_service
+
+    try:
+        service.delete_session(session_id)
+    except SessionNotFoundError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(e),
+        ) from e
+
+
+@router.post("/sessions/{session_id}/turn")
+async def execute_turn(
+    request: Request,
+    session_id: str,
+) -> ExecuteTurnResponse:
+    """Execute the next turn in a coordination session.
+
+    Args:
+        request: FastAPI request.
+        session_id: Session identifier.
+
+    Returns:
+        ExecuteTurnResponse with generated message and updated status.
+    """
+    service = request.app.state.coordination_service
+
+    try:
+        # Execute turn
+        message = await service.execute_turn(session_id)
+
+        # Get updated session status
+        session = service.get_session(session_id)
+        sender_agent = session.agents[message.sender_id]
+
+        # Build response
+        message_response = ChannelMessageResponse(
+            message_id=message.message_id,
+            sender_id=message.sender_id,
+            sender_name=sender_agent.display_name,
+            content=message.content,
+            turn_number=message.turn_number,
+            channel_type="public",
+            is_interrupted=message.is_interrupted,
+        )
+
+        # Build agent states
+        agent_states = []
+        public_channel = next(
+            c for c in session.channels.values() if c.channel_type == "public"
+        )
+        for agent in session.agents.values():
+            message_count = sum(
+                1 for msg in public_channel.messages if msg.sender_id == agent.agent_id
+            )
+            agent_states.append(
+                AgentStateResponse(
+                    agent_id=agent.agent_id,
+                    display_name=agent.display_name,
+                    role=agent.role,
+                    message_count=message_count,
+                )
+            )
+
+        # Determine next speaker
+        try:
+            next_speaker = session.get_next_speaker()
+        except Exception:
+            next_speaker = None
+
+        status_response = SessionStatusResponse(
+            session_id=session.session_id,
+            current_turn=session.current_turn,
+            is_active=session.is_active,
+            next_speaker=next_speaker,
+            agent_states=agent_states,
+        )
+
+        return ExecuteTurnResponse(
+            message=message_response,
+            session_status=status_response,
+        )
+
+    except CoordinationError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        ) from e
+
+
+@router.post("/sessions/{session_id}/round")
+async def execute_round(
+    request: Request,
+    session_id: str,
+) -> ExecuteRoundResponse:
+    """Execute a full round (all agents get one turn).
+
+    Args:
+        request: FastAPI request.
+        session_id: Session identifier.
+
+    Returns:
+        ExecuteRoundResponse with all generated messages and updated status.
+    """
+    service = request.app.state.coordination_service
+
+    try:
+        # Execute round
+        messages = await service.execute_round(session_id)
+
+        # Get updated session status
+        session = service.get_session(session_id)
+
+        # Build message responses
+        message_responses = []
+        for msg in messages:
+            sender_agent = session.agents[msg.sender_id]
+            message_responses.append(
+                ChannelMessageResponse(
+                    message_id=msg.message_id,
+                    sender_id=msg.sender_id,
+                    sender_name=sender_agent.display_name,
+                    content=msg.content,
+                    turn_number=msg.turn_number,
+                    channel_type="public",
+                    is_interrupted=msg.is_interrupted,
+                )
+            )
+
+        # Build agent states
+        agent_states = []
+        public_channel = next(
+            c for c in session.channels.values() if c.channel_type == "public"
+        )
+        for agent in session.agents.values():
+            message_count = sum(
+                1 for msg in public_channel.messages if msg.sender_id == agent.agent_id
+            )
+            agent_states.append(
+                AgentStateResponse(
+                    agent_id=agent.agent_id,
+                    display_name=agent.display_name,
+                    role=agent.role,
+                    message_count=message_count,
+                )
+            )
+
+        # Determine next speaker
+        try:
+            next_speaker = session.get_next_speaker()
+        except Exception:
+            next_speaker = None
+
+        status_response = SessionStatusResponse(
+            session_id=session.session_id,
+            current_turn=session.current_turn,
+            is_active=session.is_active,
+            next_speaker=next_speaker,
+            agent_states=agent_states,
+        )
+
+        return ExecuteRoundResponse(
+            messages=message_responses,
+            session_status=status_response,
+        )
+
+    except CoordinationError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        ) from e
+
+
+@router.post("/sessions/{session_id}/whisper")
+async def send_whisper(
+    request: Request,
+    session_id: str,
+    body: WhisperRequest,
+) -> WhisperResponse:
+    """Send a whisper (private message) between two agents.
+
+    Args:
+        request: FastAPI request.
+        session_id: Session identifier.
+        body: Whisper request with sender, recipient, and content.
+
+    Returns:
+        WhisperResponse with the created message.
+    """
+    service = request.app.state.coordination_service
+
+    try:
+        message = service.add_whisper(
+            session_id=session_id,
+            from_id=body.from_agent_id,
+            to_id=body.to_agent_id,
+            content=body.content,
+        )
+
+        session = service.get_session(session_id)
+        sender_agent = session.agents[message.sender_id]
+
+        message_response = ChannelMessageResponse(
+            message_id=message.message_id,
+            sender_id=message.sender_id,
+            sender_name=sender_agent.display_name,
+            content=message.content,
+            turn_number=message.turn_number,
+            channel_type="whisper",
+            is_interrupted=False,
+        )
+
+        return WhisperResponse(message=message_response)
+
+    except CoordinationError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        ) from e
+
+
+@router.post("/sessions/{session_id}/vote")
+async def submit_vote(
+    request: Request,
+    session_id: str,
+    body: VoteRequest,
+) -> VoteResponse:
+    """Submit a vote from an agent.
+
+    Args:
+        request: FastAPI request.
+        session_id: Session identifier.
+        body: Vote request with agent, question, and choice.
+
+    Returns:
+        VoteResponse confirming the vote.
+    """
+    # Note: In a full implementation, votes would be stored in the session
+    # For now, just return a confirmation
+    vote_id = uuid4().hex[:12]
+
+    return VoteResponse(
+        vote_id=vote_id,
+        agent_id=body.agent_id,
+        choice=body.choice,
+    )
+
+
+@router.get("/sessions/{session_id}/messages")
+async def get_messages(
+    request: Request,
+    session_id: str,
+) -> MessageListResponse:
+    """Get all messages in a coordination session.
+
+    Args:
+        request: FastAPI request.
+        session_id: Session identifier.
+
+    Returns:
+        MessageListResponse with all messages.
+    """
+    service = request.app.state.coordination_service
+
+    try:
+        session = service.get_session(session_id)
+
+        # Get public channel messages
+        public_channel = next(
+            (c for c in session.channels.values() if c.channel_type == "public"), None
+        )
+        if not public_channel:
+            return MessageListResponse(session_id=session_id, messages=[])
+
+        # Build message responses
+        message_responses = []
+        for msg in public_channel.messages:
+            sender_name = session.agents.get(msg.sender_id, type("obj", (), {"display_name": "System"})()).display_name
+            message_responses.append(
+                ChannelMessageResponse(
+                    message_id=msg.message_id,
+                    sender_id=msg.sender_id,
+                    sender_name=sender_name,
+                    content=msg.content,
+                    turn_number=msg.turn_number,
+                    channel_type="public",
+                    is_interrupted=msg.is_interrupted,
+                )
+            )
+
+        return MessageListResponse(
+            session_id=session_id,
+            messages=message_responses,
+        )
+
+    except SessionNotFoundError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(e),
+        ) from e
