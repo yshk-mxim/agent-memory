@@ -93,6 +93,15 @@ def run_step_for_uid(
     return None
 
 
+def _is_gpt_oss_tokenizer(tokenizer: Any) -> bool:
+    """Check if tokenizer uses GPT-OSS Harmony format.
+
+    GPT-OSS models have <|channel|> markers in their chat template.
+    """
+    chat_template = getattr(tokenizer, "chat_template", "") or ""
+    return "<|channel|>" in chat_template and "<|start|>" in chat_template
+
+
 def tokenize_with_chat_template(
     tokenizer: Any,
     chat_messages: list[dict[str, str]],
@@ -104,6 +113,9 @@ def tokenize_with_chat_template(
     that are critical for proper identity handling in multi-turn conversations.
     Falls back to raw text tokenization if no chat template is available.
 
+    For GPT-OSS models, uses reasoning_effort="low" to minimize analysis
+    channel output and prevent the model from getting stuck in analysis mode.
+
     Args:
         tokenizer: HuggingFace-compatible tokenizer.
         chat_messages: List of {"role": ..., "content": ...} dicts.
@@ -114,11 +126,16 @@ def tokenize_with_chat_template(
     """
     if hasattr(tokenizer, "apply_chat_template") and getattr(tokenizer, "chat_template", None):
         try:
-            tokens = tokenizer.apply_chat_template(
-                chat_messages,
-                tokenize=True,
-                add_generation_prompt=True,
-            )
+            # GPT-OSS: Use low reasoning to prevent analysis mode loops
+            template_kwargs: dict[str, Any] = {
+                "tokenize": True,
+                "add_generation_prompt": True,
+            }
+            if _is_gpt_oss_tokenizer(tokenizer):
+                template_kwargs["reasoning_effort"] = "low"
+                logger.debug("GPT-OSS detected, using reasoning_effort=low")
+
+            tokens = tokenizer.apply_chat_template(chat_messages, **template_kwargs)
             if isinstance(tokens, list):
                 return tokens
         except Exception:

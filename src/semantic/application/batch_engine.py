@@ -1380,9 +1380,13 @@ class BlockPoolBatchEngine:
             for marker in ("<|end|>", "<|return|>"):
                 if marker in text:
                     text = text.split(marker)[0]
+        elif "<|channel|>analysis<|message|>" in text:
+            # GPT-OSS stuck in analysis mode - don't leak internal reasoning
+            # This happens when the model generates analysis without a final channel
+            logger.warning("[GPT-OSS] Model stuck in analysis mode, returning empty response")
+            return ""
         else:
-            # No final channel - clean up any channel markers
-            text = text.replace("<|channel|>analysis<|message|>", "")
+            # No final channel and no analysis - clean up any stray markers
             text = text.replace("<|channel|>commentary<|message|>", "")
             text = text.replace("<|channel|>final<|message|>", "")
             text = text.replace("<|end|>", "")
@@ -1391,6 +1395,9 @@ class BlockPoolBatchEngine:
         # Remove any remaining start markers (from incomplete generation)
         if "<|start|>assistant" in text:
             text = text.split("<|start|>assistant")[0]
+
+        # Remove any remaining <|...|> markers (GPT-OSS artifacts)
+        text = re.sub(r"<\|[^|]+\|>", "", text)
 
         # BPE artifacts
         text = text.replace("Ġ", " ")
@@ -1440,6 +1447,9 @@ class BlockPoolBatchEngine:
             self._agent_blocks[agent_id] = blocks
 
         text = self._tokenizer.decode(tokens)
+        # Debug: log raw text before cleaning to diagnose GPT-OSS channel issues
+        if "<|" in text or "channel" in text.lower():
+            logger.info("[RAW OUTPUT] %s: %s", uid, text[:500])
         text = self._clean_text(text)
 
         logger.debug("Finalized %s: %d tokens", uid, len(tokens))

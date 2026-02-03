@@ -1035,23 +1035,26 @@ class CoordinationService:
         return "<|channel|>" in chat_template and "<|start|>" in chat_template
 
     def _apply_gpt_oss_template(self, messages: list[dict]) -> str:
-        """Apply custom GPT-OSS Harmony format without ChatGPT identity injection.
+        """Apply GPT-OSS Harmony format matching the official tokenizer template.
 
-        GPT-OSS uses a complex template with:
-        - A system message with model identity and settings (Reasoning: low for fast responses)
-        - A developer message for instructions (our system prompt)
-        - Channels (analysis, commentary, final) for assistant messages
+        The Harmony format has:
+        - System message with identity, date, reasoning level, and channel rules
+        - Developer message for custom instructions (our system prompts)
+        - User/assistant messages with proper channel markers
+        - Generation prompt ending with just <|start|>assistant (model chooses channel)
         """
         from datetime import datetime
 
         formatted_parts = []
 
-        # 1. System message with roleplay identity and low reasoning
+        # 1. System message - matches official template structure
+        # Uses "medium" reasoning (official default) for better quality
         system_msg = (
             "<|start|>system<|message|>"
-            "You are a helpful roleplay assistant. Follow the developer instructions.\n"
+            "You are a helpful AI assistant.\n"
+            "Knowledge cutoff: 2024-06\n"
             f"Current date: {datetime.now().strftime('%Y-%m-%d')}\n\n"
-            "Reasoning: low\n\n"
+            "Reasoning: medium\n\n"
             "# Valid channels: analysis, commentary, final. "
             "Channel must be included for every message."
             "<|end|>"
@@ -1060,7 +1063,7 @@ class CoordinationService:
 
         # 2. Collect messages by type
         developer_content = []
-        conversation: list[tuple[str, str]] = []  # (role, content) pairs
+        conversation: list[tuple[str, str]] = []
 
         for msg in messages:
             role = msg["role"]
@@ -1071,7 +1074,7 @@ class CoordinationService:
             else:
                 conversation.append((role, content))
 
-        # 3. Add developer instructions if we have system prompts
+        # 3. Add developer instructions (matches official template)
         if developer_content:
             formatted_parts.append(
                 "<|start|>developer<|message|># Instructions\n\n"
@@ -1084,13 +1087,15 @@ class CoordinationService:
             if role == "user":
                 formatted_parts.append(f"<|start|>user<|message|>{content}<|end|>")
             elif role == "assistant":
+                # Previous assistant responses use final channel
                 formatted_parts.append(
                     f"<|start|>assistant<|channel|>final<|message|>{content}<|end|>"
                 )
 
-        # 5. Generation prompt - force final channel for direct roleplay responses
-        # Using <|channel|>final forces the model to skip analysis and output directly
-        formatted_parts.append("<|start|>assistant<|channel|>final<|message|>")
+        # 5. Generation prompt - let model choose its channel (matches official)
+        # The model will output <|channel|>analysis first for reasoning,
+        # then <|channel|>final for the actual response
+        formatted_parts.append("<|start|>assistant")
 
         return "".join(formatted_parts)
 
@@ -1113,21 +1118,11 @@ class CoordinationService:
 
         tokenizer = self._engine.tokenizer
 
-        # GPT-OSS: Use custom template to avoid "You are ChatGPT" injection
+        # GPT-OSS: Try official tokenizer template first (with ChatGPT identity)
+        # If that produces poor results, can switch back to custom template
         if self._is_gpt_oss_model():
-            try:
-                formatted_text = self._apply_gpt_oss_template(messages)
-                tokens = tokenizer.encode(formatted_text)
-                logger.info(
-                    "GPT-OSS custom template: %d messages -> %d tokens",
-                    len(messages),
-                    len(tokens),
-                )
-                # Log first 300 chars of formatted text for debugging
-                logger.debug("GPT-OSS template preview: %s...", formatted_text[:300])
-                return tokens, prompt_text
-            except Exception as e:
-                logger.warning("GPT-OSS template failed: %s, falling back", e)
+            logger.info("GPT-OSS detected - using official tokenizer template")
+            # Fall through to use apply_chat_template below
 
         if hasattr(tokenizer, "apply_chat_template") and getattr(tokenizer, "chat_template", None):
             try:
@@ -1149,10 +1144,18 @@ class CoordinationService:
                 else:
                     messages_for_template = messages
 
+                # GPT-OSS: Use low reasoning to prevent analysis mode loops
+                template_kwargs: dict[str, Any] = {
+                    "tokenize": True,
+                    "add_generation_prompt": True,
+                }
+                if self._is_gpt_oss_model():
+                    template_kwargs["reasoning_effort"] = "low"
+                    logger.info("GPT-OSS: using reasoning_effort=low")
+
                 tokens = tokenizer.apply_chat_template(
                     messages_for_template,
-                    tokenize=True,
-                    add_generation_prompt=True,
+                    **template_kwargs,
                 )
                 if isinstance(tokens, list):
                     logger.debug(
