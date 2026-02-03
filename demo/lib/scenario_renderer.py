@@ -7,8 +7,35 @@ and passes the resulting ScenarioSpec to this renderer.
 from __future__ import annotations
 
 import logging
+import re
 
 import streamlit as st
+
+
+def _truncate_at_stop_markers(text: str, agent_names: list[str]) -> str:
+    """Lightweight stop detection for streaming display.
+
+    Truncates text at common runaway markers like 'User:', 'Assistant:', etc.
+    Called on every token during streaming, so must be fast.
+    """
+    # Standard markers that indicate fake turn continuation
+    stop_markers = [
+        "\nUser:", "\nuser:",
+        "\nAssistant:", "\nassistant:",
+        "\nSystem:", "\nsystem:",
+    ]
+    # Add agent names as stop markers
+    for name in agent_names:
+        stop_markers.append(f"\n{name}:")
+
+    for marker in stop_markers:
+        idx = text.find(marker)
+        if idx > 0:
+            text = text[:idx]
+
+    # Also strip leading role prefixes if model echoes them
+    text = re.sub(r"^(?:Assistant|User|System):\s*", "", text.strip())
+    return text
 
 from demo.lib import api_client
 from demo.lib.control_bar import render_round_controls
@@ -311,11 +338,11 @@ class ScenarioRenderer:
     def _collect_prior_messages(
         self, phase: PhaseSpec
     ) -> dict[str, list[dict[str, str]]]:
-        """Collect prior phase messages for each permanent agent in this phase.
+        """Collect prior phase messages for each permanent agent.
 
-        For each permanent agent, finds all completed prior phases where the
-        agent participated and gathers their messages. This enables KV cache
-        prefix matching across phases.
+        Enables KV cache prefix matching: the prompt in Phase N starts with
+        Phase 1..N-1 content, so the engine extends the cached KV instead
+        of reprocessing from scratch.
         """
         sid = self.spec.id
         prior: dict[str, list[dict[str, str]]] = {}
@@ -331,7 +358,6 @@ class ScenarioRenderer:
             agent_id = self._stable_agent_id(agent_key)
             agent_msgs: list[dict[str, str]] = []
 
-            # Iterate prior phases in order
             for prior_phase in self.spec.phases[:phase_idx]:
                 if agent_key not in prior_phase.agents:
                     continue
@@ -343,7 +369,6 @@ class ScenarioRenderer:
                     content = msg.get("content", "")
                     if not content:
                         continue
-                    # Map sender_name to stable agent_id for prompt role mapping
                     if sender_name == "System":
                         sender_id = "system"
                     else:
@@ -413,7 +438,6 @@ class ScenarioRenderer:
                 }
             )
 
-        # Collect prior messages for permanent agents (cross-phase KV cache)
         prior_agent_messages = self._collect_prior_messages(phase)
 
         result = api_client.create_session(
@@ -461,6 +485,9 @@ class ScenarioRenderer:
 
     def _stream_turns(self, session_id: str, count: int) -> None:
         """Stream multiple turns, showing tokens as they arrive."""
+        # Build list of agent names for real-time stop detection
+        all_agent_names = list(self.agent_colors.keys())
+
         for _i in range(count):
             placeholder = st.empty()
             agent_name = ""
@@ -477,9 +504,11 @@ class ScenarioRenderer:
                     accumulated = ""
                 elif event_type == "token":
                     accumulated = data.get("accumulated", accumulated)
+                    # Lightweight streaming clean: truncate at obvious stop markers
+                    display_text = _truncate_at_stop_markers(accumulated, all_agent_names)
                     placeholder.markdown(
                         f'<span style="color:{color}; font-weight:bold;">'
-                        f"{agent_name}:</span> {accumulated}\u258c",
+                        f"{agent_name}:</span> {display_text}\u258c",
                         unsafe_allow_html=True,
                     )
                 elif event_type == "turn_complete":

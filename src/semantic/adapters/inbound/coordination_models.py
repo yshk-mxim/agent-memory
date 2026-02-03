@@ -86,7 +86,7 @@ class CreateSessionRequest(BaseModel):
     prior_agent_messages: dict[str, list[dict[str, str]]] = Field(
         default_factory=dict,
         description="Per-agent messages from prior phases, keyed by agent_id. "
-        "Injected before the initial prompt for KV cache prefix matching.",
+        "Injected privately for KV cache prefix matching (filtered from API).",
     )
 
 

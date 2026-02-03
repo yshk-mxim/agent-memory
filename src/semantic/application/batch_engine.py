@@ -855,6 +855,23 @@ class BlockPoolBatchEngine:
 
                 if stored_text:
                     char_match = cache.common_prefix_chars(prompt)
+                    logger.info(
+                        "[CACHE PREFIX] agent=%s char_match=%d stored=%d prompt=%d ratio=%.1f%%",
+                        agent_id,
+                        char_match,
+                        len(stored_text),
+                        len(prompt),
+                        (char_match / len(stored_text) * 100) if stored_text else 0,
+                    )
+                    if char_match < len(stored_text) and char_match < len(prompt):
+                        ctx = 40
+                        stored_at = stored_text[char_match:char_match + ctx]
+                        prompt_at = prompt[char_match:char_match + ctx]
+                        logger.debug(
+                            "[CACHE DIVERGE AT] stored='%s' vs prompt='%s'",
+                            stored_at.replace("\n", "\\n"),
+                            prompt_at.replace("\n", "\\n"),
+                        )
 
                     if char_match == len(stored_text) == len(prompt):
                         # EXACT MATCH: Reuse prompt portion of cache only.
@@ -925,7 +942,7 @@ class BlockPoolBatchEngine:
                         # DIVERGE: Prompt diverges from stored text
                         match_ratio = char_match / len(stored_text)
 
-                        if match_ratio >= 0.8 and char_match > 100:
+                        if match_ratio >= 0.5 and char_match > 100:
                             # Partial reuse: re-tokenize matched prefix to find token boundary
                             matched_tokens = self._tokenizer.encode(prompt[:char_match])
                             usable_tokens = len(matched_tokens)
@@ -960,8 +977,8 @@ class BlockPoolBatchEngine:
                                 tokens_to_process = remaining_tokens
                         else:
                             # Not enough overlap — discard cache entirely
-                            logger.debug(
-                                "[CACHE DIVERGE MISS] %d chars matched (%.0f%% < 80%%)",
+                            logger.info(
+                                "[CACHE DIVERGE MISS] %d chars matched (%.0f%% < 50%%)",
                                 char_match,
                                 match_ratio * 100,
                             )
@@ -977,6 +994,11 @@ class BlockPoolBatchEngine:
 
                 else:
                     # No prompt_text stored — fall back to token comparison (legacy)
+                    logger.info(
+                        "[CACHE NO PROMPT_TEXT] agent=%s cached_tokens=%d — using legacy path",
+                        agent_id,
+                        cached_tokens,
+                    )
                     cached_token_seq = getattr(cache, "token_sequence", [])
                     if cached_token_seq:
                         common_prefix = cache.common_prefix_length(prompt_tokens)
@@ -1016,7 +1038,7 @@ class BlockPoolBatchEngine:
                     logger.warning("[CACHE FALLBACK] Empty tokens_to_process, using last token")
                     tokens_to_process = [prompt_tokens[-1]]
 
-                logger.debug(
+                logger.info(
                     "[CACHE INJECT] %s: offset=%d, quantized=%s, prompt=%d, processing=%d",
                     cache_type,
                     cached_tokens,

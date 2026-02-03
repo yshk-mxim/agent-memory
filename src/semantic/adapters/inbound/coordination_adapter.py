@@ -451,9 +451,15 @@ async def stream_turn_events(service, session_id: str) -> AsyncIterator[dict[str
         }
 
         accumulated_text = ""
+        clean_text = ""
 
         # Stream tokens
         async for delta in service.execute_turn_stream(session_id):
+            if delta.finish_reason == "cleaned":
+                # Final delta contains the cleaned text for turn_complete
+                clean_text = delta.text
+                continue
+
             new_text = delta.text[len(accumulated_text) :]
             accumulated_text = delta.text
 
@@ -468,14 +474,14 @@ async def stream_turn_events(service, session_id: str) -> AsyncIterator[dict[str
                     ),
                 }
 
-        # Send turn_complete event
+        # Send turn_complete event with cleaned content
         yield {
             "event": "turn_complete",
             "data": json.dumps(
                 {
                     "agent_id": directive.agent_id,
                     "agent_name": agent_role.display_name,
-                    "content": accumulated_text,
+                    "content": clean_text or accumulated_text,
                     "turn": directive.turn_number,
                 }
             ),
@@ -664,9 +670,13 @@ async def get_messages(
         if not public_channel:
             return MessageListResponse(session_id=session_id, messages=[])
 
-        # Build message responses
+        # Return only public messages (empty visible_to).
+        # Private messages (prior-phase context for KV cache prefix matching,
+        # per-agent prompts) are internal and not part of the phase transcript.
         message_responses = []
         for msg in public_channel.messages:
+            if msg.visible_to:
+                continue
             sender_name = session.agents.get(
                 msg.sender_id, type("obj", (), {"display_name": "System"})()
             ).display_name

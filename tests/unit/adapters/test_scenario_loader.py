@@ -89,10 +89,10 @@ class TestLoadScenarioRealFiles:
         assert spec.outcome is not None
         assert isinstance(spec.outcome, OutcomeRule)
         assert spec.outcome.type == "parse_choice"
-        assert spec.outcome.choices == ("cooperate", "defect")
+        assert spec.outcome.choices == ("keep_silent", "confess")
         assert spec.payoff is not None
         assert isinstance(spec.payoff, PayoffMatrix)
-        assert spec.payoff.labels == ("Cooperate", "Defect")
+        assert spec.payoff.labels == ("Keep Silent", "Confess")
         assert len(spec.payoff.matrix) == 2
 
     def test_real_files_produce_frozen_domain_objects(self):

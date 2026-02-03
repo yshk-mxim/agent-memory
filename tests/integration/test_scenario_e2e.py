@@ -147,7 +147,7 @@ class TestPrisonersDilemmaFullPipeline:
 
     def test_payoff_matrix_present(self, pd_spec: ScenarioSpec) -> None:
         assert pd_spec.payoff is not None
-        assert pd_spec.payoff.labels == ("Cooperate", "Defect")
+        assert pd_spec.payoff.labels == ("Keep Silent", "Confess")
         assert len(pd_spec.payoff.matrix) == 2
 
     def test_outcome_rule_present(self, pd_spec: ScenarioSpec) -> None:

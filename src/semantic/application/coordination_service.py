@@ -62,6 +62,7 @@ class CoordinationService:
         self._cache_store = cache_store
         self._engine = engine
         self._sessions: dict[str, CoordinationSession] = {}
+        self._agent_name_registry: dict[str, str] = {}
         self._lock = asyncio.Lock()
 
     @staticmethod
@@ -88,7 +89,9 @@ class CoordinationService:
         if session and session.persistent_cache_prefix:
             agent_role = session.agents.get(agent_id)
             if agent_role and agent_role.lifecycle == AgentLifecycle.PERMANENT:
-                return f"persist_{session.persistent_cache_prefix}_{agent_id}"
+                key = f"persist_{session.persistent_cache_prefix}_{agent_id}"
+                logger.debug("persistent_cache_key agent=%s key=%s", agent_id, key)
+                return key
         return self._agent_cache_key(session_id, agent_id)
 
     async def create_session(
@@ -117,8 +120,9 @@ class CoordinationService:
             persistent_cache_prefix: If set, permanent agents use identity-based
                 cache keys that persist across sessions (for cross-phase memory).
             prior_agent_messages: Per-agent messages from prior phases, keyed by
-                agent_id. Injected into the channel BEFORE the initial prompt so
-                that prefix matching can reuse the agent's prior KV cache.
+                agent_id. Injected into the channel (private, filtered from API)
+                so that build_agent_prompt produces token sequences that extend
+                the agent's persistent KV cache via prefix matching.
 
         Returns:
             The created CoordinationSession.
@@ -133,16 +137,24 @@ class CoordinationService:
                 participant_ids=frozenset(a.agent_id for a in agents),
             )
 
-            # Inject prior phase messages BEFORE initial prompt.
-            # These are visible only to the agent who experienced them,
-            # enabling KV cache prefix matching across phases.
+            # Register agent names (for cross-phase name resolution)
+            for a in agents:
+                self._agent_name_registry[a.agent_id] = a.display_name
+
+            # Inject prior phase messages (private to each agent).
+            # The API filters these out (non-empty visible_to), so transcripts
+            # stay clean. But build_agent_prompt includes them, making the token
+            # sequence extend the agent's persistent KV cache for prefix matching.
             if prior_agent_messages:
                 for target_agent_id, messages in prior_agent_messages.items():
                     for msg in messages:
                         sender_id = msg.get("sender_id", "system")
+                        sender_name = msg.get("sender_name", "")
                         content = msg.get("content", "")
                         if not content:
                             continue
+                        if sender_name and sender_id != "system":
+                            self._agent_name_registry[sender_id] = sender_name
                         public_channel.add_message(
                             sender_id=sender_id,
                             content=content,
@@ -335,10 +347,7 @@ class CoordinationService:
         return visible
 
     def _build_system_instruction(self, agent_role: AgentRole, debate_format: DebateFormat) -> str:
-        """Build system instruction for Gemma 3 roleplay.
-
-        Uses patterns proven by Gemma3NPC: roleplay-mode framing,
-        character-first identity, concise anti-drift rules.
+        """Build system instruction with clear identity and anti-drift rules.
 
         Args:
             agent_role: The agent's role in the coordination.
@@ -349,29 +358,20 @@ class CoordinationService:
         """
         name = agent_role.display_name
 
-        # Roleplay-mode framing (proven effective for Gemma 3 character consistency)
         if agent_role.system_prompt:
-            identity = (
-                f"Enter Roleplay Mode. You are {name}. "
-                f"You must always stay in character as {name}.\n"
-                f"{agent_role.system_prompt}"
-            )
+            identity = f"Your name is {name}. {agent_role.system_prompt}"
         else:
-            identity = (
-                f"Enter Roleplay Mode. You are {name}, a {agent_role.role}. "
-                f"You must always stay in character as {name}."
-            )
+            identity = f"Your name is {name}. You are a {agent_role.role}."
 
-        # Concise anti-drift rules (Gemma 3 follows short directives better)
         rules = (
-            f"Speak only as {name}, in first person. "
-            "Do not write dialogue for others. "
-            "Do not narrate in third person. "
-            "Do not prefix with any name. "
-            "One concise reply only."
+            "RULES: "
+            f"You are {name} and nobody else. "
+            "Respond in first person as yourself. "
+            "Never generate dialogue for other characters. "
+            "Never prefix your response with any name or label. "
+            "Give one short reply only."
         )
 
-        # Debate format as behavioral guidance (not labeled headers)
         style = self._debate_style_hint(debate_format, agent_role.role)
 
         parts = [identity, rules]
@@ -434,10 +434,10 @@ class CoordinationService:
                     {"role": "user", "content": f"{sender_name}: {msg.content}"},
                 )
 
-        # Character-reinforcing cue (Gemma 3 stays in character better with identity reminder)
+        # Short cue to elicit next response without confusing role labels
         messages.append({
             "role": "user",
-            "content": f"[It is now {agent_role.display_name}'s turn to speak.]",
+            "content": f"[{agent_role.display_name}, respond now.]",
         })
 
         return messages
@@ -445,17 +445,31 @@ class CoordinationService:
     def _get_agent_name(self, session_id: str, agent_id: str) -> str:
         """Get display name for an agent.
 
-        Args:
-            session_id: Session identifier.
-            agent_id: Agent identifier.
-
-        Returns:
-            Display name, or agent_id if not found.
+        Checks session agents first, then falls back to a global registry
+        populated from prior-phase message injection. This ensures agents
+        from prior phases are referenced by display name (not raw ID),
+        which is critical for cross-phase KV cache prefix matching.
         """
         session = self._sessions.get(session_id)
         if session and agent_id in session.agents:
             return session.agents[agent_id].display_name
-        return agent_id
+        return self._agent_name_registry.get(agent_id, agent_id)
+
+    def _all_known_agent_names(self, session_id: str) -> list[str]:
+        """Get ALL known agent display names: session agents + name registry.
+
+        Used for stop markers so model-generated text from agents in
+        prior phases (e.g., Warden in The Yard) is properly truncated.
+        """
+        names: set[str] = set()
+        session = self._sessions.get(session_id)
+        if session:
+            for a in session.agents.values():
+                names.add(a.display_name)
+        for name in self._agent_name_registry.values():
+            names.add(name)
+        names.discard("")
+        return list(names)
 
     def _get_agent_role(self, session_id: str, agent_name: str) -> str:
         """Get role for an agent by display name.
@@ -501,6 +515,14 @@ class CoordinationService:
         namespaced_agent_id = self._resolve_cache_key(session_id, directive.agent_id)
         cached_blocks = self._cache_store.load(namespaced_agent_id)
 
+        if cached_blocks:
+            logger.info(
+                "cache_reuse agent_id=%s cached_tokens=%d prompt_tokens=%d",
+                namespaced_agent_id,
+                cached_blocks.total_tokens,
+                len(prompt_tokens),
+            )
+
         # Submit to scheduler (or fall back to direct engine if no scheduler)
         if self._scheduler is not None:
             result = await self._scheduler.submit_and_wait(
@@ -535,7 +557,7 @@ class CoordinationService:
             self._cache_store.save(namespaced_agent_id, result.blocks)
 
         # Strip runaway continuation (model generating fake turns)
-        all_names = [a.display_name for a in session.agents.values()]
+        all_names = self._all_known_agent_names(session_id)
         clean_text = self._clean_agent_response(
             result.text,
             sender_name=agent_role.display_name,
@@ -595,11 +617,11 @@ class CoordinationService:
 
         # Log cache reuse for debugging
         if cached_blocks:
-            logger.debug(
-                "cache_reuse",
-                agent_id=namespaced_agent_id,
-                cached_tokens=cached_blocks.total_tokens,
-                prompt_tokens=len(prompt_tokens),
+            logger.info(
+                "cache_reuse agent_id=%s cached_tokens=%d prompt_tokens=%d",
+                namespaced_agent_id,
+                cached_blocks.total_tokens,
+                len(prompt_tokens),
             )
 
         accumulated_text = ""
@@ -642,11 +664,18 @@ class CoordinationService:
             self._cache_store.save(namespaced_agent_id, updated_blocks)
 
         # Strip runaway continuation (model generating fake turns)
-        all_names = [a.display_name for a in session.agents.values()]
+        all_names = self._all_known_agent_names(session_id)
         clean_text = self._clean_agent_response(
             accumulated_text,
             sender_name=agent_role.display_name,
             all_agent_names=all_names,
+        )
+
+        # Yield final delta with cleaned text so adapter can use it in turn_complete
+        yield StreamDelta(
+            text=clean_text,
+            token_count=len(clean_text.split()),
+            finish_reason="cleaned",
         )
 
         # Record message in public channel
@@ -862,6 +891,9 @@ class CoordinationService:
             prefixes.append(re.escape(name))
         prefix_pattern = "|".join(dict.fromkeys(prefixes))  # dedupe, preserve order
         text = re.sub(rf"^(?:{prefix_pattern}):\s?", "", text)
+
+        # Strip echoed turn cue (e.g., "[Danny, respond now.]")
+        text = re.sub(r"^\[.+?, respond now\.\]\s*", "", text)
 
         # Strip echoed instruction/rule fragments (Gemma3 artifact)
         text = re.sub(
