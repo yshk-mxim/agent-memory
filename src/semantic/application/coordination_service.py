@@ -1088,8 +1088,9 @@ class CoordinationService:
                     f"<|start|>assistant<|channel|>final<|message|>{content}<|end|>"
                 )
 
-        # 5. Generation prompt - model generates analysis then final channel
-        formatted_parts.append("<|start|>assistant")
+        # 5. Generation prompt - force final channel for direct roleplay responses
+        # Using <|channel|>final forces the model to skip analysis and output directly
+        formatted_parts.append("<|start|>assistant<|channel|>final<|message|>")
 
         return "".join(formatted_parts)
 
