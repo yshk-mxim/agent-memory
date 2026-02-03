@@ -135,7 +135,8 @@ class BatchQuantizedKVCache(_BaseCache):
             values_scales[i : i + 1, :, p:dest_end, :] = v_s[..., :actual_offset, :]
             values_zeros[i : i + 1, :, p:dest_end, :] = v_z[..., :actual_offset, :]
 
-        mx.eval(keys_quant, keys_scales, keys_zeros, values_quant, values_scales, values_zeros)
+        # NOTE: Do NOT call mx.eval() here - let MLX handle lazy evaluation.
+        # Forcing eval mid-graph can cause Metal command buffer conflicts.
 
         batch_cache = cls(group_size=group_size, bits=bits)
         batch_cache.keys = (keys_quant, keys_scales, keys_zeros)
@@ -219,7 +220,7 @@ class BatchQuantizedKVCache(_BaseCache):
                         lambda x: x[..., :prev, :], (self.keys, self.values)
                     )
                 self.keys, self.values = tree_map(expand_quant, (self.keys, self.values))
-                mx.eval(*self.keys, *self.values)
+                # NOTE: Do NOT call mx.eval() here - matches upstream QuantizedKVCache
             else:
                 self.keys = init_quant(k_head_dim)
                 self.values = init_quant(v_head_dim)
@@ -253,7 +254,7 @@ class BatchQuantizedKVCache(_BaseCache):
 
         self.keys = tuple(k[batch_indices] for k in self.keys)
         self.values = tuple(v[batch_indices] for v in self.values)
-        mx.eval(*self.keys, *self.values)
+        # NOTE: Do NOT call mx.eval() here - matches upstream BatchKVCache.filter()
 
         self.offset = self.offset[batch_indices]
         self.left_padding = self.left_padding[batch_indices]
@@ -322,7 +323,7 @@ class BatchQuantizedKVCache(_BaseCache):
 
         self.keys = tuple(mx.concatenate([sk, ok], axis=0) for sk, ok in zip(self_k, other_k))
         self.values = tuple(mx.concatenate([sv, ov], axis=0) for sv, ov in zip(self_v, other_v))
-        mx.eval(*self.keys, *self.values)
+        # NOTE: Do NOT call mx.eval() here - matches upstream BatchKVCache.extend()
 
         self.offset = mx.concatenate([self_off, other_off])
         self.left_padding = mx.concatenate([self_lp, other_lp])
