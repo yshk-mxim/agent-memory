@@ -58,6 +58,14 @@ class ScenarioRenderer:
     def render(self) -> None:
         """Main render entry point."""
         self._render_sidebar()
+
+        # Run All executes here (main area) so streaming renders in content area
+        run_all_key = _state_key(self.spec.id, "run_all_active")
+        if st.session_state.get(run_all_key):
+            st.session_state[run_all_key] = False
+            self._run_all_phases()
+            return  # Streaming view stays visible until next interaction
+
         self._render_phases()
         if self.spec.ui.show_memory_panel:
             st.divider()
@@ -103,7 +111,7 @@ class ScenarioRenderer:
                         key=_state_key(self.spec.id, "run_all"),
                     ):
                         self._reset_all()
-                        self._run_all_phases()
+                        st.session_state[_state_key(self.spec.id, "run_all_active")] = True
                         st.rerun()
                 with col_reset:
                     if st.button(
