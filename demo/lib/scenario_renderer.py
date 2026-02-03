@@ -486,7 +486,7 @@ class ScenarioRenderer:
                     return
 
     def _run_all_phases(self) -> None:
-        """Execute all phases sequentially: create session, run turns, fetch messages."""
+        """Execute all phases sequentially with streaming output."""
         status = st.sidebar.empty()
         for idx, phase in enumerate(self.spec.phases, 1):
             sid = self.spec.id
@@ -495,17 +495,16 @@ class ScenarioRenderer:
 
             status.info(f"Phase {idx}/{len(self.spec.phases)}: {phase.label}...")
 
-            # Create session (resolves templates from prior phases)
             new_id = self._create_phase_session(phase)
             if not new_id:
                 status.error(f"Failed to create session for {phase.label}")
                 return
             st.session_state[session_key] = new_id
 
-            # Run all turns for this phase
+            # Stream turns with live output
             turn_count = phase.auto_rounds * len(phase.agents)
-            for _t in range(turn_count):
-                api_client.execute_turn(self.base_url, new_id)
+            with st.expander(phase.label, expanded=True):
+                self._stream_turns(new_id, turn_count)
 
             # Fetch and store messages (needed for template resolution in later phases)
             messages = api_client.get_session_messages(self.base_url, new_id)

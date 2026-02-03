@@ -161,6 +161,16 @@ class TestPrisonersDilemmaFullPipeline:
         assert yard.initial_prompt
         assert not has_template_refs(yard.initial_prompt)
 
+    def test_final_reckoning_has_per_agent_prompts(self, pd_spec: ScenarioSpec) -> None:
+        reckoning = pd_spec.phases[3]
+        assert reckoning.name == "final_reckoning"
+        assert reckoning.initial_prompt  # Shared scene-setting
+        assert not has_template_refs(reckoning.initial_prompt)
+        # Per-agent instructions (no template refs — static role guidance)
+        assert set(reckoning.per_agent_prompt_templates.keys()) == {"warden", "marco", "danny"}
+        for tmpl in reckoning.per_agent_prompt_templates.values():
+            assert not has_template_refs(tmpl)
+
 
 class TestTemplateResolutionWithRealisticMessages:
     """Template resolution with multi-turn, realistic message data."""

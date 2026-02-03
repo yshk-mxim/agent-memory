@@ -74,11 +74,22 @@ phases:
     topology: round_robin
     debate_format: free_form
     initial_prompt: >-
-      The warden calls both suspects back for a final session.
-      You are impatient. This is the last time you will ask.
-      State the deal one final time, then demand each suspect choose NOW:
-      cooperate (stay silent) or defect (talk).
-      Tell them plainly: whatever they say next is their final answer. No more discussion.
+      The warden calls both suspects back into the room for one final session.
+    per_agent_prompt_templates:
+      warden: >-
+        You are impatient. This is the last time you will ask.
+        State the deal one final time: Both quiet = 2yr each.
+        One talks = talker free, other 10yr. Both talk = 5yr each.
+        Demand each suspect choose NOW: cooperate (stay silent) or defect (talk).
+        Whatever they say next is their final answer. No more discussion.
+      marco: >-
+        The warden is about to demand your final answer.
+        Listen to what he says, then make your choice:
+        cooperate (stay silent) or defect (talk).
+      danny: >-
+        The warden is about to demand your final answer.
+        Listen to what he says, then make your choice:
+        cooperate (stay silent) or defect (talk).
     auto_rounds: 2
 
   - name: outcome_analysis
