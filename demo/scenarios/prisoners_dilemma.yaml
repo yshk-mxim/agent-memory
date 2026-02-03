@@ -52,13 +52,8 @@ phases:
     agents: [warden, danny]
     topology: round_robin
     debate_format: free_form
-    initial_prompt_template: |
-      The warden enters Danny's interrogation room.
-      The warden has already spoken with Marco.
-
-      What the warden knows from Marco's interrogation:
-      ${interrogation_marco.messages[warden]}
-
+    initial_prompt: >-
+      The warden now enters Danny's interrogation room.
       Present the same deal: Both quiet = 2yr each.
       One talks = talker free, other 10yr. Both talk = 5yr each.
     auto_rounds: 3
@@ -71,17 +66,6 @@ phases:
     initial_prompt: >-
       Marco and Danny meet in the yard.
       They can discuss strategy but the guards might be listening.
-    per_agent_prompt_templates:
-      marco: |
-        YOUR PRIVATE MEMORIES (only you can see this):
-
-        From your interrogation with the Warden:
-        ${interrogation_marco.messages[marco]}
-      danny: |
-        YOUR PRIVATE MEMORIES (only you can see this):
-
-        From your interrogation with the Warden:
-        ${interrogation_danny.messages[danny]}
     auto_rounds: 2
 
   - name: final_reckoning
@@ -89,33 +73,12 @@ phases:
     agents: [warden, marco, danny]
     topology: round_robin
     debate_format: free_form
-    initial_prompt_template: |
+    initial_prompt: >-
       The warden calls both suspects back for a final session.
-
-      What the warden overheard from the yard:
-      ${the_yard.messages[warden]}
-
       You are impatient. This is the last time you will ask.
       State the deal one final time, then demand each suspect choose NOW:
       cooperate (stay silent) or defect (talk).
       Tell them plainly: whatever they say next is their final answer. No more discussion.
-    per_agent_prompt_templates:
-      marco: |
-        YOUR PRIVATE MEMORIES (only you can see this):
-
-        From your interrogation:
-        ${interrogation_marco.messages[marco]}
-
-        From your conversation with Danny in the yard:
-        ${the_yard.messages[marco]}
-      danny: |
-        YOUR PRIVATE MEMORIES (only you can see this):
-
-        From your interrogation:
-        ${interrogation_danny.messages[danny]}
-
-        From your conversation with Marco in the yard:
-        ${the_yard.messages[danny]}
     auto_rounds: 2
 
   - name: outcome_analysis

@@ -78,6 +78,16 @@ class CreateSessionRequest(BaseModel):
         ge=0,
         le=1000,
     )
+    persistent_cache_prefix: str = Field(
+        default="",
+        description="If set, permanent agents use identity-based cache keys "
+        "that persist across sessions for cross-phase KV cache reuse.",
+    )
+    prior_agent_messages: dict[str, list[dict[str, str]]] = Field(
+        default_factory=dict,
+        description="Per-agent messages from prior phases, keyed by agent_id. "
+        "Injected before the initial prompt for KV cache prefix matching.",
+    )
 
 
 class CreateSessionResponse(BaseModel):

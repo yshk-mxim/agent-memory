@@ -131,27 +131,19 @@ class TestPrisonersDilemmaFullPipeline:
         assert pd_spec.agents["marco"].role == "participant"
         assert pd_spec.agents["danny"].role == "participant"
 
-    def test_interrogation_danny_template_refs_marco(self, pd_spec: ScenarioSpec) -> None:
+    def test_interrogation_danny_uses_kv_cache_not_templates(self, pd_spec: ScenarioSpec) -> None:
         danny_phase = pd_spec.phases[1]
         assert danny_phase.name == "interrogation_danny"
+        # With persistent KV cache, danny phase uses plain prompt (no template refs)
         refs = extract_phase_refs(danny_phase.initial_prompt_template)
-        assert refs == {"interrogation_marco"}
+        assert refs == set()
+        assert danny_phase.initial_prompt  # Has plain initial prompt
 
-    def test_wardens_knowledge_injected(self, pd_spec: ScenarioSpec) -> None:
-        danny_phase = pd_spec.phases[1]
-        phase_messages = {
-            "interrogation_marco": [
-                {"sender_name": "Warden", "content": "Here's the deal, Marco."},
-                {"sender_name": "Marco", "content": "I'm not saying anything."},
-                {"sender_name": "Warden", "content": "Marco seems nervous."},
-            ],
-        }
-        resolved = resolve_template(danny_phase.initial_prompt_template, phase_messages)
-
-        assert "Warden: Here's the deal, Marco." in resolved
-        assert "Marco: I'm not saying anything." in resolved
-        assert "Warden: Marco seems nervous." in resolved
-        assert "${" not in resolved
+    def test_analyst_still_uses_template_injection(self, pd_spec: ScenarioSpec) -> None:
+        analyst_phase = pd_spec.phases[4]
+        assert analyst_phase.name == "outcome_analysis"
+        refs = extract_phase_refs(analyst_phase.initial_prompt_template)
+        assert refs == {"final_reckoning"}
 
     def test_payoff_matrix_present(self, pd_spec: ScenarioSpec) -> None:
         assert pd_spec.payoff is not None

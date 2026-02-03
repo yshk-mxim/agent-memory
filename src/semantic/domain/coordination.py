@@ -187,6 +187,7 @@ class CoordinationSession:
     turn_order: list[str] = field(default_factory=list)
     is_active: bool = True
     max_turns: int = 0
+    persistent_cache_prefix: str = ""
 
     def get_next_speaker(self) -> str | None:
         """Get the agent_id of the next speaker based on topology.

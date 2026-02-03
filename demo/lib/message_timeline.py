@@ -37,7 +37,7 @@ def render_message(
     turn = msg.get("turn_number", 0)
 
     if sender_id == "system":
-        st.markdown(f"*[Turn {turn}] {content}*")
+        return  # System messages are injected context, not dialogue
     else:
         color = agent_colors.get(sender_name, "#888888")
         st.markdown(

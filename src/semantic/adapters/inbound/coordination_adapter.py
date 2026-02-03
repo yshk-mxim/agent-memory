@@ -104,6 +104,8 @@ async def create_session(
         initial_prompt=body.initial_prompt,
         per_agent_prompts=body.per_agent_prompts or None,
         max_turns=body.max_turns,
+        persistent_cache_prefix=body.persistent_cache_prefix,
+        prior_agent_messages=body.prior_agent_messages or None,
     )
 
     # Build response
@@ -617,6 +619,23 @@ async def submit_vote(
         agent_id=body.agent_id,
         choice=body.choice,
     )
+
+
+@router.delete("/caches/{prefix}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_persistent_caches(
+    request: Request,
+    prefix: str,
+) -> None:
+    """Delete all persistent caches matching a prefix.
+
+    Used by scenario "Reset All" to clear cross-phase agent memory.
+
+    Args:
+        request: FastAPI request.
+        prefix: The persistent_cache_prefix to match.
+    """
+    service = get_coordination_service(request)
+    service.delete_persistent_caches(prefix)
 
 
 @router.get("/sessions/{session_id}/messages")

@@ -129,24 +129,40 @@ class ScenarioRenderer:
                 st.divider()
 
     def _render_columns(self, phases: tuple[PhaseSpec, ...]) -> None:
-        """Render phases in column grid."""
+        """Render phases in column grid, preserving phase order.
+
+        Consecutive narrow phases (≤column_count agents) share a row.
+        Wide phases and row breaks render full-width with a divider.
+        """
         cols_per_row = self.spec.ui.column_count
-        # Split phases that fit in columns vs full-width
-        column_phases = [p for p in phases if len(p.agents) <= cols_per_row]
-        wide_phases = [p for p in phases if len(p.agents) > cols_per_row]
+        narrow_batch: list[PhaseSpec] = []
 
-        # Render column-width phases in rows
-        for i in range(0, len(column_phases), cols_per_row):
-            batch = column_phases[i : i + cols_per_row]
-            cols = st.columns(len(batch))
-            for col, phase in zip(cols, batch, strict=False):
+        for phase in phases:
+            if len(phase.agents) <= cols_per_row:
+                narrow_batch.append(phase)
+                if len(narrow_batch) == cols_per_row:
+                    cols = st.columns(cols_per_row)
+                    for col, p in zip(cols, narrow_batch, strict=False):
+                        with col:
+                            self._render_single_phase(p)
+                    narrow_batch = []
+            else:
+                # Flush any pending narrow phases first
+                if narrow_batch:
+                    cols = st.columns(len(narrow_batch))
+                    for col, p in zip(cols, narrow_batch, strict=False):
+                        with col:
+                            self._render_single_phase(p)
+                    narrow_batch = []
+                st.divider()
+                self._render_single_phase(phase)
+
+        # Flush remaining narrow phases
+        if narrow_batch:
+            cols = st.columns(len(narrow_batch))
+            for col, p in zip(cols, narrow_batch, strict=False):
                 with col:
-                    self._render_single_phase(phase)
-
-        # Render wide phases full-width
-        for phase in wide_phases:
-            st.divider()
-            self._render_single_phase(phase)
+                    self._render_single_phase(p)
 
     def _render_tabs(self, phases: tuple[PhaseSpec, ...]) -> None:
         """Render phases as tabs."""
@@ -188,10 +204,7 @@ class ScenarioRenderer:
                     st.session_state[session_key] = new_id
                     st.rerun()
             if not can_create:
-                deps = extract_phase_refs(phase.initial_prompt_template)
-                for tmpl in phase.per_agent_prompt_templates.values():
-                    deps.update(extract_phase_refs(tmpl))
-                st.caption(f"Requires: {', '.join(deps)}")
+                st.caption("Waiting for prior phases to complete.")
         else:
             # Fetch and display messages
             messages = api_client.get_session_messages(self.base_url, session_id)
@@ -227,21 +240,41 @@ class ScenarioRenderer:
                 st.rerun()
 
     def _can_create_phase(self, phase: PhaseSpec) -> bool:
-        """Check if a phase's template dependencies are satisfied."""
-        # Collect all template refs from both shared and per-agent templates
+        """Check if a phase's dependencies are satisfied.
+
+        Checks both template refs (for ephemeral agents) and prior phase
+        completion (for permanent agents needing KV cache carryover).
+        """
+        sid = self.spec.id
+
+        # Template dependencies (explicit ${phase.messages[agent]} refs)
         all_deps: set[str] = set()
         all_deps.update(extract_phase_refs(phase.initial_prompt_template))
         for tmpl in phase.per_agent_prompt_templates.values():
             all_deps.update(extract_phase_refs(tmpl))
-        if not all_deps:
-            return True
         for dep_name in all_deps:
-            dep_key = _phase_key(self.spec.id, dep_name, "session_id")
+            dep_key = _phase_key(sid, dep_name, "session_id")
             if not st.session_state.get(dep_key):
                 return False
-            msg_key = _phase_key(self.spec.id, dep_name, "messages")
+            msg_key = _phase_key(sid, dep_name, "messages")
             if not st.session_state.get(msg_key):
                 return False
+
+        # Prior phase dependencies (permanent agents with prior history)
+        phase_idx = next(
+            (i for i, p in enumerate(self.spec.phases) if p.name == phase.name), 0
+        )
+        for agent_key in phase.agents:
+            agent = self.spec.agents.get(agent_key)
+            if not agent or agent.lifecycle != "permanent":
+                continue
+            for prior_phase in self.spec.phases[:phase_idx]:
+                if agent_key not in prior_phase.agents:
+                    continue
+                prior_key = _phase_key(sid, prior_phase.name, "messages")
+                if not st.session_state.get(prior_key):
+                    return False
+
         return True
 
     def _build_agent_display_names(self) -> dict[str, str]:
@@ -263,12 +296,79 @@ class ScenarioRenderer:
                 phase_messages[dep_name] = msgs
         return phase_messages
 
+    def _stable_agent_id(self, agent_key: str) -> str:
+        """Generate a stable agent_id from scenario + agent key."""
+        return f"scn_{self.spec.id}_{agent_key}"
+
+    def _collect_prior_messages(
+        self, phase: PhaseSpec
+    ) -> dict[str, list[dict[str, str]]]:
+        """Collect prior phase messages for each permanent agent in this phase.
+
+        For each permanent agent, finds all completed prior phases where the
+        agent participated and gathers their messages. This enables KV cache
+        prefix matching across phases.
+        """
+        sid = self.spec.id
+        prior: dict[str, list[dict[str, str]]] = {}
+        phase_idx = next(
+            (i for i, p in enumerate(self.spec.phases) if p.name == phase.name), 0
+        )
+
+        for agent_key in phase.agents:
+            agent = self.spec.agents.get(agent_key)
+            if not agent or agent.lifecycle != "permanent":
+                continue
+
+            agent_id = self._stable_agent_id(agent_key)
+            agent_msgs: list[dict[str, str]] = []
+
+            # Iterate prior phases in order
+            for prior_phase in self.spec.phases[:phase_idx]:
+                if agent_key not in prior_phase.agents:
+                    continue
+                stored = st.session_state.get(
+                    _phase_key(sid, prior_phase.name, "messages"), []
+                )
+                for msg in stored:
+                    sender_name = msg.get("sender_name", "")
+                    content = msg.get("content", "")
+                    if not content:
+                        continue
+                    # Map sender_name to stable agent_id for prompt role mapping
+                    if sender_name == "System":
+                        sender_id = "system"
+                    else:
+                        sender_key = self._agent_key_by_name(sender_name)
+                        sender_id = (
+                            self._stable_agent_id(sender_key)
+                            if sender_key
+                            else msg.get("sender_id", "system")
+                        )
+                    agent_msgs.append({
+                        "sender_id": sender_id,
+                        "sender_name": sender_name,
+                        "content": content,
+                    })
+
+            if agent_msgs:
+                prior[agent_id] = agent_msgs
+
+        return prior
+
+    def _agent_key_by_name(self, display_name: str) -> str | None:
+        """Look up agent key by display name."""
+        for key, agent in self.spec.agents.items():
+            if agent.display_name == display_name:
+                return key
+        return None
+
     def _create_phase_session(self, phase: PhaseSpec) -> str | None:
         """Create a coordination session for a phase."""
         agent_names = self._build_agent_display_names()
         phase_messages = self._fetch_dep_messages(phase)
 
-        # Resolve shared initial prompt template
+        # Resolve shared initial prompt template (for ephemeral agents like Analyst)
         initial_prompt = phase.initial_prompt
         if has_template_refs(phase.initial_prompt_template):
             initial_prompt = resolve_template(
@@ -289,7 +389,7 @@ class ScenarioRenderer:
                 if resolved.strip():
                     per_agent_prompts[agent.display_name] = resolved
 
-        # Build agent configs
+        # Build agent configs with stable IDs
         agent_configs = []
         for agent_key in phase.agents:
             agent = self.spec.agents.get(agent_key)
@@ -297,12 +397,16 @@ class ScenarioRenderer:
                 continue
             agent_configs.append(
                 {
+                    "agent_id": self._stable_agent_id(agent_key),
                     "display_name": agent.display_name,
                     "role": agent.role,
                     "system_prompt": agent.system_prompt,
                     "lifecycle": agent.lifecycle,
                 }
             )
+
+        # Collect prior messages for permanent agents (cross-phase KV cache)
+        prior_agent_messages = self._collect_prior_messages(phase)
 
         result = api_client.create_session(
             self.base_url,
@@ -313,6 +417,8 @@ class ScenarioRenderer:
             initial_prompt=initial_prompt,
             max_turns=phase.max_turns,
             per_agent_prompts=per_agent_prompts,
+            persistent_cache_prefix=self.spec.id,
+            prior_agent_messages=prior_agent_messages or None,
         )
         if result:
             return result.get("session_id")
@@ -408,7 +514,7 @@ class ScenarioRenderer:
         status.success("All phases complete!")
 
     def _reset_all(self) -> None:
-        """Delete all phase sessions and reset state."""
+        """Delete all phase sessions, persistent caches, and reset state."""
         for phase in self.spec.phases:
             session_key = _phase_key(self.spec.id, phase.name, "session_id")
             session_id = st.session_state.get(session_key)
@@ -417,3 +523,5 @@ class ScenarioRenderer:
             st.session_state[session_key] = None
             st.session_state[_phase_key(self.spec.id, phase.name, "messages")] = []
             st.session_state[_phase_key(self.spec.id, phase.name, "executing")] = False
+        # Clear persistent KV caches for permanent agents
+        api_client.delete_persistent_caches(self.base_url, self.spec.id)

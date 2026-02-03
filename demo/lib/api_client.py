@@ -31,6 +31,8 @@ def create_session(
     initial_prompt: str,
     max_turns: int,
     per_agent_prompts: dict[str, str] | None = None,
+    persistent_cache_prefix: str = "",
+    prior_agent_messages: dict[str, list[dict[str, str]]] | None = None,
 ) -> dict[str, Any] | None:
     """Create a coordination session. Returns response dict or None on failure."""
     try:
@@ -44,6 +46,10 @@ def create_session(
         }
         if per_agent_prompts:
             payload["per_agent_prompts"] = per_agent_prompts
+        if persistent_cache_prefix:
+            payload["persistent_cache_prefix"] = persistent_cache_prefix
+        if prior_agent_messages:
+            payload["prior_agent_messages"] = prior_agent_messages
         with httpx.Client(timeout=10.0) as client:
             resp = client.post(
                 f"{base_url}/v1/coordination/sessions",
@@ -237,6 +243,19 @@ def get_agent_list(base_url: str) -> list[dict[str, Any]]:
     except httpx.HTTPError:
         logger.debug("Get agent list connection error", exc_info=True)
         return []
+
+
+def delete_persistent_caches(base_url: str, prefix: str) -> bool:
+    """Delete all persistent caches for a scenario. Returns True on success."""
+    try:
+        with httpx.Client(timeout=10.0) as client:
+            resp = client.delete(
+                f"{base_url}/v1/coordination/caches/{prefix}",
+            )
+            return resp.status_code == _HTTP_NO_CONTENT
+    except httpx.HTTPError:
+        logger.debug("Delete persistent caches connection error", exc_info=True)
+        return False
 
 
 def delete_agent(base_url: str, agent_id: str) -> bool:

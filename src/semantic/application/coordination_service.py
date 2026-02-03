@@ -19,6 +19,7 @@ from uuid import uuid4
 import structlog
 
 from semantic.domain.coordination import (
+    AgentLifecycle,
     AgentRole,
     Channel,
     ChannelMessage,
@@ -76,6 +77,20 @@ class CoordinationService:
         """
         return f"coord_{session_id}_{agent_id}"
 
+    def _resolve_cache_key(self, session_id: str, agent_id: str) -> str:
+        """Resolve cache key, using persistent key for permanent agents.
+
+        Permanent agents in sessions with a persistent_cache_prefix get
+        identity-based cache keys that survive session deletion, enabling
+        KV cache reuse across phases.
+        """
+        session = self._sessions.get(session_id)
+        if session and session.persistent_cache_prefix:
+            agent_role = session.agents.get(agent_id)
+            if agent_role and agent_role.lifecycle == AgentLifecycle.PERMANENT:
+                return f"persist_{session.persistent_cache_prefix}_{agent_id}"
+        return self._agent_cache_key(session_id, agent_id)
+
     async def create_session(
         self,
         topology: Topology,
@@ -85,6 +100,8 @@ class CoordinationService:
         initial_prompt: str = "",
         per_agent_prompts: dict[str, str] | None = None,
         max_turns: int = 0,
+        persistent_cache_prefix: str = "",
+        prior_agent_messages: dict[str, list[dict[str, str]]] | None = None,
     ) -> CoordinationSession:
         """Create a new coordination session with agents and topology.
 
@@ -97,6 +114,11 @@ class CoordinationService:
             per_agent_prompts: Per-agent private context keyed by display_name.
                 Each entry becomes a system message visible only to that agent.
             max_turns: Maximum turns before auto-termination (0 = unlimited).
+            persistent_cache_prefix: If set, permanent agents use identity-based
+                cache keys that persist across sessions (for cross-phase memory).
+            prior_agent_messages: Per-agent messages from prior phases, keyed by
+                agent_id. Injected into the channel BEFORE the initial prompt so
+                that prefix matching can reuse the agent's prior KV cache.
 
         Returns:
             The created CoordinationSession.
@@ -110,6 +132,23 @@ class CoordinationService:
                 channel_type="public",
                 participant_ids=frozenset(a.agent_id for a in agents),
             )
+
+            # Inject prior phase messages BEFORE initial prompt.
+            # These are visible only to the agent who experienced them,
+            # enabling KV cache prefix matching across phases.
+            if prior_agent_messages:
+                for target_agent_id, messages in prior_agent_messages.items():
+                    for msg in messages:
+                        sender_id = msg.get("sender_id", "system")
+                        content = msg.get("content", "")
+                        if not content:
+                            continue
+                        public_channel.add_message(
+                            sender_id=sender_id,
+                            content=content,
+                            turn_number=0,
+                            visible_to=frozenset([target_agent_id]),
+                        )
 
             # Add shared initial prompt as public system message
             if initial_prompt:
@@ -142,6 +181,7 @@ class CoordinationService:
                 channels={public_channel.channel_id: public_channel},
                 turn_order=[a.agent_id for a in agents],
                 max_turns=max_turns,
+                persistent_cache_prefix=persistent_cache_prefix,
             )
 
             self._sessions[session_id] = session
@@ -150,6 +190,7 @@ class CoordinationService:
                 session_id=session_id,
                 topology=topology.value,
                 num_agents=len(agents),
+                persistent_cache=bool(persistent_cache_prefix),
             )
             return session
 
@@ -170,7 +211,10 @@ class CoordinationService:
         return self._sessions[session_id]
 
     async def delete_session(self, session_id: str) -> None:
-        """Delete a coordination session and clean up all agent caches.
+        """Delete a coordination session and clean up ephemeral agent caches.
+
+        Persistent caches (for permanent agents with persistent_cache_prefix)
+        are preserved — use delete_persistent_caches() to clear them.
 
         Args:
             session_id: Session identifier.
@@ -183,16 +227,39 @@ class CoordinationService:
                 raise SessionNotFoundError(f"Session {session_id} not found")
             session = self._sessions[session_id]
 
-            # Clean up all agent caches (both ephemeral and permanent)
-            # Rationale: session-scoped STM caches are useless across sessions
-            # (only ~100 tokens of system prompt would match). Future LTM will
-            # use separate identity-addressed keys (ltm_{canonical_name}).
             for agent_id in session.agents:
-                cache_key = self._agent_cache_key(session_id, agent_id)
-                self._cache_store.delete(cache_key)
+                resolved_key = self._resolve_cache_key(session_id, agent_id)
+                session_key = self._agent_cache_key(session_id, agent_id)
+                if resolved_key != session_key:
+                    # Persistent cache — don't delete (survives session lifecycle)
+                    continue
+                self._cache_store.delete(session_key)
 
             del self._sessions[session_id]
             logger.info("coordination_session_deleted", session_id=session_id)
+
+    def delete_persistent_caches(self, prefix: str) -> int:
+        """Delete all persistent caches matching a prefix.
+
+        Used by "Reset All" to clear cross-phase agent memory.
+
+        Args:
+            prefix: The persistent_cache_prefix used when creating sessions.
+
+        Returns:
+            Number of caches deleted.
+        """
+        target_prefix = f"persist_{prefix}_"
+        deleted = 0
+        all_agents = self._cache_store.list_all_agents()
+        for entry in all_agents:
+            agent_id = entry.get("agent_id", "")
+            if agent_id.startswith(target_prefix):
+                self._cache_store.delete(agent_id)
+                deleted += 1
+        if deleted:
+            logger.info("persistent_caches_deleted", prefix=prefix, count=deleted)
+        return deleted
 
     def list_sessions(self) -> list[CoordinationSession]:
         """List all active coordination sessions.
@@ -430,8 +497,8 @@ class CoordinationService:
         # Tokenize using model's chat template for proper turn boundaries
         prompt_tokens, prompt_text = self._tokenize_chat_messages(prompt_messages)
 
-        # Load agent's cache (if any)
-        namespaced_agent_id = self._agent_cache_key(session_id, directive.agent_id)
+        # Load agent's cache (persistent key for permanent agents, session-scoped otherwise)
+        namespaced_agent_id = self._resolve_cache_key(session_id, directive.agent_id)
         cached_blocks = self._cache_store.load(namespaced_agent_id)
 
         # Submit to scheduler (or fall back to direct engine if no scheduler)
@@ -522,8 +589,8 @@ class CoordinationService:
         # Tokenize using model's chat template for proper turn boundaries
         prompt_tokens, prompt_text = self._tokenize_chat_messages(prompt_messages)
 
-        # Load agent's cache
-        namespaced_agent_id = self._agent_cache_key(session_id, directive.agent_id)
+        # Load agent's cache (persistent key for permanent agents)
+        namespaced_agent_id = self._resolve_cache_key(session_id, directive.agent_id)
         cached_blocks = self._cache_store.load(namespaced_agent_id)
 
         # Log cache reuse for debugging
