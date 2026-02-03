@@ -115,6 +115,7 @@ async def create_session(
             display_name=a.display_name,
             role=a.role,
             system_prompt=a.system_prompt,
+            lifecycle=a.lifecycle.value,
         )
         for a in agents
     ]

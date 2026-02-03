@@ -13,6 +13,16 @@ n_kv_heads = 16
 head_dim = 128
 kv_bytes_per_token = 62208  # Q4 (4-bit, group_size=64), all 27 layers
 
+[inference]
+# DeepSeek Coder V2 recommended settings
+# Source: https://huggingface.co/deepseek-ai/DeepSeek-Coder-V2-Lite-Instruct
+temperature = 0.3           # Lower for code tasks, more deterministic
+top_p = 0.95
+top_k = 50
+repetition_penalty = 1.0
+extended_thinking = false
+supports_thinking = false   # Coder V2 Lite doesn't have extended thinking
+
 [optimal]
 # Core inference parameters (validated by profiling experiments A, C, E)
 max_batch_size = 2          # Exp C: batch=2 gives 48.1 sys TPS vs 39.9 single (21% gain)

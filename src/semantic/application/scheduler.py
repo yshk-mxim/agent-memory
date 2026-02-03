@@ -79,6 +79,15 @@ class ConcurrentScheduler:
         self._running = False
         self._worker_thread: threading.Thread | None = None
 
+    def update_engine(self, new_engine: Any) -> None:
+        """Update engine reference after model hot-swap.
+
+        Args:
+            new_engine: New BatchEngine instance
+        """
+        self._engine = new_engine
+        logger.info("[SCHEDULER] Engine updated after model swap")
+
     # ------------------------------------------------------------------
     # Public API (async)
     # ------------------------------------------------------------------

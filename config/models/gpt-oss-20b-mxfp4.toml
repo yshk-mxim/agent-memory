@@ -20,6 +20,16 @@ head_dim = 64
 status = "compatible"
 note = "Requires mlx_sink_compat patch for Q4 KV + attention sinks"
 
+[inference]
+# GPT-OSS-20B is a thinking model (supports chain-of-thought reasoning)
+# Lower temperature for reasoning tasks, higher for creative
+temperature = 0.6           # Balanced for reasoning tasks
+top_p = 0.9
+top_k = 40
+repetition_penalty = 1.0
+extended_thinking = false   # Default off, toggle available since this is a thinking model
+supports_thinking = true    # Model supports extended reasoning/chain-of-thought
+
 [optimal]
 max_batch_size = 1
 prefill_step_size = 256

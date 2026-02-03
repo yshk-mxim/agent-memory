@@ -9,6 +9,15 @@
 [model]
 model_id = "mlx-community/SmolLM2-135M-Instruct"
 
+[inference]
+# SmolLM2 135M - lightweight model for simple tasks
+temperature = 0.7
+top_p = 0.9
+top_k = 40
+repetition_penalty = 1.0
+extended_thinking = false
+supports_thinking = false   # Too small for reasoning chains
+
 [optimal]
 max_batch_size = 4
 prefill_step_size = 512

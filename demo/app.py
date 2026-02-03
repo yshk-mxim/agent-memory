@@ -479,33 +479,101 @@ def _render_model_info() -> None:
     st.subheader("Model")
     model_info = fetch_model_info()
     st.session_state.model_info = model_info
-    if not model_info:
-        st.caption("Model info unavailable")
+
+    # Check if model is loaded
+    model_id = model_info.get("id", "") if model_info else ""
+
+    if not model_info or not model_id:
+        st.markdown("**No model loaded**")
+        st.caption("Use Switch Model to load one")
+        # Still show model switch UI even when no model loaded
+        _render_model_switch("")
         return
 
-    model_id = model_info.get("id", "unknown")
     short_name = get_model_short_name(model_id)
     st.markdown(f"**{short_name}**")
     st.caption(model_id)
     spec = model_info.get("spec", {})
-    if not spec:
+    if spec:
+        s1, s2 = st.columns(2)
+        s1.markdown(f"Layers: **{spec.get('n_layers', '?')}**")
+        s2.markdown(f"KV heads: **{spec.get('n_kv_heads', '?')}**")
+        s3, s4 = st.columns(2)
+        kv_bits = spec.get("kv_bits")
+        quant_label = f"Q{kv_bits}" if kv_bits else "FP16"
+        s3.markdown(f"Quantization: **{quant_label}**")
+        s4.markdown(f"Head dim: **{spec.get('head_dim', '?')}**")
+        max_ctx = spec.get("max_context_length", "?")
+        ctx_text = (
+            f"Max context: **{max_ctx:,}** tokens"
+            if isinstance(max_ctx, int)
+            else f"Max context: **{max_ctx}**"
+        )
+        st.markdown(ctx_text)
+
+    # Model switch section (requires SEMANTIC_ADMIN_KEY)
+    _render_model_switch(model_id)
+
+
+def _render_model_switch(current_model_id: str) -> None:
+    """Render model switch controls (requires admin key)."""
+    import os
+    from demo.lib import api_client
+
+    admin_key = os.getenv("SEMANTIC_ADMIN_KEY", "")
+    if not admin_key:
+        st.caption("Set SEMANTIC_ADMIN_KEY to enable model switching")
         return
 
-    s1, s2 = st.columns(2)
-    s1.markdown(f"Layers: **{spec.get('n_layers', '?')}**")
-    s2.markdown(f"KV heads: **{spec.get('n_kv_heads', '?')}**")
-    s3, s4 = st.columns(2)
-    kv_bits = spec.get("kv_bits")
-    quant_label = f"Q{kv_bits}" if kv_bits else "FP16"
-    s3.markdown(f"Quantization: **{quant_label}**")
-    s4.markdown(f"Head dim: **{spec.get('head_dim', '?')}**")
-    max_ctx = spec.get("max_context_length", "?")
-    ctx_text = (
-        f"Max context: **{max_ctx:,}** tokens"
-        if isinstance(max_ctx, int)
-        else f"Max context: **{max_ctx}**"
-    )
-    st.markdown(ctx_text)
+    with st.expander("Switch Model", expanded=False):
+        available = api_client.get_available_models(SERVER_URL, admin_key)
+        if not available:
+            st.warning("Could not fetch available models")
+            return
+
+        # Show all models, mark current one
+        def format_model(m):
+            name = get_model_short_name(m)
+            if m == current_model_id:
+                return f"{name} (current)"
+            return name
+
+        selected = st.selectbox(
+            "Target model",
+            options=available,
+            format_func=format_model,
+            key="model_switch_selector",
+        )
+
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("⬇️ Offload", use_container_width=True):
+                with st.spinner("Offloading model..."):
+                    result = api_client.offload_model(SERVER_URL, admin_key)
+                    if result and result.get("status") == "success":
+                        st.success("Model offloaded - memory freed")
+                        st.rerun()
+                    else:
+                        st.error("Offload failed")
+        with col2:
+            if st.button("🔄 Load", use_container_width=True, type="primary"):
+                with st.spinner(f"Loading {get_model_short_name(selected)}..."):
+                    result = api_client.swap_model(SERVER_URL, admin_key, selected)
+                    if result and result.get("status") == "success":
+                        st.success(f"Loaded {get_model_short_name(selected)}")
+                        st.rerun()
+                    else:
+                        st.error("Model swap failed")
+
+        # Clear all caches button
+        if st.button("🗑️ Clear All Caches", use_container_width=True):
+            with st.spinner("Clearing caches..."):
+                result = api_client.clear_all_caches(SERVER_URL, admin_key)
+                if result and result.get("status") == "success":
+                    st.success(result.get("message", "Caches cleared"))
+                    st.rerun()
+                else:
+                    st.error("Failed to clear caches")
 
 
 def _render_agent_metrics() -> None:

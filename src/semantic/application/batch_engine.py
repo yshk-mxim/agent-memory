@@ -171,6 +171,75 @@ class BlockPoolBatchEngine:
             max_chunk,
         )
 
+    def _is_gpt_oss_model(self) -> bool:
+        """Check if current model uses GPT-OSS Harmony format.
+
+        GPT-OSS uses <|channel|> markers and <|end|> is a delimiter, not EOS.
+        Only <|return|> should be a stop token for GPT-OSS.
+        """
+        chat_template = getattr(self._tokenizer, "chat_template", "") or ""
+        return "<|channel|>" in chat_template and "<|start|>" in chat_template
+
+    def _build_stop_tokens(self) -> set[int]:
+        """Build set of stop tokens for current model.
+
+        Different models use different special tokens for end-of-turn:
+        - Standard: eos_token_id
+        - Llama 3.1: <|eot_id|> (128009) for end-of-turn
+        - GPT-OSS: <|return|> only (NOT <|end|>, which is a message delimiter)
+        - DeepSeek: <｜end▁of▁sentence｜> (special unicode)
+
+        Returns:
+            Set of token IDs that should stop generation.
+        """
+        stop_tokens: set[int] = set()
+
+        # Always include standard EOS
+        if self._tokenizer.eos_token_id is not None:
+            stop_tokens.add(self._tokenizer.eos_token_id)
+
+        # Check if this is a GPT-OSS model (uses Harmony format)
+        is_gpt_oss = self._is_gpt_oss_model()
+
+        # Model-specific stop tokens
+        special_stop_tokens = [
+            # Llama 3.1 end-of-turn
+            "<|eot_id|>",
+            # GPT-OSS return (end of full response)
+            "<|return|>",
+            # DeepSeek (special unicode)
+            "<｜end▁of▁sentence｜>",
+            # Common alternatives
+            "<|endoftext|>",
+            "<|im_end|>",
+        ]
+
+        # For non-GPT-OSS models, also include <|end|> as stop token
+        # GPT-OSS uses <|end|> as message delimiter, not EOS
+        if not is_gpt_oss:
+            special_stop_tokens.append("<|end|>")
+        else:
+            logger.info("[STOP_TOKENS] GPT-OSS detected, excluding <|end|> from stop tokens")
+
+        for token_str in special_stop_tokens:
+            try:
+                token_id = self._tokenizer.convert_tokens_to_ids(token_str)
+                # Only add if it's a valid token (not UNK)
+                if token_id != self._tokenizer.unk_token_id and token_id is not None:
+                    stop_tokens.add(token_id)
+            except (KeyError, AttributeError):
+                # Token doesn't exist in this tokenizer's vocabulary
+                pass
+
+        logger.debug(
+            "[STOP_TOKENS] Built stop set: %s (eos=%s, gpt_oss=%s)",
+            stop_tokens,
+            self._tokenizer.eos_token_id,
+            is_gpt_oss,
+        )
+
+        return stop_tokens
+
     def _log_memory(self, label: str) -> tuple[float, float, float]:
         """Log current MLX memory state.
 
@@ -413,10 +482,13 @@ class BlockPoolBatchEngine:
         logits = y[:, -1, :]
         next_token = int(mx.argmax(logits, axis=-1).item())
 
-        # Check for immediate EOS
-        if next_token == self._tokenizer.eos_token_id:
-            logger.debug("[NATIVE GEN] EOS at token 1 (immediate)")
-            generated = []  # Don't include EOS in output
+        # Build stop tokens set (includes model-specific end-of-turn tokens)
+        stop_tokens = self._build_stop_tokens()
+
+        # Check for immediate stop token
+        if next_token in stop_tokens:
+            logger.debug("[NATIVE GEN] Stop token %d at token 1 (immediate)", next_token)
+            generated = []  # Don't include stop token in output
         else:
             generated = [next_token]
 
@@ -429,9 +501,9 @@ class BlockPoolBatchEngine:
                 logits = y[:, -1, :]
                 next_token = int(mx.argmax(logits, axis=-1).item())
 
-                # Check for EOS BEFORE adding to output
-                if next_token == self._tokenizer.eos_token_id:
-                    logger.debug("[NATIVE GEN] EOS at token %d", i + 2)
+                # Check for stop token BEFORE adding to output
+                if next_token in stop_tokens:
+                    logger.debug("[NATIVE GEN] Stop token %d at token %d", next_token, i + 2)
                     break
 
                 generated.append(next_token)
@@ -803,9 +875,12 @@ class BlockPoolBatchEngine:
                 if self._batch_gen_factory is not None:
                     self._batch_gen = self._batch_gen_factory(self._model, self._tokenizer)
                 else:
+                    # Build model-specific stop tokens
+                    stop_tokens = self._build_stop_tokens()
+
                     self._batch_gen = self._cache_adapter.create_batch_generator(
                         model=self._model,
-                        stop_tokens={self._tokenizer.eos_token_id},
+                        stop_tokens=stop_tokens,
                         kv_bits=self._spec.kv_bits,
                         kv_group_size=self._spec.kv_group_size,
                     )
@@ -1153,9 +1228,12 @@ class BlockPoolBatchEngine:
                 if self._batch_gen_factory is not None:
                     self._batch_gen = self._batch_gen_factory(self._model, self._tokenizer)
                 else:
+                    # Build model-specific stop tokens
+                    stop_tokens = self._build_stop_tokens()
+
                     self._batch_gen = self._cache_adapter.create_batch_generator(
                         model=self._model,
-                        stop_tokens={self._tokenizer.eos_token_id},
+                        stop_tokens=stop_tokens,
                         kv_bits=self._spec.kv_bits,
                         kv_group_size=self._spec.kv_group_size,
                     )
@@ -1287,14 +1365,41 @@ class BlockPoolBatchEngine:
                     )
 
     def _clean_text(self, text: str) -> str:
-        """Remove BPE artifacts and normalize whitespace."""
+        """Remove BPE artifacts, model-specific tokens, and normalize whitespace.
+
+        For GPT-OSS models that output analysis before final response, extracts
+        only the final channel content.
+        """
+        # GPT-OSS: Extract only final channel content if present
+        # Model outputs: <|channel|>analysis<|message|>...<|end|><|start|>assistant<|channel|>final<|message|>...
+        if "<|channel|>final<|message|>" in text:
+            # Extract content after final channel marker
+            final_start = text.rfind("<|channel|>final<|message|>")
+            text = text[final_start + len("<|channel|>final<|message|>") :]
+            # Remove trailing markers
+            for marker in ("<|end|>", "<|return|>"):
+                if marker in text:
+                    text = text.split(marker)[0]
+        else:
+            # No final channel - clean up any channel markers
+            text = text.replace("<|channel|>analysis<|message|>", "")
+            text = text.replace("<|channel|>commentary<|message|>", "")
+            text = text.replace("<|channel|>final<|message|>", "")
+            text = text.replace("<|end|>", "")
+            text = text.replace("<|return|>", "")
+
+        # Remove any remaining start markers (from incomplete generation)
+        if "<|start|>assistant" in text:
+            text = text.split("<|start|>assistant")[0]
+
+        # BPE artifacts
         text = text.replace("Ġ", " ")
         text = text.replace("Ċ", "\n")
         text = text.replace("ċ", "\n")
         text = text.replace("▁", " ")
         text = self._RE_MULTI_SPACES.sub("  ", text)
         text = self._RE_MULTI_NEWLINES.sub("\n\n", text)
-        return text
+        return text.strip()
 
     def _finalize_sequence(
         self,

@@ -65,6 +65,17 @@ class CoordinationService:
         self._agent_name_registry: dict[str, str] = {}
         self._lock = asyncio.Lock()
 
+    def update_engine(self, new_engine) -> None:
+        """Update engine reference after model hot-swap.
+
+        Called by admin API after model swap to ensure CoordinationService
+        uses the new BatchEngine with the newly loaded model.
+        """
+        self._engine = new_engine
+        if self._scheduler is not None:
+            self._scheduler.update_engine(new_engine)
+        logger.info("CoordinationService engine updated after model swap")
+
     @staticmethod
     def _agent_cache_key(session_id: str, agent_id: str) -> str:
         """Construct namespaced cache key for coordination agent.
@@ -956,6 +967,132 @@ class CoordinationService:
                 lines.append(f"Assistant: {content}")
         return "\n\n".join(lines)
 
+    def _merge_consecutive_messages(self, messages: list[dict]) -> list[dict]:
+        """Merge consecutive messages with the same role.
+
+        Llama 3.1 and other models expect strict user/assistant alternation.
+        In multi-agent scenarios, we may have:
+          user: "Bob: Hello"
+          user: "Carol: Hi"
+          user: "[Alice, respond now.]"
+
+        This merges them into a single user message to maintain model compatibility.
+        System messages are always kept separate at the start.
+
+        Args:
+            messages: List of chat messages with role/content.
+
+        Returns:
+            List with consecutive same-role messages merged.
+        """
+        if not messages:
+            return []
+
+        merged: list[dict] = []
+        for msg in messages:
+            if not merged:
+                merged.append(dict(msg))
+                continue
+
+            prev = merged[-1]
+            # Merge consecutive same-role messages (except system)
+            if msg["role"] == prev["role"] and msg["role"] != "system":
+                prev["content"] = prev["content"] + "\n\n" + msg["content"]
+            else:
+                merged.append(dict(msg))
+
+        return merged
+
+    def _needs_message_merging(self) -> bool:
+        """Check if model needs consecutive same-role messages merged.
+
+        Llama 3.1 and similar models require strict user/assistant alternation.
+        Gemma3 handles multi-turn conversations with role markers natively.
+        """
+        tokenizer = self._engine.tokenizer
+        chat_template = getattr(tokenizer, "chat_template", "") or ""
+
+        # Llama-style templates use <|start_header_id|>
+        if "<|start_header_id|>" in chat_template:
+            return True
+
+        # ChatML templates might also need merging (e.g., <|im_start|>)
+        if "<|im_start|>" in chat_template:
+            return True
+
+        # Gemma, GPT-OSS, and most other models handle consecutive messages
+        return False
+
+    def _is_gpt_oss_model(self) -> bool:
+        """Check if current model is GPT-OSS (uses Harmony format).
+
+        GPT-OSS models have a built-in template that injects "You are ChatGPT"
+        which breaks roleplay scenarios. We need to use a custom template.
+        """
+        tokenizer = self._engine.tokenizer
+        chat_template = getattr(tokenizer, "chat_template", "") or ""
+        # GPT-OSS uses Harmony format with channel markers
+        return "<|channel|>" in chat_template and "<|start|>" in chat_template
+
+    def _apply_gpt_oss_template(self, messages: list[dict]) -> str:
+        """Apply custom GPT-OSS Harmony format without ChatGPT identity injection.
+
+        GPT-OSS uses a complex template with:
+        - A system message with model identity and settings (Reasoning: low for fast responses)
+        - A developer message for instructions (our system prompt)
+        - Channels (analysis, commentary, final) for assistant messages
+        """
+        from datetime import datetime
+
+        formatted_parts = []
+
+        # 1. System message with roleplay identity and low reasoning
+        system_msg = (
+            "<|start|>system<|message|>"
+            "You are a helpful roleplay assistant. Follow the developer instructions.\n"
+            f"Current date: {datetime.now().strftime('%Y-%m-%d')}\n\n"
+            "Reasoning: low\n\n"
+            "# Valid channels: analysis, commentary, final. "
+            "Channel must be included for every message."
+            "<|end|>"
+        )
+        formatted_parts.append(system_msg)
+
+        # 2. Collect messages by type
+        developer_content = []
+        conversation: list[tuple[str, str]] = []  # (role, content) pairs
+
+        for msg in messages:
+            role = msg["role"]
+            content = msg["content"]
+
+            if role == "system":
+                developer_content.append(content)
+            else:
+                conversation.append((role, content))
+
+        # 3. Add developer instructions if we have system prompts
+        if developer_content:
+            formatted_parts.append(
+                "<|start|>developer<|message|># Instructions\n\n"
+                + "\n\n".join(developer_content)
+                + "\n\n<|end|>"
+            )
+
+        # 4. Add conversation messages
+        for role, content in conversation:
+            if role == "user":
+                formatted_parts.append(f"<|start|>user<|message|>{content}<|end|>")
+            elif role == "assistant":
+                formatted_parts.append(
+                    f"<|start|>assistant<|channel|>final<|message|>{content}<|end|>"
+                )
+
+        # 5. Generation prompt - model generates analysis then final channel
+        formatted_parts.append("<|start|>assistant")
+
+        return "".join(formatted_parts)
+
     def _tokenize_chat_messages(self, messages: list[dict]) -> tuple[list[int], str]:
         """Tokenize using model's chat template for proper turn boundaries.
 
@@ -963,23 +1100,68 @@ class CoordinationService:
         to maintain identity in multi-agent conversations. Falls back to raw
         text tokenization if no chat template is available.
 
+        For Llama 3.1 and similar models that require strict user/assistant
+        alternation, consecutive same-role messages are merged first.
+
+        For GPT-OSS models, uses custom template to avoid ChatGPT identity injection.
+
         Returns:
             Tuple of (token_ids, prompt_text_for_logging).
         """
         prompt_text = self._format_messages_as_text(messages)
 
         tokenizer = self._engine.tokenizer
+
+        # GPT-OSS: Use custom template to avoid "You are ChatGPT" injection
+        if self._is_gpt_oss_model():
+            try:
+                formatted_text = self._apply_gpt_oss_template(messages)
+                tokens = tokenizer.encode(formatted_text)
+                logger.info(
+                    "GPT-OSS custom template: %d messages -> %d tokens",
+                    len(messages),
+                    len(tokens),
+                )
+                # Log first 300 chars of formatted text for debugging
+                logger.debug("GPT-OSS template preview: %s...", formatted_text[:300])
+                return tokens, prompt_text
+            except Exception as e:
+                logger.warning("GPT-OSS template failed: %s, falling back", e)
+
         if hasattr(tokenizer, "apply_chat_template") and getattr(tokenizer, "chat_template", None):
             try:
+                # Only merge for models that need strict alternation
+                needs_merge = self._needs_message_merging()
+                if needs_merge:
+                    messages_for_template = self._merge_consecutive_messages(messages)
+                    logger.info(
+                        "message_merge original=%d merged=%d",
+                        len(messages),
+                        len(messages_for_template),
+                    )
+                    # Log first 500 chars of merged user content for debugging
+                    for m in messages_for_template:
+                        if m["role"] == "user":
+                            content_preview = m["content"][:200].replace("\n", "\\n")
+                            logger.info("merged_user_content preview=%s...", content_preview)
+                            break
+                else:
+                    messages_for_template = messages
+
                 tokens = tokenizer.apply_chat_template(
-                    messages,
+                    messages_for_template,
                     tokenize=True,
                     add_generation_prompt=True,
                 )
                 if isinstance(tokens, list):
+                    logger.debug(
+                        "Chat template produced %d tokens from %d messages",
+                        len(tokens),
+                        len(messages_for_template),
+                    )
                     return tokens, prompt_text
-            except Exception:
-                logger.debug("Chat template failed, falling back to raw text")
+            except Exception as e:
+                logger.debug("Chat template failed: %s, falling back to raw text", e)
 
         return tokenizer.encode(prompt_text), prompt_text
 

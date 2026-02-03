@@ -123,6 +123,10 @@ class ScenarioRenderer:
                 st.error("Server not reachable. Start with: `semantic serve`")
             st.divider()
 
+            # Model info and switch UI
+            self._render_model_section()
+            st.divider()
+
             st.subheader("Agents")
             for agent in self.spec.agents.values():
                 color = self.agent_colors.get(agent.display_name, "#888")
@@ -158,6 +162,96 @@ class ScenarioRenderer:
                     ):
                         self._reset_all()
                         st.rerun()
+
+    def _render_model_section(self) -> None:
+        """Render model info and switch controls."""
+        import os
+
+        import httpx
+
+        st.subheader("Model")
+
+        # Fetch current model info
+        model_id = ""
+        try:
+            with httpx.Client(timeout=3.0) as client:
+                resp = client.get(f"{self.base_url}/v1/models")
+                if resp.status_code == 200:
+                    data = resp.json()
+                    models = data.get("data", [])
+                    if models:
+                        model_info = models[0]
+                        model_id = model_info.get("id", "")
+        except Exception:
+            pass
+
+        if not model_id:
+            st.markdown("**No model loaded**")
+            st.caption("Use Switch Model to load one")
+        else:
+            short_name = model_id.rsplit("/", 1)[-1] if "/" in model_id else model_id
+            st.markdown(f"**{short_name}**")
+            spec = model_info.get("spec", {})
+            if spec:
+                kv_bits = spec.get("kv_bits")
+                quant_label = f"Q{kv_bits}" if kv_bits else "FP16"
+                st.caption(f"{spec.get('n_layers', '?')} layers | {quant_label}")
+
+        # Model switch (requires admin key)
+        admin_key = os.getenv("SEMANTIC_ADMIN_KEY", "")
+        if not admin_key:
+            st.caption("Set SEMANTIC_ADMIN_KEY to enable model switching")
+            return
+
+        with st.expander("Switch Model", expanded=False):
+            available = api_client.get_available_models(self.base_url, admin_key)
+            if not available:
+                st.warning("Could not fetch available models")
+                return
+
+            # Show all models, mark current one
+            def format_model(m):
+                name = m.rsplit("/", 1)[-1] if "/" in m else m
+                if m == model_id:
+                    return f"{name} (current)"
+                return name
+
+            selected = st.selectbox(
+                "Target model",
+                options=available,
+                format_func=format_model,
+                key=_state_key(self.spec.id, "model_switch"),
+            )
+
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button(
+                    "⬇️ Offload",
+                    use_container_width=True,
+                    key=_state_key(self.spec.id, "offload_model_btn"),
+                ):
+                    with st.spinner("Offloading model..."):
+                        result = api_client.offload_model(self.base_url, admin_key)
+                        if result and result.get("status") == "success":
+                            st.success("Model offloaded")
+                            st.rerun()
+                        else:
+                            st.error("Offload failed")
+            with col2:
+                selected_name = selected.rsplit("/", 1)[-1] if "/" in selected else selected
+                if st.button(
+                    "🔄 Load",
+                    use_container_width=True,
+                    type="primary",
+                    key=_state_key(self.spec.id, "load_model_btn"),
+                ):
+                    with st.spinner(f"Loading {selected_name}..."):
+                        result = api_client.swap_model(self.base_url, admin_key, selected)
+                        if result and result.get("status") == "success":
+                            st.success(f"Loaded {selected_name}")
+                            st.rerun()
+                        else:
+                            st.error("Model swap failed")
 
     def _render_phases(self) -> None:
         """Render phases based on ui.layout."""

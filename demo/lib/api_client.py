@@ -267,3 +267,96 @@ def delete_agent(base_url: str, agent_id: str) -> bool:
     except httpx.HTTPError:
         logger.debug("Delete agent connection error", exc_info=True)
         return False
+
+
+# --- Admin API functions for model management ---
+
+
+def get_available_models(base_url: str, admin_key: str) -> list[str]:
+    """Get list of available models. Returns list of model IDs."""
+    try:
+        with httpx.Client(timeout=10.0) as client:
+            resp = client.get(
+                f"{base_url}/admin/models/available",
+                headers={"X-Admin-Key": admin_key},
+            )
+            if resp.status_code == _HTTP_OK:
+                data = cast(dict[str, Any], resp.json())
+                return cast(list[str], data.get("models", []))
+            return []
+    except httpx.HTTPError:
+        logger.debug("Get available models connection error", exc_info=True)
+        return []
+
+
+def get_current_model(base_url: str, admin_key: str) -> dict[str, Any] | None:
+    """Get current model info. Returns model info dict or None."""
+    try:
+        with httpx.Client(timeout=10.0) as client:
+            resp = client.get(
+                f"{base_url}/admin/models/current",
+                headers={"X-Admin-Key": admin_key},
+            )
+            if resp.status_code == _HTTP_OK:
+                return cast(dict[str, Any], resp.json())
+            return None
+    except httpx.HTTPError:
+        logger.debug("Get current model connection error", exc_info=True)
+        return None
+
+
+def swap_model(
+    base_url: str,
+    admin_key: str,
+    model_id: str,
+    timeout_seconds: float = 60.0,
+) -> dict[str, Any] | None:
+    """Swap to a new model. Returns swap result or None on failure."""
+    try:
+        with httpx.Client(timeout=120.0) as client:
+            resp = client.post(
+                f"{base_url}/admin/models/swap",
+                headers={"X-Admin-Key": admin_key},
+                json={"model_id": model_id, "timeout_seconds": timeout_seconds},
+            )
+            if resp.status_code == _HTTP_OK:
+                return cast(dict[str, Any], resp.json())
+            logger.warning("Swap model failed: HTTP %d - %s", resp.status_code, resp.text)
+            return None
+    except httpx.HTTPError:
+        logger.debug("Swap model connection error", exc_info=True)
+        return None
+
+
+def offload_model(base_url: str, admin_key: str) -> dict[str, Any] | None:
+    """Offload current model to free memory. Returns result or None on failure."""
+    try:
+        with httpx.Client(timeout=60.0) as client:
+            resp = client.post(
+                f"{base_url}/admin/models/offload",
+                headers={"X-Admin-Key": admin_key},
+            )
+            if resp.status_code == _HTTP_OK:
+                return cast(dict[str, Any], resp.json())
+            logger.warning("Offload model failed: HTTP %d - %s", resp.status_code, resp.text)
+            return None
+    except httpx.HTTPError:
+        logger.debug("Offload model connection error", exc_info=True)
+        return None
+
+
+def clear_all_caches(base_url: str, admin_key: str) -> dict[str, Any] | None:
+    """Clear all caches (memory and disk). Returns result or None on failure."""
+    try:
+        with httpx.Client(timeout=30.0) as client:
+            resp = client.delete(
+                f"{base_url}/admin/caches",
+                headers={"X-Admin-Key": admin_key},
+            )
+            if resp.status_code == _HTTP_OK:
+                return cast(dict[str, Any], resp.json())
+            logger.warning("Clear caches failed: HTTP %d - %s", resp.status_code, resp.text)
+            return None
+    except httpx.HTTPError:
+        logger.debug("Clear caches connection error", exc_info=True)
+        return None
