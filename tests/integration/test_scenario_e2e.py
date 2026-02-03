@@ -139,11 +139,14 @@ class TestPrisonersDilemmaFullPipeline:
         assert refs == set()
         assert danny_phase.initial_prompt  # Has plain initial prompt
 
-    def test_analyst_still_uses_template_injection(self, pd_spec: ScenarioSpec) -> None:
-        analyst_phase = pd_spec.phases[4]
-        assert analyst_phase.name == "outcome_analysis"
-        refs = extract_phase_refs(analyst_phase.initial_prompt_template)
-        assert refs == {"final_reckoning"}
+    def test_outcome_analysis_queries_prisoners_directly(self, pd_spec: ScenarioSpec) -> None:
+        outcome_phase = pd_spec.phases[4]
+        assert outcome_phase.name == "outcome_analysis"
+        # New design: analyst queries prisoners directly (no template injection)
+        assert outcome_phase.agents == ("marco", "danny", "analyst")
+        assert "marco" in outcome_phase.per_agent_prompt_templates
+        assert "danny" in outcome_phase.per_agent_prompt_templates
+        assert "analyst" in outcome_phase.per_agent_prompt_templates
 
     def test_payoff_matrix_present(self, pd_spec: ScenarioSpec) -> None:
         assert pd_spec.payoff is not None
@@ -166,8 +169,8 @@ class TestPrisonersDilemmaFullPipeline:
         assert reckoning.name == "final_reckoning"
         assert reckoning.initial_prompt  # Shared scene-setting
         assert not has_template_refs(reckoning.initial_prompt)
-        # Per-agent instructions (no template refs — static role guidance)
-        assert set(reckoning.per_agent_prompt_templates.keys()) == {"warden", "marco", "danny"}
+        # Per-agent instructions: only warden needs special instructions
+        assert "warden" in reckoning.per_agent_prompt_templates
         for tmpl in reckoning.per_agent_prompt_templates.values():
             assert not has_template_refs(tmpl)
 

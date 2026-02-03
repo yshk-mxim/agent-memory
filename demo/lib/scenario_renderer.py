@@ -17,21 +17,31 @@ def _truncate_at_stop_markers(text: str, agent_names: list[str]) -> str:
 
     Truncates text at common runaway markers like 'User:', 'Assistant:', etc.
     Called on every token during streaming, so must be fast.
+
+    NOTE: Markers must stay synchronized with _clean_agent_response() in
+    coordination_service.py to avoid visual glitches during streaming.
     """
     # Standard markers that indicate fake turn continuation
+    # Synced with coordination_service.py:912-918
     stop_markers = [
         "\nUser:", "\nuser:",
-        "\nAssistant:", "\nassistant:",
+        "\nYou:", "\nyou:",
         "\nSystem:", "\nsystem:",
+        "\nAssistant:", "\nassistant:",
+        "\n<start_of_turn>", "\n<end_of_turn>",  # Gemma3 turn markers
     ]
     # Add agent names as stop markers
     for name in agent_names:
         stop_markers.append(f"\n{name}:")
 
+    # Find the EARLIEST marker occurrence (not first in list)
+    min_idx = len(text)
     for marker in stop_markers:
         idx = text.find(marker)
-        if idx > 0:
-            text = text[:idx]
+        if 0 < idx < min_idx:
+            min_idx = idx
+    if min_idx < len(text):
+        text = text[:min_idx]
 
     # Also strip leading role prefixes if model echoes them
     text = re.sub(r"^(?:Assistant|User|System):\s*", "", text.strip())

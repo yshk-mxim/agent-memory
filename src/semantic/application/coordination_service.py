@@ -922,10 +922,14 @@ class CoordinationService:
             agent_names.add(sender_name)
         for name in agent_names:
             stop_markers.append(f"\n{name}:")
+        # Find the EARLIEST marker occurrence (not first in list)
+        min_idx = len(text)
         for marker in stop_markers:
             idx = text.find(marker)
-            if idx > 0:
-                text = text[:idx]
+            if 0 < idx < min_idx:
+                min_idx = idx
+        if min_idx < len(text):
+            text = text[:min_idx]
 
         # Clean up extra whitespace from marker removal
         text = re.sub(r"\n{3,}", "\n\n", text)

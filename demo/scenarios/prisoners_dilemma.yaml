@@ -7,9 +7,11 @@ agents:
     display_name: Warden
     role: moderator
     system_prompt: >-
-      Pragmatic corrections officer running interrogations.
-      You present deals and pressure suspects into choosing.
-      Speak plainly and use information strategically. Under 3 sentences.
+      Pragmatic corrections officer. You know the punishment rules:
+      If both suspects keep silent, they each get 2 years.
+      If one confesses and the other keeps silent, the confessor goes free and the silent one gets 10 years.
+      If both confess, they each get 5 years.
+      You use this information strategically to pressure suspects. Speak plainly. Under 3 sentences.
     lifecycle: permanent
     color: "#95A5A6"
   marco:
@@ -17,8 +19,9 @@ agents:
     role: participant
     system_prompt: >-
       Blue-collar worker, 34, first offense, anxious about your family.
-      You worry about doing the right thing but also about self-preservation.
-      Under 3 sentences.
+      You know the warden might tell the other suspect what you say.
+      Anything you say in public areas like the yard might be overheard.
+      You worry about doing the right thing but also about self-preservation. Under 3 sentences.
     lifecycle: permanent
     color: "#3498DB"
   danny:
@@ -26,19 +29,17 @@ agents:
     role: participant
     system_prompt: >-
       Street-smart, 41, been through the system before.
-      You trust no one and look out for yourself first.
-      Under 3 sentences.
+      You know the warden might tell the other suspect what you say.
+      Anything you say in public areas like the yard might be overheard.
+      You trust no one and look out for yourself first. Under 3 sentences.
     lifecycle: permanent
     color: "#E74C3C"
   analyst:
     display_name: Analyst
     role: moderator
     system_prompt: >-
-      Neutral game theory analyst. Determine what each suspect ACTUALLY
-      CHOSE based on their final statements.
-      "stay silent", "quiet", "keep silent" = KEPT SILENT.
-      "talk", "confess", "rat out" = CONFESSED.
-      Quote each suspect's key statement, classify it, then apply the payoff matrix.
+      Neutral classifier. Read the transcript and determine what each suspect actually chose.
+      Classify based on their final statements. Apply the payoff rules exactly.
     lifecycle: ephemeral
     color: "#9B59B6"
 
@@ -49,11 +50,7 @@ phases:
     topology: round_robin
     debate_format: free_form
     initial_prompt: >-
-      SCENARIO: Interrogation Room A. The Warden is alone with Marco.
-      THE DEAL: If both suspects keep silent, they each get 2 years.
-      If one confesses and the other keeps silent, the confessor goes free
-      and the silent one gets 10 years. If both confess, they each get 5 years.
-      The Warden must present this deal to Marco now.
+      Interrogation Room A. The Warden addresses Marco directly.
     auto_rounds: 3
 
   - name: interrogation_danny
@@ -62,11 +59,7 @@ phases:
     topology: round_robin
     debate_format: free_form
     initial_prompt: >-
-      SCENARIO: Interrogation Room B. The Warden is alone with Danny.
-      THE DEAL: If both suspects keep silent, they each get 2 years.
-      If one confesses and the other keeps silent, the confessor goes free
-      and the silent one gets 10 years. If both confess, they each get 5 years.
-      The Warden must present this deal to Danny now.
+      Interrogation Room B. The Warden addresses Danny directly.
     auto_rounds: 3
 
   - name: the_yard
@@ -75,10 +68,7 @@ phases:
     topology: round_robin
     debate_format: free_form
     initial_prompt: >-
-      SCENARIO: The prison yard. Marco and Danny meet without the Warden present.
-      They have each been offered the same deal by the Warden. They can discuss
-      what to do, but the guards might be listening. They do not know what the
-      other told the Warden.
+      The prison yard. Marco and Danny meet alone. No warden, no guards nearby.
     auto_rounds: 2
 
   - name: final_reckoning
@@ -87,46 +77,37 @@ phases:
     topology: round_robin
     debate_format: free_form
     initial_prompt: >-
-      SCENARIO: The interrogation room. The Warden has called both Marco and Danny
-      back together for the final time.
+      The interrogation room. The Warden has called both suspects back together.
+      This is the final time. Each suspect must choose: keep silent or confess.
     per_agent_prompt_templates:
       warden: >-
-        This is the last time you will ask. You are impatient.
-        Remind them of the deal: both keep silent = 2 years each,
-        one confesses = confessor free and the other gets 10 years,
-        both confess = 5 years each.
-        Demand each suspect choose NOW: keep silent or confess.
+        You are impatient. Remind them of the deal one final time, then demand each suspect choose NOW.
         Whatever they say is their final answer.
-      marco: >-
-        The Warden is about to demand your final answer.
-        Listen to what he says, then choose: keep silent or confess.
-      danny: >-
-        The Warden is about to demand your final answer.
-        Listen to what he says, then choose: keep silent or confess.
     auto_rounds: 2
 
   - name: outcome_analysis
     label: "The Verdict"
-    agents: [analyst]
+    agents: [marco, danny, analyst]
     topology: round_robin
     debate_format: free_form
-    initial_prompt_template: |
-      TRANSCRIPT FROM FINAL RECKONING:
-      ${final_reckoning.messages[analyst]}
+    initial_prompt: >-
+      The warden has recorded your final decisions. State your choice clearly.
+    per_agent_prompt_templates:
+      marco: >-
+        State your final choice in ONE WORD: CONFESS or SILENT.
+      danny: >-
+        State your final choice in ONE WORD: CONFESS or SILENT.
+      analyst: >-
+        PAYOFF MATRIX:
+        | Marco    | Danny    | Marco gets | Danny gets |
+        |----------|----------|------------|------------|
+        | SILENT   | SILENT   | 2 years    | 2 years    |
+        | CONFESS  | SILENT   | FREE       | 10 years   |
+        | SILENT   | CONFESS  | 10 years   | FREE       |
+        | CONFESS  | CONFESS  | 5 years    | 5 years    |
 
-      CLASSIFICATION RULES:
-      KEPT SILENT = suspect says "silent", "quiet", "keep silent", or refuses to talk
-      CONFESSED = suspect says "talk", "confess", "rat out", or tries to get the other caught
-
-      PAYOFF MATRIX (APPLY CAREFULLY):
-      - Both KEEP SILENT → 2 years each
-      - One CONFESSES, other KEEPS SILENT → confessor goes FREE, silent one gets 10 years
-      - Both CONFESS → 5 years each (not 2 years!)
-
-      REQUIRED FORMAT:
-      Step 1: Quote Marco's exact final choice. Classification: [KEPT SILENT or CONFESSED]
-      Step 2: Quote Danny's exact final choice. Classification: [KEPT SILENT or CONFESSED]
-      Step 3: Apply matrix: Marco=[KEPT SILENT/CONFESSED], Danny=[KEPT SILENT/CONFESSED] → VERDICT: Marco gets X years, Danny gets Y years
+        Read Marco's choice and Danny's choice above. Look up the row in the matrix.
+        State: "Marco chose X, Danny chose Y. From the matrix: Marco gets Z, Danny gets W."
     auto_rounds: 1
 
 outcome:
