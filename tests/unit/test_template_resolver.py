@@ -30,9 +30,7 @@ class TestResolveTemplate:
         assert result == "Context:\nAlice: I agree.\nBob: I disagree."
 
     def test_multiple_refs_substituted(self) -> None:
-        template = (
-            "Phase1:\n${intro.messages[a]}\n\nPhase2:\n${outro.messages[b]}"
-        )
+        template = "Phase1:\n${intro.messages[a]}\n\nPhase2:\n${outro.messages[b]}"
         phase_messages = {
             "intro": [{"sender_name": "Host", "content": "Welcome"}],
             "outro": [{"sender_name": "Host", "content": "Goodbye"}],
@@ -100,6 +98,103 @@ class TestResolveTemplate:
         }
         result = resolve_template(template, phase_messages)
         assert result == "BEGIN S: hi END"
+
+
+# ---------------------------------------------------------------------------
+# resolve_template — agent perspective formatting
+# ---------------------------------------------------------------------------
+
+
+class TestResolveTemplatePerspective:
+    """Tests for perspective-aware formatting with agent_display_names."""
+
+    def test_own_messages_labeled_you(self) -> None:
+        template = "${chat.messages[alice]}"
+        phase_messages = {
+            "chat": [
+                {"sender_name": "Alice", "content": "I think so."},
+                {"sender_name": "Bob", "content": "I disagree."},
+            ],
+        }
+        agent_names = {"alice": "Alice", "bob": "Bob"}
+        result = resolve_template(template, phase_messages, agent_names)
+        assert result == "You: I think so.\nBob: I disagree."
+
+    def test_other_agent_perspective_different(self) -> None:
+        template = "${chat.messages[bob]}"
+        phase_messages = {
+            "chat": [
+                {"sender_name": "Alice", "content": "I think so."},
+                {"sender_name": "Bob", "content": "I disagree."},
+            ],
+        }
+        agent_names = {"alice": "Alice", "bob": "Bob"}
+        result = resolve_template(template, phase_messages, agent_names)
+        assert result == "Alice: I think so.\nYou: I disagree."
+
+    def test_system_messages_skipped(self) -> None:
+        template = "${phase.messages[alice]}"
+        phase_messages = {
+            "phase": [
+                {"sender_name": "System", "content": "Topic intro"},
+                {"sender_name": "Alice", "content": "My response."},
+            ],
+        }
+        agent_names = {"alice": "Alice"}
+        result = resolve_template(template, phase_messages, agent_names)
+        assert "System" not in result
+        assert result == "You: My response."
+
+    def test_no_agent_names_shows_all_senders(self) -> None:
+        template = "${chat.messages[alice]}"
+        phase_messages = {
+            "chat": [
+                {"sender_name": "Alice", "content": "Hi"},
+                {"sender_name": "Bob", "content": "Hello"},
+            ],
+        }
+        result = resolve_template(template, phase_messages)
+        assert result == "Alice: Hi\nBob: Hello"
+
+    def test_unknown_agent_key_no_perspective(self) -> None:
+        template = "${chat.messages[unknown]}"
+        phase_messages = {
+            "chat": [{"sender_name": "Alice", "content": "Hi"}],
+        }
+        agent_names = {"alice": "Alice"}
+        result = resolve_template(template, phase_messages, agent_names)
+        assert result == "Alice: Hi"
+
+    def test_per_agent_templates_different_perspectives(self) -> None:
+        """Simulate gossip scenario: same phase, different agent perspectives."""
+        phase_messages = {
+            "private_chat": [
+                {"sender_name": "Alice", "content": "Did you hear about Eve?"},
+                {"sender_name": "Bob", "content": "No, what happened?"},
+                {"sender_name": "Alice", "content": "She got promoted!"},
+            ],
+        }
+        agent_names = {"alice": "Alice", "bob": "Bob", "eve": "Eve"}
+
+        alice_tmpl = "Your memories:\n${private_chat.messages[alice]}"
+        bob_tmpl = "Your memories:\n${private_chat.messages[bob]}"
+
+        alice_result = resolve_template(
+            alice_tmpl,
+            phase_messages,
+            agent_names,
+        )
+        bob_result = resolve_template(
+            bob_tmpl,
+            phase_messages,
+            agent_names,
+        )
+
+        assert "You: Did you hear about Eve?" in alice_result
+        assert "Bob: No, what happened?" in alice_result
+
+        assert "Alice: Did you hear about Eve?" in bob_result
+        assert "You: No, what happened?" in bob_result
 
 
 # ---------------------------------------------------------------------------

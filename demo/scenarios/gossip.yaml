@@ -44,26 +44,33 @@ phases:
     agents: [alice, bob, eve]
     topology: round_robin
     debate_format: free_form
-    initial_prompt_template: |
+    initial_prompt: |
       The three of you are meeting together.
 
       IMPORTANT: You have private knowledge from earlier conversations,
       but ONLY say things you'd be comfortable saying in front of everyone.
       Do NOT repeat private gossip directly. You may hint at inside jokes.
 
-      Alice remembers (from private chat with Bob):
-      ${alice_bob.messages[alice]}
-
-      Alice remembers (from private chat with Eve):
-      ${alice_eve.messages[alice]}
-
-      Bob remembers (from private chat with Alice):
-      ${alice_bob.messages[bob]}
-
-      Eve remembers (from private chat with Alice):
-      ${alice_eve.messages[eve]}
-
       Now you're all in the same room. Be natural.
+    per_agent_prompt_templates:
+      alice: |
+        YOUR PRIVATE MEMORIES (only you can see this):
+
+        From your private chat with Bob:
+        ${alice_bob.messages[alice]}
+
+        From your private chat with Eve:
+        ${alice_eve.messages[alice]}
+      bob: |
+        YOUR PRIVATE MEMORIES (only you can see this):
+
+        From your private chat with Alice:
+        ${alice_bob.messages[bob]}
+      eve: |
+        YOUR PRIVATE MEMORIES (only you can see this):
+
+        From your private chat with Alice:
+        ${alice_eve.messages[eve]}
     auto_rounds: 3
 
 ui:

@@ -188,7 +188,7 @@ class TestAgentSettings:
         """Should load with documented default values."""
         settings = AgentSettings()
 
-        assert settings.max_agents_in_memory == 5
+        assert settings.max_agents_in_memory == 12
         assert settings.cache_dir == "~/.semantic/caches"
         assert settings.batch_window_ms == 10
         assert settings.lru_eviction_enabled is True
@@ -278,7 +278,7 @@ class TestRootSettings:
 
         # Verify defaults propagate
         assert settings.mlx.model_id == "mlx-community/DeepSeek-Coder-V2-Lite-Instruct-4bit-mlx"
-        assert settings.agent.max_agents_in_memory == 5
+        assert settings.agent.max_agents_in_memory == 12
         assert settings.server.port == 8000
 
     def test_load_mixed_env_vars(self, monkeypatch) -> None:

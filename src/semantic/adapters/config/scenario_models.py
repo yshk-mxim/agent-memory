@@ -72,6 +72,7 @@ class PhaseSpecModel(BaseModel):
     decision_mode: str = Field(default="none")
     initial_prompt: str = Field(default="", max_length=50000)
     initial_prompt_template: str = Field(default="", max_length=50000)
+    per_agent_prompt_templates: dict[str, str] = Field(default_factory=dict)
     max_turns: int = Field(default=0, ge=0, le=1000)
     auto_rounds: int = Field(default=3, ge=1, le=50)
     interactions: list[InteractionEdgeModel] | None = None
@@ -90,6 +91,7 @@ class PhaseSpecModel(BaseModel):
             decision_mode=self.decision_mode,
             initial_prompt=self.initial_prompt,
             initial_prompt_template=self.initial_prompt_template,
+            per_agent_prompt_templates=dict(self.per_agent_prompt_templates),
             max_turns=self.max_turns,
             auto_rounds=self.auto_rounds,
             interactions=edges,
@@ -135,6 +137,7 @@ class UIHintsModel(BaseModel):
     column_count: int = Field(default=2, ge=1, le=4)
     show_memory_panel: bool = Field(default=False)
     show_interaction_graph: bool = Field(default=False)
+    show_run_all: bool = Field(default=False)
     max_visible_messages: int = Field(default=50, ge=1, le=500)
     phase_controls: str = Field(default="per_phase", pattern=r"^(per_phase|global)$")
 
@@ -145,6 +148,7 @@ class UIHintsModel(BaseModel):
             column_count=self.column_count,
             show_memory_panel=self.show_memory_panel,
             show_interaction_graph=self.show_interaction_graph,
+            show_run_all=self.show_run_all,
             max_visible_messages=self.max_visible_messages,
             phase_controls=self.phase_controls,
         )

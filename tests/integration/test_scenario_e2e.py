@@ -47,18 +47,23 @@ class TestGossipFullPipeline:
         assert alice_eve.agents == ("alice", "eve")
         assert reunion.agents == ("alice", "bob", "eve")
 
-    def test_reunion_has_template(self, gossip: ScenarioSpec) -> None:
+    def test_reunion_has_per_agent_templates(self, gossip: ScenarioSpec) -> None:
         reunion = gossip.phases[2]
-        assert reunion.initial_prompt_template
-        assert has_template_refs(reunion.initial_prompt_template)
+        assert reunion.per_agent_prompt_templates
+        assert set(reunion.per_agent_prompt_templates.keys()) == {"alice", "bob", "eve"}
+        for tmpl in reunion.per_agent_prompt_templates.values():
+            assert has_template_refs(tmpl)
 
-    def test_reunion_template_refs_both_prior_phases(self, gossip: ScenarioSpec) -> None:
+    def test_reunion_per_agent_templates_ref_prior_phases(self, gossip: ScenarioSpec) -> None:
         reunion = gossip.phases[2]
-        refs = extract_phase_refs(reunion.initial_prompt_template)
-        assert refs == {"alice_bob", "alice_eve"}
+        all_refs: set[str] = set()
+        for tmpl in reunion.per_agent_prompt_templates.values():
+            all_refs.update(extract_phase_refs(tmpl))
+        assert all_refs == {"alice_bob", "alice_eve"}
 
-    def test_reunion_template_resolves_with_all_agent_context(
-        self, gossip: ScenarioSpec,
+    def test_reunion_per_agent_templates_resolve_with_perspective(
+        self,
+        gossip: ScenarioSpec,
     ) -> None:
         reunion = gossip.phases[2]
         phase_messages = {
@@ -71,13 +76,36 @@ class TestGossipFullPipeline:
                 {"sender_name": "Eve", "content": "Tell me everything!"},
             ],
         }
-        resolved = resolve_template(reunion.initial_prompt_template, phase_messages)
+        agent_names = {k: a.display_name for k, a in gossip.agents.items()}
 
-        assert "Alice: Bob is so forgetful." in resolved
-        assert "Bob: Don't tell Eve I said this." in resolved
-        assert "Alice: Eve, you won't believe this." in resolved
-        assert "Eve: Tell me everything!" in resolved
-        assert "${" not in resolved
+        # Alice sees her own messages as "You"
+        alice_resolved = resolve_template(
+            reunion.per_agent_prompt_templates["alice"],
+            phase_messages,
+            agent_names,
+        )
+        assert "You: Bob is so forgetful." in alice_resolved
+        assert "Bob: Don't tell Eve I said this." in alice_resolved
+        assert "You: Eve, you won't believe this." in alice_resolved
+        assert "${" not in alice_resolved
+
+        # Bob sees his messages as "You", Alice's as "Alice"
+        bob_resolved = resolve_template(
+            reunion.per_agent_prompt_templates["bob"],
+            phase_messages,
+            agent_names,
+        )
+        assert "Alice: Bob is so forgetful." in bob_resolved
+        assert "You: Don't tell Eve I said this." in bob_resolved
+
+        # Eve sees her messages as "You", Alice's as "Alice"
+        eve_resolved = resolve_template(
+            reunion.per_agent_prompt_templates["eve"],
+            phase_messages,
+            agent_names,
+        )
+        assert "Alice: Eve, you won't believe this." in eve_resolved
+        assert "You: Tell me everything!" in eve_resolved
 
     def test_non_template_phases_have_initial_prompt(self, gossip: ScenarioSpec) -> None:
         alice_bob, alice_eve, _ = gossip.phases
@@ -94,7 +122,7 @@ class TestPrisonersDilemmaFullPipeline:
         return load_scenario(SCENARIOS_DIR / "prisoners_dilemma.yaml")
 
     def test_agents(self, pd_spec: ScenarioSpec) -> None:
-        assert set(pd_spec.agents.keys()) == {"warden", "marco", "danny"}
+        assert set(pd_spec.agents.keys()) == {"warden", "marco", "danny", "analyst"}
 
     def test_warden_is_moderator(self, pd_spec: ScenarioSpec) -> None:
         assert pd_spec.agents["warden"].role == "moderator"
@@ -166,7 +194,7 @@ class TestTemplateResolutionWithRealisticMessages:
         template = "${chat.messages[x]}"
         messages = [
             {"sender_name": "Bot", "content": "Price: $50 (25% off!) & free shipping"},
-            {"sender_name": "User", "content": "What about <html> tags & \"quotes\"?"},
+            {"sender_name": "User", "content": 'What about <html> tags & "quotes"?'},
         ]
         resolved = resolve_template(template, {"chat": messages})
 
@@ -180,10 +208,7 @@ class TestTemplateResolutionWithRealisticMessages:
         assert resolved == "History:\n(no messages yet)"
 
     def test_multiple_phase_refs_in_single_template(self) -> None:
-        template = (
-            "Phase A:\n${phase_a.messages[x]}\n\n"
-            "Phase B:\n${phase_b.messages[y]}"
-        )
+        template = "Phase A:\n${phase_a.messages[x]}\n\nPhase B:\n${phase_b.messages[y]}"
         phase_messages = {
             "phase_a": [{"sender_name": "Host", "content": "Welcome"}],
             "phase_b": [{"sender_name": "Host", "content": "Goodbye"}],
@@ -240,9 +265,13 @@ class TestCrossPhaseDependencyChecking:
     def test_gossip_reunion_depends_on_both_private_phases(self) -> None:
         gossip = load_scenario(SCENARIOS_DIR / "gossip.yaml")
         reunion = gossip.phases[2]
-        deps = extract_phase_refs(reunion.initial_prompt_template)
+        # Dependencies are now in per_agent_prompt_templates, not initial_prompt_template
+        all_deps: set[str] = set()
+        all_deps.update(extract_phase_refs(reunion.initial_prompt_template))
+        for tmpl in reunion.per_agent_prompt_templates.values():
+            all_deps.update(extract_phase_refs(tmpl))
         prior_phase_names = {p.name for p in gossip.phases[:2]}
-        assert deps == prior_phase_names
+        assert all_deps == prior_phase_names
 
 
 class TestScenarioDiscoveryPipeline:

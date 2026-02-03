@@ -22,6 +22,7 @@ from sse_starlette.sse import EventSourceResponse
 from semantic.adapters.inbound.adapter_helpers import (
     get_semantic_state,
     run_step_for_uid,
+    tokenize_with_chat_template,
     try_parse_json_at,
 )
 from semantic.adapters.inbound.request_models import (
@@ -191,6 +192,78 @@ def messages_to_prompt(  # noqa: PLR0912, C901
     lines.append("Assistant:")
 
     return "\n".join(lines)
+
+
+def messages_to_chat_dicts(  # noqa: C901, PLR0912
+    messages: list[Message],
+    system: str | list[Any] = "",
+    tools: list[Any] | None = None,
+) -> list[dict[str, str]]:
+    """Convert Anthropic messages to simple chat dicts for chat template.
+
+    Args:
+        messages: List of user/assistant messages
+        system: System prompt (string or blocks)
+        tools: Optional list of tool definitions
+
+    Returns:
+        List of {"role": ..., "content": ...} dicts
+    """
+    result: list[dict[str, str]] = []
+
+    # Build system content
+    system_parts: list[str] = []
+    if system:
+        if isinstance(system, str):
+            system_parts.append(system)
+        else:
+            for block in system:
+                if hasattr(block, "text"):
+                    system_parts.append(block.text)
+
+    if tools:
+        tool_lines = ["\nAvailable Tools:"]
+        for tool in tools:
+            tool_def = {
+                "name": tool.name,
+                "description": tool.description,
+                "input_schema": tool.input_schema,
+            }
+            tool_lines.append(json.dumps(tool_def, indent=2))
+        tool_lines.append(
+            '\nTo use a tool, output JSON: {"tool_use": {"name": "<tool_name>", '
+            '"input": {<parameters>}}}'
+        )
+        system_parts.append("\n".join(tool_lines))
+
+    if system_parts:
+        result.append({"role": "system", "content": "\n\n".join(system_parts)})
+
+    # Convert messages
+    for msg in messages:
+        parts: list[str] = []
+        if isinstance(msg.content, str):
+            parts.append(msg.content)
+        else:
+            for block in msg.content:
+                if hasattr(block, "text"):
+                    parts.append(block.text)
+                elif hasattr(block, "thinking"):
+                    parts.append(f"(thinking): {block.thinking}")
+                elif hasattr(block, "tool_use_id"):
+                    rc = (
+                        block.content
+                        if isinstance(block.content, str)
+                        else json.dumps(block.content)
+                    )
+                    st = "ERROR" if block.is_error else "SUCCESS"
+                    parts.append(f"[Tool Result - {st}]: {rc}")
+                elif hasattr(block, "name") and hasattr(block, "input"):
+                    tc = {"name": block.name, "input": block.input}
+                    parts.append(f"[Tool Call]: {json.dumps(tc)}")
+        result.append({"role": msg.role, "content": "\n".join(parts)})
+
+    return result
 
 
 async def stream_generation(  # noqa: C901, PLR0912
@@ -553,18 +626,29 @@ async def create_message(request_body: MessagesRequest, request: Request):  # no
     prefix_cache: SharedPrefixCache | None = getattr(semantic_state, "prefix_cache", None)
 
     try:
-        # 1. Convert messages to prompt (including tools if present)
+        # 1. Convert messages to prompt (for logging and fallback)
+        tools_arg = request_body.tools if request_body.tools else None
         prompt = messages_to_prompt(
             request_body.messages,
             request_body.system,
-            request_body.tools if request_body.tools else None,
+            tools_arg,
         )
         logger.debug(f"Prompt length: {len(prompt)} chars")
         logger.debug(f"Full prompt:\n{prompt}")
 
-        # 2. Tokenize (run in executor to avoid blocking)
+        # 2. Tokenize using chat template for proper model turn markers
         tokenizer = batch_engine.tokenizer
-        tokens = await asyncio.to_thread(tokenizer.encode, prompt)
+        chat_dicts = messages_to_chat_dicts(
+            request_body.messages,
+            request_body.system,
+            tools_arg,
+        )
+        tokens = await asyncio.to_thread(
+            tokenize_with_chat_template,
+            tokenizer,
+            chat_dicts,
+            prompt,
+        )
 
         # 3. Determine agent_id: use X-Session-ID for session-based caching,
         # fall back to token-based ID for stateless requests.
@@ -626,7 +710,9 @@ async def create_message(request_body: MessagesRequest, request: Request):  # no
                     )
                 )
             # Legacy direct streaming (no scheduler) — unsafe for concurrent requests
-            logger.warning("Returning SSE stream (direct, no scheduler) — concurrent requests unsafe")
+            logger.warning(
+                "Returning SSE stream (direct, no scheduler) — concurrent requests unsafe"
+            )
             return EventSourceResponse(
                 stream_generation(
                     request_body, batch_engine, cache_store, tokens, agent_id, cached_blocks
@@ -659,7 +745,9 @@ async def create_message(request_body: MessagesRequest, request: Request):  # no
         else:
             # Legacy direct path: no concurrency protection — unsafe for
             # simultaneous requests. Enable SEMANTIC_MLX_SCHEDULER_ENABLED=true.
-            logger.warning("Using direct batch_engine path (no scheduler) — concurrent requests unsafe")
+            logger.warning(
+                "Using direct batch_engine path (no scheduler) — concurrent requests unsafe"
+            )
             uid = await asyncio.to_thread(
                 batch_engine.submit,
                 agent_id=agent_id,

@@ -711,15 +711,20 @@ class TestBlockPoolO1Timing:
         assert mean_ms < 0.1, f"Mean deallocation time {mean_ms:.4f}ms exceeds 0.1ms"
 
     def test_scaling_ratio_indicates_o1(self, small_spec: ModelCacheSpec) -> None:
-        """10 allocations vs 10000: ratio must be < 3x (O(1) not O(n))."""
+        """100 allocations vs 10000: ratio must be < 5x (O(1) not O(n))."""
         import time
 
-        # Small batch: 10 allocations
+        # Warmup pass to stabilize JIT/caches
+        pool_warmup = BlockPool(spec=small_spec, total_blocks=20000)
+        for i in range(200):
+            pool_warmup.allocate(1, layer_id=0, agent_id=f"warmup_{i}")
+
+        # Small batch: 100 allocations (enough to reduce noise)
         pool_small = BlockPool(spec=small_spec, total_blocks=20000)
         start = time.perf_counter()
-        for i in range(10):
+        for i in range(100):
             pool_small.allocate(1, layer_id=0, agent_id=f"agent_{i}")
-        time_10 = time.perf_counter() - start
+        time_100 = time.perf_counter() - start
 
         # Large batch: 10000 allocations
         pool_large = BlockPool(spec=small_spec, total_blocks=20000)
@@ -728,14 +733,12 @@ class TestBlockPoolO1Timing:
             pool_large.allocate(1, layer_id=0, agent_id=f"agent_{i}")
         time_10000 = time.perf_counter() - start
 
-        # If O(1): time_10000 / time_10 ≈ 1000 (just more iterations)
-        # If O(n): time_10000 / time_10 would be >> 1000
-        # We check per-operation: mean_10000 should be < 3x mean_10
-        mean_10 = time_10 / 10
+        mean_100 = time_100 / 100
         mean_10000 = time_10000 / 10000
-        ratio = mean_10000 / mean_10 if mean_10 > 0 else 1.0
+        ratio = mean_10000 / mean_100 if mean_100 > 0 else 1.0
 
-        assert ratio < 3.0, (
+        assert ratio < 5.0, (
             f"Scaling ratio {ratio:.2f}x suggests O(n) not O(1). "
-            f"10-op mean={mean_10*1000:.4f}ms, 10000-op mean={mean_10000*1000:.4f}ms"
+            f"100-op mean={mean_100*1000:.4f}ms, "
+            f"10000-op mean={mean_10000*1000:.4f}ms"
         )

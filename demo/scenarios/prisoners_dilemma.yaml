@@ -6,7 +6,10 @@ agents:
   warden:
     display_name: Warden
     role: moderator
-    system_prompt: "You are a pragmatic corrections officer. Explain the deal plainly. Under 3 sentences."
+    system_prompt: >-
+      You are a pragmatic corrections officer.
+      Explain the deal plainly. You may use information you have strategically.
+      Under 3 sentences.
     lifecycle: permanent
     color: "#95A5A6"
   marco:
@@ -21,6 +24,17 @@ agents:
     system_prompt: "You are Danny. Street-smart, 41, been through the system. Under 3 sentences."
     lifecycle: permanent
     color: "#E74C3C"
+  analyst:
+    display_name: Analyst
+    role: moderator
+    system_prompt: >-
+      You are a neutral game theory analyst. Your job is to determine
+      what each suspect ACTUALLY CHOSE based on their final statements.
+      "stay silent", "cooperate", "two years" = COOPERATE.
+      "talk", "confess", "defect" = DEFECT. Quote each suspect's key
+      statement, classify it, then apply the payoff matrix.
+    lifecycle: ephemeral
+    color: "#9B59B6"
 
 phases:
   - name: interrogation_marco
@@ -50,14 +64,82 @@ phases:
     auto_rounds: 3
 
   - name: the_yard
-    label: "The Yard (Optional)"
+    label: "The Yard"
     agents: [marco, danny]
     topology: round_robin
     debate_format: free_form
     initial_prompt: >-
       Marco and Danny meet in the yard.
       They can discuss strategy but the guards might be listening.
+    per_agent_prompt_templates:
+      marco: |
+        YOUR PRIVATE MEMORIES (only you can see this):
+
+        From your interrogation with the Warden:
+        ${interrogation_marco.messages[marco]}
+      danny: |
+        YOUR PRIVATE MEMORIES (only you can see this):
+
+        From your interrogation with the Warden:
+        ${interrogation_danny.messages[danny]}
     auto_rounds: 2
+
+  - name: final_reckoning
+    label: "Final Reckoning"
+    agents: [warden, marco, danny]
+    topology: round_robin
+    debate_format: free_form
+    initial_prompt_template: |
+      The warden calls both suspects back for a final session.
+
+      What the warden overheard from the yard:
+      ${the_yard.messages[warden]}
+
+      You are impatient. This is the last time you will ask.
+      State the deal one final time, then demand each suspect choose NOW:
+      cooperate (stay silent) or defect (talk).
+      Tell them plainly: whatever they say next is their final answer. No more discussion.
+    per_agent_prompt_templates:
+      marco: |
+        YOUR PRIVATE MEMORIES (only you can see this):
+
+        From your interrogation:
+        ${interrogation_marco.messages[marco]}
+
+        From your conversation with Danny in the yard:
+        ${the_yard.messages[marco]}
+      danny: |
+        YOUR PRIVATE MEMORIES (only you can see this):
+
+        From your interrogation:
+        ${interrogation_danny.messages[danny]}
+
+        From your conversation with Marco in the yard:
+        ${the_yard.messages[danny]}
+    auto_rounds: 2
+
+  - name: outcome_analysis
+    label: "The Verdict"
+    agents: [analyst]
+    topology: round_robin
+    debate_format: free_form
+    initial_prompt_template: |
+      TRANSCRIPT FROM FINAL RECKONING:
+      ${final_reckoning.messages[analyst]}
+
+      CLASSIFICATION RULES:
+      If a suspect says "silent", "quiet", "cooperate", or accepts "two years" → COOPERATE
+      If a suspect says "talk", "confess", "defect", or tries to get the other caught → DEFECT
+
+      PAYOFF MATRIX:
+      Both COOPERATE → 2 years each
+      One DEFECTS, other COOPERATES → defector FREE, cooperator 10 years
+      Both DEFECT → 5 years each
+
+      Step 1: Quote Marco's final choice statement. Classify: COOPERATE or DEFECT.
+      Step 2: Quote Danny's final choice statement. Classify: COOPERATE or DEFECT.
+      Step 3: Apply the payoff matrix. State each suspect's sentence.
+    auto_rounds: 1
 
 outcome:
   type: parse_choice
@@ -75,3 +157,4 @@ ui:
   layout: columns
   column_count: 2
   show_memory_panel: false
+  show_run_all: true

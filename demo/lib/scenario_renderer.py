@@ -89,14 +89,30 @@ class ScenarioRenderer:
 
             st.divider()
 
-            # Global reset
-            if st.button(
-                "Reset All",
-                use_container_width=True,
-                key=_state_key(self.spec.id, "reset_all"),
-            ):
-                self._reset_all()
-                st.rerun()
+            if self.spec.ui.show_run_all:
+                all_done = all(
+                    st.session_state.get(_phase_key(self.spec.id, p.name, "session_id"))
+                    for p in self.spec.phases
+                )
+                col_run, col_reset = st.columns(2)
+                with col_run:
+                    if st.button(
+                        "Run All" if not all_done else "Re-run All",
+                        use_container_width=True,
+                        type="primary",
+                        key=_state_key(self.spec.id, "run_all"),
+                    ):
+                        self._reset_all()
+                        self._run_all_phases()
+                        st.rerun()
+                with col_reset:
+                    if st.button(
+                        "Reset All",
+                        use_container_width=True,
+                        key=_state_key(self.spec.id, "reset_all"),
+                    ):
+                        self._reset_all()
+                        st.rerun()
 
     def _render_phases(self) -> None:
         """Render phases based on ui.layout."""
@@ -173,6 +189,8 @@ class ScenarioRenderer:
                     st.rerun()
             if not can_create:
                 deps = extract_phase_refs(phase.initial_prompt_template)
+                for tmpl in phase.per_agent_prompt_templates.values():
+                    deps.update(extract_phase_refs(tmpl))
                 st.caption(f"Requires: {', '.join(deps)}")
         else:
             # Fetch and display messages
@@ -196,15 +214,13 @@ class ScenarioRenderer:
 
             if action == "run_turns":
                 st.session_state[exec_key] = True
-                with st.spinner("Generating..."):
-                    count = phase.auto_rounds * len(phase.agents)
-                    api_client.execute_turns(self.base_url, session_id, count)
+                count = phase.auto_rounds * len(phase.agents)
+                self._stream_turns(session_id, count)
                 st.session_state[exec_key] = False
                 st.rerun()
             elif action == "run_round":
                 st.session_state[exec_key] = True
-                with st.spinner("Running round..."):
-                    api_client.execute_round(self.base_url, session_id)
+                self._stream_turns(session_id, len(phase.agents))
                 st.session_state[exec_key] = False
                 st.rerun()
             elif action == "refresh":
@@ -212,31 +228,66 @@ class ScenarioRenderer:
 
     def _can_create_phase(self, phase: PhaseSpec) -> bool:
         """Check if a phase's template dependencies are satisfied."""
-        if not has_template_refs(phase.initial_prompt_template):
+        # Collect all template refs from both shared and per-agent templates
+        all_deps: set[str] = set()
+        all_deps.update(extract_phase_refs(phase.initial_prompt_template))
+        for tmpl in phase.per_agent_prompt_templates.values():
+            all_deps.update(extract_phase_refs(tmpl))
+        if not all_deps:
             return True
-        deps = extract_phase_refs(phase.initial_prompt_template)
-        for dep_name in deps:
+        for dep_name in all_deps:
             dep_key = _phase_key(self.spec.id, dep_name, "session_id")
             if not st.session_state.get(dep_key):
                 return False
-            # Check that dependency has messages
             msg_key = _phase_key(self.spec.id, dep_name, "messages")
             if not st.session_state.get(msg_key):
                 return False
         return True
 
+    def _build_agent_display_names(self) -> dict[str, str]:
+        """Build agent_key -> display_name mapping for template resolution."""
+        return {key: agent.display_name for key, agent in self.spec.agents.items()}
+
+    def _fetch_dep_messages(self, phase: PhaseSpec) -> dict[str, list[dict[str, str]]]:
+        """Fetch messages from dependency phases referenced by templates."""
+        phase_messages: dict[str, list[dict[str, str]]] = {}
+        all_templates = [phase.initial_prompt_template]
+        all_templates.extend(phase.per_agent_prompt_templates.values())
+        dep_names: set[str] = set()
+        for tmpl in all_templates:
+            dep_names.update(extract_phase_refs(tmpl))
+        for dep_name in dep_names:
+            dep_session = st.session_state.get(_phase_key(self.spec.id, dep_name, "session_id"))
+            if dep_session:
+                msgs = api_client.get_session_messages(self.base_url, dep_session)
+                phase_messages[dep_name] = msgs
+        return phase_messages
+
     def _create_phase_session(self, phase: PhaseSpec) -> str | None:
         """Create a coordination session for a phase."""
-        # Resolve template if needed
+        agent_names = self._build_agent_display_names()
+        phase_messages = self._fetch_dep_messages(phase)
+
+        # Resolve shared initial prompt template
         initial_prompt = phase.initial_prompt
         if has_template_refs(phase.initial_prompt_template):
-            phase_messages: dict[str, list[dict[str, str]]] = {}
-            for dep_name in extract_phase_refs(phase.initial_prompt_template):
-                dep_session = st.session_state.get(_phase_key(self.spec.id, dep_name, "session_id"))
-                if dep_session:
-                    msgs = api_client.get_session_messages(self.base_url, dep_session)
-                    phase_messages[dep_name] = msgs
-            initial_prompt = resolve_template(phase.initial_prompt_template, phase_messages)
+            initial_prompt = resolve_template(
+                phase.initial_prompt_template,
+                phase_messages,
+                agent_names,
+            )
+
+        # Resolve per-agent private prompt templates
+        per_agent_prompts: dict[str, str] | None = None
+        if phase.per_agent_prompt_templates:
+            per_agent_prompts = {}
+            for agent_key, tmpl in phase.per_agent_prompt_templates.items():
+                agent = self.spec.agents.get(agent_key)
+                if not agent:
+                    continue
+                resolved = resolve_template(tmpl, phase_messages, agent_names)
+                if resolved.strip():
+                    per_agent_prompts[agent.display_name] = resolved
 
         # Build agent configs
         agent_configs = []
@@ -261,6 +312,7 @@ class ScenarioRenderer:
             agents=agent_configs,
             initial_prompt=initial_prompt,
             max_turns=phase.max_turns,
+            per_agent_prompts=per_agent_prompts,
         )
         if result:
             return result.get("session_id")
@@ -292,6 +344,68 @@ class ScenarioRenderer:
                     st.caption(f"{total_tokens:,} tokens | {', '.join(tiers)} | {agent.lifecycle}")
                 else:
                     st.caption("No cache")
+
+    def _stream_turns(self, session_id: str, count: int) -> None:
+        """Stream multiple turns, showing tokens as they arrive."""
+        for _i in range(count):
+            placeholder = st.empty()
+            agent_name = ""
+            accumulated = ""
+            color = "#888"
+
+            for event_type, data in api_client.stream_turn(
+                self.base_url,
+                session_id,
+            ):
+                if event_type == "turn_start":
+                    agent_name = data.get("agent_name", "")
+                    color = self.agent_colors.get(agent_name, "#888")
+                    accumulated = ""
+                elif event_type == "token":
+                    accumulated = data.get("accumulated", accumulated)
+                    placeholder.markdown(
+                        f'<span style="color:{color}; font-weight:bold;">'
+                        f"{agent_name}:</span> {accumulated}\u258c",
+                        unsafe_allow_html=True,
+                    )
+                elif event_type == "turn_complete":
+                    content = data.get("content", accumulated)
+                    placeholder.markdown(
+                        f'<span style="color:{color}; font-weight:bold;">'
+                        f"{agent_name}:</span> {content}",
+                        unsafe_allow_html=True,
+                    )
+                elif event_type == "error":
+                    placeholder.error(data.get("error", "Stream error"))
+                    return
+
+    def _run_all_phases(self) -> None:
+        """Execute all phases sequentially: create session, run turns, fetch messages."""
+        status = st.sidebar.empty()
+        for idx, phase in enumerate(self.spec.phases, 1):
+            sid = self.spec.id
+            pname = phase.name
+            session_key = _phase_key(sid, pname, "session_id")
+
+            status.info(f"Phase {idx}/{len(self.spec.phases)}: {phase.label}...")
+
+            # Create session (resolves templates from prior phases)
+            new_id = self._create_phase_session(phase)
+            if not new_id:
+                status.error(f"Failed to create session for {phase.label}")
+                return
+            st.session_state[session_key] = new_id
+
+            # Run all turns for this phase
+            turn_count = phase.auto_rounds * len(phase.agents)
+            for _t in range(turn_count):
+                api_client.execute_turn(self.base_url, new_id)
+
+            # Fetch and store messages (needed for template resolution in later phases)
+            messages = api_client.get_session_messages(self.base_url, new_id)
+            st.session_state[_phase_key(sid, pname, "messages")] = messages
+
+        status.success("All phases complete!")
 
     def _reset_all(self) -> None:
         """Delete all phase sessions and reset state."""

@@ -75,7 +75,17 @@ class TestLoadScenarioRealFiles:
         assert "marco" in spec.agents
         assert "danny" in spec.agents
         assert spec.agents["warden"].role == "moderator"
-        assert len(spec.phases) == 3
+        assert "analyst" in spec.agents
+        assert spec.agents["analyst"].lifecycle == "ephemeral"
+        assert len(spec.phases) == 5
+        phase_names = [p.name for p in spec.phases]
+        assert phase_names == [
+            "interrogation_marco",
+            "interrogation_danny",
+            "the_yard",
+            "final_reckoning",
+            "outcome_analysis",
+        ]
         assert spec.outcome is not None
         assert isinstance(spec.outcome, OutcomeRule)
         assert spec.outcome.type == "parse_choice"

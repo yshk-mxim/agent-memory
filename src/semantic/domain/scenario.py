@@ -42,6 +42,7 @@ class PhaseSpec:
     decision_mode: str = "none"
     initial_prompt: str = ""
     initial_prompt_template: str = ""
+    per_agent_prompt_templates: dict[str, str] = field(default_factory=dict)
     max_turns: int = 0
     auto_rounds: int = 3
     interactions: tuple[InteractionEdge, ...] | None = None
@@ -73,6 +74,7 @@ class UIHints:
     column_count: int = 2
     show_memory_panel: bool = False
     show_interaction_graph: bool = False
+    show_run_all: bool = False
     max_visible_messages: int = 50
     phase_controls: str = "per_phase"
 

@@ -93,6 +93,39 @@ def run_step_for_uid(
     return None
 
 
+def tokenize_with_chat_template(
+    tokenizer: Any,
+    chat_messages: list[dict[str, str]],
+    fallback_text: str,
+) -> list[int]:
+    """Tokenize using model's native chat template when available.
+
+    Models like Gemma3 use special turn markers (<start_of_turn>user, etc.)
+    that are critical for proper identity handling in multi-turn conversations.
+    Falls back to raw text tokenization if no chat template is available.
+
+    Args:
+        tokenizer: HuggingFace-compatible tokenizer.
+        chat_messages: List of {"role": ..., "content": ...} dicts.
+        fallback_text: Pre-formatted text to use if no chat template.
+
+    Returns:
+        Token IDs.
+    """
+    if hasattr(tokenizer, "apply_chat_template") and getattr(tokenizer, "chat_template", None):
+        try:
+            tokens = tokenizer.apply_chat_template(
+                chat_messages,
+                tokenize=True,
+                add_generation_prompt=True,
+            )
+            if isinstance(tokens, list):
+                return tokens
+        except Exception:
+            logger.debug("Chat template failed, falling back to raw text tokenization")
+    return tokenizer.encode(fallback_text)
+
+
 def try_parse_json_at(text: str, start: int) -> tuple[dict[str, Any] | None, int]:
     """Try to parse a JSON object starting at the given position.
 

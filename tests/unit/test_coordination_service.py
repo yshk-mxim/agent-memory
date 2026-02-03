@@ -70,8 +70,8 @@ def sample_agents():
 class TestCreateSession:
     """Tests for create_session()."""
 
-    def test_create_basic_session(self, service: CoordinationService, sample_agents) -> None:
-        session = service.create_session(
+    async def test_create_basic_session(self, service: CoordinationService, sample_agents) -> None:
+        session = await service.create_session(
             topology=Topology.TURN_BY_TURN,
             debate_format=DebateFormat.FREE_FORM,
             decision_mode=DecisionMode.NONE,
@@ -89,10 +89,10 @@ class TestCreateSession:
         assert session.max_turns == 10
         assert session.is_active
 
-    def test_create_session_adds_initial_prompt(
+    async def test_create_session_adds_initial_prompt(
         self, service: CoordinationService, sample_agents
     ) -> None:
-        session = service.create_session(
+        session = await service.create_session(
             topology=Topology.TURN_BY_TURN,
             debate_format=DebateFormat.FREE_FORM,
             decision_mode=DecisionMode.NONE,
@@ -106,10 +106,10 @@ class TestCreateSession:
         assert public_channel.messages[0].sender_id == "system"
         assert "Should AI be open source?" in public_channel.messages[0].content
 
-    def test_create_session_stores_in_service(
+    async def test_create_session_stores_in_service(
         self, service: CoordinationService, sample_agents
     ) -> None:
-        session = service.create_session(
+        session = await service.create_session(
             topology=Topology.TURN_BY_TURN,
             debate_format=DebateFormat.FREE_FORM,
             decision_mode=DecisionMode.NONE,
@@ -120,12 +120,44 @@ class TestCreateSession:
         retrieved = service.get_session(session.session_id)
         assert retrieved.session_id == session.session_id
 
+    async def test_create_session_per_agent_prompts(
+        self, service: CoordinationService, sample_agents
+    ) -> None:
+        session = await service.create_session(
+            topology=Topology.TURN_BY_TURN,
+            debate_format=DebateFormat.FREE_FORM,
+            decision_mode=DecisionMode.NONE,
+            agents=sample_agents,
+            initial_prompt="Shared context",
+            per_agent_prompts={
+                "Alice": "Alice's private memories",
+                "Bob": "Bob's private memories",
+            },
+        )
+
+        public_channel = next(c for c in session.channels.values() if c.channel_type == "public")
+        # 1 shared + 2 per-agent = 3 system messages
+        system_msgs = [m for m in public_channel.messages if m.sender_id == "system"]
+        assert len(system_msgs) == 3
+
+        # Shared message is public (empty visible_to)
+        shared = system_msgs[0]
+        assert shared.visible_to == frozenset()
+        assert "Shared context" in shared.content
+
+        # Per-agent messages have restricted visibility
+        alice_msg = next(m for m in system_msgs if "Alice" in m.content and m.visible_to)
+        assert alice_msg.visible_to == frozenset(["a"])  # Only Alice can see
+
+        bob_msg = next(m for m in system_msgs if "Bob" in m.content and m.visible_to)
+        assert bob_msg.visible_to == frozenset(["b"])  # Only Bob can see
+
 
 class TestGetSession:
     """Tests for get_session()."""
 
-    def test_get_existing_session(self, service: CoordinationService, sample_agents) -> None:
-        created = service.create_session(
+    async def test_get_existing_session(self, service: CoordinationService, sample_agents) -> None:
+        created = await service.create_session(
             topology=Topology.TURN_BY_TURN,
             debate_format=DebateFormat.FREE_FORM,
             decision_mode=DecisionMode.NONE,
@@ -143,30 +175,33 @@ class TestGetSession:
 class TestDeleteSession:
     """Tests for delete_session()."""
 
-    def test_delete_existing_session(self, service: CoordinationService, sample_agents) -> None:
-        session = service.create_session(
+    async def test_delete_existing_session(
+        self,
+        service: CoordinationService,
+        sample_agents,
+    ) -> None:
+        session = await service.create_session(
             topology=Topology.TURN_BY_TURN,
             debate_format=DebateFormat.FREE_FORM,
             decision_mode=DecisionMode.NONE,
             agents=sample_agents,
         )
 
-        service.delete_session(session.session_id)
+        await service.delete_session(session.session_id)
 
-        # Should no longer be retrievable
         with pytest.raises(SessionNotFoundError):
             service.get_session(session.session_id)
 
-    def test_delete_nonexistent_session_raises(self, service: CoordinationService) -> None:
+    async def test_delete_nonexistent_session_raises(self, service: CoordinationService) -> None:
         with pytest.raises(SessionNotFoundError):
-            service.delete_session("nonexistent_id")
+            await service.delete_session("nonexistent_id")
 
 
 class TestGetNextTurn:
     """Tests for get_next_turn()."""
 
-    def test_get_first_turn(self, service: CoordinationService, sample_agents) -> None:
-        session = service.create_session(
+    async def test_get_first_turn(self, service: CoordinationService, sample_agents) -> None:
+        session = await service.create_session(
             topology=Topology.TURN_BY_TURN,
             debate_format=DebateFormat.FREE_FORM,
             decision_mode=DecisionMode.NONE,
@@ -180,10 +215,10 @@ class TestGetNextTurn:
         assert directive.turn_number == 0
         assert directive.system_instruction  # Should have system prompt
 
-    def test_get_turn_inactive_session_raises(
+    async def test_get_turn_inactive_session_raises(
         self, service: CoordinationService, sample_agents
     ) -> None:
-        session = service.create_session(
+        session = await service.create_session(
             topology=Topology.TURN_BY_TURN,
             debate_format=DebateFormat.FREE_FORM,
             decision_mode=DecisionMode.NONE,
@@ -194,10 +229,10 @@ class TestGetNextTurn:
         with pytest.raises(InvalidTurnError):
             service.get_next_turn(session.session_id)
 
-    def test_visible_messages_filtered(
+    async def test_visible_messages_filtered(
         self, service: CoordinationService, sample_agents
     ) -> None:
-        session = service.create_session(
+        session = await service.create_session(
             topology=Topology.TURN_BY_TURN,
             debate_format=DebateFormat.FREE_FORM,
             decision_mode=DecisionMode.NONE,
@@ -215,10 +250,10 @@ class TestGetNextTurn:
 class TestBuildAgentPrompt:
     """Tests for build_agent_prompt()."""
 
-    def test_build_prompt_includes_system_instruction(
+    async def test_build_prompt_includes_system_instruction(
         self, service: CoordinationService, sample_agents
     ) -> None:
-        session = service.create_session(
+        session = await service.create_session(
             topology=Topology.TURN_BY_TURN,
             debate_format=DebateFormat.FREE_FORM,
             decision_mode=DecisionMode.NONE,
@@ -229,14 +264,13 @@ class TestBuildAgentPrompt:
         agent_role = session.agents[directive.agent_id]
         messages = service.build_agent_prompt(directive, agent_role)
 
-        # First message should be system
         assert messages[0]["role"] == "system"
-        assert "Alice" in messages[0]["content"]  # Agent name in system prompt
+        assert "Alice" in messages[0]["content"]
 
-    def test_build_prompt_formats_other_agents_as_user(
+    async def test_build_prompt_formats_other_agents_as_user(
         self, service: CoordinationService, sample_agents
     ) -> None:
-        session = service.create_session(
+        session = await service.create_session(
             topology=Topology.TURN_BY_TURN,
             debate_format=DebateFormat.FREE_FORM,
             decision_mode=DecisionMode.NONE,
@@ -244,19 +278,48 @@ class TestBuildAgentPrompt:
             initial_prompt="Test",
         )
 
-        # Manually add a message from agent b
         public_channel = next(c for c in session.channels.values() if c.channel_type == "public")
         public_channel.add_message(sender_id="b", content="Hello from Bob", turn_number=1)
 
-        # Get directive for agent a (should see Bob's message as user role)
         directive = service.get_next_turn(session.session_id)
         agent_role = session.agents["a"]
         messages = service.build_agent_prompt(directive, agent_role)
 
-        # Find Bob's message in the prompt
-        bob_messages = [m for m in messages if "Bob" in m.get("content", "")]
-        assert len(bob_messages) > 0
-        assert bob_messages[0]["role"] == "user"  # Other agent's message = user role
+        bob_messages = [
+            m for m in messages
+            if m["role"] == "user" and "Hello from Bob" in m.get("content", "")
+        ]
+        assert len(bob_messages) == 1
+        assert "Bob: Hello from Bob" in bob_messages[0]["content"]
+
+    async def test_per_agent_prompt_visible_only_to_target(
+        self,
+        service: CoordinationService,
+        sample_agents,
+    ) -> None:
+        session = await service.create_session(
+            topology=Topology.TURN_BY_TURN,
+            debate_format=DebateFormat.FREE_FORM,
+            decision_mode=DecisionMode.NONE,
+            agents=sample_agents,
+            initial_prompt="Shared topic",
+            per_agent_prompts={"Alice": "Alice secret context"},
+        )
+
+        # Agent a (Alice) should see both shared + her private context
+        directive_a = service.get_next_turn(session.session_id)
+        assert directive_a.agent_id == "a"
+        visible_a = [m.content for m in directive_a.visible_messages]
+        assert any("Shared topic" in c for c in visible_a)
+        assert any("Alice secret context" in c for c in visible_a)
+
+        # Simulate advancing to agent b's turn
+        session.advance_turn()
+        directive_b = service.get_next_turn(session.session_id)
+        assert directive_b.agent_id == "b"
+        visible_b = [m.content for m in directive_b.visible_messages]
+        assert any("Shared topic" in c for c in visible_b)
+        assert not any("Alice secret context" in c for c in visible_b)
 
 
 class TestFilterVisibleMessages:

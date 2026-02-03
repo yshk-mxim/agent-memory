@@ -327,7 +327,8 @@ class TestCharacterPrefixRoundTrip:
 
         store.save("agent_1", blocks)
 
-        # Evict from hot tier (force disk load path)
+        # Flush write-behind to disk, then clear hot tier
+        store.flush_dirty()
         store.invalidate_hot("agent_1")
         recovered = store.load("agent_1")
 
@@ -352,6 +353,7 @@ class TestCharacterPrefixRoundTrip:
             prompt_text=text,
         )
         store.save("agent_1", blocks)
+        store.flush_dirty()
         store.invalidate_hot("agent_1")
         recovered = store.load("agent_1")
 
@@ -372,6 +374,7 @@ class TestCharacterPrefixRoundTrip:
             prompt_text=text,
         )
         store.save("agent_1", blocks)
+        store.flush_dirty()
         store.invalidate_hot("agent_1")
         recovered = store.load("agent_1")
 
@@ -392,6 +395,7 @@ class TestCharacterPrefixRoundTrip:
             prompt_text="Hello, how are you today?",
         )
         store.save("agent_1", blocks)
+        store.flush_dirty()
         store.invalidate_hot("agent_1")
         recovered = store.load("agent_1")
 
@@ -411,6 +415,7 @@ class TestCharacterPrefixRoundTrip:
             prompt_text="Hello, world",
         )
         store.save("agent_1", blocks)
+        store.flush_dirty()
         store.invalidate_hot("agent_1")
         recovered = store.load("agent_1")
 
@@ -431,6 +436,7 @@ class TestCharacterPrefixRoundTrip:
             prompt_text="Caf\u00e9 au lait",
         )
         store.save("agent_1", blocks)
+        store.flush_dirty()
         store.invalidate_hot("agent_1")
         recovered = store.load("agent_1")
 
@@ -474,6 +480,7 @@ class TestTokenSequenceFidelity:
             token_sequence=seq,
         )
         store.save("agent_1", blocks)
+        store.flush_dirty()
         store.invalidate_hot("agent_1")
         recovered = store.load("agent_1")
 
@@ -494,6 +501,7 @@ class TestTokenSequenceFidelity:
             token_sequence=seq,
         )
         store.save("agent_1", blocks)
+        store.flush_dirty()
         store.invalidate_hot("agent_1")
         recovered = store.load("agent_1")
 
@@ -513,6 +521,7 @@ class TestTokenSequenceFidelity:
             token_sequence=seq,
         )
         store.save("agent_1", blocks)
+        store.flush_dirty()
         store.invalidate_hot("agent_1")
         recovered = store.load("agent_1")
 
@@ -532,6 +541,7 @@ class TestTokenSequenceFidelity:
             token_sequence=seq,
         )
         store.save("agent_1", blocks)
+        store.flush_dirty()
         store.invalidate_hot("agent_1")
         recovered = store.load("agent_1")
 
@@ -551,6 +561,7 @@ class TestTokenSequenceFidelity:
             token_sequence=seq,
         )
         store.save("agent_1", blocks)
+        store.flush_dirty()
         store.invalidate_hot("agent_1")
         recovered = store.load("agent_1")
 
@@ -569,6 +580,7 @@ class TestTokenSequenceFidelity:
             token_sequence=[],
         )
         store.save("agent_1", blocks)
+        store.flush_dirty()
         store.invalidate_hot("agent_1")
         recovered = store.load("agent_1")
 
@@ -589,6 +601,7 @@ class TestTokenSequenceFidelity:
             token_sequence=seq,
         )
         store.save("agent_1", blocks)
+        store.flush_dirty()
         store.invalidate_hot("agent_1")
         recovered = store.load("agent_1")
 
@@ -653,6 +666,7 @@ class TestAgentCacheStoreRoundTrip:
         )
 
         store.save("agent_1", blocks)
+        store.flush_dirty()
         store.invalidate_hot("agent_1")
 
         # Verify hot tier is empty
@@ -677,6 +691,7 @@ class TestAgentCacheStoreRoundTrip:
         )
 
         store.save("agent_1", blocks)
+        store.flush_dirty()
 
         # Verify metadata was passed to adapter
         _, metadata = adapter._store["agent_1"]
@@ -697,6 +712,7 @@ class TestAgentCacheStoreRoundTrip:
         )
 
         store.save("agent_1", blocks)
+        store.flush_dirty()
         store.invalidate_hot("agent_1")
 
         # Change model tag to incompatible one
@@ -728,6 +744,7 @@ class TestAgentCacheStoreRoundTrip:
 
         # Round 1
         store.save("agent_1", blocks)
+        store.flush_dirty()
         store.invalidate_hot("agent_1")
         recovered1 = store.load("agent_1")
         assert recovered1 is not None, "Round 1 load returned None"
@@ -735,6 +752,7 @@ class TestAgentCacheStoreRoundTrip:
 
         # Round 2: save recovered data, load again
         store.save("agent_1", recovered1)
+        store.flush_dirty()
         store.invalidate_hot("agent_1")
         recovered2 = store.load("agent_1")
         assert recovered2 is not None, "Round 2 load returned None"

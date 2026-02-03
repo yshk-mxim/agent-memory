@@ -11,9 +11,12 @@ No MLX / infrastructure imports — interacts with adapters through ports.
 """
 
 import asyncio
-import structlog
-from typing import AsyncIterator
+import re
+from collections.abc import AsyncIterator
+from dataclasses import dataclass
 from uuid import uuid4
+
+import structlog
 
 from semantic.domain.coordination import (
     AgentRole,
@@ -32,6 +35,16 @@ from semantic.domain.value_objects import StreamDelta
 
 logger = structlog.get_logger(__name__)
 
+MAX_CONTEXT_MESSAGES = 40  # Total across all speakers
+
+
+@dataclass
+class _DirectResult:
+    """Result from direct engine generation (scheduler bypass)."""
+
+    text: str
+    blocks: object
+
 
 class CoordinationService:
     """Orchestrates multi-agent coordination sessions.
@@ -43,11 +56,12 @@ class CoordinationService:
     """
 
     def __init__(self, scheduler, cache_store, engine) -> None:
+        """Initialize with injected scheduler, cache store, and engine."""
         self._scheduler = scheduler
         self._cache_store = cache_store
         self._engine = engine
         self._sessions: dict[str, CoordinationSession] = {}
-        self._lock = asyncio.Lock()  # Thread safety for concurrent requests
+        self._lock = asyncio.Lock()
 
     @staticmethod
     def _agent_cache_key(session_id: str, agent_id: str) -> str:
@@ -69,6 +83,7 @@ class CoordinationService:
         decision_mode: DecisionMode,
         agents: list[AgentRole],
         initial_prompt: str = "",
+        per_agent_prompts: dict[str, str] | None = None,
         max_turns: int = 0,
     ) -> CoordinationSession:
         """Create a new coordination session with agents and topology.
@@ -79,6 +94,8 @@ class CoordinationService:
             decision_mode: Decision-making mode (voting, consensus, etc.).
             agents: List of AgentRole objects defining participants.
             initial_prompt: Optional initial prompt/topic for discussion.
+            per_agent_prompts: Per-agent private context keyed by display_name.
+                Each entry becomes a system message visible only to that agent.
             max_turns: Maximum turns before auto-termination (0 = unlimited).
 
         Returns:
@@ -94,7 +111,7 @@ class CoordinationService:
                 participant_ids=frozenset(a.agent_id for a in agents),
             )
 
-            # Add initial prompt as system message if provided
+            # Add shared initial prompt as public system message
             if initial_prompt:
                 public_channel.add_message(
                     sender_id="system",
@@ -102,6 +119,19 @@ class CoordinationService:
                     turn_number=0,
                     visible_to=frozenset(),  # Empty = public
                 )
+
+            # Add per-agent private context (visible only to each agent)
+            if per_agent_prompts:
+                name_to_id = {a.display_name: a.agent_id for a in agents}
+                for display_name, prompt in per_agent_prompts.items():
+                    agent_id = name_to_id.get(display_name)
+                    if agent_id and prompt.strip():
+                        public_channel.add_message(
+                            sender_id="system",
+                            content=prompt,
+                            turn_number=0,
+                            visible_to=frozenset([agent_id]),
+                        )
 
             session = CoordinationSession(
                 session_id=session_id,
@@ -205,9 +235,7 @@ class CoordinationService:
             raise InvalidTurnError(f"No public channel found for session {session_id}")
 
         # Filter messages visible to this agent
-        visible_messages = self._filter_visible_messages(
-            public_channel.messages, next_speaker
-        )
+        visible_messages = self._filter_visible_messages(public_channel.messages, next_speaker)
 
         # Build system instruction based on role and debate format
         system_instruction = self._build_system_instruction(agent_role, session.debate_format)
@@ -239,10 +267,11 @@ class CoordinationService:
                 visible.append(msg)
         return visible
 
-    def _build_system_instruction(
-        self, agent_role: AgentRole, debate_format: DebateFormat
-    ) -> str:
-        """Build system instruction prompt based on role and debate format.
+    def _build_system_instruction(self, agent_role: AgentRole, debate_format: DebateFormat) -> str:
+        """Build system instruction for Gemma 3 roleplay.
+
+        Uses patterns proven by Gemma3NPC: roleplay-mode framing,
+        character-first identity, concise anti-drift rules.
 
         Args:
             agent_role: The agent's role in the coordination.
@@ -251,120 +280,97 @@ class CoordinationService:
         Returns:
             System instruction string.
         """
-        instructions = []
+        name = agent_role.display_name
 
-        # Identity and role-specific instruction
+        # Roleplay-mode framing (proven effective for Gemma 3 character consistency)
         if agent_role.system_prompt:
-            instructions.append(f"You are {agent_role.display_name}. {agent_role.system_prompt}")
+            identity = (
+                f"Enter Roleplay Mode. You are {name}. "
+                f"You must always stay in character as {name}.\n"
+                f"{agent_role.system_prompt}"
+            )
         else:
-            instructions.append(f"You are {agent_role.display_name}, a {agent_role.role}.")
+            identity = (
+                f"Enter Roleplay Mode. You are {name}, a {agent_role.role}. "
+                f"You must always stay in character as {name}."
+            )
 
-        # Enhanced debate format instruction with concrete examples
+        # Concise anti-drift rules (Gemma 3 follows short directives better)
+        rules = (
+            f"Speak only as {name}, in first person. "
+            "Do not write dialogue for others. "
+            "Do not narrate in third person. "
+            "Do not prefix with any name. "
+            "One concise reply only."
+        )
+
+        # Debate format as behavioral guidance (not labeled headers)
+        style = self._debate_style_hint(debate_format, agent_role.role)
+
+        parts = [identity, rules]
+        if style:
+            parts.append(style)
+        return "\n\n".join(parts)
+
+    @staticmethod
+    def _debate_style_hint(debate_format: DebateFormat, role: str) -> str:
+        """Return a short behavioral hint for the debate format."""
         if debate_format == DebateFormat.STRUCTURED:
-            instructions.append(
-                "STRUCTURED DEBATE FORMAT: "
-                "Cite others' points, provide evidence, address counterarguments, "
-                "and build logical chains. State your position with clear reasoning."
-            )
-        elif debate_format == DebateFormat.SOCRATIC:
-            instructions.append(
-                "SOCRATIC METHOD: Respond primarily with questions that probe others' "
-                "reasoning. Question premises, explore assumptions, test implications, "
-                "and seek clarity."
-            )
-        elif debate_format == DebateFormat.DEVILS_ADVOCATE:
-            if agent_role.role == "critic":
-                instructions.append(
-                    "DEVIL'S ADVOCATE: Challenge proposals and find weaknesses. "
-                    "Identify assumptions, find edge cases, present alternatives, "
-                    "and stress test arguments."
-                )
-        elif debate_format == DebateFormat.PARLIAMENTARY:
-            instructions.append(
-                "PARLIAMENTARY PROCEDURE: Use formal structure. "
-                "Address the moderator, reference previous speakers formally, "
-                "and structure your argument with opening statement, evidence, "
-                "and conclusion."
-            )
-        elif debate_format == DebateFormat.FREE_FORM:
-            instructions.append(
-                "FREE-FORM DISCUSSION: Respond naturally to the conversation. "
-                "Build on or respond to specific points others have made."
-            )
+            return "Cite others' points, provide evidence, and state your position with reasoning."
+        if debate_format == DebateFormat.SOCRATIC:
+            return "Respond primarily with questions that probe others' reasoning."
+        if debate_format == DebateFormat.DEVILS_ADVOCATE and role == "critic":
+            return "Challenge proposals and find weaknesses."
+        if debate_format == DebateFormat.PARLIAMENTARY:
+            return "Use formal structure: address the moderator and reference speakers formally."
+        return ""
 
-        return "\n\n".join(instructions)
+    def build_agent_prompt(self, directive: TurnDirective, agent_role: AgentRole) -> list[dict]:
+        """Build multi-turn prompt using chat roles as identity signals.
 
-    def build_agent_prompt(
-        self, directive: TurnDirective, agent_role: AgentRole
-    ) -> list[dict]:
-        """Build multi-turn prompt with proper role attribution.
+        Identity design (extends naturally to N participants):
+          system  → "You are Alice." — establishes who THIS agent is
+          assistant → agent's own past messages (plain text, no name prefix)
+          user    → everyone else, prefixed with "Name: " to distinguish speakers
 
-        Uses standard chat format where:
-        - System message: identity, rules, metacognitive prompts
-        - Conversation history: alternating user/assistant turns
-        - Agent's own messages: "assistant" role
-        - Others' messages: "user" role
-
-        This leverages the model's natural understanding of conversation roles.
+        The chat API's role system is the identity mechanism:
+          - assistant = "me" (model's own voice, never prefixed with a name)
+          - user = "not me" (Name: prefix tells the model who is speaking)
+          - system = rules and context
 
         Args:
             directive: Turn directive with context.
             agent_role: The agent's role.
 
         Returns:
-            List of message dicts in OpenAI format.
+            List of message dicts in chat format.
         """
-        # Build system message from directive (includes identity + debate format)
-        system_content = ""
-        if directive.system_instruction:
-            system_content += directive.system_instruction
-
-        # Add first-person instruction
-        system_content += (
-            "\n\nRespond in first person as yourself. "
-            "Address other participants by name when responding to their points."
-        )
+        system_content = directive.system_instruction or ""
 
         messages = [{"role": "system", "content": system_content}]
 
-        # Replay conversation history as alternating user/assistant turns
-        # Keep only recent messages if conversation is very long
-        MAX_CONTEXT_MESSAGES = 40  # Total across all speakers
         visible_messages = directive.visible_messages
         if len(visible_messages) > MAX_CONTEXT_MESSAGES:
-            omitted_count = len(visible_messages) - MAX_CONTEXT_MESSAGES
             visible_messages = visible_messages[-MAX_CONTEXT_MESSAGES:]
-            messages.append({
-                "role": "user",
-                "content": f"[{omitted_count} earlier messages omitted for brevity]"
-            })
 
         for msg in visible_messages:
             if msg.sender_id == "system":
-                # System messages about the topic appear as user turns
-                messages.append({
-                    "role": "user",
-                    "content": f"[Turn {msg.turn_number}] Discussion topic: {msg.content}"
-                })
+                messages.append({"role": "user", "content": msg.content})
             elif msg.sender_id == agent_role.agent_id:
-                # Agent's own messages appear as assistant turns
-                messages.append({
-                    "role": "assistant",
-                    "content": f"[Turn {msg.turn_number}] {msg.content}"
-                })
+                messages.append({"role": "assistant", "content": msg.content})
             else:
-                # Other agents' messages appear as user turns with attribution
-                sender_name = self._get_agent_name(directive.session_id, msg.sender_id)
-                sender_role = self._get_agent_role(directive.session_id, sender_name)
-                messages.append({
-                    "role": "user",
-                    "content": f"[Turn {msg.turn_number}] {sender_name} ({sender_role}): {msg.content}"
-                })
+                sender_name = self._get_agent_name(
+                    directive.session_id,
+                    msg.sender_id,
+                )
+                messages.append(
+                    {"role": "user", "content": f"{sender_name}: {msg.content}"},
+                )
 
-        # Final user turn prompting response
+        # Character-reinforcing cue (Gemma 3 stays in character better with identity reminder)
         messages.append({
             "role": "user",
-            "content": "Please share your analysis and response."
+            "content": f"[It is now {agent_role.display_name}'s turn to speak.]",
         })
 
         return messages
@@ -421,9 +427,8 @@ class CoordinationService:
         # Build prompt
         prompt_messages = self.build_agent_prompt(directive, agent_role)
 
-        # Tokenize prompt (engine provides tokenizer)
-        prompt_text = self._format_messages_as_text(prompt_messages)
-        prompt_tokens = self._engine.tokenizer.encode(prompt_text)
+        # Tokenize using model's chat template for proper turn boundaries
+        prompt_tokens, prompt_text = self._tokenize_chat_messages(prompt_messages)
 
         # Load agent's cache (if any)
         namespaced_agent_id = self._agent_cache_key(session_id, directive.agent_id)
@@ -435,10 +440,11 @@ class CoordinationService:
                 agent_id=namespaced_agent_id,
                 prompt_tokens=prompt_tokens,
                 cache=cached_blocks,
-                max_tokens=512,
+                max_tokens=200,
                 prompt_text=prompt_text,
-                temperature=0.7,
-                top_p=1.0,
+                temperature=1.0,
+                top_p=0.95,
+                top_k=64,
             )
         else:
             # Direct engine path (no scheduler available)
@@ -446,22 +452,34 @@ class CoordinationService:
                 agent_id=namespaced_agent_id,
                 prompt_tokens=prompt_tokens,
                 cache=cached_blocks,
-                max_tokens=512,
-                temperature=0.7,
-                top_p=1.0,
+                max_tokens=200,
+                temperature=1.0,
+                top_p=0.95,
+                top_k=64,
             )
 
-        # Save updated cache
+        # Cache invariant: result.blocks contains KV state for prompt + generated
+        # tokens. The blocks.token_sequence stores ONLY the prompt tokens (used for
+        # prefix matching on the next turn). The generated text is added to the
+        # channel as a message, and build_agent_prompt() will include it as an
+        # assistant-role message next turn — the engine's prefix matcher reuses
+        # the cached prompt KV and only recomputes the new tokens.
         if result.blocks:
             self._cache_store.save(namespaced_agent_id, result.blocks)
 
-        # Add message to public channel
-        public_channel = next(
-            c for c in session.channels.values() if c.channel_type == "public"
+        # Strip runaway continuation (model generating fake turns)
+        all_names = [a.display_name for a in session.agents.values()]
+        clean_text = self._clean_agent_response(
+            result.text,
+            sender_name=agent_role.display_name,
+            all_agent_names=all_names,
         )
+
+        # Add message to public channel
+        public_channel = next(c for c in session.channels.values() if c.channel_type == "public")
         message = public_channel.add_message(
             sender_id=directive.agent_id,
-            content=result.text,
+            content=clean_text,
             turn_number=session.current_turn,
         )
 
@@ -501,9 +519,8 @@ class CoordinationService:
         # Build prompt
         prompt_messages = self.build_agent_prompt(directive, agent_role)
 
-        # Tokenize prompt
-        prompt_text = self._format_messages_as_text(prompt_messages)
-        prompt_tokens = self._engine.tokenizer.encode(prompt_text)
+        # Tokenize using model's chat template for proper turn boundaries
+        prompt_tokens, prompt_text = self._tokenize_chat_messages(prompt_messages)
 
         # Load agent's cache
         namespaced_agent_id = self._agent_cache_key(session_id, directive.agent_id)
@@ -526,10 +543,11 @@ class CoordinationService:
                 agent_id=namespaced_agent_id,
                 prompt_tokens=prompt_tokens,
                 cache=cached_blocks,
-                max_tokens=512,
+                max_tokens=200,
                 prompt_text=prompt_text,
-                temperature=0.7,
-                top_p=1.0,
+                temperature=1.0,
+                top_p=0.95,
+                top_k=64,
             ):
                 accumulated_text = delta.text
                 yield delta
@@ -539,26 +557,36 @@ class CoordinationService:
                 agent_id=namespaced_agent_id,
                 prompt_tokens=prompt_tokens,
                 cache=cached_blocks,
-                max_tokens=512,
-                temperature=0.7,
-                top_p=1.0,
+                max_tokens=200,
+                temperature=1.0,
+                top_p=0.95,
+                top_k=64,
             )
             accumulated_text = result.text
             # Yield single delta with final text
-            yield StreamDelta(text=result.text, token_count=len(result.text.split()), finish_reason="stop")
+            yield StreamDelta(
+                text=result.text, token_count=len(result.text.split()), finish_reason="stop"
+            )
 
-        # Post-stream: save cache using engine's stored blocks
+        # Cache invariant: same as execute_turn() — blocks contain prompt + generated
+        # KV state, but token_sequence is prompt-only for prefix matching.
         updated_blocks = self._engine.get_agent_blocks(namespaced_agent_id)
         if updated_blocks:
             self._cache_store.save(namespaced_agent_id, updated_blocks)
 
-        # Record message in public channel
-        public_channel = next(
-            c for c in session.channels.values() if c.channel_type == "public"
+        # Strip runaway continuation (model generating fake turns)
+        all_names = [a.display_name for a in session.agents.values()]
+        clean_text = self._clean_agent_response(
+            accumulated_text,
+            sender_name=agent_role.display_name,
+            all_agent_names=all_names,
         )
+
+        # Record message in public channel
+        public_channel = next(c for c in session.channels.values() if c.channel_type == "public")
         public_channel.add_message(
             sender_id=directive.agent_id,
-            content=accumulated_text,
+            content=clean_text,
             turn_number=session.current_turn,
         )
 
@@ -729,14 +757,89 @@ class CoordinationService:
         )
         return tally
 
+    @staticmethod
+    def _clean_agent_response(
+        text: str,
+        sender_name: str = "",
+        all_agent_names: list[str] | None = None,
+    ) -> str:
+        """Strip runaway generation and internal model markers from responses.
+
+        Handles three classes of artifacts:
+        1. Gemma3-style: model continues generating fake turns (User:/System:/etc.)
+        2. GPT-OSS-style: model emits internal channel/reasoning markers
+        3. Name/role echoing: model prefixes response with its own name or role
+        """
+        # GPT-OSS: extract final channel content if present
+        final_marker = "<|channel|>final<|message|>"
+        if final_marker in text:
+            last_idx = text.rfind(final_marker)
+            text = text[last_idx + len(final_marker):]
+            end_idx = text.find("<|end|>")
+            if end_idx > 0:
+                text = text[:end_idx]
+
+        # Strip special tokens and bare role markers
+        text = re.sub(r"<\|[a-z_]+\|>", "", text)
+        text = re.sub(r"(?m)^assistant$", "", text)
+        text = re.sub(r"\bassistant(?=[A-Z])", "", text)
+
+        # Normalize before pattern matching
+        text = text.strip()
+
+        # Strip echoed role/name prefix at start of response
+        prefixes = ["Assistant", "System", "User", "You"]
+        if sender_name:
+            prefixes.append(re.escape(sender_name))
+        for name in (all_agent_names or []):
+            prefixes.append(re.escape(name))
+        prefix_pattern = "|".join(dict.fromkeys(prefixes))  # dedupe, preserve order
+        text = re.sub(rf"^(?:{prefix_pattern}):\s?", "", text)
+
+        # Strip echoed instruction/rule fragments (Gemma3 artifact)
+        text = re.sub(
+            r"^(?:(?:Do not|Don'?t) (?:include|incorporate|respond|present|narrate|write|talk)"
+            r"[^\n.]*[.\n]?\s*)+",
+            "",
+            text,
+        )
+        text = re.sub(r"(?:FREE-FORM DISCUSSION|STRUCTURED DEBATE|SOCRATIC METHOD):?\s*", "", text)
+
+        # Re-strip and re-check prefix after instruction removal may expose new prefix
+        text = text.strip()
+        text = re.sub(rf"^(?:{prefix_pattern}):\s?", "", text)
+
+        # Truncate at first sign of fake turn continuation
+        stop_markers = [
+            "\nUser:", "\nuser:",
+            "\nYou:", "\nyou:",
+            "\nSystem:", "\nsystem:",
+            "\nAssistant:", "\nassistant:",
+            "\n<start_of_turn>", "\n<end_of_turn>",
+        ]
+        # Add ALL agent names as stop markers (catches cross-agent generation)
+        agent_names = set(all_agent_names or [])
+        if sender_name:
+            agent_names.add(sender_name)
+        for name in agent_names:
+            stop_markers.append(f"\n{name}:")
+        for marker in stop_markers:
+            idx = text.find(marker)
+            if idx > 0:
+                text = text[:idx]
+
+        # Clean up extra whitespace from marker removal
+        text = re.sub(r"\n{3,}", "\n\n", text)
+        return text.strip()
+
     def _format_messages_as_text(self, messages: list[dict]) -> str:
-        """Format message list as plain text for tokenization.
+        """Format message list as plain text for logging.
 
         Args:
             messages: List of message dicts.
 
         Returns:
-            Formatted text string.
+            Human-readable text string (for logging, not tokenization).
         """
         lines = []
         for msg in messages:
@@ -750,6 +853,33 @@ class CoordinationService:
                 lines.append(f"Assistant: {content}")
         return "\n\n".join(lines)
 
+    def _tokenize_chat_messages(self, messages: list[dict]) -> tuple[list[int], str]:
+        """Tokenize using model's chat template for proper turn boundaries.
+
+        Models like Gemma3 require special turn markers (e.g. <start_of_turn>)
+        to maintain identity in multi-agent conversations. Falls back to raw
+        text tokenization if no chat template is available.
+
+        Returns:
+            Tuple of (token_ids, prompt_text_for_logging).
+        """
+        prompt_text = self._format_messages_as_text(messages)
+
+        tokenizer = self._engine.tokenizer
+        if hasattr(tokenizer, "apply_chat_template") and getattr(tokenizer, "chat_template", None):
+            try:
+                tokens = tokenizer.apply_chat_template(
+                    messages,
+                    tokenize=True,
+                    add_generation_prompt=True,
+                )
+                if isinstance(tokens, list):
+                    return tokens, prompt_text
+            except Exception:
+                logger.debug("Chat template failed, falling back to raw text")
+
+        return tokenizer.encode(prompt_text), prompt_text
+
     async def _generate_direct(
         self,
         agent_id: str,
@@ -758,6 +888,7 @@ class CoordinationService:
         max_tokens: int,
         temperature: float,
         top_p: float,
+        top_k: int = 0,
     ):
         """Generate text using batch engine directly (fallback when no scheduler).
 
@@ -768,13 +899,11 @@ class CoordinationService:
             max_tokens: Maximum tokens to generate.
             temperature: Sampling temperature.
             top_p: Top-p sampling parameter.
+            top_k: Top-k sampling parameter.
 
         Returns:
             Generation result with text and cache.
         """
-        import asyncio
-        from dataclasses import dataclass
-
         # Submit request to batch engine
         uid = self._engine.submit(
             agent_id=agent_id,
@@ -784,6 +913,7 @@ class CoordinationService:
             prompt_tokens=prompt_tokens,
             temperature=temperature,
             top_p=top_p,
+            top_k=top_k,
         )
 
         # Poll engine until result is ready
@@ -801,10 +931,4 @@ class CoordinationService:
         if result is None:
             raise RuntimeError(f"Generation failed for agent {agent_id}")
 
-        # Build result object compatible with scheduler result
-        @dataclass
-        class DirectResult:
-            text: str
-            blocks: any
-
-        return DirectResult(text=result.text, blocks=result.blocks)
+        return _DirectResult(text=result.text, blocks=result.blocks)

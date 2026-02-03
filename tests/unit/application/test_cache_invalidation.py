@@ -56,8 +56,8 @@ class TestEvictAllToDisk:
         assert evicted_count == 3
         assert len(store._hot_cache) == 0  # Hot tier cleared
         assert len(store._warm_cache) == 3  # All in warm tier
-        # save() persists to disk immediately (3 calls) + evict_all re-saves (3 calls)
-        assert mock_adapter.save.call_count == 6
+        # Write-behind: save() defers disk write, only eviction flushes (3 calls)
+        assert mock_adapter.save.call_count == 3
 
     def test_evict_all_to_disk_with_empty_hot_tier(self, tmp_path):
         """Evicting when hot tier is empty returns 0."""
@@ -113,8 +113,8 @@ class TestEvictAllToDisk:
         # Verify: hot tier empty, warm tier has entry
         assert len(store._hot_cache) == 0
         assert "agent_1" in store._warm_cache
-        # save() persists to disk (1 call) + evict_all re-saves (1 call)
-        assert mock_adapter.save.call_count == 2
+        # Write-behind: save() defers disk write, only eviction flushes (1 call)
+        assert mock_adapter.save.call_count == 1
 
 
 class TestUpdateModelTag:
@@ -458,8 +458,14 @@ class TestInvalidateHot:
         store.save("agent_1", blocks)
 
         assert "agent_1" in store._hot_cache
-        assert "agent_1" in store._warm_cache
 
+        # Evict to warm tier first (write-behind: save() doesn't write to disk)
+        store.evict_all_to_disk()
+        assert "agent_1" in store._warm_cache
+        assert "agent_1" not in store._hot_cache
+
+        # Reload to hot tier, then invalidate
+        store._hot_cache["agent_1"] = store._warm_cache["agent_1"]
         store.invalidate_hot("agent_1")
 
         assert "agent_1" not in store._hot_cache

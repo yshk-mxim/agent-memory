@@ -30,20 +30,24 @@ def create_session(
     agents: list[dict[str, Any]],
     initial_prompt: str,
     max_turns: int,
+    per_agent_prompts: dict[str, str] | None = None,
 ) -> dict[str, Any] | None:
     """Create a coordination session. Returns response dict or None on failure."""
     try:
+        payload: dict[str, Any] = {
+            "topology": topology,
+            "debate_format": debate_format,
+            "decision_mode": decision_mode,
+            "agents": agents,
+            "initial_prompt": initial_prompt,
+            "max_turns": max_turns,
+        }
+        if per_agent_prompts:
+            payload["per_agent_prompts"] = per_agent_prompts
         with httpx.Client(timeout=10.0) as client:
             resp = client.post(
                 f"{base_url}/v1/coordination/sessions",
-                json={
-                    "topology": topology,
-                    "debate_format": debate_format,
-                    "decision_mode": decision_mode,
-                    "agents": agents,
-                    "initial_prompt": initial_prompt,
-                    "max_turns": max_turns,
-                },
+                json=payload,
             )
             if resp.status_code == _HTTP_CREATED:
                 return cast(dict[str, Any], resp.json())
@@ -120,6 +124,35 @@ def execute_turns(base_url: str, session_id: str, count: int) -> bool:
         if result is None:
             return False
     return True
+
+
+def stream_turn(
+    base_url: str,
+    session_id: str,
+) -> Iterator[tuple[str, Any]]:
+    """Stream a single turn via SSE. Yields (event_type, text_chunk)."""
+    try:
+        with (
+            httpx.Client(timeout=120.0) as client,
+            client.stream(
+                "POST",
+                f"{base_url}/v1/coordination/sessions/{session_id}/turn/stream",
+            ) as resp,
+        ):
+            if resp.status_code != _HTTP_OK:
+                return
+            event_type = ""
+            for line in resp.iter_lines():
+                if line.startswith("event: "):
+                    event_type = line[7:]
+                elif line.startswith("data: "):
+                    try:
+                        data = json.loads(line[6:])
+                    except json.JSONDecodeError:
+                        continue
+                    yield event_type, data
+    except httpx.HTTPError:
+        logger.debug("Stream turn connection error", exc_info=True)
 
 
 def stream_round(

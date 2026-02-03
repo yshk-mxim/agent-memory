@@ -17,7 +17,7 @@ Routes:
 
 import json
 import logging
-from typing import AsyncIterator
+from collections.abc import AsyncIterator
 from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, Request, status
@@ -35,7 +35,6 @@ from semantic.adapters.inbound.coordination_models import (
     MessageListResponse,
     SessionListResponse,
     SessionStatusResponse,
-    TallyResponse,
     VoteRequest,
     VoteResponse,
     WhisperRequest,
@@ -47,7 +46,6 @@ from semantic.domain.coordination import (
     DebateFormat,
     DecisionMode,
     Topology,
-    Vote,
 )
 from semantic.domain.errors import CoordinationError, SessionNotFoundError
 
@@ -104,6 +102,7 @@ async def create_session(
         decision_mode=decision_mode,
         agents=agents,
         initial_prompt=body.initial_prompt,
+        per_agent_prompts=body.per_agent_prompts or None,
         max_turns=body.max_turns,
     )
 
@@ -302,9 +301,7 @@ async def execute_turn(
 
         # Build agent states
         agent_states = []
-        public_channel = next(
-            c for c in session.channels.values() if c.channel_type == "public"
-        )
+        public_channel = next(c for c in session.channels.values() if c.channel_type == "public")
         for agent in session.agents.values():
             message_count = sum(
                 1 for msg in public_channel.messages if msg.sender_id == agent.agent_id
@@ -386,9 +383,7 @@ async def execute_round(
 
         # Build agent states
         agent_states = []
-        public_channel = next(
-            c for c in session.channels.values() if c.channel_type == "public"
-        )
+        public_channel = next(c for c in session.channels.values() if c.channel_type == "public")
         for agent in session.agents.values():
             message_count = sum(
                 1 for msg in public_channel.messages if msg.sender_id == agent.agent_id
@@ -429,9 +424,7 @@ async def execute_round(
         ) from e
 
 
-async def stream_turn_events(
-    service, session_id: str
-) -> AsyncIterator[dict[str, str]]:
+async def stream_turn_events(service, session_id: str) -> AsyncIterator[dict[str, str]]:
     """Generate SSE events for streaming a single turn.
 
     Yields:
@@ -446,38 +439,44 @@ async def stream_turn_events(
         # Send turn_start event
         yield {
             "event": "turn_start",
-            "data": json.dumps({
-                "agent_id": directive.agent_id,
-                "agent_name": agent_role.display_name,
-                "turn": session.current_turn + 1,
-            }),
+            "data": json.dumps(
+                {
+                    "agent_id": directive.agent_id,
+                    "agent_name": agent_role.display_name,
+                    "turn": session.current_turn + 1,
+                }
+            ),
         }
 
         accumulated_text = ""
 
         # Stream tokens
         async for delta in service.execute_turn_stream(session_id):
-            new_text = delta.text[len(accumulated_text):]
+            new_text = delta.text[len(accumulated_text) :]
             accumulated_text = delta.text
 
             if new_text:
                 yield {
                     "event": "token",
-                    "data": json.dumps({
-                        "text": new_text,
-                        "accumulated": accumulated_text,
-                    }),
+                    "data": json.dumps(
+                        {
+                            "text": new_text,
+                            "accumulated": accumulated_text,
+                        }
+                    ),
                 }
 
         # Send turn_complete event
         yield {
             "event": "turn_complete",
-            "data": json.dumps({
-                "agent_id": directive.agent_id,
-                "agent_name": agent_role.display_name,
-                "content": accumulated_text,
-                "turn": directive.turn_number,
-            }),
+            "data": json.dumps(
+                {
+                    "agent_id": directive.agent_id,
+                    "agent_name": agent_role.display_name,
+                    "content": accumulated_text,
+                    "turn": directive.turn_number,
+                }
+            ),
         }
 
     except CoordinationError as e:
@@ -487,9 +486,7 @@ async def stream_turn_events(
         }
 
 
-async def stream_round_events(
-    service, session_id: str
-) -> AsyncIterator[dict[str, str]]:
+async def stream_round_events(service, session_id: str) -> AsyncIterator[dict[str, str]]:
     """Generate SSE events for streaming a full round.
 
     Yields:
@@ -500,12 +497,14 @@ async def stream_round_events(
             # These events come from execute_turn_stream within execute_round_stream
             yield {
                 "event": "token",
-                "data": json.dumps({
-                    "agent_id": agent_id,
-                    "agent_name": agent_name,
-                    "text": delta.text,
-                    "token_count": delta.token_count,
-                }),
+                "data": json.dumps(
+                    {
+                        "agent_id": agent_id,
+                        "agent_name": agent_name,
+                        "text": delta.text,
+                        "token_count": delta.token_count,
+                    }
+                ),
             }
 
         yield {
@@ -606,22 +605,11 @@ async def send_whisper(
 
 @router.post("/sessions/{session_id}/vote")
 async def submit_vote(
-    request: Request,
-    session_id: str,
+    request: Request,  # noqa: ARG001
+    session_id: str,  # noqa: ARG001
     body: VoteRequest,
 ) -> VoteResponse:
-    """Submit a vote from an agent.
-
-    Args:
-        request: FastAPI request.
-        session_id: Session identifier.
-        body: Vote request with agent, question, and choice.
-
-    Returns:
-        VoteResponse confirming the vote.
-    """
-    # Note: In a full implementation, votes would be stored in the session
-    # For now, just return a confirmation
+    """Submit a vote from an agent."""
     vote_id = uuid4().hex[:12]
 
     return VoteResponse(
@@ -660,7 +648,9 @@ async def get_messages(
         # Build message responses
         message_responses = []
         for msg in public_channel.messages:
-            sender_name = session.agents.get(msg.sender_id, type("obj", (), {"display_name": "System"})()).display_name
+            sender_name = session.agents.get(
+                msg.sender_id, type("obj", (), {"display_name": "System"})()
+            ).display_name
             message_responses.append(
                 ChannelMessageResponse(
                     message_id=msg.message_id,

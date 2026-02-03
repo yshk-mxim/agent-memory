@@ -22,6 +22,7 @@ from sse_starlette.sse import EventSourceResponse
 from semantic.adapters.inbound.adapter_helpers import (
     get_semantic_state,
     run_step_for_uid,
+    tokenize_with_chat_template,
     try_parse_json_at,
 )
 from semantic.adapters.inbound.request_models import (
@@ -173,6 +174,62 @@ def openai_messages_to_prompt(  # noqa: C901, PLR0912
     lines.append("Assistant:")
 
     return "\n".join(lines)
+
+
+def openai_messages_to_chat_dicts(  # noqa: C901, PLR0912
+    messages: list[OpenAIChatMessage],
+    tools: list[Any] | None = None,
+) -> list[dict[str, str]]:
+    """Convert OpenAI messages to simple chat dicts for chat template.
+
+    Args:
+        messages: List of OpenAI chat messages
+        tools: Optional list of tool definitions
+
+    Returns:
+        List of {"role": ..., "content": ...} dicts
+    """
+    result: list[dict[str, str]] = []
+
+    for msg in messages:
+        if msg.role == "system":
+            content = msg.content or ""
+            if tools and not result:
+                # Append tool definitions to first system message
+                tool_lines = [content, "\nAvailable Functions:"]
+                for tool in tools:
+                    if tool.type == "function":
+                        func_def = {
+                            "name": tool.function.get("name"),
+                            "description": tool.function.get("description"),
+                            "parameters": tool.function.get("parameters"),
+                        }
+                        tool_lines.append(json.dumps(func_def, indent=2))
+                tool_lines.append(
+                    "\nTo call a function, output JSON: "
+                    '{"function_call": {"name": "<name>", "arguments": {<params>}}}'
+                )
+                content = "\n".join(tool_lines)
+                tools = None  # Don't add again
+            result.append({"role": "system", "content": content})
+        elif msg.role == "user":
+            result.append({"role": "user", "content": msg.content or ""})
+        elif msg.role == "assistant":
+            if msg.tool_calls:
+                parts = []
+                for tc in msg.tool_calls:
+                    fc = {
+                        "name": tc.get("function", {}).get("name"),
+                        "arguments": tc.get("function", {}).get("arguments"),
+                    }
+                    parts.append(f"[Function Call]: {json.dumps(fc)}")
+                result.append({"role": "assistant", "content": "\n".join(parts)})
+            elif msg.content:
+                result.append({"role": "assistant", "content": msg.content})
+        elif msg.role == "tool" and msg.content:
+            result.append({"role": "user", "content": f"[Tool Result]: {msg.content}"})
+
+    return result
 
 
 async def _stream_via_scheduler(  # noqa: C901, PLR0912
@@ -357,7 +414,9 @@ async def stream_chat_completion(  # noqa: C901, PLR0912, PLR0915
             return
 
         # --- Direct batch engine path (no scheduler) — unsafe for concurrent requests ---
-        logger.warning("Using direct batch_engine streaming (no scheduler) — concurrent requests unsafe")
+        logger.warning(
+            "Using direct batch_engine streaming (no scheduler) — concurrent requests unsafe"
+        )
         uid = batch_engine.submit(
             agent_id=agent_id,
             prompt=prompt,
@@ -561,17 +620,21 @@ async def create_chat_completion(  # noqa: C901, PLR0912, PLR0915
     cache_store: AgentCacheStore = semantic_state.cache_store
 
     try:
-        # 1. Convert OpenAI messages to prompt (including tools if present)
-        prompt = openai_messages_to_prompt(
-            request_body.messages,
-            request_body.tools if request_body.tools else None,
-        )
+        # 1. Convert OpenAI messages to prompt (for logging and fallback)
+        tools_arg = request_body.tools if request_body.tools else None
+        prompt = openai_messages_to_prompt(request_body.messages, tools_arg)
         logger.debug(f"Prompt length: {len(prompt)} chars")
         logger.debug(f"Full prompt:\n{prompt}")
 
-        # 2. Tokenize to get agent ID (run in executor to avoid blocking)
+        # 2. Tokenize using chat template for proper model turn markers
         tokenizer = batch_engine.tokenizer
-        tokens = await asyncio.to_thread(tokenizer.encode, prompt)
+        chat_dicts = openai_messages_to_chat_dicts(request_body.messages, tools_arg)
+        tokens = await asyncio.to_thread(
+            tokenize_with_chat_template,
+            tokenizer,
+            chat_dicts,
+            prompt,
+        )
 
         # Check for session_id in request body or X-Session-ID header
         session_id = request_body.session_id or request.headers.get("X-Session-ID")
@@ -622,7 +685,9 @@ async def create_chat_completion(  # noqa: C901, PLR0912, PLR0915
         else:
             # Legacy direct path: no concurrency protection — unsafe for
             # simultaneous requests. Enable SEMANTIC_MLX_SCHEDULER_ENABLED=true.
-            logger.warning("Using direct batch_engine path (no scheduler) — concurrent requests unsafe")
+            logger.warning(
+                "Using direct batch_engine path (no scheduler) — concurrent requests unsafe"
+            )
             uid = await asyncio.to_thread(
                 batch_engine.submit,
                 agent_id=agent_id,

@@ -40,26 +40,37 @@ class CreateSessionRequest(BaseModel):
 
     topology: str = Field(
         default="turn_by_turn",
-        description="Communication topology: turn_by_turn, broadcast, whisper, round_robin, interrupt",
+        description=(
+            "Communication topology: turn_by_turn, broadcast, whisper, round_robin, interrupt"
+        ),
     )
     debate_format: str = Field(
         default="free_form",
-        description="Debate format: free_form, structured, socratic, devils_advocate, parliamentary",
+        description=(
+            "Debate format: free_form, structured, socratic, devils_advocate, parliamentary"
+        ),
     )
     decision_mode: str = Field(
         default="none",
-        description="Decision mode: none, majority_vote, ranked_choice, coordinator_decides, consensus",
+        description=(
+            "Decision mode: none, majority_vote, ranked_choice, coordinator_decides, consensus"
+        ),
     )
     agents: list[AgentRoleConfig] = Field(
         ...,
         description="List of agents participating in this session",
-        min_length=2,
+        min_length=1,
         max_length=30,
     )
     initial_prompt: str = Field(
         default="",
         description="Optional initial prompt/topic for discussion",
         max_length=50000,
+    )
+    per_agent_prompts: dict[str, str] = Field(
+        default_factory=dict,
+        description="Per-agent private context keyed by display_name. "
+        "Each entry becomes a system message visible only to that agent.",
     )
     max_turns: int = Field(
         default=0,
