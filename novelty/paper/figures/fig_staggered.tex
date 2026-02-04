@@ -14,15 +14,10 @@
     ylabel={TTFT (seconds)},
     symbolic x coords={User A, User B, Total},
     xtick=data,
-    ymin=0, ymax=100,
+    ymin=0, ymax=40,
+    enlarge x limits=0.25,
     legend pos=north west,
     legend style={font=\small},
-    nodes near coords,
-    nodes near coords style={font=\footnotesize},
-    every node near coord/.append style={
-        anchor=south,
-        yshift=2pt
-    },
     grid=major,
     grid style={line width=.1pt, draw=gray!20},
 ]
@@ -43,10 +38,10 @@
 };
 \addlegendentry{Batched}
 
-% Annotations
-\node[font=\small, text=red] at (axis cs:User A,9) {4\% penalty};
-\node[font=\small, text=green!70!black] at (axis cs:User B,15) {2.6$\times$ faster};
-\node[font=\small, text=green!70!black] at (axis cs:Total,36) {1.86$\times$ total};
+% Annotations - positioned above bars with better spacing
+\node[font=\footnotesize, text=red] at (axis cs:User A,10.5) {4\% penalty};
+\node[font=\footnotesize, text=green!70!black] at (axis cs:User B,27) {2.6$\times$ faster};
+\node[font=\footnotesize, text=green!70!black] at (axis cs:Total,35) {1.86$\times$ total};
 
 \end{axis}
 \end{tikzpicture}

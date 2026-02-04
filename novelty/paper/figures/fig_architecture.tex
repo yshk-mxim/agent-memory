@@ -18,18 +18,18 @@
 \node[agent, below=0.8cm of a2] (a3) {Agent 3\\Planner};
 
 % Block Pool
-\node[component, right=3cm of a2] (bp) {Block Pool\\Per-Agent\\Isolation};
+\node[component, right=2.2cm of a2] (bp) {Block Pool\\Per-Agent\\Isolation};
 
 % Q4 Pipeline
-\node[component, right=2.5cm of bp] (q4) {Q4 Pipeline\\Quantization\\+ Attention};
+\node[component, right=2cm of bp] (q4) {Q4 Pipeline\\Quantization\\+ Attention};
 
 % Disk Storage
-\node[storage, right=2.5cm of q4] (disk) {Disk\\safetensors\\~50ms reload};
+\node[storage, right=1.8cm of q4] (disk) {Disk\\safetensors\\50ms reload};
 
-% Arrows from agents to block pool
-\draw[arrow] (a1) -- node[above, label] {4K tokens} (bp);
-\draw[arrow] (a2) -- node[above, label] {2K tokens} (bp);
-\draw[arrow] (a3) -- node[above, label] {3K tokens} (bp);
+% Arrows from agents to block pool with better label positioning
+\draw[arrow] (a1) -- node[above, label, pos=0.6] {\footnotesize 4K} (bp);
+\draw[arrow] (a2) -- node[above, label] {\footnotesize 2K} (bp);
+\draw[arrow] (a3) -- node[above, label, pos=0.6] {\footnotesize 3K} (bp);
 
 % Arrow from block pool to Q4 pipeline
 \draw[arrow, bend left=15] (bp) to node[above, label] {Load} (q4);
