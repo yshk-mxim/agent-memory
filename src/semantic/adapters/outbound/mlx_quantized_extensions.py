@@ -378,8 +378,15 @@ class BatchQuantizedKVCache(_BaseCache):
         **kwargs: Any,
     ) -> Any | None:
         from mlx_lm.models.base import create_causal_mask
+        import mlx.core as mx
 
-        return create_causal_mask(N, offset=self._idx, left_padding=self.left_padding, **kwargs)
+        mask = create_causal_mask(N, offset=self._idx, left_padding=self.left_padding, **kwargs)
+        # Batched masks are 4D (B,1,N,seq). GQA attention reshapes scores
+        # to 5D (B,n_kv_heads,n_repeats,N,seq). Add axis=2 so the mask
+        # broadcasts as (B,1,1,N,seq) → compatible with both 4D and 5D scores.
+        if mask is not None and mask.ndim == 4:
+            mask = mx.expand_dims(mask, axis=2)
+        return mask
 
     # ------------------------------------------------------------------
     # empty / size / state / trim
