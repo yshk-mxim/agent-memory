@@ -15,6 +15,7 @@ from fastapi.responses import JSONResponse
 from mlx_lm import load
 from prometheus_client import generate_latest
 
+import semantic.adapters.outbound.mlx_quantized_extensions  # noqa: F401, E402
 import semantic.adapters.outbound.mlx_sink_compat  # noqa: F401, E402
 
 from semantic.adapters.config.logging import configure_logging
@@ -35,6 +36,7 @@ from semantic.adapters.inbound.openai_adapter import router as openai_router
 from semantic.adapters.inbound.rate_limiter import RateLimiter
 from semantic.adapters.inbound.request_id_middleware import RequestIDMiddleware
 from semantic.adapters.inbound.request_logging_middleware import RequestLoggingMiddleware
+from semantic.adapters.outbound.chat_template_adapter import ChatTemplateAdapter
 from semantic.adapters.outbound.mlx_cache_adapter import MLXCacheAdapter
 from semantic.adapters.outbound.mlx_spec_extractor import get_extractor
 from semantic.adapters.outbound.safetensors_cache_adapter import SafetensorsCacheAdapter
@@ -123,7 +125,6 @@ def _load_model_and_extract_spec(settings):
     spec_extractor = get_extractor()
     base_spec: ModelCacheSpec = spec_extractor.extract_spec(model)
 
-    # Add quantization settings from config
     from dataclasses import replace
 
     model_spec = replace(
@@ -219,6 +220,10 @@ def _initialize_batch_engine(model, tokenizer, block_pool, model_spec, settings)
         pool=block_pool,
         spec=model_spec,
         cache_adapter=mlx_adapter,
+        chunked_prefill_enabled=settings.mlx.chunked_prefill_enabled,
+        chunked_prefill_threshold=settings.mlx.chunked_prefill_threshold,
+        chunked_prefill_min_chunk=settings.mlx.chunked_prefill_min_chunk,
+        chunked_prefill_max_chunk=settings.mlx.chunked_prefill_max_chunk,
     )
     logger.info(
         "batch_engine_initialized",
@@ -289,7 +294,11 @@ async def lifespan(app: FastAPI):
 
         # Initialize model registry and swap orchestrator for hot-swap support
         model_loader = MLXModelLoader()
-        model_registry = ModelRegistry(model_loader=model_loader)
+        spec_extractor = get_extractor()
+        model_registry = ModelRegistry(
+            model_loader=model_loader,
+            spec_extractor=spec_extractor,
+        )
         # Manually set registry state (model already loaded above)
         model_registry._model = model
         model_registry._tokenizer = tokenizer
@@ -352,10 +361,13 @@ async def lifespan(app: FastAPI):
                 )
 
         # Initialize CoordinationService (can work with or without scheduler)
+        chat_template_adapter = ChatTemplateAdapter()
         coordination_service = CoordinationService(
-            scheduler=scheduler,  # May be None if scheduler unavailable
+            scheduler=scheduler,
             cache_store=cache_store,
             engine=batch_engine,
+            reasoning_extra_tokens=settings.mlx.reasoning_extra_tokens,
+            chat_template=chat_template_adapter,
         )
         app.state.coordination_service = coordination_service
         logger.info(

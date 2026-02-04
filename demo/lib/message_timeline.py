@@ -84,9 +84,8 @@ def build_agent_colors(
     colors: dict[str, str] = {}
     default_idx = 0
     for agent in agents.values():
-        has_attrs = hasattr(agent, "display_name")
-        name = agent.display_name if has_attrs else agent.get("display_name", "")
-        color = agent.color if has_attrs else agent.get("color", "")
+        name = agent.display_name if hasattr(agent, "display_name") else agent["display_name"]
+        color = agent.color if hasattr(agent, "color") else agent.get("color", "")
         if color:
             colors[name] = color
         else:

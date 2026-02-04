@@ -19,6 +19,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request, status
 from sse_starlette.sse import EventSourceResponse
 
+from semantic.adapters.config.settings import get_settings
 from semantic.adapters.inbound.adapter_helpers import (
     get_semantic_state,
     run_step_for_uid,
@@ -392,7 +393,9 @@ async def stream_chat_completion(  # noqa: C901, PLR0912, PLR0915
         SSE events in OpenAI Chat Completions format
     """
     try:
-        max_tokens = request_body.max_tokens or 256
+        settings = get_settings()
+        base_max_tokens = request_body.max_tokens or 256
+        max_tokens = base_max_tokens + settings.mlx.reasoning_extra_tokens
 
         if cached_blocks is not None:
             cache_store.invalidate_hot(agent_id)
@@ -620,13 +623,11 @@ async def create_chat_completion(  # noqa: C901, PLR0912, PLR0915
     cache_store: AgentCacheStore = semantic_state.cache_store
 
     try:
-        # 1. Convert OpenAI messages to prompt (for logging and fallback)
         tools_arg = request_body.tools if request_body.tools else None
         prompt = openai_messages_to_prompt(request_body.messages, tools_arg)
         logger.debug(f"Prompt length: {len(prompt)} chars")
         logger.debug(f"Full prompt:\n{prompt}")
 
-        # 2. Tokenize using chat template for proper model turn markers
         tokenizer = batch_engine.tokenizer
         chat_dicts = openai_messages_to_chat_dicts(request_body.messages, tools_arg)
         tokens = await asyncio.to_thread(
@@ -641,14 +642,13 @@ async def create_chat_completion(  # noqa: C901, PLR0912, PLR0915
         agent_id = generate_agent_id_openai(session_id, tokens)
         logger.debug(f"Agent ID: {agent_id}, tokens: {len(tokens)}, session_id={session_id}")
 
-        # 3. Check cache store for existing cache
         cached_blocks = cache_store.load(agent_id)
         if cached_blocks:
             logger.info(f"Cache hit: {agent_id} ({cached_blocks.total_tokens} tokens)")
         else:
             logger.info(f"Cache miss: {agent_id}")
 
-        # 4. Handle streaming vs non-streaming
+        # Streaming vs non-streaming
         if request_body.stream:
             # Return SSE stream
             logger.info("Returning OpenAI SSE stream")
@@ -665,8 +665,10 @@ async def create_chat_completion(  # noqa: C901, PLR0912, PLR0915
                 )
             )
 
-        # 5. Generate (scheduler or direct batch engine)
-        max_tokens = request_body.max_tokens or 256
+        # Generate (scheduler or direct batch engine)
+        settings = get_settings()
+        base_max_tokens = request_body.max_tokens or 256
+        max_tokens = base_max_tokens + settings.mlx.reasoning_extra_tokens
         scheduler = semantic_state.scheduler
 
         if cached_blocks is not None:
@@ -712,16 +714,16 @@ async def create_chat_completion(  # noqa: C901, PLR0912, PLR0915
                 detail="Generation failed - no completion returned",
             )
 
-        # 7. Save updated cache
+        # Save updated cache
         updated_blocks = batch_engine.get_agent_blocks(agent_id)
         if updated_blocks:
             cache_store.save(agent_id, updated_blocks)
             logger.debug(f"Saved cache: {agent_id} ({updated_blocks.total_tokens} tokens)")
 
-        # 8. Parse for function calls
+        # Parse for function calls
         remaining_text, function_calls = parse_function_calls(completion.text)
 
-        # 9. Format OpenAI response
+        # Format OpenAI response
         # Build tool_calls array if function calls detected
         tool_calls_array = None
         if function_calls:

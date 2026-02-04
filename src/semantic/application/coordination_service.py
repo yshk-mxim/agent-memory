@@ -1,10 +1,7 @@
 """CoordinationService: orchestrates multi-agent coordination sessions.
 
-The coordination service manages structured multi-agent conversations by:
-1. Creating and tracking coordination sessions
-2. Building prompts that include inter-agent context
-3. Routing generation requests through the scheduler
-4. Managing turn sequencing based on topology
+Manages structured multi-agent conversations: session lifecycle, prompt
+building with inter-agent context, generation routing, and turn sequencing.
 
 Architecture layer: application service.
 No MLX / infrastructure imports — interacts with adapters through ports.
@@ -34,6 +31,8 @@ from semantic.domain.coordination import (
 from semantic.domain.errors import InvalidTurnError, SessionNotFoundError
 from semantic.domain.value_objects import StreamDelta
 
+from semantic.application.ports import ChatTemplatePort
+
 logger = structlog.get_logger(__name__)
 
 MAX_CONTEXT_MESSAGES = 40  # Total across all speakers
@@ -56,11 +55,19 @@ class CoordinationService:
       - engine: BlockPoolBatchEngine (for tokenization)
     """
 
-    def __init__(self, scheduler, cache_store, engine) -> None:
-        """Initialize with injected scheduler, cache store, and engine."""
+    def __init__(
+        self,
+        scheduler,
+        cache_store,
+        engine,
+        reasoning_extra_tokens: int = 300,
+        chat_template: ChatTemplatePort | None = None,
+    ) -> None:
         self._scheduler = scheduler
         self._cache_store = cache_store
         self._engine = engine
+        self._reasoning_extra_tokens = reasoning_extra_tokens
+        self._chat_template = chat_template
         self._sessions: dict[str, CoordinationSession] = {}
         self._agent_name_registry: dict[str, str] = {}
         self._lock = asyncio.Lock()
@@ -535,12 +542,14 @@ class CoordinationService:
             )
 
         # Submit to scheduler (or fall back to direct engine if no scheduler)
+        # GPT-OSS needs more tokens for analysis channel before final
+        gen_max_tokens = self._get_generation_max_tokens()
         if self._scheduler is not None:
             result = await self._scheduler.submit_and_wait(
                 agent_id=namespaced_agent_id,
                 prompt_tokens=prompt_tokens,
                 cache=cached_blocks,
-                max_tokens=200,
+                max_tokens=gen_max_tokens,
                 prompt_text=prompt_text,
                 temperature=1.0,
                 top_p=0.95,
@@ -552,7 +561,7 @@ class CoordinationService:
                 agent_id=namespaced_agent_id,
                 prompt_tokens=prompt_tokens,
                 cache=cached_blocks,
-                max_tokens=200,
+                max_tokens=gen_max_tokens,
                 temperature=1.0,
                 top_p=0.95,
                 top_k=64,
@@ -638,12 +647,14 @@ class CoordinationService:
         accumulated_text = ""
 
         # Stream tokens via scheduler
+        # GPT-OSS needs more tokens for analysis channel before final
+        gen_max_tokens = self._get_generation_max_tokens()
         if self._scheduler is not None:
             async for delta in self._scheduler.submit_and_stream(
                 agent_id=namespaced_agent_id,
                 prompt_tokens=prompt_tokens,
                 cache=cached_blocks,
-                max_tokens=200,
+                max_tokens=gen_max_tokens,
                 prompt_text=prompt_text,
                 temperature=1.0,
                 top_p=0.95,
@@ -657,7 +668,7 @@ class CoordinationService:
                 agent_id=namespaced_agent_id,
                 prompt_tokens=prompt_tokens,
                 cache=cached_blocks,
-                max_tokens=200,
+                max_tokens=gen_max_tokens,
                 temperature=1.0,
                 top_p=0.95,
                 top_k=64,
@@ -1003,101 +1014,10 @@ class CoordinationService:
 
         return merged
 
-    def _needs_message_merging(self) -> bool:
-        """Check if model needs consecutive same-role messages merged.
-
-        Llama 3.1 and similar models require strict user/assistant alternation.
-        Gemma3 handles multi-turn conversations with role markers natively.
-        """
-        tokenizer = self._engine.tokenizer
-        chat_template = getattr(tokenizer, "chat_template", "") or ""
-
-        # Llama-style templates use <|start_header_id|>
-        if "<|start_header_id|>" in chat_template:
-            return True
-
-        # ChatML templates might also need merging (e.g., <|im_start|>)
-        if "<|im_start|>" in chat_template:
-            return True
-
-        # Gemma, GPT-OSS, and most other models handle consecutive messages
-        return False
-
-    def _is_gpt_oss_model(self) -> bool:
-        """Check if current model is GPT-OSS (uses Harmony format).
-
-        GPT-OSS models have a built-in template that injects "You are ChatGPT"
-        which breaks roleplay scenarios. We need to use a custom template.
-        """
-        tokenizer = self._engine.tokenizer
-        chat_template = getattr(tokenizer, "chat_template", "") or ""
-        # GPT-OSS uses Harmony format with channel markers
-        return "<|channel|>" in chat_template and "<|start|>" in chat_template
-
-    def _apply_gpt_oss_template(self, messages: list[dict]) -> str:
-        """Apply GPT-OSS Harmony format matching the official tokenizer template.
-
-        The Harmony format has:
-        - System message with identity, date, reasoning level, and channel rules
-        - Developer message for custom instructions (our system prompts)
-        - User/assistant messages with proper channel markers
-        - Generation prompt ending with just <|start|>assistant (model chooses channel)
-        """
-        from datetime import datetime
-
-        formatted_parts = []
-
-        # 1. System message - matches official template structure
-        # Uses "medium" reasoning (official default) for better quality
-        system_msg = (
-            "<|start|>system<|message|>"
-            "You are a helpful AI assistant.\n"
-            "Knowledge cutoff: 2024-06\n"
-            f"Current date: {datetime.now().strftime('%Y-%m-%d')}\n\n"
-            "Reasoning: medium\n\n"
-            "# Valid channels: analysis, commentary, final. "
-            "Channel must be included for every message."
-            "<|end|>"
-        )
-        formatted_parts.append(system_msg)
-
-        # 2. Collect messages by type
-        developer_content = []
-        conversation: list[tuple[str, str]] = []
-
-        for msg in messages:
-            role = msg["role"]
-            content = msg["content"]
-
-            if role == "system":
-                developer_content.append(content)
-            else:
-                conversation.append((role, content))
-
-        # 3. Add developer instructions (matches official template)
-        if developer_content:
-            formatted_parts.append(
-                "<|start|>developer<|message|># Instructions\n\n"
-                + "\n\n".join(developer_content)
-                + "\n\n<|end|>"
-            )
-
-        # 4. Add conversation messages
-        for role, content in conversation:
-            if role == "user":
-                formatted_parts.append(f"<|start|>user<|message|>{content}<|end|>")
-            elif role == "assistant":
-                # Previous assistant responses use final channel
-                formatted_parts.append(
-                    f"<|start|>assistant<|channel|>final<|message|>{content}<|end|>"
-                )
-
-        # 5. Generation prompt - let model choose its channel (matches official)
-        # The model will output <|channel|>analysis first for reasoning,
-        # then <|channel|>final for the actual response
-        formatted_parts.append("<|start|>assistant")
-
-        return "".join(formatted_parts)
+    def _get_generation_max_tokens(self) -> int:
+        """Get max_tokens including reasoning headroom."""
+        base_tokens = 200
+        return base_tokens + self._reasoning_extra_tokens
 
     def _tokenize_chat_messages(self, messages: list[dict]) -> tuple[list[int], str]:
         """Tokenize using model's chat template for proper turn boundaries.
@@ -1106,10 +1026,8 @@ class CoordinationService:
         to maintain identity in multi-agent conversations. Falls back to raw
         text tokenization if no chat template is available.
 
-        For Llama 3.1 and similar models that require strict user/assistant
-        alternation, consecutive same-role messages are merged first.
-
-        For GPT-OSS models, uses custom template to avoid ChatGPT identity injection.
+        Message merging and template kwargs are delegated to the injected
+        ChatTemplatePort, keeping model-specific logic in adapters.
 
         Returns:
             Tuple of (token_ids, prompt_text_for_logging).
@@ -1118,16 +1036,13 @@ class CoordinationService:
 
         tokenizer = self._engine.tokenizer
 
-        # GPT-OSS: Try official tokenizer template first (with ChatGPT identity)
-        # If that produces poor results, can switch back to custom template
-        if self._is_gpt_oss_model():
-            logger.info("GPT-OSS detected - using official tokenizer template")
-            # Fall through to use apply_chat_template below
-
         if hasattr(tokenizer, "apply_chat_template") and getattr(tokenizer, "chat_template", None):
             try:
-                # Only merge for models that need strict alternation
-                needs_merge = self._needs_message_merging()
+                needs_merge = (
+                    self._chat_template.needs_message_merging(tokenizer)
+                    if self._chat_template
+                    else False
+                )
                 if needs_merge:
                     messages_for_template = self._merge_consecutive_messages(messages)
                     logger.info(
@@ -1135,7 +1050,6 @@ class CoordinationService:
                         len(messages),
                         len(messages_for_template),
                     )
-                    # Log first 500 chars of merged user content for debugging
                     for m in messages_for_template:
                         if m["role"] == "user":
                             content_preview = m["content"][:200].replace("\n", "\\n")
@@ -1144,14 +1058,11 @@ class CoordinationService:
                 else:
                     messages_for_template = messages
 
-                # GPT-OSS: Use low reasoning to prevent analysis mode loops
-                template_kwargs: dict[str, Any] = {
-                    "tokenize": True,
-                    "add_generation_prompt": True,
-                }
-                if self._is_gpt_oss_model():
-                    template_kwargs["reasoning_effort"] = "low"
-                    logger.info("GPT-OSS: using reasoning_effort=low")
+                template_kwargs = (
+                    self._chat_template.get_template_kwargs(tokenizer)
+                    if self._chat_template
+                    else {"tokenize": True, "add_generation_prompt": True}
+                )
 
                 tokens = tokenizer.apply_chat_template(
                     messages_for_template,

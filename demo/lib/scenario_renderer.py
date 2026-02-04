@@ -182,8 +182,8 @@ class ScenarioRenderer:
                     if models:
                         model_info = models[0]
                         model_id = model_info.get("id", "")
-        except Exception:
-            pass
+        except httpx.HTTPError:
+            logger.debug("Failed to fetch model info", exc_info=True)
 
         if not model_id:
             st.markdown("**No model loaded**")
@@ -439,6 +439,41 @@ class ScenarioRenderer:
         """Generate a stable agent_id from scenario + agent key."""
         return f"scn_{self.spec.id}_{agent_key}"
 
+    def _collect_agent_prior_messages(
+        self, agent_key: str, phase_idx: int
+    ) -> list[dict[str, str]]:
+        """Collect all messages from prior phases where this agent participated."""
+        sid = self.spec.id
+        agent_msgs: list[dict[str, str]] = []
+
+        for prior_phase in self.spec.phases[:phase_idx]:
+            if agent_key not in prior_phase.agents:
+                continue
+            stored = st.session_state.get(
+                _phase_key(sid, prior_phase.name, "messages"), []
+            )
+            for msg in stored:
+                sender_name = msg.get("sender_name", "")
+                content = msg.get("content", "")
+                if not content:
+                    continue
+                if sender_name == "System":
+                    sender_id = "system"
+                else:
+                    sender_key = self._agent_key_by_name(sender_name)
+                    sender_id = (
+                        self._stable_agent_id(sender_key)
+                        if sender_key
+                        else msg.get("sender_id", "system")
+                    )
+                agent_msgs.append({
+                    "sender_id": sender_id,
+                    "sender_name": sender_name,
+                    "content": content,
+                })
+
+        return agent_msgs
+
     def _collect_prior_messages(
         self, phase: PhaseSpec
     ) -> dict[str, list[dict[str, str]]]:
@@ -448,7 +483,6 @@ class ScenarioRenderer:
         Phase 1..N-1 content, so the engine extends the cached KV instead
         of reprocessing from scratch.
         """
-        sid = self.spec.id
         prior: dict[str, list[dict[str, str]]] = {}
         phase_idx = next(
             (i for i, p in enumerate(self.spec.phases) if p.name == phase.name), 0
@@ -460,34 +494,7 @@ class ScenarioRenderer:
                 continue
 
             agent_id = self._stable_agent_id(agent_key)
-            agent_msgs: list[dict[str, str]] = []
-
-            for prior_phase in self.spec.phases[:phase_idx]:
-                if agent_key not in prior_phase.agents:
-                    continue
-                stored = st.session_state.get(
-                    _phase_key(sid, prior_phase.name, "messages"), []
-                )
-                for msg in stored:
-                    sender_name = msg.get("sender_name", "")
-                    content = msg.get("content", "")
-                    if not content:
-                        continue
-                    if sender_name == "System":
-                        sender_id = "system"
-                    else:
-                        sender_key = self._agent_key_by_name(sender_name)
-                        sender_id = (
-                            self._stable_agent_id(sender_key)
-                            if sender_key
-                            else msg.get("sender_id", "system")
-                        )
-                    agent_msgs.append({
-                        "sender_id": sender_id,
-                        "sender_name": sender_name,
-                        "content": content,
-                    })
-
+            agent_msgs = self._collect_agent_prior_messages(agent_key, phase_idx)
             if agent_msgs:
                 prior[agent_id] = agent_msgs
 
@@ -500,48 +507,56 @@ class ScenarioRenderer:
                 return key
         return None
 
+    def _build_phase_agent_configs(self, phase: PhaseSpec) -> list[dict]:
+        """Build agent config dicts with stable IDs for session creation."""
+        configs = []
+        for agent_key in phase.agents:
+            agent = self.spec.agents.get(agent_key)
+            if not agent:
+                continue
+            configs.append({
+                "agent_id": self._stable_agent_id(agent_key),
+                "display_name": agent.display_name,
+                "role": agent.role,
+                "system_prompt": agent.system_prompt,
+                "lifecycle": agent.lifecycle,
+            })
+        return configs
+
+    def _resolve_per_agent_prompts(
+        self,
+        phase: PhaseSpec,
+        phase_messages: dict[str, list[dict[str, str]]],
+        agent_names: dict[str, str],
+    ) -> dict[str, str] | None:
+        """Resolve per-agent private prompt templates."""
+        if not phase.per_agent_prompt_templates:
+            return None
+        prompts: dict[str, str] = {}
+        for agent_key, tmpl in phase.per_agent_prompt_templates.items():
+            agent = self.spec.agents.get(agent_key)
+            if not agent:
+                continue
+            resolved = resolve_template(tmpl, phase_messages, agent_names)
+            if resolved.strip():
+                prompts[agent.display_name] = resolved
+        return prompts or None
+
     def _create_phase_session(self, phase: PhaseSpec) -> str | None:
         """Create a coordination session for a phase."""
         agent_names = self._build_agent_display_names()
         phase_messages = self._fetch_dep_messages(phase)
 
-        # Resolve shared initial prompt template (for ephemeral agents like Analyst)
         initial_prompt = phase.initial_prompt
         if has_template_refs(phase.initial_prompt_template):
             initial_prompt = resolve_template(
-                phase.initial_prompt_template,
-                phase_messages,
-                agent_names,
+                phase.initial_prompt_template, phase_messages, agent_names,
             )
 
-        # Resolve per-agent private prompt templates
-        per_agent_prompts: dict[str, str] | None = None
-        if phase.per_agent_prompt_templates:
-            per_agent_prompts = {}
-            for agent_key, tmpl in phase.per_agent_prompt_templates.items():
-                agent = self.spec.agents.get(agent_key)
-                if not agent:
-                    continue
-                resolved = resolve_template(tmpl, phase_messages, agent_names)
-                if resolved.strip():
-                    per_agent_prompts[agent.display_name] = resolved
-
-        # Build agent configs with stable IDs
-        agent_configs = []
-        for agent_key in phase.agents:
-            agent = self.spec.agents.get(agent_key)
-            if not agent:
-                continue
-            agent_configs.append(
-                {
-                    "agent_id": self._stable_agent_id(agent_key),
-                    "display_name": agent.display_name,
-                    "role": agent.role,
-                    "system_prompt": agent.system_prompt,
-                    "lifecycle": agent.lifecycle,
-                }
-            )
-
+        per_agent_prompts = self._resolve_per_agent_prompts(
+            phase, phase_messages, agent_names,
+        )
+        agent_configs = self._build_phase_agent_configs(phase)
         prior_agent_messages = self._collect_prior_messages(phase)
 
         result = api_client.create_session(

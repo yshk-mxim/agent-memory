@@ -330,37 +330,31 @@ async def offload_model(
 
         logger.info(f"Admin API: Offloading model {model_id}")
 
-        # Step 1: Drain active requests
         engine = request.app.state.semantic.batch_engine
         if engine:
             logger.info("Draining active requests...")
             await engine.drain(timeout_seconds=30.0)
 
-        # Step 2: Evict caches to disk
         cache_store = request.app.state.semantic.cache_store
         if cache_store:
             logger.info("Evicting caches to disk...")
             evicted = cache_store.evict_all_to_disk()
             logger.info(f"Evicted {evicted} caches")
 
-        # Step 3: Clear BlockPool allocations (blocks are now persisted to disk)
         block_pool = request.app.state.semantic.block_pool
         if block_pool:
             logger.info("Clearing block pool allocations...")
             cleared = block_pool.force_clear_all_allocations()
             logger.info(f"Cleared {cleared} agent allocations from pool")
 
-        # Step 4: Shutdown engine
         if engine:
             logger.info("Shutting down batch engine...")
             engine.shutdown()
             request.app.state.semantic.batch_engine = None
 
-        # Step 5: Unload model
         logger.info("Unloading model...")
         registry.unload_model()
 
-        # Step 6: Force garbage collection
         gc.collect()
 
         logger.info(f"Model {model_id} offloaded successfully")
@@ -419,14 +413,12 @@ async def clear_all_caches(
 
         semantic = request.app.state.semantic
 
-        # Step 1: Clear hot caches
         cache_store = semantic.cache_store
         if cache_store:
             hot_cleared = len(cache_store._hot_cache)
             cache_store._hot_cache.clear()
             logger.info(f"Cleared {hot_cleared} hot caches")
 
-        # Step 2: Clear disk caches
         cache_dir = cache_store.cache_dir if cache_store else None
         if cache_dir and cache_dir.exists():
             for cache_file in cache_dir.glob("*.safetensors"):
@@ -434,7 +426,6 @@ async def clear_all_caches(
                 disk_cleared += 1
             logger.info(f"Deleted {disk_cleared} disk cache files")
 
-        # Step 3: Clear BlockPool allocations
         block_pool = semantic.block_pool
         if block_pool:
             pool_cleared = block_pool.force_clear_all_allocations()

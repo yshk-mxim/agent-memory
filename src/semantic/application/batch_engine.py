@@ -12,8 +12,6 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from semantic.domain.entities import AgentBlocks as AgentBlocksType
 
-# Import Q4 extensions to enable QuantizedKVCache.merge() for batching
-from semantic.adapters.outbound import mlx_quantized_extensions  # noqa: F401
 from semantic.domain.entities import AgentBlocks, KVBlock
 from semantic.domain.errors import (
     GenerationError,
@@ -27,6 +25,12 @@ from semantic.domain.value_objects import CompletedGeneration, ModelCacheSpec, S
 logger = logging.getLogger(__name__)
 
 
+# Adaptive chunk size thresholds (token counts)
+_CHUNK_TIER_SMALL_CACHE = 2000
+_CHUNK_TIER_MEDIUM_CACHE = 8000
+_CHUNK_TIER_LARGE_CACHE = 20000
+
+
 def adaptive_chunk_size(
     cache_pos: int,
     min_chunk: int = 512,
@@ -34,29 +38,17 @@ def adaptive_chunk_size(
 ) -> int:
     """Calculate optimal chunk size based on current cache position.
 
-    Larger chunks = faster (fewer forward passes)
-    Smaller chunks = less peak memory
-
-    Strategy: Aggressive early (large chunks), conservative late (small chunks).
-    This balances speed and memory - large chunks are fast when cache is small,
-    but as cache grows, we need smaller chunks to avoid OOM.
-
-    Args:
-        cache_pos: Current position in the sequence (tokens processed so far)
-        min_chunk: Minimum chunk size (for large cache positions)
-        max_chunk: Maximum chunk size (for small cache positions)
-
-    Returns:
-        Optimal chunk size for current position
+    Aggressive early (large chunks for speed), conservative late
+    (small chunks to avoid OOM as cache grows).
     """
-    if cache_pos < 2000:
-        return max_chunk  # Large chunks when cache small
-    elif cache_pos < 8000:
-        return max(min_chunk, max_chunk // 2)  # Medium chunks
-    elif cache_pos < 20000:
-        return max(min_chunk, max_chunk // 4)  # Standard chunks
+    if cache_pos < _CHUNK_TIER_SMALL_CACHE:
+        return max_chunk
+    elif cache_pos < _CHUNK_TIER_MEDIUM_CACHE:
+        return max(min_chunk, max_chunk // 2)
+    elif cache_pos < _CHUNK_TIER_LARGE_CACHE:
+        return max(min_chunk, max_chunk // 4)
     else:
-        return min_chunk  # Small chunks for huge cache
+        return min_chunk
 
 
 class BlockPoolBatchEngine:
@@ -84,17 +76,27 @@ class BlockPoolBatchEngine:
     _RE_MULTI_SPACES = re.compile(r" {3,}")
     _RE_MULTI_NEWLINES = re.compile(r"\n\n\n+")
 
+    # Default chunked prefill settings
+    DEFAULT_CHUNKED_PREFILL_ENABLED = True
+    DEFAULT_CHUNKED_PREFILL_THRESHOLD = 2048
+    DEFAULT_CHUNKED_PREFILL_MIN_CHUNK = 512
+    DEFAULT_CHUNKED_PREFILL_MAX_CHUNK = 4096
+    MAX_SAFE_CACHE_MEMORY_MB = 7500  # Safe on 24GB GPU with ~8GB model
+
     def __init__(
         self,
-        model: Any,  # MLX model
-        tokenizer: Any,  # MLX tokenizer
+        model: Any,
+        tokenizer: Any,
         pool: BlockPool,
         spec: ModelCacheSpec,
-        cache_adapter: Any,  # CacheOperationsPort (MLXCacheAdapter)
-        batch_gen_factory: Callable[[Any, Any], Any] | None = None,  # For testing
-        adaptive_config: Any | None = None,  # AdaptiveConfig (optional)
+        cache_adapter: Any,
+        batch_gen_factory: Callable[[Any, Any], Any] | None = None,
+        adaptive_config: Any | None = None,
+        chunked_prefill_enabled: bool = DEFAULT_CHUNKED_PREFILL_ENABLED,
+        chunked_prefill_threshold: int = DEFAULT_CHUNKED_PREFILL_THRESHOLD,
+        chunked_prefill_min_chunk: int = DEFAULT_CHUNKED_PREFILL_MIN_CHUNK,
+        chunked_prefill_max_chunk: int = DEFAULT_CHUNKED_PREFILL_MAX_CHUNK,
     ) -> None:
-        """Initialize batch engine."""
         if model is None:
             raise ModelNotFoundError("Model must be loaded before creating engine")
         if tokenizer is None:
@@ -114,51 +116,22 @@ class BlockPoolBatchEngine:
         self._batch_gen_factory = batch_gen_factory
         self._adaptive_config = adaptive_config
 
-        self._batch_gen: Any | None = None  # Lazy - created on first submit
+        self._batch_gen: Any | None = None
         self._lock = threading.RLock()
         self._active_requests: dict[str, tuple[str, list[int], Any, list[int], str]] = {}
         self._agent_blocks: dict[str, AgentBlocks] = {}
         self._draining: bool = False
-        self._native_completions: dict[
-            str, CompletedGeneration
-        ] = {}  # Pre-computed native path results
+        self._native_completions: dict[str, CompletedGeneration] = {}
 
-        # Chunked prefill settings (loaded lazily)
-        self._chunked_prefill_enabled: bool | None = None
-        self._chunked_prefill_threshold: int | None = None
-        self._chunked_prefill_min_chunk: int | None = None
-        self._chunked_prefill_max_chunk: int | None = None
+        self._chunked_prefill_enabled: bool | None = chunked_prefill_enabled
+        self._chunked_prefill_threshold: int | None = chunked_prefill_threshold
+        self._chunked_prefill_min_chunk: int | None = chunked_prefill_min_chunk
+        self._chunked_prefill_max_chunk: int | None = chunked_prefill_max_chunk
 
     def _get_chunked_prefill_settings(self) -> tuple[bool, int, int, int]:
-        """Lazily load chunked prefill settings.
-
-        If adaptive_config is set, chunk sizes are adjusted dynamically
-        based on workload (memory pressure, batch depth).
-        """
-        if self._chunked_prefill_enabled is None:
-            try:
-                from semantic.adapters.config.settings import get_settings
-
-                settings = get_settings()
-                self._chunked_prefill_enabled = settings.mlx.chunked_prefill_enabled
-                self._chunked_prefill_threshold = settings.mlx.chunked_prefill_threshold
-                self._chunked_prefill_min_chunk = settings.mlx.chunked_prefill_min_chunk
-                self._chunked_prefill_max_chunk = settings.mlx.chunked_prefill_max_chunk
-            except ImportError:
-                logger.debug("Settings module not available, using chunked prefill defaults")
-                self._chunked_prefill_enabled = True
-                self._chunked_prefill_threshold = 2048
-                self._chunked_prefill_min_chunk = 512
-                self._chunked_prefill_max_chunk = 4096
-            except AttributeError as e:
-                logger.warning(f"Chunked prefill settings incomplete: {e}, using defaults")
-                self._chunked_prefill_enabled = True
-                self._chunked_prefill_threshold = 2048
-                self._chunked_prefill_min_chunk = 512
-                self._chunked_prefill_max_chunk = 4096
-
-        min_chunk = self._chunked_prefill_min_chunk or 512
-        max_chunk = self._chunked_prefill_max_chunk or 4096
+        """Get chunked prefill settings, applying adaptive adjustments if configured."""
+        min_chunk = self._chunked_prefill_min_chunk or self.DEFAULT_CHUNKED_PREFILL_MIN_CHUNK
+        max_chunk = self._chunked_prefill_max_chunk or self.DEFAULT_CHUNKED_PREFILL_MAX_CHUNK
 
         # Override chunk sizes from adaptive config if available
         if self._adaptive_config is not None:
@@ -590,7 +563,7 @@ class BlockPoolBatchEngine:
             bytes_per_token_q4 = (
                 self._spec.n_kv_heads * self._spec.head_dim * 2 * 0.5 * self._spec.n_layers
             )
-            max_safe_memory_mb = 7500  # 7.5GB - safe on 24GB GPU with 8GB model
+            max_safe_memory_mb = self.MAX_SAFE_CACHE_MEMORY_MB
             max_safe_cache_tokens = int((max_safe_memory_mb * 1024 * 1024) / bytes_per_token_q4)
 
             if cache.total_tokens > max_safe_cache_tokens:
@@ -1370,23 +1343,32 @@ class BlockPoolBatchEngine:
         For GPT-OSS models that output analysis before final response, extracts
         only the final channel content.
         """
-        # GPT-OSS: Extract only final channel content if present
-        # Model outputs: <|channel|>analysis<|message|>...<|end|><|start|>assistant<|channel|>final<|message|>...
-        if "<|channel|>final<|message|>" in text:
-            # Extract content after final channel marker
-            final_start = text.rfind("<|channel|>final<|message|>")
-            text = text[final_start + len("<|channel|>final<|message|>") :]
-            # Remove trailing markers
-            for marker in ("<|end|>", "<|return|>"):
-                if marker in text:
-                    text = text.split(marker)[0]
-        elif "<|channel|>analysis<|message|>" in text:
-            # GPT-OSS stuck in analysis mode - don't leak internal reasoning
-            # This happens when the model generates analysis without a final channel
+        # GPT-OSS: Extract final channel content
+        # Normal: <|channel|>analysis<|message|>...<|end|><|start|>assistant<|channel|>final<|message|>...
+        # Malformed: <|channel|>final<|channel|>commentary<|message|>... (missing <|message|> after final)
+        if "<|channel|>final" in text:
+            # Find the last occurrence of final channel marker
+            final_idx = text.rfind("<|channel|>final")
+            text_after_final = text[final_idx:]
+
+            # Look for <|message|> after the final channel marker
+            msg_idx = text_after_final.find("<|message|>")
+            if msg_idx != -1:
+                text = text_after_final[msg_idx + len("<|message|>"):]
+                # Remove trailing markers
+                for marker in ("<|end|>", "<|return|>"):
+                    if marker in text:
+                        text = text.split(marker)[0]
+            else:
+                # No <|message|> found - malformed, return empty
+                logger.warning("[GPT-OSS] Malformed final channel (no message marker)")
+                return ""
+        elif "<|channel|>analysis<|message|>" in text and "<|channel|>final" not in text:
+            # Pure analysis mode - don't leak internal reasoning
             logger.warning("[GPT-OSS] Model stuck in analysis mode, returning empty response")
             return ""
         else:
-            # No final channel and no analysis - clean up any stray markers
+            # No channel markers - clean up any stray markers
             text = text.replace("<|channel|>commentary<|message|>", "")
             text = text.replace("<|channel|>final<|message|>", "")
             text = text.replace("<|end|>", "")

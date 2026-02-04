@@ -45,6 +45,8 @@ DEFAULT_TEMPERATURE = 0.7
 DEFAULT_TOP_P = 1.0
 DEFAULT_MAX_TOKENS = 512
 DEFAULT_MAX_CONTEXT = 32768
+_CHAT_CONTAINER_HEIGHT = 350
+_THINKING_SYSTEM_PROMPT = "Think step by step before answering."
 
 
 def init_session_state() -> None:
@@ -95,7 +97,7 @@ def check_server() -> dict | None:
             if mem.status_code == HTTPStatus.OK:
                 return mem.json()
             return {}
-    except Exception:
+    except httpx.HTTPError:
         return None
 
 
@@ -109,7 +111,7 @@ def fetch_model_info() -> dict | None:
                 models = data.get("data", [])
                 if models:
                     return models[0]
-    except Exception:
+    except httpx.HTTPError:
         return None
     return None
 
@@ -300,6 +302,42 @@ def render_agent_settings(agent_idx: int) -> None:
         )
 
 
+def _submit_agent_message(
+    prefix: str, sid: str, messages: list[dict], user_input: str
+) -> None:
+    """Validate context, add user message, and submit generation request."""
+    max_context = st.session_state.get(f"{prefix}_max_context", DEFAULT_MAX_CONTEXT)
+    est_tokens = estimate_token_count([*messages, {"role": "user", "content": user_input}])
+    if est_tokens > max_context:
+        st.warning(
+            f"Context length (~{est_tokens} tokens) exceeds limit ({max_context}). "
+            "Clear history or increase the limit."
+        )
+        return
+
+    messages.append({"role": "user", "content": user_input})
+    st.session_state[f"{prefix}_messages"] = messages
+
+    temperature = st.session_state.get(f"{prefix}_temperature", DEFAULT_TEMPERATURE)
+    top_p = st.session_state.get(f"{prefix}_top_p", DEFAULT_TOP_P)
+    max_tokens = st.session_state.get(f"{prefix}_max_tokens", DEFAULT_MAX_TOKENS)
+    thinking = st.session_state.get(f"{prefix}_thinking", False)
+
+    api_messages = list(messages)
+    if thinking and api_messages:
+        api_messages = [
+            {"role": "system", "content": _THINKING_SYSTEM_PROMPT},
+            *api_messages,
+        ]
+
+    future = st.session_state.executor.submit(
+        non_stream_response, api_messages, sid, temperature, top_p, max_tokens
+    )
+    st.session_state[f"{prefix}_future"] = future
+    st.session_state[f"{prefix}_generating"] = True
+    st.rerun()
+
+
 @st.fragment
 def render_agent_column(agent_idx: int) -> None:
     """Render a single agent's conversation column.
@@ -315,7 +353,6 @@ def render_agent_column(agent_idx: int) -> None:
     turn = st.session_state[f"{prefix}_turn"]
     all_metrics = st.session_state[f"{prefix}_metrics"]
 
-    # Header with cache state badge
     cache_label, cache_color = get_cache_state(turn)
     st.markdown(
         f"### {name} "
@@ -325,17 +362,14 @@ def render_agent_column(agent_idx: int) -> None:
     )
     st.caption(f"Session: `{sid}` | Turns: {turn}")
 
-    # Per-agent settings
     render_agent_settings(agent_idx)
 
-    # Chat history
-    chat_container = st.container(height=350)
+    chat_container = st.container(height=_CHAT_CONTAINER_HEIGHT)
     with chat_container:
         for msg in messages:
             with st.chat_message(msg["role"]):
                 st.markdown(msg["content"])
 
-    # Latest metrics
     if all_metrics:
         m = all_metrics[-1]
         cols = st.columns(3)
@@ -343,13 +377,8 @@ def render_agent_column(agent_idx: int) -> None:
         cols[1].metric("TPS", f"{m['tps']}")
         cols[2].metric("Tokens", f"{m['input_tokens']}+{m['output_tokens']}")
 
-    # Input
-    user_input = st.chat_input(
-        f"Message {name}...",
-        key=f"{prefix}_input",
-    )
+    user_input = st.chat_input(f"Message {name}...", key=f"{prefix}_input")
 
-    # Suggested prompt button (only show when no messages)
     if not messages and st.button(
         f'Try: "{SUGGESTED_PROMPTS[agent_idx][:40]}..."',
         key=f"{prefix}_suggest",
@@ -357,48 +386,11 @@ def render_agent_column(agent_idx: int) -> None:
     ):
         user_input = SUGGESTED_PROMPTS[agent_idx]
 
-    # Show generating indicator if request is in progress
     if st.session_state.get(f"{prefix}_generating", False):
         st.info(f"{name} is generating... (concurrent request)", icon="⏳")
 
     if user_input:
-        # Check context length limit before sending
-        max_context = st.session_state.get(f"{prefix}_max_context", DEFAULT_MAX_CONTEXT)
-        est_tokens = estimate_token_count([*messages, {"role": "user", "content": user_input}])
-        if est_tokens > max_context:
-            st.warning(
-                f"Context length (~{est_tokens} tokens) exceeds limit ({max_context}). "
-                "Clear history or increase the limit."
-            )
-            return
-
-        # Add user message
-        messages.append({"role": "user", "content": user_input})
-        st.session_state[f"{prefix}_messages"] = messages
-
-        # Read per-agent settings
-        temperature = st.session_state.get(f"{prefix}_temperature", DEFAULT_TEMPERATURE)
-        top_p = st.session_state.get(f"{prefix}_top_p", DEFAULT_TOP_P)
-        max_tokens = st.session_state.get(f"{prefix}_max_tokens", DEFAULT_MAX_TOKENS)
-        thinking = st.session_state.get(f"{prefix}_thinking", False)
-
-        # Prepend thinking instruction if enabled
-        api_messages = list(messages)
-        if thinking and api_messages:
-            api_messages = [
-                {"role": "system", "content": "Think step by step before answering."},
-                *api_messages,
-            ]
-
-        # Submit request to background thread (non-blocking)
-        future = st.session_state.executor.submit(
-            non_stream_response, api_messages, sid, temperature, top_p, max_tokens
-        )
-        st.session_state[f"{prefix}_future"] = future
-        st.session_state[f"{prefix}_generating"] = True
-
-        # Trigger rerun to show generating indicator
-        st.rerun()
+        _submit_agent_message(prefix, sid, messages, user_input)
 
 
 @st.fragment(run_every="0.5s")
@@ -706,7 +698,7 @@ def main() -> None:
                 api_messages = list(messages)
                 if thinking and api_messages:
                     api_messages = [
-                        {"role": "system", "content": "Think step by step before answering."},
+                        {"role": "system", "content": _THINKING_SYSTEM_PROMPT},
                         *api_messages,
                     ]
 

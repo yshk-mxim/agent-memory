@@ -5,10 +5,10 @@ This allows us to keep Q4 format end-to-end (storage -> injection -> generation)
 without dequantizing to FP16, maintaining 75% memory savings.
 
 Patches applied on import:
-  1. QuantizedKVCache.merge()  -> delegates to BatchQuantizedKVCache.merge()
-  2. QuantizedKVCache.size()   -> returns offset (not 0)
-  3. BatchKVCache.merge()      -> delegates to Q4 merge for QuantizedKVCache inputs
-  4. _make_cache()             -> creates BatchQuantizedKVCache for cold starts
+  - QuantizedKVCache.merge()  -> delegates to BatchQuantizedKVCache.merge()
+  - QuantizedKVCache.size()   -> returns offset (not 0)
+  - BatchKVCache.merge()      -> delegates to Q4 merge for QuantizedKVCache inputs
+  - _make_cache()             -> creates BatchQuantizedKVCache for cold starts
 """
 
 import logging

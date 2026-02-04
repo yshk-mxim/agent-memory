@@ -3,12 +3,13 @@
 Coordinates the full hot-swap sequence:
 1. Drain active requests from BatchEngine
 2. Evict all caches to disk via AgentCacheStore
-3. Shutdown BatchEngine
-4. Unload old model via ModelRegistry
-5. Load new model via ModelRegistry
-6. Reconfigure BlockPool for new model spec
-7. Create new BatchEngine with new model
-8. Update application state
+3. Clear BlockPool allocations (caches are now persisted)
+4. Shutdown BatchEngine
+5. Unload old model via ModelRegistry
+6. Load new model via ModelRegistry
+7. Reconfigure BlockPool for new model spec
+8. Update cache store model tag
+9. Create new BatchEngine with new model
 
 Implements rollback on failure to restore previous model.
 """
@@ -112,48 +113,53 @@ class ModelSwapOrchestrator:
         try:
             # Step 1: Drain active requests (if engine exists)
             if old_engine is not None:
-                logger.info("Step 1/7: Draining active requests...")
+                logger.info("Step 1/9: Draining active requests...")
                 await old_engine.drain(timeout_seconds=timeout_seconds)
                 logger.info("Drain complete")
 
             # Step 2: Evict all caches to disk
-            logger.info("Step 2/7: Evicting all caches to disk...")
+            logger.info("Step 2/9: Evicting all caches to disk...")
             evicted_count = self._cache_store.evict_all_to_disk()
             logger.info(f"Evicted {evicted_count} caches")
 
-            # Step 3: Shutdown old BatchEngine
+            # Step 3: Clear BlockPool allocations (caches are now on disk)
+            logger.info("Step 3/9: Clearing BlockPool allocations...")
+            cleared_count = self._pool.force_clear_all_allocations()
+            logger.info(f"Cleared {cleared_count} agent allocations from pool")
+
+            # Step 4: Shutdown old BatchEngine
             if old_engine is not None:
-                logger.info("Step 3/7: Shutting down BatchEngine...")
+                logger.info("Step 4/9: Shutting down BatchEngine...")
                 old_engine.shutdown()
                 logger.info("BatchEngine shutdown complete")
 
-            # Step 4: Unload old model
+            # Step 5: Unload old model
             if old_model_id is not None:
-                logger.info(f"Step 4/7: Unloading model {old_model_id}...")
+                logger.info(f"Step 5/9: Unloading model {old_model_id}...")
                 self._registry.unload_model()
                 logger.info("Model unloaded")
 
-            # Step 5: Load new model
-            logger.info(f"Step 5/7: Loading model {new_model_id}...")
+            # Step 6: Load new model
+            logger.info(f"Step 6/9: Loading model {new_model_id}...")
             new_model, new_tokenizer = self._registry.load_model(new_model_id)
             new_spec = self._registry.get_current_spec()
             if new_spec is None:
                 raise ModelNotFoundError(f"Failed to extract spec for {new_model_id}")
             logger.info("Model loaded")
 
-            # Step 6: Reconfigure BlockPool for new model dimensions
-            logger.info("Step 6/7: Reconfiguring BlockPool...")
+            # Step 7: Reconfigure BlockPool for new model dimensions
+            logger.info("Step 7/9: Reconfiguring BlockPool...")
             self._pool.reconfigure(new_spec)
             logger.info("BlockPool reconfigured")
 
-            # Step 7: Update cache store model tag
-            logger.info("Step 7/8: Updating cache store model tag...")
+            # Step 8: Update cache store model tag
+            logger.info("Step 8/9: Updating cache store model tag...")
             new_tag = self._create_model_tag(new_model_id, new_spec)
             self._cache_store.update_model_tag(new_tag)
             logger.info("Model tag updated")
 
-            # Step 8: Create new BatchEngine with new model
-            logger.info("Step 8/8: Creating new BatchEngine...")
+            # Step 9: Create new BatchEngine with new model
+            logger.info("Step 9/9: Creating new BatchEngine...")
             new_engine = BlockPoolBatchEngine(
                 model=new_model,
                 tokenizer=new_tokenizer,

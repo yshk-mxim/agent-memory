@@ -91,6 +91,17 @@ class MLXSettings(BaseSettings):
         description="KV cache quantization group size (must be power of 2)",
     )
 
+    reasoning_extra_tokens: int = Field(
+        default=300,
+        ge=0,
+        le=1000,
+        description=(
+            "Extra tokens for reasoning models (GPT-OSS, etc.) that generate "
+            "chain-of-thought before final response. Default 300 is safe for "
+            "all models - non-reasoning models simply have extra headroom."
+        ),
+    )
+
     @field_validator("kv_bits", mode="before")
     @classmethod
     def validate_kv_bits(cls, v: int | str | None) -> int | None:

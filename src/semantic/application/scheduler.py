@@ -205,22 +205,20 @@ class ConcurrentScheduler:
         while self._running:
             did_work = False
 
-            # 1. Accept new requests
             accepted = self._accept_requests()
             if accepted:
                 did_work = True
 
-            # 2. DECODE-FIRST: one token per active sequence
+            # Decode-first: one token per active sequence
             if self._engine.has_active_batch():
                 self._run_decode_step()
                 did_work = True
 
-            # 3. THEN PREFILL: one chunk for the first prefilling sequence
+            # Then prefill: one chunk for the first prefilling sequence
             if self._prefill_queue:
                 self._process_one_chunk()
                 did_work = True
 
-            # 4. If idle, block-wait on request queue
             if not did_work:
                 self._wait_for_request(timeout=0.05)
 

@@ -83,7 +83,7 @@ def discover_sessions() -> None:
                 "label": label,
                 "colors": color_map,
             }
-    except Exception:
+    except (KeyError, TypeError):
         logger.debug("Failed to discover sessions", exc_info=True)
 
 

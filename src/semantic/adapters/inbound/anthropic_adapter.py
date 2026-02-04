@@ -626,7 +626,6 @@ async def create_message(request_body: MessagesRequest, request: Request):  # no
     prefix_cache: SharedPrefixCache | None = getattr(semantic_state, "prefix_cache", None)
 
     try:
-        # 1. Convert messages to prompt (for logging and fallback)
         tools_arg = request_body.tools if request_body.tools else None
         prompt = messages_to_prompt(
             request_body.messages,
@@ -636,7 +635,6 @@ async def create_message(request_body: MessagesRequest, request: Request):  # no
         logger.debug(f"Prompt length: {len(prompt)} chars")
         logger.debug(f"Full prompt:\n{prompt}")
 
-        # 2. Tokenize using chat template for proper model turn markers
         tokenizer = batch_engine.tokenizer
         chat_dicts = messages_to_chat_dicts(
             request_body.messages,
@@ -650,9 +648,7 @@ async def create_message(request_body: MessagesRequest, request: Request):  # no
             prompt,
         )
 
-        # 3. Determine agent_id: use X-Session-ID for session-based caching,
-        # fall back to token-based ID for stateless requests.
-        # Session-based lookup enables prefix caching across conversation turns.
+        # Session-based lookup enables prefix caching across conversation turns
         session_id = request.headers.get("X-Session-ID")
         if session_id:
             agent_id = f"sess_{session_id}"
@@ -661,7 +657,6 @@ async def create_message(request_body: MessagesRequest, request: Request):  # no
             agent_id = generate_agent_id_from_tokens(tokens)
             logger.debug(f"Token-based agent ID: {agent_id}, tokens: {len(tokens)}")
 
-        # 4. Check cache store for existing cache
         cached_blocks = cache_store.load(agent_id)
         prefix_hash: str | None = None
         if cached_blocks:
@@ -669,7 +664,7 @@ async def create_message(request_body: MessagesRequest, request: Request):  # no
         else:
             logger.info(f"Cache miss: {agent_id}")
 
-            # 4b. Compute shared prefix hash for system+tools reuse
+            # Compute shared prefix hash for system+tools reuse
             if prefix_cache is not None:
                 system_text = ""
                 if request_body.system:
@@ -692,7 +687,7 @@ async def create_message(request_body: MessagesRequest, request: Request):  # no
                             f"tokens={prefix_entry.n_tokens}"
                         )
 
-        # 5. Handle streaming vs non-streaming
+        # Streaming vs non-streaming
         if request_body.stream:
             if scheduler is not None:
                 # Batched streaming via scheduler (supports batch=2)
@@ -724,7 +719,7 @@ async def create_message(request_body: MessagesRequest, request: Request):  # no
         top_p = request_body.top_p
         top_k = request_body.top_k
 
-        # 6. Route through scheduler (interleaved) or direct engine path
+        # Route through scheduler or direct engine path
         if scheduler is not None:
             # Scheduler path: interleaved prefill + decode
             logger.info(f"Routing through scheduler: agent={agent_id}, tokens={len(tokens)}")
@@ -765,7 +760,7 @@ async def create_message(request_body: MessagesRequest, request: Request):  # no
             if cached_blocks is not None:
                 cache_store.invalidate_hot(agent_id)
 
-            # 7. Execute generation (step until complete - run in executor)
+            # Execute generation (step until complete)
             completion = await asyncio.to_thread(run_step_for_uid, batch_engine, uid)
 
         if completion:
@@ -780,16 +775,16 @@ async def create_message(request_body: MessagesRequest, request: Request):  # no
                 detail="Generation failed - no completion returned",
             )
 
-        # 8. Save updated cache
+        # Save updated cache
         updated_blocks = batch_engine.get_agent_blocks(agent_id)
         if updated_blocks:
             cache_store.save(agent_id, updated_blocks)
             logger.debug(f"Saved cache: {agent_id} ({updated_blocks.total_tokens} tokens)")
 
-        # 9. Parse for tool calls
+        # Parse for tool calls
         remaining_text, tool_calls = parse_tool_calls(completion.text)
 
-        # 10. Format response
+        # Format response
         content_blocks = []
 
         # Add text block if there's remaining text
