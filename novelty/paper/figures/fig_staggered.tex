@@ -22,26 +22,26 @@
     grid style={line width=.1pt, draw=gray!20},
 ]
 
-% Sequential serving
-\addplot[fill=blue!30, draw=blue!70] coordinates {
+% Sequential serving - blue (colorblind-safe)
+\addplot[fill=blue!30, draw=blue!80!black, line width=1pt] coordinates {
     (User A, 7.0)
     (User B, 24.5)
     (Total, 31.5)
 };
 \addlegendentry{Sequential}
 
-% Batched serving
-\addplot[fill=green!30, draw=green!70] coordinates {
+% Batched serving - orange (colorblind-safe)
+\addplot[fill=orange!40, draw=orange!90!black, line width=1pt] coordinates {
     (User A, 7.3)
     (User B, 9.6)
     (Total, 16.9)
 };
 \addlegendentry{Batched}
 
-% Annotations - positioned above bars with better spacing
-\node[font=\footnotesize, text=red] at (axis cs:User A,10.5) {4\% penalty};
-\node[font=\footnotesize, text=green!70!black] at (axis cs:User B,27) {2.6$\times$ faster};
-\node[font=\footnotesize, text=green!70!black] at (axis cs:Total,35) {1.86$\times$ total};
+% Annotations - positioned above bars with better spacing, colorblind-safe colors
+\node[font=\footnotesize, text=violet!80!black] at (axis cs:User A,10.5) {4\% penalty};
+\node[font=\footnotesize, text=orange!90!black] at (axis cs:User B,27) {2.6$\times$ faster};
+\node[font=\footnotesize, text=orange!90!black] at (axis cs:Total,35) {1.86$\times$ total};
 
 \end{axis}
 \end{tikzpicture}

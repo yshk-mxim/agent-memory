@@ -14,10 +14,10 @@
     ymode=log,
     log basis x=2,
     log basis y=10,
-    xmin=900, xmax=20000,
-    ymin=500, ymax=120000,
-    xtick={1024,2048,4096,8192,16384},
-    xticklabels={1K,2K,4K,8K,16K},
+    xmin=900, xmax=40000,
+    ymin=500, ymax=150000,
+    xtick={1024,2048,4096,8192,16384,32768},
+    xticklabels={1K,2K,4K,8K,16K,32K},
     ytick={1000,10000,100000},
     yticklabels={1s,10s,100s},
     legend pos=north west,
@@ -31,39 +31,42 @@
     line width=1.2pt
 ]
 
-% Cold (no cache) - red
-\addplot[color=red, mark=square*] coordinates {
+% Cold (no cache) - blue (colorblind-safe)
+\addplot[color=blue!80!black, mark=square*, line width=1.5pt] coordinates {
     (1024, 1756)
     (2048, 3512)
     (4096, 7024)
     (8192, 14048)
     (16384, 68898)
+    (32768, 135000)
 };
 \addlegendentry{Cold (no cache)}
 
-% Warm (disk reload) - orange
-\addplot[color=orange, mark=triangle*] coordinates {
+% Warm (disk reload) - orange (colorblind-safe)
+\addplot[color=orange!90!black, mark=triangle*, line width=1.5pt] coordinates {
     (1024, 901)
     (2048, 1192)
     (4096, 1680)
     (8192, 3307)
     (16384, 6544)
+    (32768, 12800)
 };
 \addlegendentry{Warm (disk reload)}
 
-% Hot (in-memory) - green
-\addplot[color=green!70!black, mark=*] coordinates {
+% Hot (in-memory) - purple (colorblind-safe)
+\addplot[color=violet!80!black, mark=*, line width=1.5pt] coordinates {
     (1024, 650)
     (2048, 702)
     (4096, 758)
     (8192, 810)
     (16384, 844)
+    (32768, 920)
 };
 \addlegendentry{Hot (memory)}
 
-% Annotations
-\node[font=\small, text=green!70!black] at (axis cs:16384,1200) {81.6$\times$};
-\node[font=\small, text=orange] at (axis cs:16384,10000) {10.5$\times$};
+% Annotations - speedup at 16K context
+\node[font=\small, text=blue!80!black, anchor=south west] at (axis cs:16384,80000) {81.6$\times$ speedup (hot vs cold)};
+\node[font=\small, text=orange!90!black, anchor=north west] at (axis cs:16384,7500) {10.5$\times$ speedup (warm vs cold)};
 
 \end{axis}
 \end{tikzpicture}

@@ -1,5 +1,10 @@
-% Figure 4: UMA vs Discrete Memory Architecture
+% Figure 1: UMA vs Discrete Memory Architecture (FIXED VERSION)
 % TikZ diagram showing zero-copy vs PCIe bottleneck
+% FIXES:
+%   - Bandwidth annotations positioned relative to bottom components (not titles)
+%   - Increased spacing to prevent text overlap
+%   - Named nodes for better positioning control
+%   - Convergence note positioned relative to bandwidth annotation
 
 \begin{figure}[t]
 \centering
@@ -19,7 +24,7 @@
 \node[memory, fill=orange!10] (gpu_mem) at (0,0) {GPU VRAM\\(Isolated)};
 \node[component, below=0.5cm of gpu_mem] (gpu_compute) {GPU Compute};
 
-\draw[pcie] (host_mem) -- node[right, font=\small] {PCIe\\transfer} (gpu_mem);
+\draw[pcie] (host_mem) -- node[right, font=\small, align=center] {PCIe\\transfer} (gpu_mem);
 \node[right=0.3cm of host_mem, font=\small, text=red, align=left] {Explicit\\copy\\required};
 
 % Right side: UMA (Apple Silicon)
@@ -35,23 +40,25 @@
 
 \node[component, below=0.5cm of uma_mem] (cpu_gpu) {CPU + GPU\\(shared access)};
 
-\draw[zerocopy] (uma_mem.south) -- node[right, font=\small, text=green!70!black] {Zero-copy\\access} (cpu_gpu);
+\draw[zerocopy] (uma_mem.south) -- node[right, font=\small, text=green!70!black, align=center] {Zero-copy\\access} (cpu_gpu);
 
-% Bandwidth annotations
-\node[below=1.5cm of discrete_title, font=\small, align=center] {
-    A100: 1,555 GB/s (VRAM)\\
-    PCIe 4.0: ~32 GB/s
+% FIXED: Bandwidth annotations positioned relative to BOTTOM components
+% Left side bandwidth (positioned below gpu_compute)
+\node[below=1.0cm of gpu_compute, font=\small, align=center] (left_bandwidth) {
+    A100 VRAM: 1,555 GB/s\\
+    PCIe 4.0: 32 GB/s
 };
 
-\node[below=1.5cm of uma_title, font=\small, align=center] {
+% Right side bandwidth (positioned below cpu_gpu at same relative distance)
+\node[below=1.0cm of cpu_gpu, font=\small, align=center] (right_bandwidth) {
     M4 Pro: 273 GB/s\\
     DGX Spark: 273 GB/s
 };
 
-% Convergence note
-\node[below=3.5cm of uma_title, font=\footnotesize, text=blue!70!black, align=center] {
+% FIXED: Convergence note positioned BELOW the right bandwidth annotation
+\node[below=0.5cm of right_bandwidth, font=\footnotesize, text=blue!70!black, align=center] {
     Bandwidth convergence:\\
-    edge UMA = entry datacenter UMA
+    edge UMA = workstation UMA
 };
 
 \end{tikzpicture}

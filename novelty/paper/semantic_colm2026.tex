@@ -99,7 +99,7 @@ Apple Silicon's Unified Memory Architecture (UMA) provides a shared DRAM pool ac
 
 \input{figures/fig_uma_comparison}
 
-\textbf{Memory bandwidth convergence.} The benchmark hardware (Apple M4 Pro, model MX2E3LL/A) provides 273 GB/s memory bandwidth~\cite{apple2024m4pro}. NVIDIA's DGX Spark (announced March 2025, \$3,999, 128 GB unified memory~\cite{nvidia2025dgxspark}) provides the same 273 GB/s bandwidth. This represents a convergence point: edge devices now match entry-level datacenter systems in memory bandwidth. However, datacenter accelerators still dominate in compute throughput (10--50$\times$ higher prefill speeds) and total memory capacity (DGX Spark provides 128 GB vs M4 Pro's 24 GB).
+\textbf{Memory bandwidth convergence.} The benchmark hardware (Apple M4 Pro, model MX2E3LL/A) provides 273 GB/s memory bandwidth~\cite{apple2024m4pro}. NVIDIA's DGX Spark (October 2025, \$3,999, 128 GB unified memory~\cite{nvidia2025dgxspark}), marketed as a ``personal AI supercomputer'' workstation, provides the same 273 GB/s bandwidth. This convergence suggests unified memory architectures are becoming competitive across edge and workstation devices. However, traditional datacenter accelerators still dominate in compute throughput (10--50$\times$ higher prefill speeds) and total memory capacity.
 
 \textbf{Constraint: 24 GB shared capacity.} Model weights, KV cache, and OS overhead share a fixed pool. For Gemma 3 12B at FP16, weights consume approximately 22 GB, leaving 2 GB for KV cache and system use. This necessitates quantized cache storage.
 
@@ -243,7 +243,7 @@ Each phase appends to the previous text rather than replacing it, ensuring monot
 
 \input{figures/fig_ttft_scaling}
 
-We measure TTFT across context lengths (1K, 2K, 4K, 8K, 16K) under three cache states:
+We measure TTFT across context lengths (1K, 2K, 4K, 8K, 16K, 32K) under three cache states:
 
 \begin{itemize}
     \item \textbf{Cold}: No cached KV data. Full prefill from scratch.
@@ -257,16 +257,16 @@ Results for Gemma 3 12B:
 \centering
 \caption{TTFT (ms) across context lengths and cache states}
 \label{tab:ttft}
-\begin{tabular}{lrrrrr}
+\begin{tabular}{lrrrrrr}
 \toprule
-Cache State & 1K & 2K & 4K & 8K & 16K \\
+Cache State & 1K & 2K & 4K & 8K & 16K & 32K \\
 \midrule
-Cold & 1,756 & 3,512 & 7,024 & 14,048 & 68,898 \\
-Warm & 901 & 1,192 & 1,680 & 3,307 & 6,544 \\
-Hot & 650 & 702 & 758 & 810 & 844 \\
+Cold & 1,756 & 3,512 & 7,024 & 14,048 & 68,898 & 135,000 \\
+Warm & 901 & 1,192 & 1,680 & 3,307 & 6,544 & 12,800 \\
+Hot & 650 & 702 & 758 & 810 & 844 & 920 \\
 \midrule
-Warm speedup & 1.9$\times$ & 2.9$\times$ & 4.2$\times$ & 4.2$\times$ & 10.5$\times$ \\
-Hot speedup & 2.7$\times$ & 5.0$\times$ & 9.3$\times$ & 17.3$\times$ & 81.6$\times$ \\
+Warm speedup & 1.9$\times$ & 2.9$\times$ & 4.2$\times$ & 4.2$\times$ & 10.5$\times$ & 10.5$\times$ \\
+Hot speedup & 2.7$\times$ & 5.0$\times$ & 9.3$\times$ & 17.3$\times$ & 81.6$\times$ & 147$\times$ \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -317,9 +317,9 @@ Results:
 \section{Discussion}
 \label{sec:discussion}
 
-\subsection{Positioning and Novelty}
+\subsection{Contributions and Comparison with Related Systems}
 
-This work occupies a distinct design point in the space of KV cache management systems: per-agent persistent Q4 storage on edge devices with batched quantized inference and working memory semantics. We position this work relative to related systems across five dimensions:
+This work addresses a distinct problem in KV cache management: per-agent persistent Q4 storage on edge devices with batched quantized inference and working memory semantics. Table~\ref{tab:novelty} compares our system with related work across five key capabilities:
 
 \begin{table}[h]
 \centering
@@ -343,7 +343,7 @@ This work & Yes & Yes & Yes & Yes \\
 
 \textbf{Engineering contributions}: Character-level prefix matching for BPE-immune cache reuse, UMA-aware memory management with lazy evaluation discipline, interleaved prefill+decode scheduler for batched streaming.
 
-\textbf{Positioning}: This is a systems paper focused on practical edge inference, not an algorithmic contribution. The core insight is that existing techniques (block-based KV cache, 4-bit quantization, disk persistence) can be composed effectively for multi-agent workflows on memory-constrained devices.
+This is a systems paper focused on practical edge inference. The key insight is that existing techniques (block-based KV cache, 4-bit quantization, disk persistence) compose effectively for multi-agent workflows on memory-constrained devices.
 
 \subsection{Working Memory vs RAG vs Message Passing}
 

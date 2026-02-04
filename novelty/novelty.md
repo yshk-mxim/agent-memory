@@ -8,7 +8,7 @@
 
 ## Abstract
 
-Multi-agent LLM workflows on edge devices suffer from *O(n)* cold-start latency: every agent turn re-prefills the entire conversation history from scratch. On Apple Silicon, where GPU compute is 10--50x slower than datacenter accelerators, this means 8--40 seconds of prefill per turn — rendering multi-agent workflows unusably slow. We present **Semantic**, a persistent KV cache management system that addresses this through two key ideas: (1) a **persistent block pool** that gives each agent its own isolated, quantized (Q4) KV cache persisted to disk in safetensors format, and (2) **KV cache as working memory** — a paradigm shift from RAG-style text retrieval to persistent attention-layer state that agents carry across sessions and phases. The system achieves **2.0x--4.3x end-to-end speedup** on multi-turn conversations (up to **81.6x TTFT speedup** at 16K context with hot in-memory cache; **1.1--2.0x** with disk-reloaded cache after server restart), **72% memory savings** from end-to-end Q4 operation, and supports **4 model architectures** (Gemma 3, GPT-OSS, Llama 3.1, Qwen 2.5) through a model-agnostic block pool abstraction. A novel **BatchQuantizedKVCache** enables concurrent inference over multiple agents' Q4 caches — a capability absent from upstream MLX libraries — with an interleaved prefill+decode scheduler that provides true per-token streaming during batched generation. Multi-phase coordination scenarios (prisoner's dilemma, gossip networks) demonstrate that persistent KV cache serves as a functional working memory: agents maintain attention-layer state across phases, eliminating re-computation and enabling context that accumulates rather than re-computes. To our knowledge, this is the first system combining agent-isolated persistent Q4 KV cache management on Apple Silicon's Unified Memory Architecture with batched quantized inference and cross-phase working memory semantics.
+Multi-agent LLM workflows on edge devices suffer from *O(n)* cold-start latency: every agent turn re-prefills the entire conversation history from scratch. On Apple Silicon, where GPU compute is 10--50x slower than datacenter accelerators, this means 8--40 seconds of prefill per turn — rendering multi-agent workflows unusably slow. We present **Semantic**, a persistent KV cache management system that addresses this through two key ideas: (1) a **persistent block pool** that gives each agent its own isolated, quantized (Q4) KV cache persisted to disk in safetensors format, and (2) **KV cache as working memory** — reframing persistent attention-layer state as an alternative to RAG-style text retrieval, enabling agents to carry computed context across sessions and phases. The system achieves **2.0x--4.3x end-to-end speedup** on multi-turn conversations (up to **81.6x TTFT speedup** at 16K context with hot in-memory cache; **1.1--2.0x** with disk-reloaded cache after server restart), **72% memory savings** from end-to-end Q4 operation, and supports **4 model architectures** (Gemma 3, GPT-OSS, Llama 3.1, Qwen 2.5) through a model-agnostic block pool abstraction. A novel **BatchQuantizedKVCache** enables concurrent inference over multiple agents' Q4 caches — a capability absent from upstream MLX libraries — with an interleaved prefill+decode scheduler that provides true per-token streaming during batched generation. Multi-phase coordination scenarios (prisoner's dilemma, gossip networks) demonstrate that persistent KV cache serves as a functional working memory: agents maintain attention-layer state across phases, eliminating re-computation and enabling context that accumulates rather than re-computes. To our knowledge, this is the first system combining agent-isolated persistent Q4 KV cache management on Apple Silicon's Unified Memory Architecture with batched quantized inference and cross-phase working memory semantics.
 
 ---
 
@@ -64,7 +64,7 @@ This system makes six contributions:
 
 2. **BatchQuantizedKVCache with Interleaved Scheduling** — A batched inference mechanism over Q4-quantized KV caches (no public MLX implementation exists), with `merge()`/`extract()` operations that bridge per-agent persistence and concurrent generation, plus a `ConcurrentScheduler` providing per-token decode granularity and true SSE streaming during batched inference.
 
-3. **KV Cache as Working Memory** — A paradigm for multi-agent coordination where persistent KV caches serve as agent working memory across phases, replacing text-retrieval-based context with pre-computed attention state.
+3. **KV Cache as Working Memory** — A framework for multi-agent coordination where persistent KV caches serve as agent working memory across phases, offering an alternative to text-retrieval-based context by preserving pre-computed attention state.
 
 4. **Q4 End-to-End Persistence Pipeline** — A cache lifecycle where KV data stays in 4-bit quantized format from disk through inference, using MLX's `quantized_scaled_dot_product_attention()` without format conversion.
 
@@ -170,7 +170,7 @@ graph TB
 | Peak memory | VRAM-isolated | Shared with OS | Chunked prefill prevents system-wide pressure |
 | Fragmentation | PagedAttention | MLX buffer cache | Block pool + `mx.clear_cache()` discipline |
 
-**The compute asymmetry is the key motivator.** On an A100, re-prefilling 4K tokens takes ~400ms — persistence saves marginal time. On Apple Silicon, the same re-prefill takes ~8 seconds — persistence transforms the interaction model.
+**The compute asymmetry is the key motivator.** On an A100, re-prefilling 4K tokens takes ~400ms — persistence saves marginal time. On Apple Silicon, the same re-prefill takes ~8 seconds — persistence transforms the interaction model. NVIDIA's DGX Spark (Grace Blackwell, 128 GB unified memory, shipping October 2025 at $3,999) brings UMA to the NVIDIA ecosystem, but with 273 GB/s memory bandwidth — roughly 1/3 of an M4 Max (400 GB/s) — making decode-phase performance (where KV cache management matters most) bandwidth-limited. Apple Silicon remains the highest-bandwidth UMA platform for local inference.
 
 MLX further enables this through **CPU-GPU stream-level parallelism**: the CPU can prepare the next chunk's computation graph while the GPU executes the current chunk. Combined with lazy evaluation, this enables overlapped cache loading and computation that benchmarks at ~21% latency improvement and ~26% throughput increase over serial execution.
 
@@ -180,14 +180,14 @@ No existing system occupies the design point that edge multi-agent inference req
 
 | System | Persistent Cache | Per-Agent Isolation | Q4 KV Cache | Edge/UMA Aware | Working Memory | Q4 Batching |
 |--------|:---:|:---:|:---:|:---:|:---:|:---:|
-| vLLM | - | - | - | - | - | - |
+| vLLM | - | - | FP8 production; INT4 RFC | - | - | - |
 | vllm-mlx (Barrios 2026) | - | - | - | Partial | - | FP16 batch |
-| SGLang | - | - | - | - | - | - |
-| LMCache | Disk + S3 | - | - | - | - | - |
+| SGLang | HiCache (GPU→CPU→disk) | - | - | - | - | - |
+| LMCache | Disk + S3 + CacheGen | - | - | - | - | - |
 | RAG-DCache (Lee 2025) | Disk | - | - | - | Document-level | - |
-| llama.cpp | Slot API | Shared context | FP16 only | Partial | - | - |
-| LM Studio | - | - | - | MLX support | - | - |
-| Ollama | - | - | - | Metal support | - | - |
+| llama.cpp | Slot API | Shared context | Q4_0/Q8_0 types | Partial | - | Continuous batch |
+| LM Studio 0.4.0 | - | Parallel slots | Via llama.cpp | Unified KV cache | - | Continuous batch |
+| Ollama | OLLAMA_KEEP_ALIVE | - | q4_0 (requires Flash Attn) | Metal support | - | - |
 | mlx-lm (upstream) | - | - | Q4 single | - | - | FP16 only |
 | **Semantic (this work)** | **safetensors** | **Block pool** | **End-to-end** | **UMA co-designed** | **Cross-phase** | **Q4 batch** |
 
@@ -195,8 +195,8 @@ No existing system occupies the design point that edge multi-agent inference req
 
 Recent research has begun recognizing the KV cache as a memory substrate:
 
-- **MemArt** (OpenReview, Oct 2025) stores conversational turns as reusable KV cache blocks, retrieving via attention scores. Reports 11% accuracy improvement over plaintext memory and 91--135x fewer prefill tokens.
-- **Memory³** and **MemOS** make the KV cache an explicit memory carrier, encoding external knowledge as sparse KV pairs injected into attention layers.
+- **MemArt** (ICLR 2026 submission, October 2025) stores conversational turns as reusable KV cache blocks, retrieving via attention scores. Reports 11% accuracy improvement over plaintext memory and 91--135x fewer prefill tokens.
+- **Memory³** and **MemOS** (Yang et al., 2025) make the KV cache an explicit memory carrier, encoding external knowledge as sparse KV pairs injected into attention layers. MemOS proposes a "memory operating system" with explicit model memory (parameters, KV cache, activations) as a first-class resource managed through standardized APIs.
 - **EM-LLM** (ICLR 2025) implements episodic memory via KV-pair retrieval, outperforming traditional RAG by 30.5% on LongBench.
 
 These systems validate the principle that KV cache is a more efficient memory format than text. However, none of them combine:
@@ -359,7 +359,7 @@ else:                          # Regular KVCache -> FP16 path
     mx.fast.scaled_dot_product_attention(queries, keys, values, ...)
 ```
 
-By injecting `QuantizedKVCache` (which has `.bits`), we force the Q4 attention path that uses `mx.quantized_matmul` internally — operating directly on packed uint32 weights without creating FP16 intermediates.
+By injecting `QuantizedKVCache` (which has `.bits`), we force the Q4 attention path. Note that `quantized_scaled_dot_product_attention` is a Python-level function (not a fused Metal kernel like `mx.fast.scaled_dot_product_attention`) — it calls `mx.quantized_matmul` for Q×K and Q×V operations, operating on packed uint32 weights without creating full FP16 intermediates. A fused Metal kernel for quantized attention (analogous to FlashAttention for quantized inputs) would improve performance. MLX issue #2955 (December 2025) proposed IO-aware FlashAttention-style kernels with quantized K/V support and was closed as completed in January 2026 — community benchmarks showed ~77% throughput improvement for PagedAttention on Metal and MLX reportedly matching or exceeding llama.cpp performance. As these optimizations mature, the Q4 attention path will benefit directly.
 
 **Measured memory savings:**
 
@@ -556,7 +556,7 @@ sequenceDiagram
 
 ### 3.6 Continuous Batching with Persistent Q4 Caches
 
-The system implements continuous batching with a novel constraint: each sequence in the batch carries its own persistent Q4 KV cache. This is a capability that no existing MLX inference system provides — upstream `mlx-lm` supports `BatchKVCache` for concurrent FP16 generation, but has no mechanism for merging, persisting, or restoring quantized caches within a batch. Issue #548 on the mlx-lm repository explicitly requests persistent batch KV cache; the maintainers acknowledged it as "not unreasonable" but it remains unimplemented.
+The system implements continuous batching with a novel constraint: each sequence in the batch carries its own persistent Q4 KV cache. This is a capability that no existing MLX inference system provides — upstream `mlx-lm` supports `BatchKVCache` for concurrent FP16 generation, but has no mechanism for merging, persisting, or restoring quantized caches within a batch. Issue #548 on the mlx-lm repository explicitly requests persistent batch KV cache; the maintainers acknowledged it as "not unreasonable" but it remains unimplemented as of mlx-lm 0.30.5 (January 2026). The upstream `mlx_lm.cache_prompt` utility supports single-prompt persistence to safetensors but not batch or per-agent cache management.
 
 #### BatchQuantizedKVCache
 
@@ -1081,15 +1081,17 @@ Side-by-side comparison using the same model (DeepSeek-Coder-V2-Lite 16B Q4) and
 
 **Key finding:** LM Studio's Turn 2 is faster (778 ms vs 1,202 ms) due to llama.cpp's optimized Metal kernels. But **LM Studio regresses at Turn 3** to 2,845 ms (only 49% of tokens cached). Semantic maintains consistent ~1.2s for all follow-up turns because character-level prefix matching ensures the cache always extends properly.
 
-| Capability | Semantic | LM Studio |
+| Capability | Semantic | LM Studio 0.4.0 |
 |------------|----------|-----------|
 | Cold short TTFT | 388 ms | ~116 ms |
 | Multi-turn consistency | **Stable at all depths** | Degrades at Turn 3+ |
 | Max practical context | **50K+ tokens** | ~4K tokens |
 | Disk persistence | **Yes (safetensors)** | No |
-| Multi-agent isolation | **Yes (per-session)** | No |
-| Q4 KV cache | **Yes (72% savings)** | No |
+| Multi-agent isolation | **Yes (per-session)** | Parallel slots (shared context) |
+| Q4 KV cache | **Yes (72% savings)** | Via llama.cpp backend |
 | Cache extends across turns | **Yes (character-level)** | Partial (token-level) |
+| Parallel inference | **Batched Q4** | Continuous batching (llama.cpp only, not MLX) |
+| Cache survives restart | **Yes** | No |
 
 ### 5.10 Character-Level vs Token-Level Matching
 
@@ -1114,7 +1116,7 @@ We assess the novelty of each technique on a spectrum from "Pure Engineering" to
 | Technique | Classification | Role in System |
 |-----------|---------------|----------------|
 | **Persistent Block Pool** (per-agent isolation) | **Novel** | Core contribution — no prior system provides this combination |
-| **KV Cache as Working Memory** (cross-phase) | **Novel framing** | Second contribution — positions KV cache as RAG alternative |
+| **KV Cache as Working Memory** (cross-phase) | **Novel framing** | Second contribution — positions KV cache as RAG alternative for multi-agent coordination |
 | **BatchQuantizedKVCache** (Q4 batched inference) | **Novel** | No public MLX implementation exists; mlx-lm issue #548 confirms unimplemented. Tested on 4 architectures including hybrid GQA + sliding window (Gemma 3) |
 | **Interleaved Prefill + Decode Scheduling** | **Incremental (significant)** | Per-token decode granularity with round-robin prefill; enables streaming + batching. Measured +35% system throughput on Gemma 3 at 1K context and 2.6x User B TTFT improvement with staggered arrivals (Section 5.7) |
 | Character-Level Prefix Matching | Incremental | Key supporting technique — makes persistence practical |
@@ -1126,9 +1128,9 @@ We assess the novelty of each technique on a spectrum from "Pure Engineering" to
 
 The **Persistent Block Pool with Per-Agent KV Cache Isolation** is the one element that no prior system provides. The combination of agent identity awareness, Q4 disk persistence, multi-architecture support, and correct concurrency semantics is unique.
 
-The **BatchQuantizedKVCache** is independently novel — no public MLX codebase implements batched inference over quantized KV caches. The `merge()`, `update_and_fetch()`, and `extract()` operations, plus three monkey-patches to upstream `mlx-lm`, enable a capability that the mlx-lm maintainers have acknowledged as needed but not built (issue #548). Combined with the `ConcurrentScheduler`'s per-token interleaving, this enables true streaming responses during batched inference — a capability absent from both `mlx-lm` and `vllm-mlx`.
+The **BatchQuantizedKVCache** is independently novel on the MLX platform — no public MLX codebase implements batched inference over quantized KV caches, though datacenter systems have explored FP8 batched caches (vLLM) and quantized KV types (llama.cpp). The `merge()`, `update_and_fetch()`, and `extract()` operations, plus three monkey-patches to upstream `mlx-lm`, enable a capability that the mlx-lm maintainers have acknowledged as needed but not built (issue #548). Combined with the `ConcurrentScheduler`'s per-token interleaving, this enables true streaming responses during batched inference — a capability absent from both `mlx-lm` and `vllm-mlx`.
 
-The **KV Cache as Working Memory** framing is the third contribution. While individual papers (MemArt, EM-LLM) have explored KV cache as memory, none have demonstrated it in a multi-phase coordination system with per-agent isolation and disk persistence. The prisoner's dilemma and gossip scenarios show working memory in action: agents carry computed attention state across phases rather than re-computing from retrieved text.
+The **KV Cache as Working Memory** framing is the third contribution. Several systems have explored KV cache as memory — MemArt for conversational turn reuse, EM-LLM for episodic retrieval, MemOS for memory lifecycle management — but none have demonstrated it in a multi-phase coordination system with per-agent isolation and disk persistence. The prisoner's dilemma and gossip scenarios show working memory in action: agents carry computed attention state across phases rather than re-computing from retrieved text.
 
 **Weakest claim:** "Zero-copy on UMA" — should be stated as "zero-format-conversion" since `mx.array()` does involve a memory copy at the load boundary. The disk-to-GPU path avoids *format* conversion (Q4 stays Q4), not *memory* copying.
 
@@ -1160,7 +1162,7 @@ In the gossip network scenario, Alice accumulates private knowledge from two sep
 
 ### 6.3 Comparison to vllm-mlx
 
-The closest related work for the persistence contribution is **vllm-mlx** (Barrios et al., arXiv:2601.19139, January 2026), which brings continuous batching and content-based prefix caching to Apple Silicon via MLX. The two systems solve different problems on the same platform:
+The closest related work for the persistence contribution is **vllm-mlx** (Barrios, arXiv:2601.19139, January 2026), which brings continuous batching and content-based prefix caching to Apple Silicon via MLX. The two systems solve different problems on the same platform:
 
 | Capability | vllm-mlx | Semantic |
 |-----------|----------|----------|
@@ -1196,9 +1198,25 @@ The `BatchQuantizedKVCache` adds a capability that neither system previously off
 
 RAG-DCache optimizes the *document retrieval* step of RAG. Semantic replaces RAG entirely for agent workflows — the cached KV state *is* the agent's context, not a precomputed acceleration of text retrieval.
 
-### 6.5 Attention-Layer vs Message-Layer Coordination
+### 6.5 Why Not Compose Existing Tools?
 
-The emergence of standardized agent communication protocols — Google's **A2A** (Agent2Agent, April 2025, now under the Linux Foundation), Anthropic's **MCP** (Model Context Protocol), and others — raises a positioning question: where does KV cache coordination fit in the protocol stack?
+A natural objection is that existing components — LMCache for disk persistence, llama.cpp's Q4 KV types, vLLM's FP8 cache, Ollama's `OLLAMA_KV_CACHE_TYPE=q4_0` — could be combined to achieve similar functionality without new engineering. This composition argument deserves a direct response.
+
+**The gap is not in individual capabilities but in their intersection.** llama.cpp supports Q4 KV cache and slot persistence, but its slots share a context and have no per-agent isolation or cross-session prefix matching. LMCache supports disk persistence and CacheGen compression, but is CUDA-only and operates at the request level without agent identity. Ollama supports Q4 KV types, but only for active inference — the quantized cache is volatile and does not survive process restart. vLLM has production FP8 KV cache, but no disk persistence and no edge/UMA support (INT4 remains an RFC).
+
+**No existing stack provides the composition we implement:**
+1. Per-agent isolated Q4 caches persisted to disk (not just Q4 in memory)
+2. Character-level prefix matching across sessions (not token-level within a session)
+3. Batched inference over persisted Q4 caches (`merge()`/`extract()` pipeline)
+4. Cross-phase working memory with prompt construction that preserves cache prefixes
+
+Each existing tool solves one dimension. Semantic's contribution is occupying the intersection point — and the engineering to make that intersection work on MLX/UMA (the `BatchQuantizedKVCache`, the monkey-patches, the lazy evaluation discipline) is non-trivial because upstream MLX has no support for batched quantized caches.
+
+**The UMA landscape is evolving.** NVIDIA's DGX Spark (128 GB LPDDR5x, 273 GB/s, shipping since October 2025 at $3,999) brings Grace Blackwell to the desktop with ~1 PFLOP FP4 compute but bandwidth-limited decode (~38 tok/s on 120B models). AMD's Strix Halo (Ryzen AI Max+ 395, 128 GB, ~212 GB/s) targets a similar niche at lower price points but with immature ROCm software support. As UMA becomes available beyond Apple Silicon, the design patterns established here — cache persistence optimized for zero-format-conversion on shared memory, adaptive chunked prefill to avoid memory pressure on a shared pool — become relevant to a broader hardware landscape. The techniques are not Apple-specific; they are UMA-specific.
+
+### 6.6 Attention-Layer vs Message-Layer Coordination
+
+The emergence of standardized agent communication protocols — Google's **A2A** (Agent2Agent, April 2025, now Linux Foundation stewardship, v0.3 as of late 2025), Anthropic's **MCP** (Model Context Protocol), and others — raises a positioning question: where does KV cache coordination fit in the protocol stack?
 
 **A2A operates at the message layer.** Its primitives are Agent Cards (capability advertisements), Tasks (stateful work units), Messages (text/file exchanges), and Artifacts (generated outputs). Communication flows over HTTP with JSON-RPC and SSE. Agents are treated as opaque black boxes — A2A neither knows nor cares what model an agent runs, whether it has a KV cache, or what its attention state looks like. This is by design: A2A solves the *interoperability* problem (how do agents from different vendors talk to each other?), not the *efficiency* problem (how do agents on the same device share computation?).
 
@@ -1214,7 +1232,7 @@ The emergence of standardized agent communication protocols — Google's **A2A**
 | Scope | Cross-vendor, cross-network | Single device, same model |
 | Protocol level | Layer 7+ (application) | Below Layer 7 (attention state) |
 
-**Cisco's "Internet of Cognition" framework** (2025) identifies this gap explicitly. Their analysis distinguishes Layer 8 (syntactic protocols for message exchange — A2A, MCP) from a proposed Layer 9 (semantic cognition protocols for shared intent, memory, and knowledge). A2A and MCP solve Layer 8. The KV cache block pool operates closer to Layer 9 — managing the *computed cognitive state* (attention patterns, weighted token relationships) rather than the *textual representation* of that state.
+**Cisco's "Internet of Cognition" framework** (Cisco Research, 2025) identifies this gap explicitly. Their layered reference architecture distinguishes Layer 8 (syntactic protocols for message exchange — A2A, MCP) from a proposed Layer 9 (semantic cognition protocols for shared intent, memory, and knowledge). A2A and MCP solve Layer 8. The KV cache block pool operates closer to Layer 9 — managing the *computed cognitive state* (attention patterns, weighted token relationships) rather than the *textual representation* of that state. The Internet of Cognition framework also identifies trust and provenance as critical concerns for agent-to-agent coordination — a dimension our system does not currently address.
 
 **Information loss at the message boundary.** When Agent A communicates with Agent B via A2A, the following happens: Agent A generates a text response → text is serialized to JSON → transmitted to Agent B → Agent B's model re-prefills over the received text from scratch. The attention patterns, token-level relationships, and contextual weights that Agent A's model computed are *destroyed* at the serialization boundary. Every inter-agent message in A2A pays the full prefill cost on the receiving side.
 
@@ -1222,26 +1240,31 @@ KV cache coordination avoids this loss for agents sharing the same model: Agent 
 
 **Complementary, not competing.** A2A and KV cache coordination operate at different levels and solve different problems. A2A enables a Gemini agent to talk to a Claude agent across the internet. KV cache coordination enables three Gemma 3 agents on the same MacBook to share attention state efficiently. A future system could use A2A for cross-vendor coordination while using KV cache persistence for intra-device efficiency — the same way TCP/IP handles network transport while shared memory handles local IPC.
 
-### 6.6 Limitations
+### 6.7 Limitations
 
-1. **Single-device only.** No distributed agent cache sharing — all agents must run on the same Apple Silicon device.
+1. **Single-device only.** No distributed agent cache sharing — all agents must run on the same Apple Silicon device. macOS Tahoe 26.2's RDMA over Thunderbolt 5 (<50μs latency) and MLX's `mx.distributed` primitives now enable multi-Mac clusters with shared memory pools (e.g., EXO 1.0 demonstrated 4x Mac Studio clusters), making network-backed cache sharing a concrete near-term possibility rather than a theoretical future direction.
 
-2. **Q4 accuracy not rigorously benchmarked.** The system uses uniform symmetric group quantization (group_size=64, bits=4) for both keys and values. KIVI (NeurIPS 2024) showed that keys and values have different quantization sensitivity. A full perplexity comparison (Q4 KV vs FP16 KV on WikiText-2, C4) is needed.
+2. **Q4 accuracy not rigorously benchmarked.** The system uses uniform symmetric group quantization (group_size=64, bits=4) for both keys and values. KIVI (Liu et al., ICML 2024) showed that keys and values have different quantization sensitivity — keys benefit from per-channel quantization, values from per-token. KVTuner (2025) further demonstrated that optimal quantization varies by layer. A full perplexity comparison (Q4 KV vs FP16 KV on WikiText-2, C4) is needed, along with evaluation of mixed-precision strategies.
 
-3. **Four architectures tested.** While the `ModelCacheSpec` abstraction is designed to be universal, only Gemma 3, GPT-OSS, Llama 3.1, and Qwen 2.5 have been validated.
+3. **Four architectures tested.** While the `ModelCacheSpec` abstraction is designed to be universal, only Gemma 3, GPT-OSS, Llama 3.1, and Qwen 2.5 have been validated. "When KV Cache Reuse Fails" (Upadhyay et al., January 2026) shows that prefix caching can degrade quality under certain conditions — model-specific validation is important.
 
 4. **No speculative decoding.** On UMA, decode is memory-bound and already fast (~50 tok/s). Prefill is the bottleneck, which persistence addresses. But speculative decoding could further improve interactive latency.
 
 5. **Working memory evaluation is qualitative.** The prisoner's dilemma and gossip scenarios demonstrate the mechanism but do not include quantitative comparisons against RAG-based agent memory on standardized benchmarks.
 
-### 6.7 Future Directions
+6. **Context capacity claims are hardware-dependent.** The ~35K token Q4 capacity and ~80K+ with chunked prefill are specific to the M4 Pro (24 GB). Devices with less memory (M4 base, 16 GB) will have lower limits. The Apple M5 (released October 2025) introduces Neural Accelerators in each GPU core, achieving **3.3--4.1x faster TTFT** than M4 (Apple ML Research, November 2025). This substantially reduces cold-start cost: a 4K-token cold prefill that takes ~8s on M4 Pro would take ~2s on M5, narrowing the persistence benefit. However, for longer contexts (16K+), even a 4x speedup still leaves cold prefill at ~17s — persistence remains valuable. The M5 Pro/Max (expected early 2026) with higher memory bandwidth (~28% increase over M4) will further improve decode throughput.
 
-- **Integration with vllm-mlx** — Semantic's persistence layer as a backend for vllm-mlx's serving engine
+### 6.8 Future Directions
+
+- **Integration with vllm-mlx or vllm-metal** — Semantic's persistence layer as a backend for vllm-mlx's serving engine, or the emerging vllm-metal effort that targets Metal directly
 - **Quantitative working memory benchmarks** — Compare KV cache working memory vs RAG-based agent memory on multi-agent reasoning benchmarks (e.g., AgentBench, GAIA)
-- **Network-backed cache sharing** — Serialized Q4 safetensors as a new form of agent state transfer between devices
-- **Adaptive quantization** — Mixed Q4/Q8 based on layer sensitivity (KIVI-style per-channel keys, per-token values)
-- **Formal perplexity benchmarking** — WikiText-2 and C4 comparisons of Q4 vs FP16 KV cache across all supported models
+- **Network-backed cache sharing** — Serialized Q4 safetensors as a new form of agent state transfer between devices, informed by KVLink's (NeurIPS 2025) cross-instance transfer approach
+- **Adaptive quantization** — Mixed Q4/Q8 based on layer sensitivity (KIVI-style per-channel keys, per-token values; KVTuner-style layer-adaptive precision)
+- **Formal perplexity benchmarking** — WikiText-2 and C4 comparisons of Q4 vs FP16 KV cache across all supported models, with attention to the failure modes identified by "When KV Cache Reuse Fails"
 - **Retrieval over cached KV segments** — Attention-score-based retrieval (MemArt-style) to select relevant cached segments rather than reloading the full cache
+- **Cross-device disaggregated inference** — EXO Labs demonstrated DGX Spark (prefill) + Mac Studio (decode) achieving 2.8--4x speedup by streaming KV cache layer-by-layer over 10GbE. macOS Tahoe 26.2's Thunderbolt 5 RDMA (<50μs latency) enables multi-Mac clusters with shared memory pools. The block pool's safetensors format could serve as the serialization layer for such disaggregated architectures, enabling persistent cache sharing across heterogeneous devices
+- **Cross-platform UMA support** — Extend to NVIDIA DGX Spark (128 GB unified memory Grace Blackwell, 273 GB/s) and AMD Strix Halo (128 GB, ~212 GB/s) as their software ecosystems mature, validating that UMA-specific design patterns transfer across vendors
+- **M5 Neural Engine adaptation** — Apple's next-generation Neural Engine accelerators may shift the prefill speed calculus; adaptive strategies that leverage dedicated accelerators for prefill while using GPU for decode could change the persistence benefit profile
 
 ---
 
@@ -1249,29 +1272,41 @@ KV cache coordination avoids this loss for agents sharing the same model: Agent 
 
 ### 7.1 KV Cache Management Systems
 
-**vLLM** (Kwon et al., 2023) introduced PagedAttention for efficient GPU VRAM management with thousands of concurrent requests. Caches are ephemeral — discarded after each request.
+**vLLM** (Kwon et al., 2023) introduced PagedAttention for efficient GPU VRAM management with thousands of concurrent requests. Now supports production FP8 KV cache quantization (NVFP4 also emerging), with INT4 KV cache as an open RFC. Integrates with **LMCache** for disk/S3 persistence and CacheGen compression. Cache salting and session-based routing (via **llm-d**) enable multi-tenant deployments. Caches remain ephemeral by default — persistence requires external components.
 
-**SGLang** (Zheng et al., 2024) uses RadixAttention for token-level prefix caching via a radix tree. Caches are in-memory only and do not survive server restarts.
+**SGLang** (Zheng et al., 2024) uses RadixAttention for token-level prefix caching via a radix tree. **HiCache** (2025) extends this with hierarchical caching (GPU → CPU → disk) using P2P transfers for multi-tier eviction. CUDA-focused; the hierarchical approach is unnecessary on UMA where all memory levels share the same physical DRAM.
 
-**LMCache** (2024) extends caching to disk and S3 storage with CacheGen compression. Closest to our persistence approach, but CUDA-only, no per-agent isolation, and no Q4 end-to-end pipeline.
+**LMCache** (2024) extends caching to disk, CPU memory, and S3 storage with CacheGen compression (3-5x compression via learned codebooks). Integrates with vLLM as a backend and supports cache sharing across vLLM instances. Closest to our persistence approach, but CUDA-only, no per-agent isolation, and no Q4 end-to-end pipeline. LMCache demonstrates that disk persistence is viable for datacenter KV caches; our contribution is bringing this to edge UMA with Q4 quantization and agent identity.
 
-**HiCache** (SGLang, 2025) adds hierarchical caching (GPU -> CPU -> disk) with P2P transfers. CUDA-focused; the hierarchical approach is unnecessary on UMA where all memory levels share the same physical DRAM.
+**vllm-mlx** (Barrios, arXiv:2601.19139, January 2026) brings vLLM-style continuous batching and content-based prefix caching to Apple Silicon. No disk persistence, no per-agent isolation, FP16-only KV cache. A separate **vllm-metal** (v0.1.0, January 2026) — an official vLLM community plugin under the `vllm-project` GitHub organization — aims to run vLLM natively on Metal with paged attention and GQA support, bypassing MLX. Early-stage but adds credibility to the Apple Silicon serving ecosystem.
 
-**vllm-mlx** (Barrios, 2026) brings vLLM-style continuous batching and content-based prefix caching to Apple Silicon. No disk persistence, no per-agent isolation, FP16-only KV cache.
+**KVLink** (NeurIPS 2025) enables cross-instance KV cache transfer for disaggregated prefill-decode architectures in datacenter settings. Complementary to our single-device approach; the serialization format could inform future networked cache sharing.
+
+**"When KV Cache Reuse Fails"** (Upadhyay et al., January 2026) provides an empirical analysis of conditions under which prefix caching degrades model quality, including prompt sensitivity and attention pattern disruption. Relevant to our character-level matching approach: our DIVERGE path discards caches below 80% match, aligning with their finding that partial reuse can be harmful.
+
+**KVSwap** (arXiv:2511.11907, November 2025) addresses disk-based KV cache offloading specifically for on-device inference with unified memory and limited I/O bandwidth. Uses a software cache (reuse buffer) for recently accessed entries to mitigate NVMe read amplification. The first framework explicitly designed for disk-based KV cache management on UMA devices — tackles the same hardware constraints as Semantic but from an offloading/eviction angle rather than full cache persistence with agent identity.
+
+**EvicPress** (arXiv:2512.14946, December 2025, Microsoft/UC Berkeley/Stanford) jointly optimizes KV cache compression and eviction across storage tiers, with adaptive per-context decisions on whether to compress, evict, or move across tiers. Integrates with vLLM + LMCache. Reports up to 2.19x faster TTFT — a datacenter counterpart to Semantic's edge persistence approach.
 
 ### 7.2 KV Cache Compression
 
-**KIVI** (Liu et al., NeurIPS 2024) demonstrated that keys and values have different quantization sensitivity — keys benefit from per-channel quantization while values benefit from per-token quantization. Our system uses uniform group quantization for both; adopting KIVI's mixed strategy could improve quality.
+**KIVI** (Liu et al., ICML 2024) demonstrated that keys and values have different quantization sensitivity — keys benefit from per-channel quantization while values benefit from per-token quantization. Our system uses uniform group quantization for both; adopting KIVI's mixed strategy could improve quality.
 
 **KVQuant** (Hooper et al., 2024) pushed KV quantization to 2-bit with per-channel sensitivity analysis. Applicable as a future optimization.
 
 **CacheGen** (Liu et al., 2024) proposed a compression codec specifically for KV cache transmission. Our safetensors-based approach prioritizes simplicity and compatibility over maximum compression ratio.
 
+**CommVQ** (Apple, ICML 2025) achieves 87.5% KV cache size reduction at 2-bit via commutative vector quantization with learned codebooks that are RoPE-commutative. Demonstrates viable 1-bit KV quantization. **QuantSpec** (Apple, ICML 2025) combines self-speculative decoding with hierarchical quantized KV cache, achieving ~2.5x speedup — with the key insight that quantizing KV cache helps most at long contexts while quantizing weights helps at short contexts. Both papers validate Apple's investment in KV cache quantization research on their own hardware.
+
+**XQuant** (arXiv:2508.10395, August 2025) proposes caching the quantized post-norm residual X instead of K and V separately, then rematerializing K/V on-the-fly via GEMMs. Achieves 2x memory savings over quantized KV cache (one tensor vs. two per layer). Represents a fundamentally different trade-off: more compute per decode step for less memory, potentially favorable on M5's Neural Accelerators.
+
+**KVSplit** (2025) patches llama.cpp to enable asymmetric 8-bit keys + 4-bit values, achieving 59% memory reduction with <1% quality loss on Apple Silicon. Provides concrete evidence that KIVI's asymmetric K/V quantization finding transfers to the UMA platform — relevant to our limitation about uniform Q4 quantization.
+
 ### 7.3 KV Cache as Memory
 
-**MemArt** (OpenReview, October 2025) — "KVCache-Centric Memory for LLM Agents." Stores conversational turns as reusable KV cache blocks, retrieves relevant blocks via attention score similarity. Reports 11% accuracy improvement over plaintext memory and 91--135x fewer prefill tokens. Most directly related to our working memory contribution, but operates in-memory (no disk persistence) and does not address multi-agent isolation.
+**MemArt** (ICLR 2026 submission, October 2025) — "KVCache-Centric Memory for LLM Agents." Stores conversational turns as reusable KV cache blocks, retrieves relevant blocks via attention score similarity. Reports 11% accuracy improvement over plaintext memory and 91--135x fewer prefill tokens. Most directly related to our working memory contribution, but operates in-memory (no disk persistence) and does not address multi-agent isolation.
 
-**Memory3 / MemOS** (2025) — Makes the KV cache an explicit memory carrier. Encodes external knowledge as sparse KV pairs injected into attention layers. Proposes a "memory operating system" abstraction. Conceptually aligned with our vision of KV cache as working memory, but focused on knowledge injection rather than agent state persistence.
+**Memory³ / MemOS** (Yang et al., 2025) — Makes the KV cache an explicit memory carrier. Encodes external knowledge as sparse KV pairs injected into attention layers. MemOS proposes a "memory operating system" with three memory types (model memory, cache memory, external memory) managed through standardized APIs — the closest conceptual parallel to our system's block pool. Conceptually aligned with our vision of KV cache as working memory, but MemOS focuses on knowledge injection and memory lifecycle management for single agents rather than multi-agent isolation and cross-phase coordination. A related survey, **"Memory in the Age of AI Agents"** (2025), provides a comprehensive taxonomy of agent memory systems spanning working memory, episodic memory, and semantic memory — positioning KV cache persistence as one substrate among many.
 
 **EM-LLM** (ICLR 2025) — Episodic memory via KV-pair retrieval as a RAG alternative. Segments past context into episodes, retrieves relevant KV pairs using surprise-based boundaries. Outperforms traditional RAG by 30.5% on LongBench. Validates the principle that KV-level memory outperforms text-level retrieval.
 
@@ -1299,23 +1334,25 @@ KV cache coordination avoids this loss for agents sharing the same model: Agent 
 
 **SR-KI** (2025) injects structured knowledge directly into KV cache via learned projection adapters — "below the prompt" injection that bypasses the tokenization and prefill pipeline entirely. This is the most radical approach to attention-layer memory: rather than persisting KV caches produced by normal inference, SR-KI *synthesizes* KV entries from structured data. Conceptually aligned with our "below the prompt" framing, but operating at a different level (knowledge injection vs. state persistence).
 
+**TRIM-KV** (arXiv:2512.03324, December 2025) learns per-token retention scores via lightweight gates, maintaining full-cache performance at 25% KV budget. **Fast KVzip** (arXiv:2601.17668, January 2026) achieves gated KV eviction maintaining near-lossless performance while evicting 70% of KV cache, validated on Qwen 2.5, Gemma 3, and others. Both could inform intelligent eviction policies for Semantic's block pool under memory pressure.
+
 ### 7.6 Edge LLM Tools
 
-**LM Studio** — Excellent Apple Silicon support via MLX, but no KV cache persistence to disk, no per-agent isolation, and cache degrades at conversation depth 3+ (see Section 5.9).
+**LM Studio 0.4.0** (January 2026) — Introduces parallel inference via llama.cpp 2.0.0's continuous batching, with configurable "Max Concurrent Predictions" (default: 4 parallel slots) and a "Unified KV Cache" option that dynamically partitions memory across requests. The `llmster` daemon enables headless server deployments. However, parallel inference applies only to the llama.cpp backend; the MLX engine does not yet support parallel requests (acknowledged as "actively in the works"). No KV cache persistence to disk, no per-agent isolation, and cache degrades at conversation depth 3+ (see Section 5.9). The new stateful `/v1/chat` endpoint with `response_id`/`previous_response_id` provides session continuation at the API level but not at the cache layer.
 
-**Ollama** — Good concurrent request handling, but no disk persistence, no per-agent isolation.
+**Ollama** — Supports quantized KV cache via `OLLAMA_KV_CACHE_TYPE` environment variable (q4_0, q8_0, f16), reducing VRAM usage at the cost of quality. Requires `OLLAMA_FLASH_ATTENTION=1` as a prerequisite — unsupported architectures silently fall back to f16, which can cause unexpected OOM. `OLLAMA_KEEP_ALIVE` controls how long models and their caches remain resident after last use (default: 5 minutes; can be set to `-1` for indefinite). Supports concurrent request handling with `OLLAMA_NUM_PARALLEL`. However, cache retention is in-memory only (volatile), with no disk persistence and no per-agent isolation — the quantized cache feature reduces memory footprint for active inference but does not address cross-session reuse.
 
-**llama.cpp** — Has slot persistence API (`--slot-save-path`), the closest existing feature. Key differences: saves FP16 cache (4x larger), shared context (no per-agent isolation), no prefix matching across slots, no batched inference across slots.
+**llama.cpp** — Has slot persistence API (`--slot-save-path`) and supports quantized KV cache types (`-ctk q4_0`, `-ctk q8_0`) for both keys and values independently. The continuous batching implementation (server mode with `--parallel N`) predates vLLM-style systems and enables concurrent request handling. Unified KV scheduling (`--kv-unified`, PR #14363, merged July 2025) provides a form of prefill-decode interleaving with optimized Metal block skipping for masked regions. Key differences from Semantic: slot saves are per-slot (shared context), not per-agent; Q4 KV cache is available but not combined with per-agent persistence or cross-session prefix matching; no working memory semantics across conversation phases.
 
 ### 7.7 Agent Frameworks and Communication Protocols
 
 **AutoGen**, **CrewAI**, **LangGraph** — All operate at the message level. None are aware of or manage the KV cache produced by the underlying inference engine. Cross-agent context sharing is done by re-sending text, not by sharing attention-layer state.
 
-**Google A2A Protocol** (April 2025, now Linux Foundation) — Defines agent-to-agent communication at the message level using HTTP/JSON-RPC/SSE. Primitives include Agent Cards (capability advertisements), Tasks (stateful work units with lifecycle), Messages, and Artifacts. A2A treats agents as opaque black boxes and solves the interoperability problem: how do agents from different vendors, running different models, communicate? It explicitly does not address model internals, KV cache state, or attention-layer coordination. Semantic's block pool operates at a level A2A does not address — managing the computed cognitive state below the prompt. See Section 6.5 for detailed comparison.
+**Google A2A Protocol** (April 2025, now Linux Foundation, v0.3) — Defines agent-to-agent communication at the message level using HTTP/JSON-RPC/SSE. Primitives include Agent Cards (capability advertisements), Tasks (stateful work units with lifecycle), Messages, and Artifacts. A2A treats agents as opaque black boxes and solves the interoperability problem: how do agents from different vendors, running different models, communicate? It explicitly does not address model internals, KV cache state, or attention-layer coordination. Semantic's block pool operates at a level A2A does not address — managing the computed cognitive state below the prompt. See Section 6.6 for detailed comparison.
 
 **Anthropic MCP** (Model Context Protocol, 2024) — Standardizes how LLM applications access external tools and data sources. Like A2A, MCP operates at the message/tool level and does not address KV cache management. MCP and A2A are Layer 8 (syntactic coordination); KV cache persistence is closer to Layer 9 (semantic cognition) in Cisco's Internet of Cognition framework.
 
-**Cisco's Internet of Cognition** (2025) — Proposes a layered architecture for AI agent communication, identifying the gap between Layer 8 (syntactic protocols like A2A and MCP for message exchange) and Layer 9 (semantic cognition protocols for shared intent, memory, and knowledge). This system's KV cache block pool — managing persistent attention state as agent working memory — operates in the space Cisco identifies as Layer 9.
+**Cisco's Internet of Cognition** (Cisco Research, 2025) — Proposes a layered reference architecture for AI agent communication, identifying the gap between Layer 8 (syntactic protocols like A2A and MCP for message exchange) and Layer 9 (semantic cognition protocols for shared intent, memory, and knowledge). The framework also addresses trust, provenance, and cognitive routing between agents. This system's KV cache block pool — managing persistent attention state as agent working memory — operates in the space Cisco identifies as Layer 9.
 
 ---
 
@@ -1329,7 +1366,7 @@ The system contributes three ideas:
 
 **2. Batched Quantized Inference.** `BatchQuantizedKVCache` enables concurrent generation over multiple agents' Q4 caches — a capability that no public MLX codebase implements. The `merge()`/`extract()` pipeline bridges per-agent persistence and batched inference, while the `ConcurrentScheduler` provides per-token streaming with interleaved prefill+decode scheduling. Three targeted monkey-patches to upstream `mlx-lm` (~130 lines) are the minimal surface area needed to make existing batching infrastructure Q4-aware.
 
-**3. KV Cache as Working Memory.** A paradigm shift from text retrieval (RAG) to persistent attention state for multi-agent coordination. Cross-phase context injection constructs prompts that share prefixes with cached KV state, enabling EXTEND-path cache reuse across workflow phases. The prisoner's dilemma and gossip network scenarios demonstrate agents carrying working memory — not retrieved text, but computed attention state — across multi-phase interactions.
+**3. KV Cache as Working Memory.** A framework positioning persistent attention state as an alternative to text retrieval (RAG) for multi-agent coordination. Cross-phase context injection constructs prompts that share prefixes with cached KV state, enabling EXTEND-path cache reuse across workflow phases. The prisoner's dilemma and gossip network scenarios demonstrate agents carrying working memory — not retrieved text, but computed attention state — across multi-phase interactions.
 
 The system occupies a verifiably unoccupied point in the design space: no prior system combines agent-isolated persistent Q4 KV cache management with batched quantized inference on edge UMA devices and cross-phase working memory semantics.
 
