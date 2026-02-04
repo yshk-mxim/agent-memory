@@ -28,9 +28,15 @@ A high-performance HTTP server for running MLX language models with **persistent
 
 ### Supported Models
 
-- **DeepSeek-Coder-V2-Lite** (16B 4-bit) - Default production model (163K context)
-- **SmolLM2** (135M) - Lightweight testing model
-- Extensible to any MLX-compatible model
+| Model | Parameters | Context | Notes |
+|-------|-----------|---------|-------|
+| **DeepSeek-Coder-V2-Lite** | 16B (4-bit) | 163K | Code-focused, large context |
+| **Gemma 3** | 12B (4-bit) | 128K | Mixed global/sliding attention |
+| **GPT-OSS (Harmony)** | 20B (4-bit) | 128K | OpenAI-compatible format |
+| **Llama 3.1** | 8B (4-bit) | 128K | General-purpose |
+| **SmolLM2** | 135M | 2K | Lightweight testing model |
+
+Extensible to any MLX-compatible model via the [Model Onboarding](docs/model-onboarding.md) guide.
 
 ## Quick Start
 
@@ -232,7 +238,7 @@ pytest tests/ -v
 pytest tests/ --cov=src/semantic --cov-report=term-missing
 ```
 
-**Test Coverage**: 370+ tests, 85%+ coverage
+**Test Coverage**: 995 tests across 6 tiers (unit, integration, MLX, e2e, smoke, stress), 85%+ coverage
 
 ## Use Cases
 
@@ -296,9 +302,13 @@ semantic/
 │   └── entrypoints/        # FastAPI app
 ├── tests/
 │   ├── unit/               # Isolated component tests
-│   └── integration/        # End-to-end API tests
+│   ├── integration/        # API and service tests (mocked MLX)
+│   ├── mlx/                # Real MLX + Metal GPU tests
+│   ├── e2e/                # End-to-end server tests
+│   └── smoke/              # Quick sanity checks
 ├── docs/                   # Comprehensive documentation
-└── project/               # Sprint plans and ADRs
+├── benchmarks/             # Performance benchmarks
+└── config/                 # Model and server configuration
 ```
 
 ### Code Quality
@@ -342,18 +352,18 @@ make lint test
 
 ### Post v1.0.0
 
-- Additional models (Llama 3, Mistral, DeepSeek)
 - Extended Prometheus metrics catalog
 - OpenTelemetry tracing
 - Performance optimizations
 - Multi-modal support exploration
+- Additional model architectures
 
 ## Contributing
 
-Contributions welcome! Please:
+Contributions welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) and our [Code of Conduct](CODE_OF_CONDUCT.md).
 
 1. Read [Architecture Documentation](docs/architecture/)
-2. Follow code quality standards (ruff, mypy)
+2. Follow [Code Quality Standards](docs/code-quality-guide.md)
 3. Add tests for new features
 4. Update documentation
 

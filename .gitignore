@@ -118,3 +118,10 @@ benchmarks/results/*_summary.txt
 
 # Claude Code session data
 .claude/
+
+# Developer tooling (local only)
+CLAUDE.md
+claude_code_proxy.py
+
+# Internal planning docs (removed from release)
+plans/
