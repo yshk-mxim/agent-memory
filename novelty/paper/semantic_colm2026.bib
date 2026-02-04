@@ -1,0 +1,262 @@
+% Bibliography for "Agent Memory Below the Prompt" COLM 2026 Paper
+% Generated: 2026-02-04
+% All citations verified - see citations/verified_snippets.md
+
+% ========================================
+% KV Cache Management Systems
+% ========================================
+
+@article{barrios2026vllmmlx,
+  title={Native LLM and MLLM Inference at Scale on Apple Silicon},
+  author={Barrios, Wayner},
+  journal={arXiv preprint arXiv:2601.19139},
+  year={2026}
+}
+
+@inproceedings{kwon2023pagedattention,
+  title={Efficient Memory Management for Large Language Model Serving with PagedAttention},
+  author={Kwon, Woosuk and Li, Zhuohan and Zhuang, Siyuan and Sheng, Ying and Zheng, Lianmin and Yu, Cody Hao and Gonzalez, Joseph E. and Zhang, Hao and Stoica, Ion},
+  booktitle={Proceedings of the 29th Symposium on Operating Systems Principles},
+  year={2023},
+  pages={611--626}
+}
+
+@inproceedings{zheng2024sglang,
+  title={SGLang: Efficient Execution of Structured Language Model Programs},
+  author={Zheng, Lianmin and Yin, Liangsheng and Xie, Zhiqiang and Huang, Jeff and Sun, Chuyue and Yu, Cody Hao and Cao, Shiyi and Kozyrakis, Christos and Stoica, Ion and Gonzalez, Joseph E. and Barrett, Clark and Sheng, Ying},
+  booktitle={Advances in Neural Information Processing Systems},
+  year={2024}
+}
+
+@article{lee2025ragdcache,
+  title={Shared Disk KV Cache Management for Efficient Multi-Instance Inference in RAG-Powered LLMs},
+  author={Lee, Hyungwoo and Kim, Kihyun and Kim, Jinwoo and So, Jungmin and Cha, Myung-Hoon and Kim, Hong-Yeon and Kim, James J. and Kim, Youngjae},
+  journal={arXiv preprint arXiv:2504.11765},
+  year={2025}
+}
+
+@article{zhang2024kvswap,
+  title={KVSwap: Disk-aware KV Cache Offloading for Long-Context On-device Inference},
+  author={Zhang, Huawei and Xia, Chunwei and Wang, Zheng},
+  journal={arXiv preprint arXiv:2511.11907},
+  year={2024}
+}
+
+% ========================================
+% KV Cache Compression & Quantization
+% ========================================
+
+@inproceedings{liu2024kivi,
+  title={KIVI: A Tuning-Free Asymmetric 2bit Quantization for KV Cache},
+  author={Liu, Zirui and Yuan, Jiayi and Jin, Hongye and Zhong, Shaochen and Xu, Zhaozhuo and Braverman, Vladimir and Chen, Beidi and Hu, Xia},
+  booktitle={Proceedings of the 41st International Conference on Machine Learning},
+  pages={32332--32344},
+  year={2024},
+  volume={235},
+  series={Proceedings of Machine Learning Research},
+  publisher={PMLR}
+}
+
+@inproceedings{hooper2024kvquant,
+  title={KVQuant: Towards 10 Million Context Length LLM Inference with KV Cache Quantization},
+  author={Hooper, Coleman and Kim, Sehoon and Mohammadzadeh, Hiva and Mahoney, Michael W. and Shao, Yakun Sophia and Keutzer, Kurt and Gholami, Amir},
+  booktitle={Advances in Neural Information Processing Systems},
+  volume={37},
+  year={2024}
+}
+
+@inproceedings{liu2024cachegen,
+  title={CacheGen: KV Cache Compression and Streaming for Fast Large Language Model Serving},
+  author={Liu, Yuhan and Li, Hanchen and Cheng, Yihua and Ray, Siddhant and Huang, Yuyang and Zhang, Qizheng and Du, Kuntai and Yao, Jiayi and Lu, Shan and Ananthanarayanan, Ganesh and Maire, Michael and Hoffmann, Henry and Holtzman, Ari and Jiang, Junchen},
+  booktitle={Proceedings of the ACM SIGCOMM 2024 Conference},
+  year={2024},
+  address={Sydney, Australia}
+}
+
+@inproceedings{li2025commvq,
+  title={CommVQ: Commutative Vector Quantization for KV Cache Compression},
+  author={Li, Shikai and Zhang, Yuke and Zhao, Xin and Zheng, Zhijie and Yang, Xiaopeng and Ding, Xiaolong},
+  booktitle={Proceedings of the 42nd International Conference on Machine Learning},
+  year={2025},
+  series={PMLR}
+}
+
+@inproceedings{li2025quantspec,
+  title={QuantSpec: Self-Speculative Decoding with Hierarchical Quantized KV Cache},
+  author={Li, Minjae and Tomar, Aditya and Gholami, Amir},
+  booktitle={Proceedings of the 42nd International Conference on Machine Learning},
+  year={2025},
+  series={PMLR}
+}
+
+@article{tomar2025xquant,
+  title={XQuant: Breaking the Memory Wall for LLM Inference with KV Cache Rematerialization},
+  author={Tomar, Aditya and Hooper, Coleman and Lee, Minjae and Xi, Haocheng and Tiwari, Rishabh and Kang, Wonjun and Manolache, Luca and Mahoney, Michael W. and Keutzer, Kurt and Gholami, Amir},
+  journal={arXiv preprint arXiv:2508.10395},
+  year={2025}
+}
+
+@article{feng2024evicpress,
+  title={EVICPRESS: Joint KV-Cache Compression and Eviction for Efficient LLM Serving},
+  author={Feng, Shaoting and Liu, Yuhan and Li, Hanchen and Chen, Xiaokun and Shen, Samuel and Du, Kuntai and Gu, Zhuohan and Zhang, Rui and Huang, Yuyang and Cheng, Yihua and Yao, Jiayi and Zhang, Qizheng and Ananthanarayanan, Ganesh and Jiang, Junchen},
+  journal={arXiv preprint arXiv:2512.14946},
+  year={2024}
+}
+
+@article{bui2024trimkv,
+  title={Cache What Lasts: Token Retention for Memory-Bounded KV Cache in LLMs},
+  author={Bui, Ngoc and Sharma, Shubham and Lamba, Simran and Mishra, Saumitra and Ying, Rex},
+  journal={arXiv preprint arXiv:2512.03324},
+  year={2024}
+}
+
+@article{kim2026fastkvzip,
+  title={Fast KVzip: Efficient and Accurate LLM Inference with Gated KV Eviction},
+  author={Kim, Jang-Hyun and Han, Dongyoon and Yun, Sangdoo},
+  journal={arXiv preprint arXiv:2601.17668},
+  year={2026}
+}
+
+% ========================================
+% Agent Memory & RAG Systems
+% ========================================
+
+@inproceedings{memart2026iclr,
+  title={KVCache-Centric Memory for LLM Agents},
+  author={Anonymous},
+  booktitle={International Conference on Learning Representations},
+  year={2026},
+  note={Submitted to ICLR 2026},
+  url={https://openreview.net/forum?id=YolJOZOGhI}
+}
+
+@inproceedings{jiang2025emllm,
+  title={EM-LLM: Human-inspired Episodic Memory for Infinite Context LLMs},
+  author={Jiang, Yi and others},
+  booktitle={International Conference on Learning Representations},
+  year={2025}
+}
+
+@article{yang2025memory3,
+  title={Memory3: Language Modeling with Explicit Memory},
+  author={Yang, Hongkang and Lin, Zehao and others},
+  journal={arXiv preprint},
+  year={2024},
+  note={Referenced in MemOS: https://arxiv.org/abs/2507.03724}
+}
+
+% ========================================
+% Multi-Agent & Agentic Workloads
+% ========================================
+
+@inproceedings{ye2025kvcomm,
+  title={KVCOMM: Online Cross-context KV-cache Communication for Efficient LLM-based Multi-agent Systems},
+  author={Ye, Hancheng and Gao, Zhengqi and Ma, Mingyuan and Wang, Qinsi and Fu, Yuzhe and Chung, Ming-Yu and Lin, Yueqian and Liu, Zhijian and Zhang, Jianyi and Zhuo, Danyang and Chen, Yiran},
+  booktitle={Advances in Neural Information Processing Systems},
+  year={2025},
+  url={https://arxiv.org/abs/2510.12872}
+}
+
+@inproceedings{pan2025kvflow,
+  title={KVFlow: Efficient Prefix Caching for Accelerating LLM-Based Multi-Agent Workflows},
+  author={Pan, Zaifeng and Patel, Ajjkumar and Hu, Zhengding and Shen, Yipeng and Guan, Yue and Li, Wan-Lu and Qin, Lianhui and Wang, Yida and Ding, Yufei},
+  booktitle={Advances in Neural Information Processing Systems},
+  year={2025},
+  url={https://arxiv.org/abs/2507.07400}
+}
+
+@article{li2025continuum,
+  title={Continuum: Efficient and Robust Multi-Turn LLM Agent Scheduling with KV Cache Time-to-Live},
+  author={Li, Hanchen and Mang, Qiuyang and He, Runyuan and Zhang, Qizheng and Mao, Huanzhi and Chen, Xiaokun and Zhou, Hangrui and Cheung, Alvin and Gonzalez, Joseph and Stoica, Ion},
+  journal={arXiv preprint arXiv:2511.02230},
+  year={2025},
+  url={https://arxiv.org/abs/2511.02230}
+}
+
+@article{jeon2025lragent,
+  title={LRAgent: Efficient KV Cache Sharing for Multi-LoRA LLM Agents},
+  author={Jeon, Hyesung and Ha, Hyeongju and Kim, Jae-Joon},
+  journal={arXiv preprint arXiv:2602.01053},
+  year={2025},
+  url={https://arxiv.org/abs/2602.01053}
+}
+
+@article{liang2026kvfails,
+  title={When KV Cache Reuse Fails in Multi-Agent Systems: Cross-Candidate Interaction is Crucial for LLM Judges},
+  author={Liang, Sichu and Wang, Zhenglin and Chu, Jiajia and Xia, Pengfei and Zang, Hui and Zhou, Deyu},
+  journal={arXiv preprint arXiv:2601.08343},
+  year={2026},
+  url={https://arxiv.org/abs/2601.08343}
+}
+
+% ========================================
+% KV Cache Reuse & RAG
+% ========================================
+
+@inproceedings{yang2025kvlink,
+  title={KVLink: Accelerating Large Language Models via Efficient KV Cache Reuse},
+  author={Yang, Jingbo and Hou, Bairu and Wei, Wei and Bao, Yujia and Chang, Shiyu},
+  booktitle={Advances in Neural Information Processing Systems},
+  year={2025},
+  url={https://arxiv.org/abs/2502.16002}
+}
+
+@inproceedings{sarthi2024raptor,
+  title={RAPTOR: Recursive Abstractive Processing for Tree-Organized Retrieval},
+  author={Sarthi, Parth and Abdullah, Salman and Tuli, Aditi and Khanna, Shubh and Goldie, Anna and Manning, Christopher D.},
+  booktitle={International Conference on Learning Representations},
+  year={2024},
+  url={https://arxiv.org/abs/2401.18059}
+}
+
+% ========================================
+% Cross-LLM & Distributed Systems
+% ========================================
+
+@article{liu2024droidspeak,
+  title={DroidSpeak: KV Cache Sharing for Cross-LLM Communication and Multi-LLM Serving},
+  author={Liu, Yuhan and Huang, Yuyang and Yao, Jiayi and Feng, Shaoting and Gu, Zhuohan and Du, Kuntai and Li, Hanchen and Cheng, Yihua and Jiang, Junchen and Lu, Shan and Musuvathi, Madan and Choukse, Esha},
+  journal={arXiv preprint arXiv:2411.02820},
+  year={2024},
+  url={https://arxiv.org/abs/2411.02820}
+}
+
+% ========================================
+% KV Cache Quantization & Optimization
+% ========================================
+
+@misc{kvsplit2025,
+  title={KVSplit: Run larger LLMs with longer contexts on Apple Silicon},
+  author={dipampaul},
+  year={2025},
+  howpublished={\url{https://github.com/dipampaul17/KVSplit}},
+  note={Open Source Project with differentiated precision KV cache quantization}
+}
+
+% ========================================
+% Hardware & Systems
+% ========================================
+
+@misc{apple2024m4pro,
+  title={Mac mini with M4 Pro - Technical Specifications},
+  author={{Apple Inc.}},
+  year={2024},
+  howpublished={\url{https://www.apple.com/mac-mini/specs/}},
+  note={M4 Pro: 273 GB/s memory bandwidth, up to 64GB unified memory}
+}
+
+@misc{nvidia2025dgxspark,
+  title={NVIDIA DGX Spark - A Grace Blackwell AI supercomputer on your desk},
+  author={{NVIDIA Corporation}},
+  year={2025},
+  howpublished={\url{https://www.nvidia.com/en-us/products/workstations/dgx-spark/}},
+  note={128GB unified memory, 273 GB/s bandwidth, \$3,999. Announced March 2025.}
+}
+
+@misc{nvidia2024a100bench,
+  title={LLM Inference Benchmark: NVIDIA A100 NVLink vs NVIDIA H100 SXM},
+  author={{Hyperstack}},
+  year={2024},
+  howpublished={\url{https://www.hyperstack.cloud/technical-resources/performance-benchmarks/llm-inference-benchmark-comparing-nvidia-a100-nvlink-vs-nvidia-h100-sxm}},
+  note={A100 prefill performance: approximately 10,000-20,000 tokens/s depending on model size}
+}

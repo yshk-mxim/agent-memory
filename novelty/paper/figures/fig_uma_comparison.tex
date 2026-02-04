@@ -1,0 +1,60 @@
+% Figure 4: UMA vs Discrete Memory Architecture
+% TikZ diagram showing zero-copy vs PCIe bottleneck
+
+\begin{figure}[t]
+\centering
+\begin{tikzpicture}[
+    node distance=0.8cm,
+    component/.style={rectangle, draw=black, thick, minimum width=2.5cm, minimum height=1cm, align=center},
+    memory/.style={rectangle, draw=black, thick, fill=blue!10, minimum width=3cm, minimum height=1.5cm, align=center},
+    arrow/.style={->, >=stealth, thick},
+    zerocopy/.style={->, >=stealth, ultra thick, draw=green!70!black},
+    pcie/.style={<->, >=stealth, thick, draw=red, dashed}
+]
+
+% Left side: Discrete GPU (NVIDIA)
+\node[font=\bfseries] (discrete_title) at (0,3.5) {Discrete GPU (NVIDIA)};
+
+\node[memory] (host_mem) at (0,2) {Host RAM\\(System Memory)};
+\node[memory, fill=orange!10] (gpu_mem) at (0,0) {GPU VRAM\\(Isolated)};
+\node[component, below=0.5cm of gpu_mem] (gpu_compute) {GPU Compute};
+
+\draw[pcie] (host_mem) -- node[right, font=\small] {PCIe\\transfer} (gpu_mem);
+\node[right=0.3cm of host_mem, font=\small, text=red, align=left] {Explicit\\copy\\required};
+
+% Right side: UMA (Apple Silicon)
+\node[font=\bfseries] (uma_title) at (7,3.5) {Unified Memory (Apple)};
+
+\node[memory, minimum width=3.5cm, minimum height=3cm, fill=blue!20] (uma_mem) at (7,1) {
+    \textbf{Shared DRAM Pool}\\
+    ~\\
+    Model Weights\\
+    KV Cache\\
+    Disk I/O Buffers
+};
+
+\node[component, below=0.5cm of uma_mem] (cpu_gpu) {CPU + GPU\\(shared access)};
+
+\draw[zerocopy] (uma_mem.south) -- node[right, font=\small, text=green!70!black] {Zero-copy\\access} (cpu_gpu);
+
+% Bandwidth annotations
+\node[below=1.5cm of discrete_title, font=\small, align=center] {
+    A100: 1,555 GB/s (VRAM)\\
+    PCIe 4.0: ~32 GB/s
+};
+
+\node[below=1.5cm of uma_title, font=\small, align=center] {
+    M4 Pro: 273 GB/s\\
+    DGX Spark: 273 GB/s
+};
+
+% Convergence note
+\node[below=3.5cm of uma_title, font=\footnotesize, text=blue!70!black, align=center] {
+    Bandwidth convergence:\\
+    edge UMA = entry datacenter UMA
+};
+
+\end{tikzpicture}
+\caption{Memory architecture comparison. Discrete GPUs isolate model weights in VRAM, requiring explicit PCIe transfers (32 GB/s bottleneck). Unified Memory Architecture (UMA) provides zero-copy access to a shared DRAM pool. M4 Pro and DGX Spark converge at 273 GB/s bandwidth, though datacenter accelerators still dominate compute throughput.}
+\label{fig:uma}
+\end{figure}

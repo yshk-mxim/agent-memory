@@ -1,0 +1,46 @@
+This is BibTeX, Version 0.99d (TeX Live 2025)
+Capacity: max_strings=200000, hash_size=200000, hash_prime=170003
+The top-level auxiliary file: semantic_colm2026.aux
+The style file: colm2026_conference.bst
+Database file #1: semantic_colm2026.bib
+You've used 20 entries,
+            2773 wiz_defined-function locations,
+            688 strings with 9976 characters,
+and the built_in function-call counts, 12419 in all, are:
+= -- 961
+> -- 1182
+< -- 10
++ -- 400
+- -- 378
+* -- 1093
+:= -- 2002
+add.period$ -- 71
+call.type$ -- 20
+change.case$ -- 184
+chr.to.int$ -- 18
+cite$ -- 40
+duplicate$ -- 449
+empty$ -- 762
+format.name$ -- 399
+if$ -- 2519
+int.to.chr$ -- 3
+int.to.str$ -- 1
+missing$ -- 17
+newline$ -- 118
+num.names$ -- 80
+pop$ -- 413
+preamble$ -- 1
+purify$ -- 164
+quote$ -- 0
+skip$ -- 392
+stack$ -- 0
+substring$ -- 120
+swap$ -- 58
+text.length$ -- 4
+text.prefix$ -- 0
+top$ -- 0
+type$ -- 220
+warning$ -- 0
+while$ -- 66
+width$ -- 0
+write$ -- 274

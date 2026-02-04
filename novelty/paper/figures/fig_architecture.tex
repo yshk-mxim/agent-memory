@@ -1,0 +1,50 @@
+% Figure 1: System Architecture
+% TikZ diagram showing: Agent -> Block Pool -> Q4 Pipeline -> Disk
+
+\begin{figure}[t]
+\centering
+\begin{tikzpicture}[
+    node distance=1.5cm and 2cm,
+    agent/.style={rectangle, draw=black, thick, fill=blue!20, minimum width=2.2cm, minimum height=1cm, align=center},
+    component/.style={rectangle, draw=black, thick, fill=green!20, minimum width=2.5cm, minimum height=1.2cm, align=center},
+    storage/.style={cylinder, draw=black, thick, fill=yellow!30, minimum width=2cm, minimum height=1.2cm, align=center, shape border rotate=90},
+    arrow/.style={->, >=stealth, thick},
+    label/.style={font=\small}
+]
+
+% Agents
+\node[agent] (a1) {Agent 1\\Code Assistant};
+\node[agent, below=0.8cm of a1] (a2) {Agent 2\\Reviewer};
+\node[agent, below=0.8cm of a2] (a3) {Agent 3\\Planner};
+
+% Block Pool
+\node[component, right=3cm of a2] (bp) {Block Pool\\Per-Agent\\Isolation};
+
+% Q4 Pipeline
+\node[component, right=2.5cm of bp] (q4) {Q4 Pipeline\\Quantization\\+ Attention};
+
+% Disk Storage
+\node[storage, right=2.5cm of q4] (disk) {Disk\\safetensors\\~50ms reload};
+
+% Arrows from agents to block pool
+\draw[arrow] (a1) -- node[above, label] {4K tokens} (bp);
+\draw[arrow] (a2) -- node[above, label] {2K tokens} (bp);
+\draw[arrow] (a3) -- node[above, label] {3K tokens} (bp);
+
+% Arrow from block pool to Q4 pipeline
+\draw[arrow, bend left=15] (bp) to node[above, label] {Load} (q4);
+\draw[arrow, bend right=15] (q4) to node[below, label] {Save} (bp);
+
+% Arrow from Q4 pipeline to disk
+\draw[arrow, bend left=15] (q4) to node[above, label] {Persist} (disk);
+\draw[arrow, bend right=15] (disk) to node[below, label] {Reload} (q4);
+
+% Results annotations
+\node[below=2.5cm of bp, align=center, font=\small\bfseries, text=blue!70!black] {2.0--4.3$\times$ E2E speedup};
+\node[below=2.5cm of q4, align=center, font=\small\bfseries, text=green!50!black] {72\% memory savings};
+\node[below=2.5cm of disk, align=center, font=\small\bfseries, text=orange!80!black] {81.6$\times$ TTFT (hot)};
+
+\end{tikzpicture}
+\caption{System architecture. Multiple agents maintain isolated KV caches in a persistent block pool. The Q4 pipeline quantizes cache data on save and operates directly on quantized tensors during attention. Disk persistence enables sub-100ms reload (warm) vs seconds of re-prefill (cold).}
+\label{fig:architecture}
+\end{figure}
