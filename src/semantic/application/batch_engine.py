@@ -966,6 +966,13 @@ class BlockPoolBatchEngine:
                             stored_at.replace("\n", "\\n"),
                             prompt_at.replace("\n", "\\n"),
                         )
+                        # When char_match=0, log the start of both strings to understand mismatch
+                        if char_match == 0:
+                            logger.info(
+                                "[CACHE ZERO MATCH] stored[:80]=%r prompt[:80]=%r",
+                                stored_text[:80],
+                                prompt[:80],
+                            )
 
                     if char_match == len(stored_text) == len(prompt):
                         # EXACT MATCH: Reuse prompt portion of cache only.

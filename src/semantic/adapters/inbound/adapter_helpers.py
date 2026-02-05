@@ -148,9 +148,18 @@ def tokenize_with_chat_template(
                         merged.append(dict(msg))
                         continue
                     prev = merged[-1]
-                    # Only merge consecutive "user" messages, never "assistant" or "system"
-                    if msg["role"] == "user" and prev["role"] == "user":
-                        # Merge with single newline separator
+                    # For Gemma: system role doesn't exist, convert to user
+                    # Merge system into first user message, or convert system→user
+                    if is_gemma and prev["role"] == "system" and msg["role"] == "user":
+                        # Convert system to user and merge with following user
+                        prev["role"] = "user"
+                        prev["content"] = prev["content"] + "\n" + msg["content"]
+                    elif is_gemma and prev["role"] == "system":
+                        # Convert standalone system to user (no following user to merge)
+                        prev["role"] = "user"
+                        merged.append(dict(msg))
+                    elif msg["role"] == "user" and prev["role"] == "user":
+                        # Merge consecutive user messages
                         prev["content"] = prev["content"] + "\n" + msg["content"]
                     else:
                         merged.append(dict(msg))
