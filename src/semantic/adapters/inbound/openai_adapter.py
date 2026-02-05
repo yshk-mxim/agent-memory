@@ -347,7 +347,9 @@ async def _stream_via_scheduler(  # noqa: C901, PLR0912
     updated_blocks = batch_engine.get_agent_blocks(agent_id)
     if updated_blocks:
         cache_store.save(agent_id, updated_blocks)
-        logger.debug(f"Saved cache: {agent_id} ({updated_blocks.total_tokens} tokens)")
+        # CRITICAL: Flush to disk immediately before batch_engine clears layer_data
+        cache_store.flush_dirty()
+        logger.debug(f"Saved and flushed cache: {agent_id} ({updated_blocks.total_tokens} tokens)")
 
     if function_calls:
         finish_reason = "tool_calls"
