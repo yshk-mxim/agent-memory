@@ -331,14 +331,20 @@ async def generate(
 
 
 @router.delete("/{agent_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_agent(agent_id: str, request: Request):
-    """Delete agent (DELETE /v1/agents/{agent_id}).
+async def delete_agent(
+    agent_id: str,
+    request: Request,
+    evict_only: bool = False,
+):
+    """Delete agent (DELETE /v1/agents/{agent_id}?evict_only=true).
 
-    Removes agent cache from memory and disk.
+    Removes agent cache from memory and optionally disk.
 
     Args:
         agent_id: Agent identifier
         request: FastAPI request (for accessing app state)
+        evict_only: If True, evict from hot tier but keep disk file.
+                    Used for testing warm cache reload.
 
     Returns:
         No content (204)
@@ -346,7 +352,8 @@ async def delete_agent(agent_id: str, request: Request):
     Raises:
         HTTPException: If agent not found or error occurs
     """
-    logger.info(f"DELETE /v1/agents/{agent_id}")
+    mode = "evict" if evict_only else "delete"
+    logger.info(f"DELETE /v1/agents/{agent_id} (mode={mode})")
 
     # Get app dependencies (with null check)
     semantic_state = get_semantic_state(request)
@@ -373,8 +380,8 @@ async def delete_agent(agent_id: str, request: Request):
         if batch_engine.remove_agent_blocks(agent_id):
             logger.debug(f"Removed {agent_id} from batch engine")
 
-        # Delete from cache store (memory and disk)
-        cache_store.delete(agent_id)
+        # Delete from cache store (memory and optionally disk)
+        cache_store.delete(agent_id, keep_disk=evict_only)
 
         # Explicitly free GPU memory held by cached tensors
         del cached_blocks
@@ -382,7 +389,10 @@ async def delete_agent(agent_id: str, request: Request):
         if mx is not None:
             mx.clear_cache()
 
-        logger.info(f"Agent deleted: {agent_id}")
+        if evict_only:
+            logger.info(f"Agent evicted to disk: {agent_id}")
+        else:
+            logger.info(f"Agent deleted: {agent_id}")
 
         return  # 204 No Content
 

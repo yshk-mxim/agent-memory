@@ -69,10 +69,20 @@ def _git_sha() -> str:
         return "unknown"
 
 
-async def _delete_agent(base_url: str, agent_id: str) -> None:
+async def _delete_agent(base_url: str, agent_id: str, evict_only: bool = False) -> None:
+    """Delete or evict agent from server.
+
+    Args:
+        base_url: Server base URL
+        agent_id: Agent identifier to delete
+        evict_only: If True, evict from hot tier but keep disk file (for warm cache test)
+    """
     async with httpx.AsyncClient(timeout=10.0) as c:
         try:
-            await c.delete(f"{base_url}/v1/agents/{agent_id}")
+            url = f"{base_url}/v1/agents/{agent_id}"
+            if evict_only:
+                url += "?evict_only=true"
+            await c.delete(url)
         except Exception:
             pass
 
@@ -133,7 +143,11 @@ async def run_nonstreaming_cold(
 async def run_streaming_warm(
     base_url: str, context_tokens: int, output_tokens: int, run_id: str,
 ) -> dict[str, Any]:
-    """Warm cache with streaming — prime then measure with stream."""
+    """Warm cache with streaming — prime then measure with stream.
+
+    Tests true disk reload: prime creates cache, evict from hot tier,
+    measure reloads from disk (safetensors).
+    """
     prime_client = OpenAIRequestClient(base_url)
     measure_client = OpenAIStreamingClient(base_url)
     factory = OpenAIPromptFactory()
@@ -142,11 +156,16 @@ async def run_streaming_warm(
 
     # Prime (cold hit, populates cache)
     await prime_client.send_and_measure(body, session_id=sid)
-    await asyncio.sleep(0.5)
 
-    # Measure (warm hit, streaming)
+    # Evict from hot tier but keep disk file (for warm cache reload)
+    await _delete_agent(base_url, f"oai_{sid}", evict_only=True)
+    await asyncio.sleep(1.0)  # Allow disk write to complete
+
+    # Measure (warm hit from disk reload, streaming)
     body["stream"] = True
     r = await measure_client.send_and_measure(body, session_id=sid)
+
+    # Full cleanup after measurement
     await _delete_agent(base_url, f"oai_{sid}")
     return {
         "mode": "streaming", "cache_state": "warm",
@@ -158,7 +177,11 @@ async def run_streaming_warm(
 async def run_nonstreaming_warm(
     base_url: str, context_tokens: int, output_tokens: int, run_id: str,
 ) -> dict[str, Any]:
-    """Warm cache without streaming — prime then measure."""
+    """Warm cache without streaming — prime then measure.
+
+    Tests true disk reload: prime creates cache, evict from hot tier,
+    measure reloads from disk (safetensors).
+    """
     client = OpenAIRequestClient(base_url)
     factory = OpenAIPromptFactory()
     body = factory.build_request(context_tokens, output_tokens)
@@ -166,10 +189,15 @@ async def run_nonstreaming_warm(
 
     # Prime
     await client.send_and_measure(body, session_id=sid)
-    await asyncio.sleep(0.5)
+
+    # Evict from hot tier but keep disk file (for warm cache reload)
+    await _delete_agent(base_url, f"oai_{sid}", evict_only=True)
+    await asyncio.sleep(1.0)  # Allow disk write to complete
 
     # Measure
     r = await client.send_and_measure(body, session_id=sid)
+
+    # Full cleanup after measurement
     await _delete_agent(base_url, f"oai_{sid}")
     return {
         "mode": "non-streaming", "cache_state": "warm",

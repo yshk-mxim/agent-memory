@@ -274,40 +274,48 @@ class AgentCacheStore:
             # Cache miss
             return None
 
-    def delete(self, agent_id: str) -> bool:
+    def delete(self, agent_id: str, keep_disk: bool = False) -> bool:
         """Delete agent cache from all tiers.
 
         Args:
             agent_id: Unique agent identifier
+            keep_disk: If True, only evict from hot tier and keep disk file
+                      for warm cache reload. If False, fully delete.
 
         Returns:
             True if agent was found and deleted, False if not found
 
         Notes:
             - Removes from hot tier (memory)
-            - Removes from warm tier (disk)
-            - Deletes safetensors file if exists
+            - If keep_disk=False: Removes from warm tier and deletes disk file
+            - If keep_disk=True: Flushes to disk and keeps for warm reload
 
         Example:
-            >>> deleted = store.delete("agent_1")
-            >>> if deleted:
-            ...     print("Agent cache deleted successfully")
+            >>> deleted = store.delete("agent_1")  # Full delete
+            >>> store.delete("agent_1", keep_disk=True)  # Evict to disk only
         """
         with self._lock:
             found = False
 
+            # CRITICAL: Flush dirty cache to disk BEFORE deletion
+            # This ensures warm cache test can reload from disk
+            if agent_id in self._hot_cache:
+                entry = self._hot_cache[agent_id]
+                if entry.dirty and entry.blocks is not None:
+                    self._save_to_disk(agent_id)
+                    logger.debug(f"Flushed dirty cache to disk before eviction: {agent_id}")
+                found = True
+
             # Remove from hot tier
             if agent_id in self._hot_cache:
                 del self._hot_cache[agent_id]
-                found = True
 
-            # Remove from warm tier and delete disk file
-            if agent_id in self._warm_cache:
+            # If keep_disk=False, remove from warm tier and delete disk file
+            if not keep_disk and agent_id in self._warm_cache:
                 cache_path = self._warm_cache[agent_id]
                 if cache_path.exists():
                     cache_path.unlink()
                 del self._warm_cache[agent_id]
-                found = True
 
             return found
 
