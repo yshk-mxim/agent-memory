@@ -242,14 +242,49 @@ class BlockPoolBatchEngine:
     def get_agent_blocks(self, agent_id: str) -> "AgentBlocksType | None":
         """Get agent blocks by ID (thread-safe).
 
+        Returns a SNAPSHOT of the agent's blocks to prevent race conditions
+        where the caller saves blocks while another thread mutates them.
+
         Args:
             agent_id: The agent identifier
 
         Returns:
-            AgentBlocks if found, None otherwise
+            AgentBlocks snapshot if found, None otherwise
         """
+        from semantic.domain.entities import AgentBlocks, KVBlock
+
         with self._lock:
-            return self._agent_blocks.get(agent_id)
+            original = self._agent_blocks.get(agent_id)
+            if original is None:
+                return None
+
+            # Create a DEEP COPY of blocks to prevent mutation races
+            # Without this, concurrent requests can corrupt the cache being saved
+            blocks_copy: dict[int, list[KVBlock]] = {}
+            for layer_id, layer_blocks in original.blocks.items():
+                # Only copy blocks with actual data
+                valid_blocks = []
+                for block in layer_blocks:
+                    if block.layer_data is not None:
+                        # Shallow copy of KVBlock (layer_data references are OK)
+                        block_copy = KVBlock(
+                            block_id=block.block_id,
+                            layer_id=block.layer_id,
+                            token_count=block.token_count,
+                            layer_data=block.layer_data,  # Reference is fine
+                            metadata=block.metadata.copy() if block.metadata else None,
+                        )
+                        valid_blocks.append(block_copy)
+                blocks_copy[layer_id] = valid_blocks
+
+            # Create snapshot AgentBlocks
+            return AgentBlocks(
+                agent_id=original.agent_id,
+                blocks=blocks_copy,
+                total_tokens=original.total_tokens,
+                token_sequence=original.token_sequence.copy() if original.token_sequence else [],
+                prompt_text=original.prompt_text,
+            )
 
     def has_agent_blocks(self, agent_id: str) -> bool:
         """Check if agent has blocks (thread-safe).
@@ -642,7 +677,15 @@ class BlockPoolBatchEngine:
                         reconstruct_tokens,
                     )
 
+                    import time as _time
+                    t_reconstruct_start = _time.perf_counter()
                     kv_cache = self._reconstruct_cache(cache, max_tokens=max_reconstruct)
+                    t_reconstruct_end = _time.perf_counter()
+                    logger.info(
+                        "[TIMING] reconstruct=%.3fs tokens=%d",
+                        t_reconstruct_end - t_reconstruct_start,
+                        reconstruct_tokens,
+                    )
 
                     # Memory tracking AFTER reconstruction (should be SAME as before - no dequant!)
                     mem_after_reconstruct = mx.get_active_memory() / (1024**3)
@@ -862,6 +905,8 @@ class BlockPoolBatchEngine:
         try:
             # Create sampler via adapter if using real MLX (not fake for testing)
             samplers = None
+            logits_processors_list = None
+
             if self._batch_gen_factory is None:
                 sampler = self._cache_adapter.create_sampler(
                     temperature=temperature,
@@ -901,6 +946,7 @@ class BlockPoolBatchEngine:
                 # Character-level prefix matching (avoids BPE boundary mismatches)
                 stored_text = getattr(cache, "prompt_text", "")
 
+                t_match_start = _time.perf_counter()
                 if stored_text:
                     char_match = cache.common_prefix_chars(prompt)
                     logger.info(
@@ -1040,6 +1086,12 @@ class BlockPoolBatchEngine:
                             cache = None
                             tokens_to_process = prompt_tokens
 
+                    t_match_end = _time.perf_counter()
+                    logger.info(
+                        "[TIMING] prefix_match=%.3fs tokens_to_process=%d",
+                        t_match_end - t_match_start,
+                        len(tokens_to_process),
+                    )
                 else:
                     # No prompt_text stored — fall back to token comparison (legacy)
                     logger.info(
@@ -1105,6 +1157,8 @@ class BlockPoolBatchEngine:
             }
             if samplers is not None:
                 insert_kwargs["samplers"] = samplers
+            if logits_processors_list is not None:
+                insert_kwargs["logits_processors"] = logits_processors_list
             if kv_cache is not None:
                 insert_kwargs["caches"] = [kv_cache]
 
@@ -1215,6 +1269,8 @@ class BlockPoolBatchEngine:
         # BatchGenerator requires at least one token to produce initial logits.
         try:
             samplers = None
+            logits_processors_list = None
+
             if self._batch_gen_factory is None:
                 sampler = self._cache_adapter.create_sampler(
                     temperature=temperature,
@@ -1230,6 +1286,8 @@ class BlockPoolBatchEngine:
             }
             if samplers is not None:
                 insert_kwargs["samplers"] = samplers
+            if logits_processors_list is not None:
+                insert_kwargs["logits_processors"] = logits_processors_list
 
             cached_tokens = kv_caches[0].offset if hasattr(kv_caches[0], "offset") else 0
             logger.debug(
@@ -1428,11 +1486,41 @@ class BlockPoolBatchEngine:
         with self._lock:
             self._agent_blocks[agent_id] = blocks
 
+        # DEBUG: Log tokens being decoded
+        logger.info(
+            "[DECODE] uid=%s agent=%s token_count=%d first_10_tokens=%s",
+            uid,
+            agent_id,
+            len(tokens),
+            tokens[:10] if tokens else [],
+        )
+
         text = self._tokenizer.decode(tokens)
+
+        # DEBUG: Log raw decoded text
+        logger.info(
+            "[RAW_DECODED] uid=%s length=%d text=%s",
+            uid,
+            len(text),
+            repr(text[:200]) if text else "(empty)",
+        )
+
         # Debug: log raw text before cleaning to diagnose GPT-OSS channel issues
         if "<|" in text or "channel" in text.lower():
             logger.info("[RAW OUTPUT] %s: %s", uid, text[:500])
+
+        text_before_clean = text
         text = self._clean_text(text)
+
+        # DEBUG: Log what cleaning did
+        if text != text_before_clean:
+            logger.info(
+                "[CLEANED] uid=%s before_len=%d after_len=%d removed=%d chars",
+                uid,
+                len(text_before_clean),
+                len(text),
+                len(text_before_clean) - len(text),
+            )
 
         logger.debug("Finalized %s: %d tokens", uid, len(tokens))
 

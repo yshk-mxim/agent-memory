@@ -381,14 +381,33 @@ class CoordinationService:
         else:
             identity = f"Your name is {name}. You are a {agent_role.role}."
 
-        rules = (
-            "RULES: "
-            f"You are {name} and nobody else. "
-            "Respond in first person as yourself. "
-            "Never generate dialogue for other characters. "
-            "Never prefix your response with any name or label. "
-            "Give one short reply only."
+        # Check if DeepSeek model (needs special anti-echo instructions)
+        is_deepseek = (
+            self._chat_template.is_deepseek(self._engine._tokenizer)
+            if self._chat_template
+            else False
         )
+
+        if is_deepseek:
+            # DeepSeek-specific: Simple rules (assistant priming does the heavy lifting)
+            # CRITICAL: DeepSeek is bilingual Chinese/English - must enforce English explicitly
+            rules = (
+                f"IMPORTANT: You must respond in English only. Do not use Chinese. "
+                f"Speak as {name} in first person. "
+                f"Do not repeat what others say. "
+                f"Do not prefix your response. "
+                f"Give one short reply only."
+            )
+        else:
+            # Standard models (Gemma, etc.)
+            rules = (
+                "RULES: "
+                f"You are {name} and nobody else. "
+                "Respond in first person as yourself. "
+                "Never generate dialogue for other characters. "
+                "Never prefix your response with any name or label. "
+                "Give one short reply only."
+            )
 
         style = self._debate_style_hint(debate_format, agent_role.role)
 
@@ -434,7 +453,33 @@ class CoordinationService:
 
         messages = [{"role": "system", "content": system_content}]
 
+        # Detect DeepSeek model for special handling
+        is_deepseek = (
+            self._chat_template.is_deepseek(self._engine._tokenizer)
+            if self._chat_template
+            else False
+        )
+
         visible_messages = directive.visible_messages
+
+        # CRITICAL: DeepSeek needs assistant-role priming to establish identity
+        # Without this initial assistant message, DeepSeek echoes other speakers
+        # or narrates in third person instead of responding as the agent.
+        # IMPORTANT: Only add priming on FIRST turn when agent has no prior messages.
+        # Adding it on subsequent turns creates consecutive assistant messages which breaks.
+        if is_deepseek:
+            # Check if this agent has any prior assistant messages in visible history
+            has_prior_messages = any(
+                msg.sender_id == agent_role.agent_id
+                for msg in visible_messages
+            )
+            if not has_prior_messages:
+                # First turn: Add identity-priming assistant message
+                # This establishes the agent's voice in first person before any dialogue
+                # CRITICAL: Keep it simple - complex priming causes DeepSeek to echo/repeat it
+                prime_message = f"I'm {agent_role.display_name}."
+                messages.append({"role": "assistant", "content": prime_message})
+                logger.debug(f"DeepSeek: Added identity primer for {agent_role.display_name}")
         if len(visible_messages) > MAX_CONTEXT_MESSAGES:
             visible_messages = visible_messages[-MAX_CONTEXT_MESSAGES:]
 
@@ -448,15 +493,41 @@ class CoordinationService:
                     directive.session_id,
                     msg.sender_id,
                 )
+                # Prefix with speaker name only (no "said:" to avoid narrative mode)
                 messages.append(
                     {"role": "user", "content": f"{sender_name}: {msg.content}"},
                 )
 
         # Short cue to elicit next response without confusing role labels
-        messages.append({
-            "role": "user",
-            "content": f"[{agent_role.display_name}, respond now.]",
-        })
+        # CRITICAL: DeepSeek echoes text prompts like "Name, what do you say?"
+        # Instead, rely on chat template's add_generation_prompt which adds "Assistant:"
+        # This signals the model to respond without providing text to echo
+        if not is_deepseek:
+            # Standard models: use explicit prompt
+            prompt_text = f"[{agent_role.display_name}, respond now.]"
+            messages.append({
+                "role": "user",
+                "content": prompt_text,
+            })
+        else:
+            # DeepSeek: Add speaker prefix as assistant message
+            # This tells the model WHO should speak without providing echoable text
+            # The chat template adds "Assistant: " via add_generation_prompt=True
+            # Combined: "Assistant: Alice:" → model continues as Alice
+            messages.append({
+                "role": "assistant",
+                "content": f"{agent_role.display_name}:",
+            })
+
+        # DEBUG: Log the full prompt being sent
+        logger.info(
+            f"[PROMPT_DEBUG] agent={agent_role.agent_id} messages_count={len(messages)}"
+        )
+        for i, msg in enumerate(messages):
+            content_preview = msg["content"][:200] if len(msg["content"]) > 200 else msg["content"]
+            logger.info(
+                f"  [{i}] role={msg['role']} content={repr(content_preview)}"
+            )
 
         return messages
 
@@ -509,6 +580,9 @@ class CoordinationService:
     async def execute_turn(self, session_id: str) -> ChannelMessage:
         """Execute the next turn: determine speaker, build prompt, generate, record message.
 
+        Uses shared chat completion logic (same as OpenAI API) to ensure consistent
+        output quality with no space stripping or other tokenization artifacts.
+
         Args:
             session_id: Session identifier.
 
@@ -523,74 +597,73 @@ class CoordinationService:
         directive = self.get_next_turn(session_id)
         agent_role = session.agents[directive.agent_id]
 
-        # Build prompt
+        # Build prompt messages (standard chat format)
         prompt_messages = self.build_agent_prompt(directive, agent_role)
 
-        # Tokenize using model's chat template for proper turn boundaries
-        prompt_tokens, prompt_text = self._tokenize_chat_messages(prompt_messages)
+        # Generate using SHARED logic (same as OpenAI API)
+        # This ensures no space stripping and consistent output quality
+        from semantic.application.chat_completion_service import generate_chat_completion
 
-        # Load agent's cache (persistent key for permanent agents, session-scoped otherwise)
         namespaced_agent_id = self._resolve_cache_key(session_id, directive.agent_id)
-        cached_blocks = self._cache_store.load(namespaced_agent_id)
-
-        if cached_blocks:
-            logger.info(
-                "cache_reuse agent_id=%s cached_tokens=%d prompt_tokens=%d",
-                namespaced_agent_id,
-                cached_blocks.total_tokens,
-                len(prompt_tokens),
-            )
-
-        # Submit to scheduler (or fall back to direct engine if no scheduler)
-        # GPT-OSS needs more tokens for analysis channel before final
         gen_max_tokens = self._get_generation_max_tokens()
-        if self._scheduler is not None:
-            result = await self._scheduler.submit_and_wait(
-                agent_id=namespaced_agent_id,
-                prompt_tokens=prompt_tokens,
-                cache=cached_blocks,
-                max_tokens=gen_max_tokens,
-                prompt_text=prompt_text,
-                temperature=1.0,
-                top_p=0.95,
-                top_k=64,
-            )
-        else:
-            # Direct engine path (no scheduler available)
-            result = await self._generate_direct(
-                agent_id=namespaced_agent_id,
-                prompt_tokens=prompt_tokens,
-                cache=cached_blocks,
-                max_tokens=gen_max_tokens,
-                temperature=1.0,
-                top_p=0.95,
-                top_k=64,
-            )
 
-        # Cache invariant: result.blocks contains KV state for prompt + generated
-        # tokens. The blocks.token_sequence stores ONLY the prompt tokens (used for
-        # prefix matching on the next turn). The generated text is added to the
-        # channel as a message, and build_agent_prompt() will include it as an
-        # assistant-role message next turn — the engine's prefix matcher reuses
-        # the cached prompt KV and only recomputes the new tokens.
-        if result.blocks:
-            self._cache_store.save(namespaced_agent_id, result.blocks)
+        # DeepSeek-specific: Use T=0 (greedy) for deterministic, properly-spaced output
+        # At T=0, the model naturally prefers Ġ-prefixed tokens over non-spaced variants
+        is_deepseek = (
+            self._chat_template.is_deepseek(self._engine._tokenizer)
+            if self._chat_template
+            else False
+        )
+
+        temperature = 0.0 if is_deepseek else 1.0
+        top_p = 0.0 if is_deepseek else 0.95
+        top_k = 0 if is_deepseek else 64
+
+        result = await generate_chat_completion(
+            messages=prompt_messages,
+            batch_engine=self._engine,
+            cache_store=self._cache_store,
+            scheduler=self._scheduler,
+            agent_id=namespaced_agent_id,
+            max_tokens=gen_max_tokens,
+            temperature=temperature,
+            top_p=top_p,
+            top_k=top_k,
+        )
 
         # Strip runaway continuation (model generating fake turns)
         all_names = self._all_known_agent_names(session_id)
         clean_text = self._clean_agent_response(
-            result.text,
+            result["text"],  # Clean text from shared generation logic
             sender_name=agent_role.display_name,
             all_agent_names=all_names,
         )
 
         # Add message to public channel
+        # Skip empty messages to prevent corrupting conversation history
         public_channel = next(c for c in session.channels.values() if c.channel_type == "public")
-        message = public_channel.add_message(
-            sender_id=directive.agent_id,
-            content=clean_text,
-            turn_number=session.current_turn,
-        )
+        if not clean_text.strip():
+            logger.warning(
+                "empty_generation agent_id=%s turn=%d - skipping history update",
+                directive.agent_id,
+                session.current_turn,
+            )
+            # Create a placeholder message for API response, but don't add to channel
+            from semantic.domain.coordination import ChannelMessage
+            message = ChannelMessage(
+                message_id="",
+                channel_id=public_channel.channel_id,
+                sender_id=directive.agent_id,
+                content="",
+                turn_number=session.current_turn,
+                metadata={"empty_generation": True},
+            )
+        else:
+            message = public_channel.add_message(
+                sender_id=directive.agent_id,
+                content=clean_text,
+                turn_number=session.current_turn,
+            )
 
         # Advance turn
         session.advance_turn()
@@ -600,7 +673,7 @@ class CoordinationService:
             session_id=session_id,
             agent_id=directive.agent_id,
             turn=directive.turn_number,
-            text_length=len(result.text),
+            text_length=len(result["text"]),
         )
 
         return message
@@ -629,7 +702,9 @@ class CoordinationService:
         prompt_messages = self.build_agent_prompt(directive, agent_role)
 
         # Tokenize using model's chat template for proper turn boundaries
+        logger.info("before_tokenize_call", num_messages=len(prompt_messages))
         prompt_tokens, prompt_text = self._tokenize_chat_messages(prompt_messages)
+        logger.info("after_tokenize_call", num_tokens=len(prompt_tokens), prompt_text_len=len(prompt_text))
 
         # Load agent's cache (persistent key for permanent agents)
         namespaced_agent_id = self._resolve_cache_key(session_id, directive.agent_id)
@@ -646,6 +721,17 @@ class CoordinationService:
 
         accumulated_text = ""
 
+        # DeepSeek-specific: Use T=0 (greedy) for deterministic, properly-spaced output
+        is_deepseek = (
+            self._chat_template.is_deepseek(self._engine._tokenizer)
+            if self._chat_template
+            else False
+        )
+
+        temperature = 0.0 if is_deepseek else 1.0
+        top_p = 0.0 if is_deepseek else 0.95
+        top_k = 0 if is_deepseek else 64
+
         # Stream tokens via scheduler
         # GPT-OSS needs more tokens for analysis channel before final
         gen_max_tokens = self._get_generation_max_tokens()
@@ -656,9 +742,9 @@ class CoordinationService:
                 cache=cached_blocks,
                 max_tokens=gen_max_tokens,
                 prompt_text=prompt_text,
-                temperature=1.0,
-                top_p=0.95,
-                top_k=64,
+                temperature=temperature,
+                top_p=top_p,
+                top_k=top_k,
             ):
                 accumulated_text = delta.text
                 yield delta
@@ -669,9 +755,9 @@ class CoordinationService:
                 prompt_tokens=prompt_tokens,
                 cache=cached_blocks,
                 max_tokens=gen_max_tokens,
-                temperature=1.0,
-                top_p=0.95,
-                top_k=64,
+                temperature=temperature,
+                top_p=top_p,
+                top_k=top_k,
             )
             accumulated_text = result.text
             # Yield single delta with final text
@@ -701,12 +787,21 @@ class CoordinationService:
         )
 
         # Record message in public channel
+        # Skip empty messages to prevent corrupting conversation history
         public_channel = next(c for c in session.channels.values() if c.channel_type == "public")
-        public_channel.add_message(
-            sender_id=directive.agent_id,
-            content=clean_text,
-            turn_number=session.current_turn,
-        )
+        if not clean_text.strip():
+            logger.warning(
+                "empty_generation_streaming agent_id=%s turn=%d - skipping history update",
+                directive.agent_id,
+                session.current_turn,
+            )
+            # Don't add empty message to channel history
+        else:
+            public_channel.add_message(
+                sender_id=directive.agent_id,
+                content=clean_text,
+                turn_number=session.current_turn,
+            )
 
         # Advance turn
         session.advance_turn()
@@ -905,17 +1000,18 @@ class CoordinationService:
         # Normalize before pattern matching
         text = text.strip()
 
-        # Strip echoed role/name prefix at start of response
+        # Strip echoed role/name prefix at start of response (handles both "Name:" and "Name said:")
         prefixes = ["Assistant", "System", "User", "You"]
         if sender_name:
             prefixes.append(re.escape(sender_name))
         for name in (all_agent_names or []):
             prefixes.append(re.escape(name))
         prefix_pattern = "|".join(dict.fromkeys(prefixes))  # dedupe, preserve order
-        text = re.sub(rf"^(?:{prefix_pattern}):\s?", "", text)
+        text = re.sub(rf"^(?:{prefix_pattern})(?:\s+said)?:\s?", "", text)
 
-        # Strip echoed turn cue (e.g., "[Danny, respond now.]")
+        # Strip echoed turn cue (e.g., "[Danny, respond now.]" or "Danny, what do you say?")
         text = re.sub(r"^\[.+?, respond now\.\]\s*", "", text)
+        text = re.sub(r"^.+?, what do you say\?\s*", "", text, flags=re.IGNORECASE)
 
         # Strip echoed instruction/rule fragments (Gemma3 artifact)
         text = re.sub(
@@ -1007,8 +1103,9 @@ class CoordinationService:
 
             prev = merged[-1]
             # Merge consecutive same-role messages (except system)
+            # Use single newline - chat template adds paragraph breaks
             if msg["role"] == prev["role"] and msg["role"] != "system":
-                prev["content"] = prev["content"] + "\n\n" + msg["content"]
+                prev["content"] = prev["content"] + "\n" + msg["content"]
             else:
                 merged.append(dict(msg))
 
@@ -1032,9 +1129,13 @@ class CoordinationService:
         Returns:
             Tuple of (token_ids, prompt_text_for_logging).
         """
+        logger.info("_tokenize_chat_messages_called", num_messages=len(messages))
         prompt_text = self._format_messages_as_text(messages)
 
         tokenizer = self._engine.tokenizer
+
+        has_template = hasattr(tokenizer, "apply_chat_template") and getattr(tokenizer, "chat_template", None) is not None
+        logger.info("tokenize_debug_start", has_template=has_template)
 
         if hasattr(tokenizer, "apply_chat_template") and getattr(tokenizer, "chat_template", None):
             try:
@@ -1064,17 +1165,37 @@ class CoordinationService:
                     else {"tokenize": True, "add_generation_prompt": True}
                 )
 
+                # CRITICAL FIX: Get the ACTUAL templated text that will be tokenized
+                # This ensures prompt_text matches what's in the cache for prefix matching
+                template_kwargs_text = template_kwargs.copy()
+                template_kwargs_text["tokenize"] = False
+                logger.info("get_templated_text", kwargs=template_kwargs_text)
+                templated_text = tokenizer.apply_chat_template(
+                    messages_for_template,
+                    **template_kwargs_text,
+                )
+                logger.info("got_templated_text",
+                           text_type=type(templated_text).__name__,
+                           text_len=len(templated_text) if hasattr(templated_text, '__len__') else 0)
+
+                # Now tokenize the templated text
+                logger.info("before_tokenize", kwargs=template_kwargs)
                 tokens = tokenizer.apply_chat_template(
                     messages_for_template,
                     **template_kwargs,
                 )
+                logger.info("after_tokenize",
+                           tokens_type=type(tokens).__name__,
+                           is_list=isinstance(tokens, list),
+                           tokens_len=len(tokens) if hasattr(tokens, '__len__') else 0)
                 if isinstance(tokens, list):
-                    logger.debug(
-                        "Chat template produced %d tokens from %d messages",
-                        len(tokens),
-                        len(messages_for_template),
+                    logger.info("template_fix_applied",
+                        templated_text_len=len(templated_text) if isinstance(templated_text, str) else 0,
+                        tokens_count=len(tokens),
+                        preview=templated_text[:100] if isinstance(templated_text, str) else str(type(templated_text))
                     )
-                    return tokens, prompt_text
+                    # Return tokens AND the actual templated text (not raw message text)
+                    return tokens, templated_text
             except Exception as e:
                 logger.debug("Chat template failed: %s, falling back to raw text", e)
 
