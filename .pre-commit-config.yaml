@@ -38,3 +38,12 @@ repos:
     hooks:
       - id: codespell
         args: [--ignore-words-list=fo,nd,te]
+
+  - repo: local
+    hooks:
+      - id: warm-cache-pattern-check
+        name: Check warm cache test patterns
+        entry: python scripts/check_warm_cache_pattern.py
+        language: system
+        files: ^benchmarks/.*benchmark.*\.py$
+        types: [python]

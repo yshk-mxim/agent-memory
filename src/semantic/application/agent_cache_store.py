@@ -15,6 +15,31 @@ from semantic.domain.value_objects import ModelCacheSpec
 logger = logging.getLogger(__name__)
 
 
+@dataclass
+class CacheMetrics:
+    """Cache performance metrics for observability.
+
+    Used to detect when warm cache is broken (high miss rate, no disk loads).
+    """
+
+    hot_hits: int = 0  # Found in hot tier (memory)
+    warm_hits: int = 0  # Found in warm tier (disk reload)
+    misses: int = 0  # Not found in any tier
+    disk_loads: int = 0  # Number of safetensors loads
+    evictions: int = 0  # Number of LRU evictions
+    dirty_flushes: int = 0  # Number of dirty cache flushes
+
+    def hit_rate(self) -> float:
+        """Calculate overall cache hit rate."""
+        total = self.hot_hits + self.warm_hits + self.misses
+        return (self.hot_hits + self.warm_hits) / total if total > 0 else 0.0
+
+    def warm_hit_rate(self) -> float:
+        """Calculate warm tier hit rate (disk reloads)."""
+        total = self.hot_hits + self.warm_hits + self.misses
+        return self.warm_hits / total if total > 0 else 0.0
+
+
 @dataclass(frozen=True)
 class ModelTag:
     """Model compatibility tag for cache validation.
@@ -177,6 +202,9 @@ class AgentCacheStore:
         # Warm tier: agent_id → file path (on disk)
         self._warm_cache: dict[str, Path] = {}
 
+        # Performance metrics for observability
+        self.metrics = CacheMetrics()
+
         # Future: trie-based prefix matching for O(log n) lookup
 
     def save(self, agent_id: str, blocks: AgentBlocks) -> None:
@@ -263,15 +291,19 @@ class AgentCacheStore:
 
                     if has_data:
                         entry.mark_accessed()
+                        self.metrics.hot_hits += 1
                         return entry.blocks
 
                 # Blocks were cleared - fall through to disk load
+                logger.debug(f"Hot cache entry for {agent_id} has cleared blocks, reloading from disk")
 
             # Check warm tier (disk)
             if agent_id in self._warm_cache:
+                self.metrics.warm_hits += 1
                 return self._load_from_disk(agent_id)
 
             # Cache miss
+            self.metrics.misses += 1
             return None
 
     def delete(self, agent_id: str, keep_disk: bool = False) -> bool:
@@ -398,6 +430,7 @@ class AgentCacheStore:
                 # Remove from hot tier
                 del self._hot_cache[lru_agent_id]
                 evicted += 1
+                self.metrics.evictions += 1
 
             return evicted
 
@@ -497,6 +530,8 @@ class AgentCacheStore:
         self._warm_cache[agent_id] = cache_path
 
         # Clear dirty flag after successful disk write
+        if entry.dirty:
+            self.metrics.dirty_flushes += 1
         entry.dirty = False
 
     def flush_dirty(self) -> int:
@@ -522,6 +557,20 @@ class AgentCacheStore:
                     flushed += 1
             return flushed
 
+    def get_metrics(self) -> CacheMetrics:
+        """Get cache performance metrics.
+
+        Returns:
+            CacheMetrics with current statistics
+
+        Example:
+            >>> metrics = store.get_metrics()
+            >>> print(f"Hit rate: {metrics.hit_rate():.1%}")
+            >>> print(f"Warm hits: {metrics.warm_hits}")
+            >>> print(f"Disk loads: {metrics.disk_loads}")
+        """
+        return self.metrics
+
     def _load_from_disk(self, agent_id: str) -> AgentBlocks | None:
         """Load cache from warm tier."""
         cache_path = self._warm_cache.get(agent_id)
@@ -532,6 +581,8 @@ class AgentCacheStore:
             if self._cache_adapter is None:
                 raise InvalidRequestError("CacheAdapter is required - dependency not injected")
             blocks_dict, metadata = self._cache_adapter.load(cache_path)
+            self.metrics.disk_loads += 1
+            logger.debug(f"Loaded cache from disk: {agent_id} ({cache_path})")
 
             # Validate model tag compatibility
             saved_tag = ModelTag(
