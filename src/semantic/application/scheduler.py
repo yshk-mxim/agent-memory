@@ -239,6 +239,20 @@ class ConcurrentScheduler:
             # only processes new tokens. _enqueue_prefill() creates fresh
             # caches, ignoring the stored KV state entirely.
             if req.cache is not None:
+                # Warn if the delta between cached tokens and prompt tokens
+                # is large — direct path will block all decode streams during
+                # reconstruction + non-interleaved prefill of the delta.
+                cached_tokens = req.cache.total_tokens if req.cache else 0
+                delta_tokens = n_tokens - cached_tokens
+                if delta_tokens > self._interleave_threshold:
+                    logger.warning(
+                        "[SCHEDULER] Warm cache + large delta (%d tokens, "
+                        "cached=%d, prompt=%d) — direct path will block "
+                        "decode. Consider chunked warm prefill.",
+                        delta_tokens,
+                        cached_tokens,
+                        n_tokens,
+                    )
                 self._submit_direct(req)
             elif n_tokens < self._interleave_threshold:
                 self._submit_direct(req)

@@ -481,3 +481,71 @@ class TestSchedulerRequestRouting:
             assert adapter.init_calls == 1
         finally:
             scheduler.stop()
+
+
+# -------------------------------------------------------------------
+# Tests: Warm cache + large delta warning
+# -------------------------------------------------------------------
+
+
+class FakeAgentBlocks:
+    """Fake AgentBlocks with total_tokens attribute."""
+
+    def __init__(self, total_tokens: int) -> None:
+        self.total_tokens = total_tokens
+
+
+class TestSchedulerWarmLargeDelta:
+    def test_warm_large_delta_warning(self, caplog) -> None:
+        """Warm cache + large prompt delta should log a warning."""
+        import logging
+
+        engine = FakeBatchEngine(steps_to_complete=1)
+        adapter = FakePrefillAdapter()
+        threshold = 100
+        scheduler = ConcurrentScheduler(engine, adapter, n_layers=2, interleave_threshold=threshold)
+        scheduler.start()
+
+        try:
+
+            async def run():
+                # Cache has 50 tokens, prompt has 500 tokens → delta = 450 > threshold
+                fake_cache = FakeAgentBlocks(total_tokens=50)
+                return await scheduler.submit_and_wait(
+                    "a1", list(range(500)), fake_cache, 10
+                )
+
+            with caplog.at_level(logging.WARNING):
+                run_async(run())
+
+            # Verify warning was logged about large delta
+            assert any("large delta" in record.message.lower() for record in caplog.records)
+        finally:
+            scheduler.stop()
+
+    def test_warm_small_delta_no_warning(self, caplog) -> None:
+        """Warm cache + small prompt delta should NOT log a warning."""
+        import logging
+
+        engine = FakeBatchEngine(steps_to_complete=1)
+        adapter = FakePrefillAdapter()
+        threshold = 100
+        scheduler = ConcurrentScheduler(engine, adapter, n_layers=2, interleave_threshold=threshold)
+        scheduler.start()
+
+        try:
+
+            async def run():
+                # Cache has 40 tokens, prompt has 50 tokens → delta = 10 < threshold
+                fake_cache = FakeAgentBlocks(total_tokens=40)
+                return await scheduler.submit_and_wait(
+                    "a1", list(range(50)), fake_cache, 10
+                )
+
+            with caplog.at_level(logging.WARNING):
+                run_async(run())
+
+            # No large delta warning
+            assert not any("large delta" in record.message.lower() for record in caplog.records)
+        finally:
+            scheduler.stop()
