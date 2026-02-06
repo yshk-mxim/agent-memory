@@ -304,11 +304,12 @@ def launch_streamlit():
 
     # Find the streamlit app
     script_dir = Path(__file__).parent
-    streamlit_app = script_dir / "apps" / "streamlit_coordination.py"
+    streamlit_app = script_dir / "demo" / "app.py"
 
     if not streamlit_app.exists():
         # Try alternative locations
         alt_paths = [
+            script_dir / "apps" / "streamlit_coordination.py",
             script_dir / "streamlit_coordination.py",
             script_dir / "src" / "semantic" / "apps" / "streamlit_coordination.py",
         ]
