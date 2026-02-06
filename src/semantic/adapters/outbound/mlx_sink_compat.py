@@ -27,7 +27,6 @@ def _apply_patch() -> None:
     try:
         import mlx.core as mx
         import mlx_lm.models.base as base_module
-        from mlx_lm.models.base import quantized_scaled_dot_product_attention
     except ImportError:
         logger.debug("mlx_lm not available, skipping sink compat patch")
         return
@@ -66,7 +65,10 @@ def _apply_patch() -> None:
                     mask=mask,
                     sinks=sinks,
                 )
-            return quantized_scaled_dot_product_attention(
+            # Dynamic lookup allows later patches (e.g. fused Q4 attention)
+            # to intercept the quantized path
+            qsdpa = base_module.quantized_scaled_dot_product_attention
+            return qsdpa(
                 queries,
                 keys,
                 values,

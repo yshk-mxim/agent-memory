@@ -48,7 +48,10 @@ def apply_fused_attention_patch() -> bool:
             return _compiled_cache[n_repeats]
 
         if n_repeats > 1:
-            @partial(mx.compile, shapeless=True)
+            # shapeless=False for GQA: the reshape depends on input shape (L),
+            # which shapeless=True would bake from the first trace. Recompiles
+            # per unique (B, L) but decode (L=1) caches after first call.
+            @partial(mx.compile, shapeless=False)
             def _inner(queries, k0, k1, k2, v0, v1, v2, scale_arr, mask):
                 B, n_q_heads, L, D = queries.shape
                 n_kv_heads = n_q_heads // n_repeats
@@ -167,10 +170,12 @@ constant int N_REPEATS = {n_repeats};
 constant int THREADS = 32;
 
 // Dequantize one Q4 element from packed array
+// Templated on S to handle both float16 (half) and bfloat16 scales/biases
+template <typename S>
 inline float dequant4(
     const device uint* weights,
-    const device half* scales,
-    const device half* biases,
+    const device S* scales,
+    const device S* biases,
     int row_offset_w,  // row * packed_dim
     int row_offset_s,  // row * groups_dim
     int col            // element index within row
@@ -314,6 +319,8 @@ inline float dequant4(
         if kernel is None:
             return None
 
+        orig_dtype = queries.dtype
+
         # Flatten inputs for the kernel (remove L=1 dimension)
         # queries: [B, n_q_heads, 1, D] -> [B * n_q_heads * D]
         q_flat = queries.reshape(-1).astype(mx.float16)
@@ -340,8 +347,9 @@ inline float dequant4(
                 output_shapes=[output_shape],
                 output_dtypes=[mx.float16],
             )
-            # Reshape back to [B, n_q_heads, 1, v_dim]
-            return results[0].reshape(B, n_q_heads, 1, v_dim)
+            # Reshape back to [B, n_q_heads, 1, v_dim] and cast to original dtype
+            out = results[0].reshape(B, n_q_heads, 1, v_dim)
+            return out.astype(orig_dtype) if orig_dtype != mx.float16 else out
         except Exception as e:
             logger.warning("Metal decode kernel failed: %s, falling back", e)
             return None
@@ -350,17 +358,9 @@ inline float dequant4(
 
     def _patched_q4_sdpa(queries, q_keys, q_values, scale, mask, group_size=64, bits=4):
         """Fused Q4 SDPA: Metal kernel for decode, compiled for prefill."""
-        B, n_q_heads, L, D = queries.shape
-
-        # Try Metal kernel for L=1 decode (single fused dispatch)
-        if L == 1:
-            result = _try_metal_decode(
-                queries, q_keys, q_values, scale, mask, group_size, bits,
-            )
-            if result is not None:
-                return result
-
-        # Fall back to compiled Q4 SDPA (fuses element-wise ops)
+        # Metal decode kernel disabled pending numerical correctness validation.
+        # The compiled Q4 SDPA (below) handles both prefill and decode correctly.
+        # TODO: validate Metal kernel output against reference implementation
         return _fused_q4_sdpa(
             queries, q_keys, q_values, scale, mask, group_size, bits,
         )
