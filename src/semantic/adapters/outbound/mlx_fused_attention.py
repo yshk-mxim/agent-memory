@@ -144,8 +144,20 @@ def apply_fused_attention_patch() -> bool:
         k_groups = k_dim // 64  # scale/bias groups per K row (group_size=64)
         v_groups = v_dim // 64
 
-        # Threadgroup memory: only shared_q[K_DIM] (e.g. 256*4 = 1KB)
-        # All cross-thread reduction uses SIMD shuffle (THREADS=32 = 1 SIMD group)
+        # Dimension-parallel: each thread handles K_DIM/32 and V_DIM/32 dims
+        if k_dim % threads != 0 or v_dim % threads != 0:
+            logger.warning(
+                "Fused decode kernel requires k_dim=%d and v_dim=%d "
+                "divisible by %d — skipping",
+                k_dim, v_dim, threads,
+            )
+            _decode_kernel_cache[key] = None
+            return None
+
+        dims_per_thread_k = k_dim // threads
+        dims_per_thread_v = v_dim // threads
+
+        # Threadgroup memory: shared_q[K_DIM] only
         tg_bytes = k_dim * 4
         if tg_bytes > 32768:
             logger.warning(
@@ -168,6 +180,8 @@ constant int N_Q_HEADS = {n_q_heads};
 constant int N_KV_HEADS = {n_kv_heads};
 constant int N_REPEATS = {n_repeats};
 constant int THREADS = 32;
+constant int DIMS_PER_THREAD_K = {dims_per_thread_k};
+constant int DIMS_PER_THREAD_V = {dims_per_thread_v};
 
 // Dequantize one Q4 element from packed array
 // Templated on S to handle both float16 (half) and bfloat16 scales/biases
@@ -188,94 +202,77 @@ inline float dequant4(
          + float(biases[row_offset_s + grp]);
 }}
 """
-        # Kernel body: online softmax fused decode attention
+        # Kernel body: dimension-parallel fused decode attention
+        # Instead of parallelizing over positions (which requires reducing V_DIM
+        # floats across threads — problematic with V_DIM=256 register pressure),
+        # we parallelize over dimensions: each thread handles K_DIM/32 K-dims
+        # and V_DIM/32 V-dims, processing ALL positions cooperatively.
+        # Only cross-thread op: simd_sum of a single float for dot products.
         # Grid: (n_q_heads, B, 1), Threadgroup: (THREADS, 1, 1)
-        # params[0] = N (sequence length, changes each call)
         source = """
     uint tid = thread_position_in_threadgroup.x;
     uint head_idx = threadgroup_position_in_grid.x;
     uint batch_idx = threadgroup_position_in_grid.y;
 
-    // Read N from params
     int N = int(params[0]);
     float scale = float(scale_in[0]);
-
     uint kv_head = head_idx / N_REPEATS;
 
-    // Only shared_q needs threadgroup memory (~1KB for head_dim=256)
-    // All cross-thread reduction uses SIMD shuffle (THREADS=32 = 1 SIMD group)
+    // Load Q into shared memory (all threads cooperate)
     threadgroup float shared_q[K_DIM];
-
-    // Load Q into shared memory
     int q_base = (batch_idx * N_Q_HEADS + head_idx) * K_DIM;
     for (int i = tid; i < K_DIM; i += THREADS) {
         shared_q[i] = float(queries[q_base + i]);
     }
     threadgroup_barrier(mem_flags::mem_threadgroup);
 
-    // KV base offsets for this head
+    // Each thread owns a slice of K and V dimensions
+    int k_start = tid * DIMS_PER_THREAD_K;
+    int v_start = tid * DIMS_PER_THREAD_V;
+
     int kv_base = (batch_idx * N_KV_HEADS + kv_head) * N;
 
-    // Phase 1: Online softmax + V accumulation (per-thread, strided over N)
-    float my_max = -INFINITY;
-    float my_sum = 0.0f;
-    float my_out[V_DIM];  // in registers
-    for (int d = 0; d < V_DIM; d++) my_out[d] = 0.0f;
+    // Online softmax + V accumulation (dimension-parallel)
+    // All threads compute the SAME attention score via simd_sum,
+    // but each accumulates only its DIMS_PER_THREAD_V dimensions of V.
+    float current_max = -INFINITY;
+    float current_sum = 0.0f;
+    float my_out[DIMS_PER_THREAD_V];
+    for (int i = 0; i < DIMS_PER_THREAD_V; i++) my_out[i] = 0.0f;
 
-    for (int pos = tid; pos < N; pos += THREADS) {
-        // Compute Q . K[pos] via dequantized dot product
-        float dot = 0.0f;
+    for (int pos = 0; pos < N; pos++) {
+        // Partial dot product: each thread handles its K-dim slice
+        float partial_dot = 0.0f;
         int k_row_w = (kv_base + pos) * K_PACKED;
         int k_row_s = (kv_base + pos) * K_GROUPS;
-        for (int d = 0; d < K_DIM; d++) {
-            dot += shared_q[d] * dequant4(k_w, k_s, k_b, k_row_w, k_row_s, d);
+        for (int d = 0; d < DIMS_PER_THREAD_K; d++) {
+            partial_dot += shared_q[k_start + d]
+                         * dequant4(k_w, k_s, k_b, k_row_w, k_row_s, k_start + d);
         }
-        dot *= scale;
+        // simd_sum: all threads get the full dot product (single float)
+        float dot = simd_sum(partial_dot) * scale;
 
-        // Online softmax update
-        float m_new = max(my_max, dot);
-        float correction = exp(my_max - m_new);
+        // Online softmax update (identical across all threads)
+        float m_new = max(current_max, dot);
+        float correction = exp(current_max - m_new);
         float p = exp(dot - m_new);
 
-        // Update V accumulator with correction
+        // Accumulate weighted V for this thread's dimensions only
         int v_row_w = (kv_base + pos) * V_PACKED;
         int v_row_s = (kv_base + pos) * V_GROUPS;
-        for (int d = 0; d < V_DIM; d++) {
-            float v_val = dequant4(v_w, v_s, v_b, v_row_w, v_row_s, d);
-            my_out[d] = correction * my_out[d] + p * v_val;
+        for (int i = 0; i < DIMS_PER_THREAD_V; i++) {
+            float v_val = dequant4(v_w, v_s, v_b, v_row_w, v_row_s, v_start + i);
+            my_out[i] = correction * my_out[i] + p * v_val;
         }
-        my_sum = correction * my_sum + p;
-        my_max = m_new;
+        current_sum = correction * current_sum + p;
+        current_max = m_new;
     }
 
-    // Phase 2: Cross-thread reduction via SIMD shuffle
-    // THREADS=32 = exactly one SIMD group, so simd_shuffle_down works
-    // across all threads without any threadgroup memory.
-    // 5 steps for 32 threads: offsets 16, 8, 4, 2, 1
-    for (ushort offset = THREADS / 2; offset > 0; offset /= 2) {
-        float other_max = simd_shuffle_down(my_max, offset);
-        float other_sum = simd_shuffle_down(my_sum, offset);
-
-        // Merge online softmax states
-        float m_new = max(my_max, other_max);
-        float corr_me = exp(my_max - m_new);
-        float corr_other = exp(other_max - m_new);
-
-        for (int d = 0; d < V_DIM; d++) {
-            float other_out = simd_shuffle_down(my_out[d], offset);
-            my_out[d] = corr_me * my_out[d] + corr_other * other_out;
-        }
-        my_sum = corr_me * my_sum + corr_other * other_sum;
-        my_max = m_new;
-    }
-
-    // Thread 0 has the final merged result — normalize and write
-    if (tid == 0) {
-        int out_base = (batch_idx * N_Q_HEADS + head_idx) * V_DIM;
-        float inv_sum = 1.0f / my_sum;
-        for (int d = 0; d < V_DIM; d++) {
-            output[out_base + d] = half(my_out[d] * inv_sum);
-        }
+    // Normalize and write (each thread writes its own V-dim slice)
+    float inv_sum = 1.0f / current_sum;
+    int out_base = (batch_idx * N_Q_HEADS + head_idx) * V_DIM;
+    for (int i = 0; i < DIMS_PER_THREAD_V; i++) {
+        output[out_base + v_start + i] = half(my_out[i] * inv_sum);
     }
 """
         try:
@@ -340,9 +337,12 @@ inline float dequant4(
         output_shape = (B * n_q_heads * v_dim,)
 
         try:
+            # mx.fast.metal_kernel uses dispatch_threads: grid = total threads
+            # (not threadgroup count). Multiply by 32 so each head gets a full
+            # 32-thread SIMD group, with threadgroup_position_in_grid.x = head_idx.
             results = kernel(
                 inputs=[q_flat, k_w, k_s, k_b, v_w, v_s, v_b, params, scale_in],
-                grid=(n_q_heads, B, 1),
+                grid=(n_q_heads * 32, B, 1),
                 threadgroup=(32, 1, 1),
                 output_shapes=[output_shape],
                 output_dtypes=[mx.float16],
@@ -358,9 +358,12 @@ inline float dequant4(
 
     def _patched_q4_sdpa(queries, q_keys, q_values, scale, mask, group_size=64, bits=4):
         """Fused Q4 SDPA: Metal kernel for decode, compiled for prefill."""
-        # Metal decode kernel disabled pending numerical correctness validation.
-        # The compiled Q4 SDPA (below) handles both prefill and decode correctly.
-        # TODO: validate Metal kernel output against reference implementation
+        # Try Metal decode kernel for L=1 single-token decode
+        result = _try_metal_decode(
+            queries, q_keys, q_values, scale, mask, group_size, bits,
+        )
+        if result is not None:
+            return result
         return _fused_q4_sdpa(
             queries, q_keys, q_values, scale, mask, group_size, bits,
         )
