@@ -684,11 +684,18 @@ class CoordinationService:
         Streams tokens as they're generated using the scheduler's streaming API.
         After streaming completes, saves the cache and records the message.
 
+        Yields a final StreamDelta with finish_reason="cleaned" containing the
+        post-processed text (runaway continuation stripped). This delta is a
+        **replacement** — consumers must use it as the authoritative final text,
+        not append it to previously accumulated raw text.
+
         Args:
             session_id: Session identifier.
 
         Yields:
             StreamDelta objects with accumulated text and token count.
+            The last yielded delta has finish_reason="cleaned" and its text
+            field contains the cleaned replacement text.
 
         Raises:
             SessionNotFoundError: If session does not exist.
@@ -779,7 +786,10 @@ class CoordinationService:
             all_agent_names=all_names,
         )
 
-        # Yield final delta with cleaned text so adapter can use it in turn_complete
+        # Yield final delta with cleaned text so adapter can use it in turn_complete.
+        # PROTOCOL: This delta is a REPLACEMENT, not an append. Consumers must
+        # treat finish_reason="cleaned" as the authoritative final text and
+        # discard previously accumulated raw text.
         yield StreamDelta(
             text=clean_text,
             token_count=len(clean_text.split()),

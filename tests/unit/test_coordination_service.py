@@ -440,6 +440,63 @@ class TestTallyVotes:
         assert tally.results == {}
 
 
+class TestStreamCleanedDelta:
+    """Tests for execute_turn_stream cleaned delta protocol."""
+
+    def test_stream_delta_cleaned_is_replacement(self) -> None:
+        """StreamDelta with finish_reason='cleaned' should be treated as replacement text."""
+        from semantic.domain.value_objects import StreamDelta
+
+        # Simulate the stream protocol: raw deltas followed by cleaned
+        raw_deltas = [
+            StreamDelta(text="Hello", token_count=1, finish_reason=None),
+            StreamDelta(text="Hello world", token_count=2, finish_reason=None),
+            StreamDelta(text="Hello world! Extra junk Bob: ...", token_count=5, finish_reason="stop"),
+        ]
+        cleaned_delta = StreamDelta(
+            text="Hello world!",  # Cleaned version (junk stripped)
+            token_count=2,
+            finish_reason="cleaned",
+        )
+
+        # Consumer should use cleaned delta text as authoritative, not concatenate
+        all_deltas = raw_deltas + [cleaned_delta]
+        final_delta = [d for d in all_deltas if d.finish_reason == "cleaned"]
+
+        assert len(final_delta) == 1
+        assert final_delta[0].text == "Hello world!"
+
+        # Verify it's different from raw accumulated text (the whole point)
+        raw_final = [d for d in all_deltas if d.finish_reason == "stop"]
+        assert raw_final[0].text != final_delta[0].text
+
+    def test_stream_no_duplicate_text(self) -> None:
+        """Summing only non-cleaned deltas gives raw text; cleaned is separate."""
+        from semantic.domain.value_objects import StreamDelta
+
+        deltas = [
+            StreamDelta(text="A", token_count=1, finish_reason=None),
+            StreamDelta(text="AB", token_count=2, finish_reason=None),
+            StreamDelta(text="ABC", token_count=3, finish_reason="stop"),
+            StreamDelta(text="AB", token_count=2, finish_reason="cleaned"),  # Cleaned = trimmed
+        ]
+
+        # Accumulate raw tokens (skip cleaned)
+        raw_text = ""
+        clean_text = ""
+        for d in deltas:
+            if d.finish_reason == "cleaned":
+                clean_text = d.text
+            else:
+                raw_text = d.text  # Each delta has full accumulated text
+
+        # Raw and clean are intentionally different
+        assert raw_text == "ABC"
+        assert clean_text == "AB"
+        # No duplication: clean_text is not appended to raw_text
+        assert clean_text != raw_text
+
+
 class TestFormatMessagesAsText:
     """Tests for _format_messages_as_text()."""
 

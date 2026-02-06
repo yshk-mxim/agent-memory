@@ -137,9 +137,25 @@ class CompletedGeneration:
 
 @dataclass(frozen=True)
 class StreamDelta:
-    """Single token delta pushed to streaming clients."""
+    """Single token delta pushed to streaming clients.
 
-    text: str  # Full accumulated text so far
+    Streaming protocol:
+        1. During generation, deltas have finish_reason=None and text contains
+           the full accumulated raw text so far. Consumers extract new content
+           via ``delta.text[len(previous_text):]``.
+
+        2. When generation completes, a delta with finish_reason="stop" or
+           "length" is yielded.
+
+        3. After the final generation delta, execute_turn_stream yields one
+           extra delta with finish_reason="cleaned". This delta's text is a
+           **replacement** (not an append) containing the post-processed text
+           with runaway continuation stripped. Consumers MUST treat this as
+           the authoritative final text and NOT concatenate it with previously
+           accumulated raw text.
+    """
+
+    text: str  # Full accumulated text so far (or replacement text if finish_reason="cleaned")
     token_count: int
     finish_reason: str | None = None
 
