@@ -499,9 +499,6 @@ class CoordinationService:
                 )
 
         # Short cue to elicit next response without confusing role labels
-        # CRITICAL: DeepSeek echoes text prompts like "Name, what do you say?"
-        # Instead, rely on chat template's add_generation_prompt which adds "Assistant:"
-        # This signals the model to respond without providing text to echo
         if not is_deepseek:
             # Standard models: use explicit prompt
             prompt_text = f"[{agent_role.display_name}, respond now.]"
@@ -509,15 +506,15 @@ class CoordinationService:
                 "role": "user",
                 "content": prompt_text,
             })
-        else:
-            # DeepSeek: Add speaker prefix as assistant message
-            # This tells the model WHO should speak without providing echoable text
-            # The chat template adds "Assistant: " via add_generation_prompt=True
-            # Combined: "Assistant: Alice:" → model continues as Alice
-            messages.append({
-                "role": "assistant",
-                "content": f"{agent_role.display_name}:",
-            })
+        # DeepSeek: No final cue message.
+        # The DeepSeek template closes EVERY assistant message with <EOS>, so
+        # an assistant message like "Name:" becomes a completed empty turn:
+        #   Assistant: Name:<EOS>Assistant:
+        # The name cue is wasted — the model starts fresh from "Assistant:".
+        # Instead, rely on: (1) system prompt identity ("Your name is X"),
+        # (2) first-turn priming ("I'm X."), and (3) conversation history
+        # where the agent's own prior messages appear as assistant role.
+        # add_generation_prompt=True appends "Assistant:" for generation.
 
         # DEBUG: Log the full prompt being sent
         logger.info(
@@ -607,17 +604,25 @@ class CoordinationService:
         namespaced_agent_id = self._resolve_cache_key(session_id, directive.agent_id)
         gen_max_tokens = self._get_generation_max_tokens()
 
-        # DeepSeek-specific: Use T=0 (greedy) for deterministic, properly-spaced output
-        # At T=0, the model naturally prefers Ġ-prefixed tokens over non-spaced variants
         is_deepseek = (
             self._chat_template.is_deepseek(self._engine._tokenizer)
             if self._chat_template
             else False
         )
 
-        temperature = 0.0 if is_deepseek else 1.0
-        top_p = 0.0 if is_deepseek else 0.95
-        top_k = 0 if is_deepseek else 64
+        # DeepSeek sampling: T=0 causes deterministic echo loops (commit 0acecd4).
+        # T>=0.3 causes spacing corruption (concatenated words).
+        # T=0.1 is the sweet spot: enough randomness to avoid echo loops,
+        # low enough to select space-prefixed (Ġ) token variants consistently.
+        # A/B tested across 0.01–1.0 range; only 0.1 scored zero on both metrics.
+        temperature = 0.1
+        top_p = 0.95
+        top_k = 64
+
+        # DeepSeek: inject agent name into the token stream after "Assistant:"
+        # so the model knows which character to generate as (see option 3 in
+        # chat_completion_service.py for details on the EOS closure problem).
+        gen_prefix = f"{agent_role.display_name}:" if is_deepseek else None
 
         result = await generate_chat_completion(
             messages=prompt_messages,
@@ -629,6 +634,7 @@ class CoordinationService:
             temperature=temperature,
             top_p=top_p,
             top_k=top_k,
+            generation_prefix=gen_prefix,
         )
 
         # Strip runaway continuation (model generating fake turns)
@@ -708,9 +714,19 @@ class CoordinationService:
         # Build prompt
         prompt_messages = self.build_agent_prompt(directive, agent_role)
 
+        # DeepSeek: inject agent name into token stream (see option 3 comments)
+        is_deepseek = (
+            self._chat_template.is_deepseek(self._engine._tokenizer)
+            if self._chat_template
+            else False
+        )
+        gen_prefix = f"{agent_role.display_name}:" if is_deepseek else None
+
         # Tokenize using model's chat template for proper turn boundaries
         logger.info("before_tokenize_call", num_messages=len(prompt_messages))
-        prompt_tokens, prompt_text = self._tokenize_chat_messages(prompt_messages)
+        prompt_tokens, prompt_text = self._tokenize_chat_messages(
+            prompt_messages, generation_prefix=gen_prefix,
+        )
         logger.info("after_tokenize_call", num_tokens=len(prompt_tokens), prompt_text_len=len(prompt_text))
 
         # Load agent's cache (persistent key for permanent agents)
@@ -728,16 +744,10 @@ class CoordinationService:
 
         accumulated_text = ""
 
-        # DeepSeek-specific: Use T=0 (greedy) for deterministic, properly-spaced output
-        is_deepseek = (
-            self._chat_template.is_deepseek(self._engine._tokenizer)
-            if self._chat_template
-            else False
-        )
-
-        temperature = 0.0 if is_deepseek else 1.0
-        top_p = 0.0 if is_deepseek else 0.95
-        top_k = 0 if is_deepseek else 64
+        # Sampling: same for all models (see execute_turn for rationale)
+        temperature = 0.1
+        top_p = 0.95
+        top_k = 64
 
         # Stream tokens via scheduler
         # GPT-OSS needs more tokens for analysis channel before final
@@ -988,10 +998,11 @@ class CoordinationService:
     ) -> str:
         """Strip runaway generation and internal model markers from responses.
 
-        Handles three classes of artifacts:
+        Handles four classes of artifacts:
         1. Gemma3-style: model continues generating fake turns (User:/System:/etc.)
         2. GPT-OSS-style: model emits internal channel/reasoning markers
         3. Name/role echoing: model prefixes response with its own name or role
+        4. DeepSeek-style: meta-narration, inline cross-agent gen, spacing loss
         """
         # GPT-OSS: extract final channel content if present
         final_marker = "<|channel|>final<|message|>"
@@ -1126,7 +1137,9 @@ class CoordinationService:
         base_tokens = 200
         return base_tokens + self._reasoning_extra_tokens
 
-    def _tokenize_chat_messages(self, messages: list[dict]) -> tuple[list[int], str]:
+    def _tokenize_chat_messages(
+        self, messages: list[dict], generation_prefix: str | None = None,
+    ) -> tuple[list[int], str]:
         """Tokenize using model's chat template for proper turn boundaries.
 
         Models like Gemma3 require special turn markers (e.g. <start_of_turn>)
@@ -1135,6 +1148,11 @@ class CoordinationService:
 
         Message merging and template kwargs are delegated to the injected
         ChatTemplatePort, keeping model-specific logic in adapters.
+
+        Args:
+            messages: Chat messages to tokenize.
+            generation_prefix: Optional prefix to inject after "Assistant:"
+                (e.g. "Warden:" for DeepSeek identity signaling).
 
         Returns:
             Tuple of (token_ids, prompt_text_for_logging).
@@ -1199,6 +1217,24 @@ class CoordinationService:
                            is_list=isinstance(tokens, list),
                            tokens_len=len(tokens) if hasattr(tokens, '__len__') else 0)
                 if isinstance(tokens, list):
+                    # Inject generation prefix (DeepSeek identity, see option 3)
+                    if (
+                        generation_prefix
+                        and isinstance(templated_text, str)
+                        and templated_text.rstrip().endswith("Assistant:")
+                    ):
+                        suffix = " " + generation_prefix
+                        templated_text = templated_text + suffix
+                        suffix_tokens = tokenizer.encode(suffix, add_special_tokens=False)
+                        if hasattr(suffix_tokens, "ids"):
+                            suffix_tokens = list(suffix_tokens.ids)
+                        tokens = list(tokens) + suffix_tokens
+                        logger.info(
+                            "injected_generation_prefix",
+                            prefix=generation_prefix,
+                            extra_tokens=len(suffix_tokens),
+                        )
+
                     logger.info("template_fix_applied",
                         templated_text_len=len(templated_text) if isinstance(templated_text, str) else 0,
                         tokens_count=len(tokens),

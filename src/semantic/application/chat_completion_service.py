@@ -19,6 +19,7 @@ async def generate_chat_completion(
     temperature: float = 0.7,
     top_p: float = 0.95,
     top_k: int | None = None,
+    generation_prefix: str | None = None,
 ) -> dict[str, Any]:
     """Generate a chat completion using shared logic.
 
@@ -36,6 +37,10 @@ async def generate_chat_completion(
         temperature: Sampling temperature
         top_p: Nucleus sampling parameter
         top_k: Top-k sampling parameter (optional)
+        generation_prefix: Optional text to append after the template's
+            "Assistant:" generation prompt (e.g. "Warden:" for DeepSeek).
+            Injected directly into the token stream, bypassing the chat
+            template's EOS closure on assistant messages.
 
     Returns:
         dict with:
@@ -71,6 +76,25 @@ async def generate_chat_completion(
         messages,
         prompt,
     )
+
+    # Option 3: Inject agent name prefix into the token stream for DeepSeek.
+    # The DeepSeek template closes EVERY assistant message with <EOS>, so adding
+    # "Name:" as an assistant message produces: "Assistant: Name:<EOS>Assistant:"
+    # — the name cue is wasted. Instead, we append " Name:" directly after the
+    # template's "Assistant:" generation prompt, producing: "Assistant: Name:"
+    # with no EOS in between. This gives the model a clear identity signal.
+    if generation_prefix and templated_text.rstrip().endswith("Assistant:"):
+        suffix = " " + generation_prefix
+        templated_text = templated_text + suffix
+        # Tokenize just the suffix (no BOS/special tokens) and append
+        suffix_tokens = tokenizer.encode(suffix, add_special_tokens=False)
+        # Handle Encoding objects (fast tokenizers) vs plain lists
+        if hasattr(suffix_tokens, "ids"):
+            suffix_tokens = list(suffix_tokens.ids)
+        if hasattr(tokens, "ids"):
+            tokens = list(tokens.ids)
+        tokens = list(tokens) + suffix_tokens
+        logger.info(f"Injected generation prefix '{generation_prefix}' (+{len(suffix_tokens)} tokens)")
 
     logger.debug(f"Tokenized {len(messages)} messages → {len(tokens)} tokens")
     logger.info(f"Using templated text: {len(templated_text)} chars vs fallback {len(prompt)} chars")
