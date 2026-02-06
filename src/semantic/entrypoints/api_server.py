@@ -282,6 +282,10 @@ async def lifespan(app: FastAPI):
     settings = get_settings()
 
     try:
+        # Apply fused Q4 attention patch (must happen before model forward pass)
+        from semantic.adapters.outbound.mlx_fused_attention import apply_fused_attention_patch
+        apply_fused_attention_patch()
+
         # Load model and extract spec
         model, tokenizer, model_spec = _load_model_and_extract_spec(settings)
 
