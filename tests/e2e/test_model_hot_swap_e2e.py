@@ -1,4 +1,4 @@
-"""E2E tests for model hot-swap functionality (Sprint 6 Day 2).
+"""E2E tests for model hot-swap functionality.
 
 Tests verify that the server can swap models at runtime while maintaining
 system stability and preserving agent caches.
@@ -16,7 +16,7 @@ def test_swap_model_mid_session_with_active_agents(test_client: httpx.Client, cl
     - Model swap completes successfully
     - Active agents drain gracefully
     - New model becomes operational
-    - Swap latency <30s (Sprint 5 EXP-012 target)
+    - Swap latency <30s
 
     Pattern: Make requests → trigger swap → verify new model active
 

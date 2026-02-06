@@ -1,4 +1,4 @@
-"""Benchmark fixtures for semantic caching server (Sprint 6 Day 5).
+"""Benchmark fixtures for semantic caching server.
 
 Provides fixtures for:
 - Benchmark server (module-scoped for performance)

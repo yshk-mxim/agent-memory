@@ -23,6 +23,22 @@ logger = logging.getLogger(__name__)
 _VALID_AGENT_ID_PATTERN = re.compile(r"^[a-zA-Z0-9_-]+$")
 
 
+def _mlx_to_numpy(arr: Any) -> "np.ndarray[Any, Any]":
+    """Convert MLX array to numpy, handling bfloat16 which numpy doesn't support.
+
+    MLX models may use bfloat16 internally (e.g., SmolLM2-135M). When quantizing
+    their KV cache, the scales and biases inherit bfloat16 dtype. Since numpy and
+    safetensors don't support bfloat16, we convert to float16 first. This is safe
+    because scales/biases are small values where bfloat16→float16 is lossless for
+    the precision needed.
+    """
+    import mlx.core as mx
+
+    if hasattr(arr, "dtype") and arr.dtype == mx.bfloat16:
+        arr = arr.astype(mx.float16)
+    return np.asarray(arr)
+
+
 class SafetensorsCacheAdapter:
     """Adapter for cache persistence using safetensors format."""
 
@@ -67,6 +83,34 @@ class SafetensorsCacheAdapter:
         self._validate_agent_id(agent_id)
         cache_path = self.cache_dir / f"{agent_id}.safetensors"
         tmp_path = self.cache_dir / f"{agent_id}.safetensors.tmp"
+
+        # CRITICAL: Validate blocks list is not corrupted before saving
+        # Detect race conditions where blocks accumulate from multiple generations
+        block_tokens = metadata.get("block_tokens", 256)
+        expected_max_blocks = (blocks.total_tokens + block_tokens - 1) // block_tokens
+
+        for layer_id, layer_blocks in blocks.blocks.items():
+            actual_blocks = len(layer_blocks)
+
+            # Sanity check: blocks list should not be wildly larger than expected
+            if actual_blocks > expected_max_blocks * 2:
+                logger.error(
+                    f"[CACHE CORRUPTION DETECTED] Agent {agent_id} layer {layer_id}: "
+                    f"{actual_blocks} blocks but only expected ~{expected_max_blocks} "
+                    f"for {blocks.total_tokens} tokens. Refusing to save corrupted cache."
+                )
+                raise CachePersistenceError(
+                    f"Cache corruption: layer {layer_id} has {actual_blocks} blocks "
+                    f"but expected ~{expected_max_blocks} for {blocks.total_tokens} tokens"
+                )
+
+            # Check for blocks with no data (shouldn't happen after get_agent_blocks filtering)
+            empty_blocks = sum(1 for b in layer_blocks if b.layer_data is None)
+            if empty_blocks > 0:
+                logger.warning(
+                    f"[CACHE SAVE] Agent {agent_id} layer {layer_id}: "
+                    f"{empty_blocks}/{actual_blocks} blocks have no layer_data (will skip)"
+                )
 
         # Estimate cache size before saving to avoid partial writes on disk full
         estimated_bytes = self._estimate_cache_size(blocks)
@@ -113,15 +157,16 @@ class SafetensorsCacheAdapter:
                         v_weights, v_scales, v_biases = v_data
 
                         # Save all quantized components separately
-                        tensors[f"L{layer_id}_B{block_idx}_K_weights"] = np.asarray(k_weights)
-                        tensors[f"L{layer_id}_B{block_idx}_K_scales"] = np.asarray(k_scales)
+                        # Uses _mlx_to_numpy to handle bfloat16→float16 conversion
+                        tensors[f"L{layer_id}_B{block_idx}_K_weights"] = _mlx_to_numpy(k_weights)
+                        tensors[f"L{layer_id}_B{block_idx}_K_scales"] = _mlx_to_numpy(k_scales)
                         if k_biases is not None:
-                            tensors[f"L{layer_id}_B{block_idx}_K_biases"] = np.asarray(k_biases)
+                            tensors[f"L{layer_id}_B{block_idx}_K_biases"] = _mlx_to_numpy(k_biases)
 
-                        tensors[f"L{layer_id}_B{block_idx}_V_weights"] = np.asarray(v_weights)
-                        tensors[f"L{layer_id}_B{block_idx}_V_scales"] = np.asarray(v_scales)
+                        tensors[f"L{layer_id}_B{block_idx}_V_weights"] = _mlx_to_numpy(v_weights)
+                        tensors[f"L{layer_id}_B{block_idx}_V_scales"] = _mlx_to_numpy(v_scales)
                         if v_biases is not None:
-                            tensors[f"L{layer_id}_B{block_idx}_V_biases"] = np.asarray(v_biases)
+                            tensors[f"L{layer_id}_B{block_idx}_V_biases"] = _mlx_to_numpy(v_biases)
 
                     else:
                         # Float16/float32 array - QUANTIZE it before saving
@@ -135,15 +180,15 @@ class SafetensorsCacheAdapter:
                         v_weights, v_scales, v_biases = mx.quantize(v_data, group_size=64, bits=4)
 
                         # Save quantized components
-                        tensors[f"L{layer_id}_B{block_idx}_K_weights"] = np.asarray(k_weights)
-                        tensors[f"L{layer_id}_B{block_idx}_K_scales"] = np.asarray(k_scales)
+                        tensors[f"L{layer_id}_B{block_idx}_K_weights"] = _mlx_to_numpy(k_weights)
+                        tensors[f"L{layer_id}_B{block_idx}_K_scales"] = _mlx_to_numpy(k_scales)
                         if k_biases is not None:
-                            tensors[f"L{layer_id}_B{block_idx}_K_biases"] = np.asarray(k_biases)
+                            tensors[f"L{layer_id}_B{block_idx}_K_biases"] = _mlx_to_numpy(k_biases)
 
-                        tensors[f"L{layer_id}_B{block_idx}_V_weights"] = np.asarray(v_weights)
-                        tensors[f"L{layer_id}_B{block_idx}_V_scales"] = np.asarray(v_scales)
+                        tensors[f"L{layer_id}_B{block_idx}_V_weights"] = _mlx_to_numpy(v_weights)
+                        tensors[f"L{layer_id}_B{block_idx}_V_scales"] = _mlx_to_numpy(v_scales)
                         if v_biases is not None:
-                            tensors[f"L{layer_id}_B{block_idx}_V_biases"] = np.asarray(v_biases)
+                            tensors[f"L{layer_id}_B{block_idx}_V_biases"] = _mlx_to_numpy(v_biases)
 
                 except (TypeError, ValueError) as e:
                     # Expected errors from invalid tensor shapes/types - log and skip block
@@ -179,8 +224,8 @@ class SafetensorsCacheAdapter:
             if tmp_path.exists():
                 try:
                     tmp_path.unlink()
-                except OSError:
-                    pass  # Already renamed or cleaned up
+                except OSError as e:
+                    logger.debug(f"Temp file already cleaned up: {tmp_path} ({e})")
 
         return cache_path
 
@@ -267,6 +312,10 @@ class SafetensorsCacheAdapter:
                 v_key = f"L{layer_id}_B{block_idx}_V"
 
                 if k_key not in tensors_data or v_key not in tensors_data:
+                    logger.warning(
+                        f"Incomplete block L{layer_id}_B{block_idx}: "
+                        f"K present={k_key in tensors_data}, V present={v_key in tensors_data}"
+                    )
                     continue
 
                 k_data = tensors_data[k_key]
@@ -361,3 +410,92 @@ class SafetensorsCacheAdapter:
                             total_bytes += arr.size * 2  # float16 = 2 bytes
 
         return total_bytes
+
+    def get_cache_file_metadata(self, agent_id: str) -> dict[str, Any] | None:
+        """Read safetensors header metadata without loading tensors.
+
+        Performs header-only read of safetensors file (8-byte length + JSON metadata).
+        Does NOT deserialize tensor data, making it fast for browsing/inspection.
+
+        Args:
+            agent_id: Agent identifier
+
+        Returns:
+            Metadata dict or None if file doesn't exist. Keys:
+                - model_id: Model identifier
+                - total_tokens: Total tokens cached
+                - token_sequence: Token IDs (if stored)
+                - prompt_text: Prompt text (if stored)
+
+        Example:
+            >>> meta = adapter.get_cache_file_metadata("agent_123")
+            >>> if meta:
+            ...     print(f"Agent has {meta['total_tokens']} tokens")
+        """
+        self._validate_agent_id(agent_id)
+        cache_path = self.cache_dir / f"{agent_id}.safetensors"
+
+        if not cache_path.exists():
+            return None
+
+        try:
+            # Read 8-byte header (little-endian uint64)
+            with open(cache_path, "rb") as f:
+                header_size_bytes = f.read(8)
+                if len(header_size_bytes) < 8:
+                    return None
+
+                header_size = struct.unpack("<Q", header_size_bytes)[0]
+
+                # Read JSON metadata (header_size bytes)
+                if header_size > 100_000_000:  # Sanity check: 100MB max
+                    logger.warning(f"Suspiciously large header for {agent_id}: {header_size} bytes")
+                    return None
+
+                metadata_bytes = f.read(header_size)
+                if len(metadata_bytes) < header_size:
+                    return None
+
+                # Parse JSON
+                metadata_str = metadata_bytes.decode("utf-8")
+                full_metadata = json.loads(metadata_str)
+
+                # Extract __metadata__ section (our custom fields)
+                user_metadata = full_metadata.get("__metadata__", {})
+
+                return {
+                    "model_id": user_metadata.get("model_id", "unknown"),
+                    "total_tokens": int(user_metadata.get("total_tokens", 0)),
+                    "token_sequence": user_metadata.get("token_sequence", []),
+                    "prompt_text": user_metadata.get("prompt_text", ""),
+                }
+
+        except (OSError, IOError, struct.error, json.JSONDecodeError, UnicodeDecodeError) as e:
+            logger.warning(f"Failed to read metadata for {agent_id}: {e}")
+            return None
+
+    def get_file_size(self, agent_id: str) -> int | None:
+        """Get file size for cached agent.
+
+        Args:
+            agent_id: Agent identifier
+
+        Returns:
+            File size in bytes, or None if file doesn't exist.
+
+        Example:
+            >>> size = adapter.get_file_size("agent_123")
+            >>> if size:
+            ...     print(f"Cache file is {size / 1024 / 1024:.2f} MB")
+        """
+        self._validate_agent_id(agent_id)
+        cache_path = self.cache_dir / f"{agent_id}.safetensors"
+
+        if not cache_path.exists():
+            return None
+
+        try:
+            return cache_path.stat().st_size
+        except OSError as e:
+            logger.warning(f"Failed to stat file for {agent_id}: {e}")
+            return None

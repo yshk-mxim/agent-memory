@@ -1,4 +1,4 @@
-"""Smoke tests for basic inference functionality (Sprint 6 Day 0).
+"""Smoke tests for basic inference functionality.
 
 These tests verify basic API operations:
 - Single request completes successfully

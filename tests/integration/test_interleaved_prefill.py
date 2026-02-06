@@ -10,16 +10,12 @@ verifying that:
 """
 
 import asyncio
-import time
 from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Any
 
-import pytest
-
 from semantic.application.scheduler import ConcurrentScheduler
 from semantic.application.shared_prefix_cache import SharedPrefixCache
-
 
 # -------------------------------------------------------------------
 # Fakes (self-contained — no MLX dependency)
@@ -33,6 +29,17 @@ class FakeCompletion:
     blocks: Any = None
     finish_reason: str = "end_turn"
     token_count: int = 5
+
+
+@dataclass
+class FakeStepResult:
+    """Mimics StepOneResult for scheduler compatibility."""
+
+    uid: str
+    text: str = ""
+    token_count: int = 0
+    finish_reason: str | None = None
+    completion: FakeCompletion | None = None
 
 
 class FakeEngine:
@@ -73,6 +80,34 @@ class FakeEngine:
         for uid in completed:
             del self._active[uid]
             yield FakeCompletion(uid=uid)
+
+    def step_once(self) -> list[FakeStepResult]:
+        """Per-token decode step matching StepOneResult interface."""
+        self.step_count += 1
+        results: list[FakeStepResult] = []
+        for uid in list(self._active):
+            self._active[uid]["steps"] -= 1
+            if self._active[uid]["steps"] <= 0:
+                comp = FakeCompletion(uid=uid)
+                results.append(
+                    FakeStepResult(
+                        uid=uid,
+                        text=comp.text,
+                        token_count=comp.token_count,
+                        finish_reason=comp.finish_reason,
+                        completion=comp,
+                    )
+                )
+                del self._active[uid]
+            else:
+                results.append(
+                    FakeStepResult(
+                        uid=uid,
+                        text="tok",
+                        token_count=1,
+                    )
+                )
+        return results
 
 
 @dataclass
@@ -147,11 +182,11 @@ class TestInterleavedPrefillDecode:
             assert len(engine.submit_with_cache_calls) == 1
             assert engine.submit_with_cache_calls[0]["agent_id"] == "agent_long"
 
-            # 800 tokens / 300 chunk = 3 chunks
+            # 800 tokens, prefill_end=799 → 3 chunks (last stops at 799)
             assert len(adapter.chunks) == 3
             assert adapter.chunks[0] == (0, 300)
             assert adapter.chunks[1] == (300, 600)
-            assert adapter.chunks[2] == (600, 800)
+            assert adapter.chunks[2] == (600, 799)
         finally:
             scheduler.stop()
 
@@ -264,7 +299,6 @@ class TestSharedPrefixCacheIntegration:
         cache.put(h, kv_caches=["fake_kv_state"], n_tokens=200, token_sequence=list(range(200)))
 
         entry = cache.get(h)
-        assert entry is not None
         assert entry.n_tokens == 200
         assert entry.hit_count == 1
 
@@ -288,7 +322,6 @@ class TestSharedPrefixCacheIntegration:
         # 100 agents looking up same prefix
         for i in range(100):
             entry = cache.get(h)
-            assert entry is not None
             assert entry.kv_caches == ["shared"]
 
         assert cache.get(h).hit_count == 101  # 100 + 1

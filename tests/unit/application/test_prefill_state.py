@@ -1,6 +1,5 @@
 """Unit tests for PrefillState."""
 
-import pytest
 
 from semantic.application.prefill_state import PrefillState
 
@@ -10,7 +9,9 @@ class TestPrefillStateBasic:
         state = PrefillState(agent_id="a1", tokens=[1, 2, 3, 4, 5])
         assert state.pos == 0
         assert state.total_tokens == 5
-        assert state.remaining_tokens == 5
+        # remaining_tokens = prefill_end - pos = (len-1) - 0 = 4
+        # prefill_end reserves 1 token for BatchGenerator initial logits
+        assert state.remaining_tokens == 4
         assert state.chunk_count == 0
         assert not state.is_done
 
@@ -24,7 +25,8 @@ class TestPrefillStateBasic:
         state = PrefillState(agent_id="a1", tokens=[1, 2, 3, 4, 5])
         state.advance(3)
         assert state.pos == 3
-        assert state.remaining_tokens == 2
+        # remaining = prefill_end - pos = 4 - 3 = 1
+        assert state.remaining_tokens == 1
         assert state.chunk_count == 1
         assert not state.is_done
 
@@ -58,7 +60,8 @@ class TestPrefillStateChunkRange:
         state = PrefillState(agent_id="a1", tokens=[1, 2, 3])
         start, end = state.next_chunk_range(chunk_size=100)
         assert start == 0
-        assert end == 3
+        # Clamps to prefill_end (len-1=2), not len(tokens)
+        assert end == 2
 
     def test_chunk_after_partial_advance(self) -> None:
         state = PrefillState(agent_id="a1", tokens=list(range(100)))
@@ -72,7 +75,8 @@ class TestPrefillStateChunkRange:
         state.advance(90)
         start, end = state.next_chunk_range(chunk_size=30)
         assert start == 90
-        assert end == 100
+        # Clamps to prefill_end (100-1=99), not len(tokens)
+        assert end == 99
 
 
 class TestPrefillStateMultiChunk:
@@ -91,9 +95,11 @@ class TestPrefillStateMultiChunk:
             chunks_processed += 1
 
         assert state.is_done
-        assert state.pos == 1000
+        # prefill_end = len(tokens)-1 = 999, so pos stops at 999
+        assert state.pos == 999
         assert state.chunk_count == chunks_processed
-        assert chunks_processed == 4  # 256+256+256+232
+        # 256+256+256+231=999 tokens processed in 4 chunks
+        assert chunks_processed == 4
 
     def test_kv_caches_opaque(self) -> None:
         state = PrefillState(agent_id="a1", tokens=[1, 2, 3])

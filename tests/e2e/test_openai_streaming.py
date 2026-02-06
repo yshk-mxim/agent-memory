@@ -1,4 +1,4 @@
-"""E2E tests for OpenAI streaming API (Sprint 6 Day 7).
+"""E2E tests for OpenAI streaming API.
 
 Tests verify SSE (Server-Sent Events) streaming for OpenAI Chat Completions API:
 - Streaming response format (OpenAI SSE)

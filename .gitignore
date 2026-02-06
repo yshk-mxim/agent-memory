@@ -44,6 +44,7 @@ data/batch_*.json
 data/*.pkl
 data/*.pickle
 models/
+!config/models/
 
 # Results - keep scripts and small configs, ignore large outputs
 results/**/*.json
@@ -105,3 +106,22 @@ benchmarks/results/capability_*.json
 # Agent caches (semantic-specific)
 .semantic/
 ~/.semantic/
+
+# Removed from release - internal project management
+project/
+archive/
+experiments/
+
+# Benchmark raw result data (keep scripts and methodology docs)
+benchmarks/results/*.json
+benchmarks/results/*_summary.txt
+
+# Claude Code session data
+.claude/
+
+# Developer tooling (local only)
+CLAUDE.md
+claude_code_proxy.py
+
+# Internal planning docs (removed from release)
+plans/

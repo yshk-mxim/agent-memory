@@ -1,4 +1,4 @@
-"""Concurrency tests for BlockPool memory tracking (NEW-2).
+"""Concurrency tests for BlockPool memory tracking.
 
 Tests that used_memory() and available_memory() are thread-safe and return
 consistent values under concurrent allocation/deallocation.
@@ -32,12 +32,12 @@ def pool(spec: ModelCacheSpec) -> BlockPool:
 
 
 class TestMemoryConcurrency:
-    """Tests for NEW-2: Thread-safe memory tracking."""
+    """Tests for thread-safe memory tracking."""
 
     def test_used_memory_consistent_under_concurrent_allocation(self, pool: BlockPool) -> None:
         """used_memory() should return consistent values during concurrent allocations.
 
-        NEW-2 validation: Memory tracking remains accurate even when multiple threads
+        Validates thatMemory tracking remains accurate even when multiple threads
         allocate blocks simultaneously.
         """
         results: list[int] = []
@@ -91,7 +91,7 @@ class TestMemoryConcurrency:
     def test_available_memory_consistent_under_concurrent_operations(self, pool: BlockPool) -> None:
         """available_memory() should return consistent values during concurrent ops.
 
-        NEW-2 validation: Available memory tracking is thread-safe.
+        Validates thatAvailable memory tracking is thread-safe.
         """
         results: list[int] = []
         errors: list[Exception] = []
@@ -146,7 +146,7 @@ class TestMemoryConcurrency:
     def test_memory_invariant_maintained_under_load(self, pool: BlockPool) -> None:
         """Memory invariant (used + available = total) maintained under concurrent load.
 
-        NEW-2 validation: No race conditions in memory tracking.
+        Validates thatNo race conditions in memory tracking.
         """
         total = pool.total_memory()
         snapshots: list[tuple[int, int]] = []
@@ -159,7 +159,7 @@ class TestMemoryConcurrency:
                     # Allocate
                     blocks = pool.allocate(n_blocks=2, layer_id=0, agent_id="test_agent")
 
-                    # Take snapshot (NEW-2: should be consistent)
+                    # Take snapshot (should be consistent under concurrency)
                     used = pool.used_memory()
                     available = pool.available_memory()
                     snapshots.append((used, available))
@@ -191,7 +191,7 @@ class TestMemoryConcurrency:
     def test_concurrent_memory_reads_no_deadlock(self, pool: BlockPool) -> None:
         """Multiple concurrent reads should not deadlock.
 
-        NEW-2 validation: Lock implementation doesn't cause deadlock.
+        Validates thatLock implementation doesn't cause deadlock.
         """
         results: list[int] = []
 

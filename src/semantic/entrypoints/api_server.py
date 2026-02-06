@@ -15,10 +15,20 @@ from fastapi.responses import JSONResponse
 from mlx_lm import load
 from prometheus_client import generate_latest
 
+import semantic.adapters.outbound.mlx_quantized_extensions  # noqa: F401, E402
+import semantic.adapters.outbound.mlx_sink_compat  # noqa: F401, E402
+
 from semantic.adapters.config.logging import configure_logging
 from semantic.adapters.config.settings import get_settings
 from semantic.adapters.inbound.anthropic_adapter import router as anthropic_router
 from semantic.adapters.inbound.auth_middleware import AuthenticationMiddleware
+from semantic.adapters.inbound.coordination_adapter import router as coordination_router
+from semantic.adapters.inbound.admin_api import (
+    get_old_engine,
+    get_orchestrator,
+    get_registry,
+    router as admin_router,
+)
 from semantic.adapters.inbound.direct_agent_adapter import router as direct_router
 from semantic.adapters.inbound.metrics import agents_active, pool_utilization_ratio, registry
 from semantic.adapters.inbound.metrics_middleware import RequestMetricsMiddleware
@@ -26,11 +36,16 @@ from semantic.adapters.inbound.openai_adapter import router as openai_router
 from semantic.adapters.inbound.rate_limiter import RateLimiter
 from semantic.adapters.inbound.request_id_middleware import RequestIDMiddleware
 from semantic.adapters.inbound.request_logging_middleware import RequestLoggingMiddleware
+from semantic.adapters.outbound.chat_template_adapter import ChatTemplateAdapter
 from semantic.adapters.outbound.mlx_cache_adapter import MLXCacheAdapter
 from semantic.adapters.outbound.mlx_spec_extractor import get_extractor
 from semantic.adapters.outbound.safetensors_cache_adapter import SafetensorsCacheAdapter
+from semantic.adapters.outbound.mlx_model_loader import MLXModelLoader
 from semantic.application.agent_cache_store import AgentCacheStore, ModelTag
 from semantic.application.batch_engine import BlockPoolBatchEngine
+from semantic.application.coordination_service import CoordinationService
+from semantic.application.model_registry import ModelRegistry
+from semantic.application.model_swap_orchestrator import ModelSwapOrchestrator
 from semantic.application.scheduler import ConcurrentScheduler
 from semantic.application.shared_prefix_cache import SharedPrefixCache
 from semantic.domain.errors import (
@@ -62,6 +77,9 @@ class AppState:
         self.cache_adapter: SafetensorsCacheAdapter | None = None
         self.scheduler: "ConcurrentScheduler | None" = None
         self.prefix_cache: SharedPrefixCache | None = None
+        self.coordination_service: "CoordinationService | None" = None
+        self.model_registry: ModelRegistry | None = None
+        self.model_swap_orchestrator: ModelSwapOrchestrator | None = None
 
 
 def _load_model_and_extract_spec(settings):
@@ -107,7 +125,6 @@ def _load_model_and_extract_spec(settings):
     spec_extractor = get_extractor()
     base_spec: ModelCacheSpec = spec_extractor.extract_spec(model)
 
-    # Add quantization settings from config
     from dataclasses import replace
 
     model_spec = replace(
@@ -203,6 +220,10 @@ def _initialize_batch_engine(model, tokenizer, block_pool, model_spec, settings)
         pool=block_pool,
         spec=model_spec,
         cache_adapter=mlx_adapter,
+        chunked_prefill_enabled=settings.mlx.chunked_prefill_enabled,
+        chunked_prefill_threshold=settings.mlx.chunked_prefill_threshold,
+        chunked_prefill_min_chunk=settings.mlx.chunked_prefill_min_chunk,
+        chunked_prefill_max_chunk=settings.mlx.chunked_prefill_max_chunk,
     )
     logger.info(
         "batch_engine_initialized",
@@ -271,6 +292,26 @@ async def lifespan(app: FastAPI):
             model, tokenizer, block_pool, model_spec, settings
         )
 
+        # Initialize model registry and swap orchestrator for hot-swap support
+        model_loader = MLXModelLoader()
+        spec_extractor = get_extractor()
+        model_registry = ModelRegistry(
+            model_loader=model_loader,
+            spec_extractor=spec_extractor,
+        )
+        # Manually set registry state (model already loaded above)
+        model_registry._model = model
+        model_registry._tokenizer = tokenizer
+        model_registry._spec = model_spec
+        model_registry._current_model_id = settings.mlx.model_id
+
+        model_swap_orchestrator = ModelSwapOrchestrator(
+            model_registry=model_registry,
+            block_pool=block_pool,
+            cache_store=cache_store,
+            cache_adapter=mlx_adapter,
+        )
+
         # Store in app state
         app.state.semantic = AppState()
         app.state.semantic.block_pool = block_pool
@@ -278,6 +319,8 @@ async def lifespan(app: FastAPI):
         app.state.semantic.cache_store = cache_store
         app.state.semantic.mlx_adapter = mlx_adapter
         app.state.semantic.cache_adapter = cache_adapter
+        app.state.semantic.model_registry = model_registry
+        app.state.semantic.model_swap_orchestrator = model_swap_orchestrator
         app.state.shutting_down = False
 
         # Shared prefix cache (always enabled)
@@ -285,30 +328,52 @@ async def lifespan(app: FastAPI):
         app.state.semantic.prefix_cache = prefix_cache
         logger.info("prefix_cache_initialized")
 
-        # Conditionally start ConcurrentScheduler for interleaved prefill
+        # Start ConcurrentScheduler — serializes all engine access through
+        # a single worker thread, preventing concurrent Metal GPU crashes.
         scheduler = None
         if settings.mlx.scheduler_enabled:
-            from semantic.adapters.outbound.mlx_prefill_adapter import MLXPrefillAdapter
+            try:
+                from semantic.adapters.outbound.mlx_prefill_adapter import MLXPrefillAdapter
 
-            prefill_adapter = MLXPrefillAdapter(
-                model=model,
-                kv_bits=settings.mlx.kv_bits or 4,
-                kv_group_size=settings.mlx.kv_group_size,
-                min_chunk=settings.mlx.chunked_prefill_min_chunk,
-                max_chunk=settings.mlx.chunked_prefill_max_chunk,
-            )
-            scheduler = ConcurrentScheduler(
-                engine=batch_engine,
-                prefill_adapter=prefill_adapter,
-                n_layers=model_spec.n_layers,
-                interleave_threshold=settings.mlx.scheduler_interleave_threshold,
-            )
-            scheduler.start()
-            app.state.semantic.scheduler = scheduler
-            logger.info(
-                "scheduler_started",
-                interleave_threshold=settings.mlx.scheduler_interleave_threshold,
-            )
+                prefill_adapter = MLXPrefillAdapter(
+                    model=model,
+                    kv_bits=settings.mlx.kv_bits or 4,
+                    kv_group_size=settings.mlx.kv_group_size,
+                    min_chunk=settings.mlx.chunked_prefill_min_chunk,
+                    max_chunk=settings.mlx.chunked_prefill_max_chunk,
+                )
+                scheduler = ConcurrentScheduler(
+                    engine=batch_engine,
+                    prefill_adapter=prefill_adapter,
+                    n_layers=model_spec.n_layers,
+                    interleave_threshold=settings.mlx.scheduler_interleave_threshold,
+                )
+                scheduler.start()
+                app.state.semantic.scheduler = scheduler
+                logger.info(
+                    "scheduler_started",
+                    interleave_threshold=settings.mlx.scheduler_interleave_threshold,
+                )
+            except ImportError:
+                logger.warning(
+                    "scheduler_unavailable",
+                    reason="MLXPrefillAdapter not importable — falling back to direct engine path",
+                )
+
+        # Initialize CoordinationService (can work with or without scheduler)
+        chat_template_adapter = ChatTemplateAdapter()
+        coordination_service = CoordinationService(
+            scheduler=scheduler,
+            cache_store=cache_store,
+            engine=batch_engine,
+            reasoning_extra_tokens=settings.mlx.reasoning_extra_tokens,
+            chat_template=chat_template_adapter,
+        )
+        app.state.coordination_service = coordination_service
+        logger.info(
+            "coordination_service_initialized",
+            scheduler_enabled=(scheduler is not None),
+        )
 
         logger.info("server_ready")
 
@@ -647,6 +712,39 @@ def _register_routes(app: FastAPI):
             },
         }
 
+    @app.get("/v1/models", status_code=status.HTTP_200_OK)
+    async def list_models():
+        """OpenAI-compatible models endpoint — returns loaded model info."""
+        semantic = getattr(app.state, "semantic", None)
+        engine = semantic.batch_engine if semantic else None
+        registry = semantic.model_registry if semantic else None
+        settings = get_settings()
+
+        # Use registry's current model (tracks swaps) or empty if offloaded
+        model_id = registry.get_current_id() if registry else None
+
+        if not model_id:
+            return {"object": "list", "data": []}
+
+        model_entry = {
+            "id": model_id,
+            "object": "model",
+            "owned_by": "local",
+        }
+
+        if engine:
+            spec = engine._spec
+            model_entry["spec"] = {
+                "n_layers": spec.n_layers,
+                "n_kv_heads": spec.n_kv_heads,
+                "head_dim": spec.head_dim,
+                "block_tokens": spec.block_tokens,
+                "kv_bits": spec.kv_bits,
+                "max_context_length": settings.mlx.max_context_length,
+            }
+
+        return {"object": "list", "data": [model_entry]}
+
     app.include_router(anthropic_router)
     logger.info("routes_registered", router="anthropic", path="/v1/messages")
 
@@ -655,6 +753,13 @@ def _register_routes(app: FastAPI):
 
     app.include_router(direct_router)
     logger.info("routes_registered", router="direct_agent", path="/v1/agents")
+
+    app.include_router(coordination_router)
+    logger.info("routes_registered", router="coordination", path="/v1/coordination")
+
+    # Admin API for model management (requires SEMANTIC_ADMIN_KEY)
+    app.include_router(admin_router)
+    logger.info("routes_registered", router="admin", path="/admin")
 
 
 def create_app() -> FastAPI:
@@ -688,6 +793,20 @@ def create_app() -> FastAPI:
     _register_debug_endpoints(app)
     _register_error_handlers(app)
     _register_routes(app)
+
+    # Set up dependency overrides for admin API
+    def _get_orchestrator():
+        return app.state.semantic.model_swap_orchestrator
+
+    def _get_old_engine():
+        return app.state.semantic.batch_engine
+
+    def _get_registry():
+        return app.state.semantic.model_registry
+
+    app.dependency_overrides[get_orchestrator] = _get_orchestrator
+    app.dependency_overrides[get_old_engine] = _get_old_engine
+    app.dependency_overrides[get_registry] = _get_registry
 
     logger.info("fastapi_app_created", log_level=settings.server.log_level)
     return app

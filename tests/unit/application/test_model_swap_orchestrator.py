@@ -8,8 +8,10 @@ import pytest
 # Mock MLX modules
 sys.modules["mlx"] = MagicMock()
 sys.modules["mlx.core"] = MagicMock()
+sys.modules["mlx.utils"] = MagicMock()
 sys.modules["mlx_lm"] = MagicMock()
 
+from semantic.application.batch_engine import BlockPoolBatchEngine
 from semantic.application.model_swap_orchestrator import ModelSwapOrchestrator
 from semantic.domain.errors import ModelNotFoundError
 from semantic.domain.value_objects import ModelCacheSpec
@@ -58,7 +60,7 @@ class TestModelSwapOrchestrator:
         mock_registry.unload_model.assert_called_once()
         mock_registry.load_model.assert_called_once_with("new-model")
         mock_pool.reconfigure.assert_called_once_with(new_spec)
-        assert new_engine is not None
+        assert isinstance(new_engine, BlockPoolBatchEngine)
 
     async def test_swap_model_first_load_skips_drain_and_shutdown(self):
         """First model load skips drain/shutdown (no old engine)."""
@@ -89,7 +91,7 @@ class TestModelSwapOrchestrator:
 
         mock_registry.unload_model.assert_not_called()
         mock_registry.load_model.assert_called_once_with("first-model")
-        assert new_engine is not None
+        assert isinstance(new_engine, BlockPoolBatchEngine)
 
     async def test_swap_model_rollback_on_load_failure(self):
         """Failed model load triggers rollback to old model."""

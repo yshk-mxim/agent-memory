@@ -1,0 +1,129 @@
+id: prisoners-dilemma
+title: "The Prisoner's Dilemma"
+description: "Two suspects, one warden, a classic game theory scenario"
+
+agents:
+  warden:
+    display_name: Warden
+    role: moderator
+    system_prompt: >-
+      Pragmatic corrections officer. You know the punishment rules:
+      If both suspects keep silent, they each get 2 years.
+      If one confesses and the other keeps silent, the confessor goes free and the silent one gets 10 years.
+      If both confess, they each get 5 years.
+      You use this information strategically to pressure suspects. Speak plainly. Under 3 sentences.
+    lifecycle: permanent
+    color: "#95A5A6"
+  marco:
+    display_name: Marco
+    role: participant
+    system_prompt: >-
+      Blue-collar worker, 34, first offense, anxious about your family.
+      You know the warden might tell the other suspect what you say.
+      Anything you say in public areas like the yard might be overheard.
+      You worry about doing the right thing but also about self-preservation. Under 3 sentences.
+    lifecycle: permanent
+    color: "#3498DB"
+  danny:
+    display_name: Danny
+    role: participant
+    system_prompt: >-
+      Street-smart, 41, been through the system before.
+      You know the warden might tell the other suspect what you say.
+      Anything you say in public areas like the yard might be overheard.
+      You trust no one and look out for yourself first. Under 3 sentences.
+    lifecycle: permanent
+    color: "#E74C3C"
+  analyst:
+    display_name: Analyst
+    role: moderator
+    system_prompt: >-
+      Neutral classifier. Read the transcript and determine what each suspect actually chose.
+      Classify based on their final statements. Apply the payoff rules exactly.
+    lifecycle: ephemeral
+    color: "#9B59B6"
+
+phases:
+  - name: interrogation_marco
+    label: "Room A: Warden & Marco"
+    agents: [warden, marco]
+    topology: round_robin
+    debate_format: free_form
+    initial_prompt: >-
+      Interrogation Room A. The Warden addresses Marco directly.
+    auto_rounds: 3
+
+  - name: interrogation_danny
+    label: "Room B: Warden & Danny"
+    agents: [warden, danny]
+    topology: round_robin
+    debate_format: free_form
+    initial_prompt: >-
+      Interrogation Room B. The Warden addresses Danny directly.
+    auto_rounds: 3
+
+  - name: the_yard
+    label: "The Yard"
+    agents: [marco, danny]
+    topology: round_robin
+    debate_format: free_form
+    initial_prompt: >-
+      The prison yard. Marco and Danny meet alone. No warden, no guards nearby.
+    auto_rounds: 2
+
+  - name: final_reckoning
+    label: "Final Reckoning"
+    agents: [warden, marco, danny]
+    topology: round_robin
+    debate_format: free_form
+    initial_prompt: >-
+      The interrogation room. The Warden has called both suspects back together.
+      This is the final time. Each suspect must choose: keep silent or confess.
+    per_agent_prompt_templates:
+      warden: >-
+        You are impatient. Remind them of the deal one final time, then demand each suspect choose NOW.
+        Whatever they say is their final answer.
+    auto_rounds: 2
+
+  - name: outcome_analysis
+    label: "The Verdict"
+    agents: [marco, danny, analyst]
+    topology: round_robin
+    debate_format: free_form
+    initial_prompt: >-
+      The warden has recorded your final decisions. State your choice clearly.
+    per_agent_prompt_templates:
+      marco: >-
+        State your final choice in ONE WORD: CONFESS or SILENT.
+      danny: >-
+        State your final choice in ONE WORD: CONFESS or SILENT.
+      analyst: >-
+        PAYOFF MATRIX:
+        | Marco    | Danny    | Marco gets | Danny gets |
+        |----------|----------|------------|------------|
+        | SILENT   | SILENT   | 2 years    | 2 years    |
+        | CONFESS  | SILENT   | FREE       | 10 years   |
+        | SILENT   | CONFESS  | 10 years   | FREE       |
+        | CONFESS  | CONFESS  | 5 years    | 5 years    |
+
+        Read Marco's choice and Danny's choice above. Look up the row in the matrix.
+        State: "Marco chose X, Danny chose Y. From the matrix: Marco gets Z, Danny gets W."
+    auto_rounds: 1
+
+outcome:
+  type: parse_choice
+  pattern: "(?i)(keep silent|silent|quiet|confess|talk|rat out)"
+  choices: [keep_silent, confess]
+  display: matrix
+
+payoff:
+  labels: [Keep Silent, Confess]
+  matrix:
+    - ["2yr / 2yr", "10yr / Free"]
+    - ["Free / 10yr", "5yr / 5yr"]
+
+ui:
+  layout: columns
+  column_count: 2
+  show_memory_panel: false
+  show_run_all: true

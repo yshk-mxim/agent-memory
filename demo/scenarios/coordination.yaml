@@ -1,0 +1,18 @@
+id: coordination
+title: "Multi-Agent Coordination"
+description: "Create custom coordination sessions with configurable agents"
+
+agents: {}
+
+phases:
+  - name: main
+    label: "Discussion"
+    agents: []
+    topology: round_robin
+    debate_format: free_form
+    auto_rounds: 3
+
+ui:
+  layout: single
+  show_memory_panel: true
+  phase_controls: global

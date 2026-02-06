@@ -19,9 +19,11 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request, status
 from sse_starlette.sse import EventSourceResponse
 
+from semantic.adapters.config.settings import get_settings
 from semantic.adapters.inbound.adapter_helpers import (
     get_semantic_state,
     run_step_for_uid,
+    tokenize_with_chat_template,
     try_parse_json_at,
 )
 from semantic.adapters.inbound.request_models import (
@@ -175,6 +177,62 @@ def openai_messages_to_prompt(  # noqa: C901, PLR0912
     return "\n".join(lines)
 
 
+def openai_messages_to_chat_dicts(  # noqa: C901, PLR0912
+    messages: list[OpenAIChatMessage],
+    tools: list[Any] | None = None,
+) -> list[dict[str, str]]:
+    """Convert OpenAI messages to simple chat dicts for chat template.
+
+    Args:
+        messages: List of OpenAI chat messages
+        tools: Optional list of tool definitions
+
+    Returns:
+        List of {"role": ..., "content": ...} dicts
+    """
+    result: list[dict[str, str]] = []
+
+    for msg in messages:
+        if msg.role == "system":
+            content = msg.content or ""
+            if tools and not result:
+                # Append tool definitions to first system message
+                tool_lines = [content, "\nAvailable Functions:"]
+                for tool in tools:
+                    if tool.type == "function":
+                        func_def = {
+                            "name": tool.function.get("name"),
+                            "description": tool.function.get("description"),
+                            "parameters": tool.function.get("parameters"),
+                        }
+                        tool_lines.append(json.dumps(func_def, indent=2))
+                tool_lines.append(
+                    "\nTo call a function, output JSON: "
+                    '{"function_call": {"name": "<name>", "arguments": {<params>}}}'
+                )
+                content = "\n".join(tool_lines)
+                tools = None  # Don't add again
+            result.append({"role": "system", "content": content})
+        elif msg.role == "user":
+            result.append({"role": "user", "content": msg.content or ""})
+        elif msg.role == "assistant":
+            if msg.tool_calls:
+                parts = []
+                for tc in msg.tool_calls:
+                    fc = {
+                        "name": tc.get("function", {}).get("name"),
+                        "arguments": tc.get("function", {}).get("arguments"),
+                    }
+                    parts.append(f"[Function Call]: {json.dumps(fc)}")
+                result.append({"role": "assistant", "content": "\n".join(parts)})
+            elif msg.content:
+                result.append({"role": "assistant", "content": msg.content})
+        elif msg.role == "tool" and msg.content:
+            result.append({"role": "user", "content": f"[Tool Result]: {msg.content}"})
+
+    return result
+
+
 async def _stream_via_scheduler(  # noqa: C901, PLR0912
     request_body: ChatCompletionsRequest,
     batch_engine: Any,
@@ -223,6 +281,8 @@ async def _stream_via_scheduler(  # noqa: C901, PLR0912
         cache=cached_blocks,
         max_tokens=max_tokens,
         prompt_text=prompt,
+        temperature=request_body.temperature,
+        top_p=request_body.top_p,
     ):
         new_text = delta.text[len(accumulated_text) :]
         accumulated_text = delta.text
@@ -287,7 +347,9 @@ async def _stream_via_scheduler(  # noqa: C901, PLR0912
     updated_blocks = batch_engine.get_agent_blocks(agent_id)
     if updated_blocks:
         cache_store.save(agent_id, updated_blocks)
-        logger.debug(f"Saved cache: {agent_id} ({updated_blocks.total_tokens} tokens)")
+        # CRITICAL: Flush to disk immediately before batch_engine clears layer_data
+        cache_store.flush_dirty()
+        logger.debug(f"Saved and flushed cache: {agent_id} ({updated_blocks.total_tokens} tokens)")
 
     if function_calls:
         finish_reason = "tool_calls"
@@ -333,7 +395,9 @@ async def stream_chat_completion(  # noqa: C901, PLR0912, PLR0915
         SSE events in OpenAI Chat Completions format
     """
     try:
-        max_tokens = request_body.max_tokens or 256
+        settings = get_settings()
+        base_max_tokens = request_body.max_tokens or 256
+        max_tokens = base_max_tokens + settings.mlx.reasoning_extra_tokens
 
         if cached_blocks is not None:
             cache_store.invalidate_hot(agent_id)
@@ -354,12 +418,17 @@ async def stream_chat_completion(  # noqa: C901, PLR0912, PLR0915
                 yield event
             return
 
-        # --- Direct batch engine path (no scheduler) ---
+        # --- Direct batch engine path (no scheduler) — unsafe for concurrent requests ---
+        logger.warning(
+            "Using direct batch_engine streaming (no scheduler) — concurrent requests unsafe"
+        )
         uid = batch_engine.submit(
             agent_id=agent_id,
             prompt=prompt,
             cache=cached_blocks,
             max_tokens=max_tokens,
+            temperature=request_body.temperature,
+            top_p=request_body.top_p,
         )
         logger.debug(f"Submitted streaming generation: uid={uid}")
 
@@ -556,31 +625,32 @@ async def create_chat_completion(  # noqa: C901, PLR0912, PLR0915
     cache_store: AgentCacheStore = semantic_state.cache_store
 
     try:
-        # 1. Convert OpenAI messages to prompt (including tools if present)
-        prompt = openai_messages_to_prompt(
-            request_body.messages,
-            request_body.tools if request_body.tools else None,
-        )
+        tools_arg = request_body.tools if request_body.tools else None
+        prompt = openai_messages_to_prompt(request_body.messages, tools_arg)
         logger.debug(f"Prompt length: {len(prompt)} chars")
         logger.debug(f"Full prompt:\n{prompt}")
 
-        # 2. Tokenize to get agent ID (run in executor to avoid blocking)
         tokenizer = batch_engine.tokenizer
-        tokens = await asyncio.to_thread(tokenizer.encode, prompt)
+        chat_dicts = openai_messages_to_chat_dicts(request_body.messages, tools_arg)
+        tokens, templated_prompt = await asyncio.to_thread(
+            tokenize_with_chat_template,
+            tokenizer,
+            chat_dicts,
+            prompt,
+        )
 
         # Check for session_id in request body or X-Session-ID header
         session_id = request_body.session_id or request.headers.get("X-Session-ID")
         agent_id = generate_agent_id_openai(session_id, tokens)
         logger.debug(f"Agent ID: {agent_id}, tokens: {len(tokens)}, session_id={session_id}")
 
-        # 3. Check cache store for existing cache
         cached_blocks = cache_store.load(agent_id)
         if cached_blocks:
             logger.info(f"Cache hit: {agent_id} ({cached_blocks.total_tokens} tokens)")
         else:
             logger.info(f"Cache miss: {agent_id}")
 
-        # 4. Handle streaming vs non-streaming
+        # Streaming vs non-streaming
         if request_body.stream:
             # Return SSE stream
             logger.info("Returning OpenAI SSE stream")
@@ -592,13 +662,15 @@ async def create_chat_completion(  # noqa: C901, PLR0912, PLR0915
                     tokens,
                     agent_id,
                     cached_blocks,
-                    prompt,
+                    templated_prompt,
                     scheduler=semantic_state.scheduler,
                 )
             )
 
-        # 5. Generate (scheduler or direct batch engine)
-        max_tokens = request_body.max_tokens or 256
+        # Generate (scheduler or direct batch engine)
+        settings = get_settings()
+        base_max_tokens = request_body.max_tokens or 256
+        max_tokens = base_max_tokens + settings.mlx.reasoning_extra_tokens
         scheduler = semantic_state.scheduler
 
         if cached_blocks is not None:
@@ -610,15 +682,24 @@ async def create_chat_completion(  # noqa: C901, PLR0912, PLR0915
                 prompt_tokens=tokens,
                 cache=cached_blocks,
                 max_tokens=max_tokens,
-                prompt_text=prompt,
+                prompt_text=templated_prompt,
+                temperature=request_body.temperature,
+                top_p=request_body.top_p,
             )
         else:
+            # Legacy direct path: no concurrency protection — unsafe for
+            # simultaneous requests. Enable SEMANTIC_MLX_SCHEDULER_ENABLED=true.
+            logger.warning(
+                "Using direct batch_engine path (no scheduler) — concurrent requests unsafe"
+            )
             uid = await asyncio.to_thread(
                 batch_engine.submit,
                 agent_id=agent_id,
-                prompt=prompt,
+                prompt=templated_prompt,
                 cache=cached_blocks,
                 max_tokens=max_tokens,
+                temperature=request_body.temperature,
+                top_p=request_body.top_p,
             )
             logger.debug(f"Submitted generation: uid={uid}")
             completion = await asyncio.to_thread(run_step_for_uid, batch_engine, uid)
@@ -635,16 +716,16 @@ async def create_chat_completion(  # noqa: C901, PLR0912, PLR0915
                 detail="Generation failed - no completion returned",
             )
 
-        # 7. Save updated cache
+        # Save updated cache
         updated_blocks = batch_engine.get_agent_blocks(agent_id)
         if updated_blocks:
             cache_store.save(agent_id, updated_blocks)
             logger.debug(f"Saved cache: {agent_id} ({updated_blocks.total_tokens} tokens)")
 
-        # 8. Parse for function calls
+        # Parse for function calls
         remaining_text, function_calls = parse_function_calls(completion.text)
 
-        # 9. Format OpenAI response
+        # Format OpenAI response
         # Build tool_calls array if function calls detected
         tool_calls_array = None
         if function_calls:

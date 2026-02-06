@@ -374,6 +374,33 @@ class BlockPool:
             self.allocated_blocks.clear()
             self.agent_allocations.clear()
 
+    def force_clear_all_allocations(self) -> int:
+        """Forcibly clear all allocations (for model offload).
+
+        Used during model offload when caches have been evicted to disk
+        but BlockPool allocations remain. This releases all blocks back
+        to the free list without requiring per-agent cleanup.
+
+        Returns:
+            Number of allocations cleared.
+
+        Notes:
+            - Should only be called after all caches are evicted to disk
+            - Does not save any state - assumes caches already persisted
+            - Thread-safe
+        """
+        with self._lock:
+            count = len(self.agent_allocations)
+
+            # Reset free list
+            self.free_list = list(range(self.total_blocks))
+
+            # Clear tracking structures
+            self.allocated_blocks.clear()
+            self.agent_allocations.clear()
+
+            return count
+
     def max_batch_size(self, tokens_per_agent: int = 256) -> int:
         """Calculate maximum number of agents that can fit in the pool.
 

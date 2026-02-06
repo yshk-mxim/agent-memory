@@ -1,4 +1,4 @@
-"""Stress testing framework for semantic caching server (Sprint 6).
+"""Stress testing framework for semantic caching server.
 
 This package provides infrastructure for stress testing including:
 - Pool exhaustion tests

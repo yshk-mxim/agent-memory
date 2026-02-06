@@ -6,10 +6,10 @@ model swapping while preserving agent caches on disk.
 
 import gc
 import logging
+from dataclasses import replace
 from typing import Any
 
-from semantic.adapters.outbound.mlx_spec_extractor import get_extractor
-from semantic.application.ports import ModelLoaderPort
+from semantic.application.ports import ModelLoaderPort, SpecExtractorPort
 from semantic.domain.errors import ModelNotFoundError
 from semantic.domain.value_objects import ModelCacheSpec
 
@@ -42,13 +42,13 @@ class ModelRegistry:
         >>> registry.unload_model()  # 100% memory reclaimed (per EXP-011)
     """
 
-    def __init__(self, model_loader: ModelLoaderPort) -> None:
-        """Initialize registry with injected model loader.
-
-        Args:
-            model_loader: Implementation of ModelLoaderPort (e.g., MLXModelLoader)
-        """
+    def __init__(
+        self,
+        model_loader: ModelLoaderPort,
+        spec_extractor: SpecExtractorPort,
+    ) -> None:
         self._loader = model_loader
+        self._spec_extractor = spec_extractor
         self._model: Any | None = None  # Framework model object
         self._tokenizer: Any | None = None  # Framework tokenizer object
         self._spec: ModelCacheSpec | None = None  # Cache spec
@@ -86,12 +86,7 @@ class ModelRegistry:
         except Exception as e:
             raise ModelNotFoundError(f"Failed to load model {model_id}: {e}") from e
 
-        # Extract cache spec from model
-        extractor = get_extractor()
-        base_spec = extractor.extract_spec(model)
-
-        # Add quantization settings from caller
-        from dataclasses import replace
+        base_spec = self._spec_extractor.extract_spec(model)
 
         spec = replace(
             base_spec,

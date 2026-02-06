@@ -154,11 +154,11 @@ def live_server(cleanup_caches) -> Iterator[str]:
         # Close log files to prevent resource warnings
         try:
             stdout_file.close()
-        except:
+        except OSError:
             pass
         try:
             stderr_file.close()
-        except:
+        except OSError:
             pass
 
         process.terminate()
@@ -167,6 +167,21 @@ def live_server(cleanup_caches) -> Iterator[str]:
         except subprocess.TimeoutExpired:
             process.kill()
             process.wait()
+
+
+@pytest.fixture(scope="module")
+def server_ready() -> None:
+    """Skip all tests if the live server at localhost:8000 is not reachable.
+
+    Used by test suites that expect a manually-started server (e.g. test_live_api,
+    test_gui_pages) rather than the auto-managed live_server fixture.
+    """
+    try:
+        resp = httpx.get("http://localhost:8000/health/ready", timeout=5.0)
+        if resp.status_code != 200:
+            pytest.skip("Server not ready at localhost:8000")
+    except httpx.HTTPError:
+        pytest.skip("Server not reachable at localhost:8000")
 
 
 @pytest.fixture(scope="function")

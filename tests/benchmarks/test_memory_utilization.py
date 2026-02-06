@@ -1,4 +1,4 @@
-"""Memory utilization benchmarks (Sprint 6 Day 6).
+"""Memory utilization benchmarks.
 
 Measures actual memory usage vs. theoretical predictions:
 - Memory scaling: 1, 5, 10 agents

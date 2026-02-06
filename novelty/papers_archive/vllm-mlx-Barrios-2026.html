@@ -1,0 +1,1243 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta content="text/html; charset=utf-8" http-equiv="content-type"/>
+<title>Native LLM and MLLM Inference at Scale on Apple Silicon</title>
+<!--Generated on Thu Jan 29 06:11:53 2026 by LaTeXML (version 0.8.8) http://dlmf.nist.gov/LaTeXML/.-->
+<meta content="width=device-width, initial-scale=1, shrink-to-fit=no" name="viewport"/>
+<link href="/static/browse/0.3.4/css/arxiv-html-papers-20250916.css" rel="stylesheet" type="text/css"/>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.3.3/html2canvas.min.js"></script>
+<script src="/static/browse/0.3.4/js/addons_new.js"></script>
+<script src="/static/browse/0.3.4/js/feedbackOverlay.js"></script>
+<meta content="LLM inference,  multimodal LLM,  Apple Silicon,  MLX,  prefix caching,  llama.cpp" lang="en" name="keywords"/>
+<base href="/html/2601.19139v2/"/></head>
+<body>
+<nav class="ltx_page_navbar">
+<nav class="ltx_TOC">
+<ol class="ltx_toclist">
+<li class="ltx_tocentry ltx_tocentry_section"><a class="ltx_ref" href="https://arxiv.org/html/2601.19139v2#S1" title="In Native LLM and MLLM Inference at Scale on Apple Silicon"><span class="ltx_text ltx_ref_title"><span class="ltx_tag ltx_tag_ref">1 </span>Introduction</span></a></li>
+<li class="ltx_tocentry ltx_tocentry_section">
+<a class="ltx_ref" href="https://arxiv.org/html/2601.19139v2#S2" title="In Native LLM and MLLM Inference at Scale on Apple Silicon"><span class="ltx_text ltx_ref_title"><span class="ltx_tag ltx_tag_ref">2 </span>Background</span></a>
+<ol class="ltx_toclist ltx_toclist_section">
+<li class="ltx_tocentry ltx_tocentry_subsection"><a class="ltx_ref" href="https://arxiv.org/html/2601.19139v2#S2.SS1" title="In 2. Background ‣ Native LLM and MLLM Inference at Scale on Apple Silicon"><span class="ltx_text ltx_ref_title"><span class="ltx_tag ltx_tag_ref">2.1 </span>Apple Silicon and Unified Memory</span></a></li>
+<li class="ltx_tocentry ltx_tocentry_subsection"><a class="ltx_ref" href="https://arxiv.org/html/2601.19139v2#S2.SS2" title="In 2. Background ‣ Native LLM and MLLM Inference at Scale on Apple Silicon"><span class="ltx_text ltx_ref_title"><span class="ltx_tag ltx_tag_ref">2.2 </span>MLX Framework</span></a></li>
+<li class="ltx_tocentry ltx_tocentry_subsection"><a class="ltx_ref" href="https://arxiv.org/html/2601.19139v2#S2.SS3" title="In 2. Background ‣ Native LLM and MLLM Inference at Scale on Apple Silicon"><span class="ltx_text ltx_ref_title"><span class="ltx_tag ltx_tag_ref">2.3 </span>LLM Inference on Apple Silicon</span></a></li>
+<li class="ltx_tocentry ltx_tocentry_subsection"><a class="ltx_ref" href="https://arxiv.org/html/2601.19139v2#S2.SS4" title="In 2. Background ‣ Native LLM and MLLM Inference at Scale on Apple Silicon"><span class="ltx_text ltx_ref_title"><span class="ltx_tag ltx_tag_ref">2.4 </span>Serving Challenges on Apple Silicon</span></a></li>
+</ol>
+</li>
+<li class="ltx_tocentry ltx_tocentry_section">
+<a class="ltx_ref" href="https://arxiv.org/html/2601.19139v2#S3" title="In Native LLM and MLLM Inference at Scale on Apple Silicon"><span class="ltx_text ltx_ref_title"><span class="ltx_tag ltx_tag_ref">3 </span>System Design</span></a>
+<ol class="ltx_toclist ltx_toclist_section">
+<li class="ltx_tocentry ltx_tocentry_subsection">
+<a class="ltx_ref" href="https://arxiv.org/html/2601.19139v2#S3.SS1" title="In 3. System Design ‣ Native LLM and MLLM Inference at Scale on Apple Silicon"><span class="ltx_text ltx_ref_title"><span class="ltx_tag ltx_tag_ref">3.1 </span>Framework Comparison</span></a>
+<ol class="ltx_toclist ltx_toclist_subsection">
+<li class="ltx_tocentry ltx_tocentry_paragraph"><a class="ltx_ref" href="https://arxiv.org/html/2601.19139v2#S3.SS1.SSS0.Px1" title="In 3.1. Framework Comparison ‣ 3. System Design ‣ Native LLM and MLLM Inference at Scale on Apple Silicon"><span class="ltx_text ltx_ref_title">Key differentiators.</span></a></li>
+</ol>
+</li>
+<li class="ltx_tocentry ltx_tocentry_subsection">
+<a class="ltx_ref" href="https://arxiv.org/html/2601.19139v2#S3.SS2" title="In 3. System Design ‣ Native LLM and MLLM Inference at Scale on Apple Silicon"><span class="ltx_text ltx_ref_title"><span class="ltx_tag ltx_tag_ref">3.2 </span>Text Model Inference</span></a>
+<ol class="ltx_toclist ltx_toclist_subsection">
+<li class="ltx_tocentry ltx_tocentry_paragraph"><a class="ltx_ref" href="https://arxiv.org/html/2601.19139v2#S3.SS2.SSS0.Px1" title="In 3.2. Text Model Inference ‣ 3. System Design ‣ Native LLM and MLLM Inference at Scale on Apple Silicon"><span class="ltx_text ltx_ref_title">Continuous Batching.</span></a></li>
+<li class="ltx_tocentry ltx_tocentry_paragraph"><a class="ltx_ref" href="https://arxiv.org/html/2601.19139v2#S3.SS2.SSS0.Px2" title="In 3.2. Text Model Inference ‣ 3. System Design ‣ Native LLM and MLLM Inference at Scale on Apple Silicon"><span class="ltx_text ltx_ref_title">Streaming.</span></a></li>
+<li class="ltx_tocentry ltx_tocentry_paragraph"><a class="ltx_ref" href="https://arxiv.org/html/2601.19139v2#S3.SS2.SSS0.Px3" title="In 3.2. Text Model Inference ‣ 3. System Design ‣ Native LLM and MLLM Inference at Scale on Apple Silicon"><span class="ltx_text ltx_ref_title">Text Prefix Caching.</span></a></li>
+</ol>
+</li>
+<li class="ltx_tocentry ltx_tocentry_subsection">
+<a class="ltx_ref" href="https://arxiv.org/html/2601.19139v2#S3.SS3" title="In 3. System Design ‣ Native LLM and MLLM Inference at Scale on Apple Silicon"><span class="ltx_text ltx_ref_title"><span class="ltx_tag ltx_tag_ref">3.3 </span>Multimodal Inference with Prefix Caching</span></a>
+<ol class="ltx_toclist ltx_toclist_subsection">
+<li class="ltx_tocentry ltx_tocentry_paragraph"><a class="ltx_ref" href="https://arxiv.org/html/2601.19139v2#S3.SS3.SSS0.Px1" title="In 3.3. Multimodal Inference with Prefix Caching ‣ 3. System Design ‣ Native LLM and MLLM Inference at Scale on Apple Silicon"><span class="ltx_text ltx_ref_title">Content-Based Hashing.</span></a></li>
+<li class="ltx_tocentry ltx_tocentry_paragraph"><a class="ltx_ref" href="https://arxiv.org/html/2601.19139v2#S3.SS3.SSS0.Px2" title="In 3.3. Multimodal Inference with Prefix Caching ‣ 3. System Design ‣ Native LLM and MLLM Inference at Scale on Apple Silicon"><span class="ltx_text ltx_ref_title">Cache-Aware Generation.</span></a></li>
+<li class="ltx_tocentry ltx_tocentry_paragraph"><a class="ltx_ref" href="https://arxiv.org/html/2601.19139v2#S3.SS3.SSS0.Px3" title="In 3.3. Multimodal Inference with Prefix Caching ‣ 3. System Design ‣ Native LLM and MLLM Inference at Scale on Apple Silicon"><span class="ltx_text ltx_ref_title">Memory Management.</span></a></li>
+</ol>
+</li>
+</ol>
+</li>
+<li class="ltx_tocentry ltx_tocentry_section">
+<a class="ltx_ref" href="https://arxiv.org/html/2601.19139v2#S4" title="In Native LLM and MLLM Inference at Scale on Apple Silicon"><span class="ltx_text ltx_ref_title"><span class="ltx_tag ltx_tag_ref">4 </span>Evaluation</span></a>
+<ol class="ltx_toclist ltx_toclist_section">
+<li class="ltx_tocentry ltx_tocentry_paragraph"><a class="ltx_ref" href="https://arxiv.org/html/2601.19139v2#S4.SS0.SSS0.Px1" title="In 4. Evaluation ‣ Native LLM and MLLM Inference at Scale on Apple Silicon"><span class="ltx_text ltx_ref_title">Setup.</span></a></li>
+<li class="ltx_tocentry ltx_tocentry_subsection">
+<a class="ltx_ref" href="https://arxiv.org/html/2601.19139v2#S4.SS1" title="In 4. Evaluation ‣ Native LLM and MLLM Inference at Scale on Apple Silicon"><span class="ltx_text ltx_ref_title"><span class="ltx_tag ltx_tag_ref">4.1 </span>Text Model Performance</span></a>
+<ol class="ltx_toclist ltx_toclist_subsection">
+<li class="ltx_tocentry ltx_tocentry_paragraph"><a class="ltx_ref" href="https://arxiv.org/html/2601.19139v2#S4.SS1.SSS0.Px1" title="In 4.1. Text Model Performance ‣ 4. Evaluation ‣ Native LLM and MLLM Inference at Scale on Apple Silicon"><span class="ltx_text ltx_ref_title">Continuous Batching Scaling.</span></a></li>
+</ol>
+</li>
+<li class="ltx_tocentry ltx_tocentry_subsection">
+<a class="ltx_ref" href="https://arxiv.org/html/2601.19139v2#S4.SS2" title="In 4. Evaluation ‣ Native LLM and MLLM Inference at Scale on Apple Silicon"><span class="ltx_text ltx_ref_title"><span class="ltx_tag ltx_tag_ref">4.2 </span>Multimodal Performance</span></a>
+<ol class="ltx_toclist ltx_toclist_subsection">
+<li class="ltx_tocentry ltx_tocentry_paragraph"><a class="ltx_ref" href="https://arxiv.org/html/2601.19139v2#S4.SS2.SSS0.Px1" title="In 4.2. Multimodal Performance ‣ 4. Evaluation ‣ Native LLM and MLLM Inference at Scale on Apple Silicon"><span class="ltx_text ltx_ref_title">Image Prefix Cache.</span></a></li>
+<li class="ltx_tocentry ltx_tocentry_paragraph"><a class="ltx_ref" href="https://arxiv.org/html/2601.19139v2#S4.SS2.SSS0.Px2" title="In 4.2. Multimodal Performance ‣ 4. Evaluation ‣ Native LLM and MLLM Inference at Scale on Apple Silicon"><span class="ltx_text ltx_ref_title">Video Performance.</span></a></li>
+</ol>
+</li>
+<li class="ltx_tocentry ltx_tocentry_subsection">
+<a class="ltx_ref" href="https://arxiv.org/html/2601.19139v2#S4.SS3" title="In 4. Evaluation ‣ Native LLM and MLLM Inference at Scale on Apple Silicon"><span class="ltx_text ltx_ref_title"><span class="ltx_tag ltx_tag_ref">4.3 </span>Ablation Studies</span></a>
+<ol class="ltx_toclist ltx_toclist_subsection">
+<li class="ltx_tocentry ltx_tocentry_paragraph"><a class="ltx_ref" href="https://arxiv.org/html/2601.19139v2#S4.SS3.SSS0.Px1" title="In 4.3. Ablation Studies ‣ 4. Evaluation ‣ Native LLM and MLLM Inference at Scale on Apple Silicon"><span class="ltx_text ltx_ref_title">Cache Components.</span></a></li>
+<li class="ltx_tocentry ltx_tocentry_paragraph"><a class="ltx_ref" href="https://arxiv.org/html/2601.19139v2#S4.SS3.SSS0.Px2" title="In 4.3. Ablation Studies ‣ 4. Evaluation ‣ Native LLM and MLLM Inference at Scale on Apple Silicon"><span class="ltx_text ltx_ref_title">Image Resolution Impact.</span></a></li>
+<li class="ltx_tocentry ltx_tocentry_paragraph"><a class="ltx_ref" href="https://arxiv.org/html/2601.19139v2#S4.SS3.SSS0.Px3" title="In 4.3. Ablation Studies ‣ 4. Evaluation ‣ Native LLM and MLLM Inference at Scale on Apple Silicon"><span class="ltx_text ltx_ref_title">Video Frame Count Impact.</span></a></li>
+<li class="ltx_tocentry ltx_tocentry_paragraph"><a class="ltx_ref" href="https://arxiv.org/html/2601.19139v2#S4.SS3.SSS0.Px4" title="In 4.3. Ablation Studies ‣ 4. Evaluation ‣ Native LLM and MLLM Inference at Scale on Apple Silicon"><span class="ltx_text ltx_ref_title">Text Prefix Caching.</span></a></li>
+</ol>
+</li>
+<li class="ltx_tocentry ltx_tocentry_subsection">
+<a class="ltx_ref" href="https://arxiv.org/html/2601.19139v2#S4.SS4" title="In 4. Evaluation ‣ Native LLM and MLLM Inference at Scale on Apple Silicon"><span class="ltx_text ltx_ref_title"><span class="ltx_tag ltx_tag_ref">4.4 </span>Discussion</span></a>
+<ol class="ltx_toclist ltx_toclist_subsection">
+<li class="ltx_tocentry ltx_tocentry_paragraph"><a class="ltx_ref" href="https://arxiv.org/html/2601.19139v2#S4.SS4.SSS0.Px1" title="In 4.4. Discussion ‣ 4. Evaluation ‣ Native LLM and MLLM Inference at Scale on Apple Silicon"><span class="ltx_text ltx_ref_title">Why MLX Outperforms llama.cpp.</span></a></li>
+<li class="ltx_tocentry ltx_tocentry_paragraph"><a class="ltx_ref" href="https://arxiv.org/html/2601.19139v2#S4.SS4.SSS0.Px2" title="In 4.4. Discussion ‣ 4. Evaluation ‣ Native LLM and MLLM Inference at Scale on Apple Silicon"><span class="ltx_text ltx_ref_title">When to Use vllm-mlx.</span></a></li>
+<li class="ltx_tocentry ltx_tocentry_paragraph"><a class="ltx_ref" href="https://arxiv.org/html/2601.19139v2#S4.SS4.SSS0.Px3" title="In 4.4. Discussion ‣ 4. Evaluation ‣ Native LLM and MLLM Inference at Scale on Apple Silicon"><span class="ltx_text ltx_ref_title">Enabling Local AI Agents.</span></a></li>
+<li class="ltx_tocentry ltx_tocentry_paragraph"><a class="ltx_ref" href="https://arxiv.org/html/2601.19139v2#S4.SS4.SSS0.Px4" title="In 4.4. Discussion ‣ 4. Evaluation ‣ Native LLM and MLLM Inference at Scale on Apple Silicon"><span class="ltx_text ltx_ref_title">Limitations and Future Work.</span></a></li>
+</ol>
+</li>
+</ol>
+</li>
+<li class="ltx_tocentry ltx_tocentry_section">
+<a class="ltx_ref" href="https://arxiv.org/html/2601.19139v2#S5" title="In Native LLM and MLLM Inference at Scale on Apple Silicon"><span class="ltx_text ltx_ref_title"><span class="ltx_tag ltx_tag_ref">5 </span>Related Work</span></a>
+<ol class="ltx_toclist ltx_toclist_section">
+<li class="ltx_tocentry ltx_tocentry_paragraph"><a class="ltx_ref" href="https://arxiv.org/html/2601.19139v2#S5.SS0.SSS0.Px1" title="In 5. Related Work ‣ Native LLM and MLLM Inference at Scale on Apple Silicon"><span class="ltx_text ltx_ref_title">KV Cache Optimization.</span></a></li>
+<li class="ltx_tocentry ltx_tocentry_paragraph"><a class="ltx_ref" href="https://arxiv.org/html/2601.19139v2#S5.SS0.SSS0.Px2" title="In 5. Related Work ‣ Native LLM and MLLM Inference at Scale on Apple Silicon"><span class="ltx_text ltx_ref_title">Multimodal Caching.</span></a></li>
+<li class="ltx_tocentry ltx_tocentry_paragraph"><a class="ltx_ref" href="https://arxiv.org/html/2601.19139v2#S5.SS0.SSS0.Px3" title="In 5. Related Work ‣ Native LLM and MLLM Inference at Scale on Apple Silicon"><span class="ltx_text ltx_ref_title">Apple Silicon ML Inference.</span></a></li>
+<li class="ltx_tocentry ltx_tocentry_paragraph"><a class="ltx_ref" href="https://arxiv.org/html/2601.19139v2#S5.SS0.SSS0.Px4" title="In 5. Related Work ‣ Native LLM and MLLM Inference at Scale on Apple Silicon"><span class="ltx_text ltx_ref_title">Edge LLM Inference.</span></a></li>
+</ol>
+</li>
+<li class="ltx_tocentry ltx_tocentry_section"><a class="ltx_ref" href="https://arxiv.org/html/2601.19139v2#S6" title="In Native LLM and MLLM Inference at Scale on Apple Silicon"><span class="ltx_text ltx_ref_title"><span class="ltx_tag ltx_tag_ref">6 </span>Conclusion</span></a></li>
+</ol></nav>
+</nav>
+<div class="ltx_page_main">
+<div class="ltx_page_content">
+<article class="ltx_document ltx_authors_1line ltx_leqno">
+<h1 class="ltx_title ltx_title_document">Native LLM and MLLM Inference at Scale on Apple Silicon</h1>
+<div class="ltx_authors">
+<span class="ltx_creator ltx_role_author">
+<span class="ltx_personname">Wayner Barrios
+</span><span class="ltx_author_notes">
+<span class="ltx_contact ltx_role_affiliation"><span class="ltx_text ltx_affiliation_institution" id="id1.1.id1">Wiqonn Technologies</span><span class="ltx_text ltx_affiliation_country" id="id2.2.id2">Colombia</span>
+</span>
+<span class="ltx_contact ltx_role_email"><a href="mailto:wbarriosq@wiqonn.com">wbarriosq@wiqonn.com</a>
+</span></span></span>
+</div>
+<div class="ltx_abstract">
+<h6 class="ltx_title ltx_title_abstract">Abstract.</h6>
+<p class="ltx_p" id="id3.id1">The growing adoption of Apple Silicon for machine learning development has created demand for efficient inference solutions that leverage its unique unified memory architecture. However, existing tools either lack native optimization (PyTorch MPS) or focus solely on text models, leaving multimodal workloads underserved. We present vllm-mlx, a framework for efficient LLM and MLLM inference on Apple Silicon built natively on MLX. For text models, we achieve 21% to 87% higher throughput than llama.cpp across models ranging from Qwen3-0.6B to Nemotron-30B, while providing continuous batching that scales to 4.3x aggregate throughput at 16 concurrent requests. For multimodal models, we introduce content-based prefix caching that eliminates redundant vision encoding by identifying identical images through content hashing, regardless of input format. Our evaluation on Apple M4 Max demonstrates throughput of up to 525 tokens per second on text models and 28x speedup on repeated image queries, reducing multimodal latency from 21.7 seconds to under 1 second. Video analysis with up to 64 frames achieves 24.7x cache speedup. We release our implementation as open source to support efficient inference on consumer Apple hardware.</p>
+</div>
+<div class="ltx_keywords">LLM inference, multimodal LLM, Apple Silicon, MLX, prefix caching, llama.cpp
+</div>
+<section class="ltx_section" id="S1">
+<h2 class="ltx_title ltx_title_section">
+<span class="ltx_tag ltx_tag_section">1. </span>Introduction</h2>
+<div class="ltx_para" id="S1.p1">
+<p class="ltx_p" id="S1.p1.1">Apple Silicon has rapidly become a significant platform for machine learning development and deployment. With unified memory architectures offering up to 192GB of shared CPU/GPU memory and memory bandwidths of <span class="ltx_text" id="S1.p1.1.1">400+ GB/s</span>, recent Mac devices provide compelling capabilities for running large language models locally. This has driven growing interest in efficient inference solutions for Apple hardware, particularly for development, privacy-sensitive applications, and edge deployment.</p>
+</div>
+<div class="ltx_para" id="S1.p2">
+<p class="ltx_p" id="S1.p2.1">However, existing inference solutions for Apple Silicon face significant limitations. PyTorch’s MPS backend adapts CUDA-style operations to Metal but lacks native optimization for the unified memory model. llama.cpp provides excellent performance for text models but does not support vision-language models. vLLM-metal <cite class="ltx_cite ltx_citemacro_citep">(vLLM Project, <a class="ltx_ref" href="https://arxiv.org/html/2601.19139v2#bib.bib15" title="">2024</a>)</cite>, the official vLLM backend for Apple Silicon, provides continuous batching but lacks multimodal support and vision caching. This fragmented landscape leaves developers without a unified solution for both text and multimodal inference on Apple Silicon.</p>
+</div>
+<div class="ltx_para" id="S1.p3">
+<p class="ltx_p" id="S1.p3.1">Multimodal models present an additional efficiency challenge. Vision-language models such as <span class="ltx_text" id="S1.p3.1.1">Qwen3-VL</span> <cite class="ltx_cite ltx_citemacro_citep">(Wang et al<span class="ltx_text">.</span>, <a class="ltx_ref" href="https://arxiv.org/html/2601.19139v2#bib.bib16" title="">2024</a>)</cite> and Gemma 3 <cite class="ltx_cite ltx_citemacro_citep">(DeepMind, <a class="ltx_ref" href="https://arxiv.org/html/2601.19139v2#bib.bib5" title="">2025</a>)</cite> must process images through a vision encoder on every request, even when the same image appears across multiple conversation turns. This redundant computation adds 1.5 to 2 seconds of latency per request, severely impacting interactive applications.</p>
+</div>
+<div class="ltx_para" id="S1.p4">
+<p class="ltx_p" id="S1.p4.1">We present a framework for efficient LLM and MLLM inference on Apple Silicon that addresses both challenges. Built natively on MLX <cite class="ltx_cite ltx_citemacro_citep">(Apple, <a class="ltx_ref" href="https://arxiv.org/html/2601.19139v2#bib.bib3" title="">2023</a>)</cite>, our system leverages the unified memory architecture for zero-copy operations and provides two key capabilities: (1) efficient text model inference with continuous batching, competitive with llama.cpp, and (2) content-based prefix caching for multimodal models that eliminates redundant vision encoding by identifying identical images through content hashing.</p>
+</div>
+<div class="ltx_para" id="S1.p5">
+<p class="ltx_p" id="S1.p5.1">We make the following contributions:</p>
+<ul class="ltx_itemize" id="S1.I1">
+<li class="ltx_item" id="S1.I1.i1" style="list-style-type:none;">
+<span class="ltx_tag ltx_tag_item">•</span>
+<div class="ltx_para" id="S1.I1.i1.p1">
+<p class="ltx_p" id="S1.I1.i1.p1.1">A comprehensive benchmark comparing vllm-mlx, mlx-lm, and llama.cpp across models from 0.6B to 30B parameters (Qwen3, Llama 3.2, Gemma 3, Nemotron), demonstrating 21% to 87% higher throughput than llama.cpp on Apple Silicon.</p>
+</div>
+</li>
+<li class="ltx_item" id="S1.I1.i2" style="list-style-type:none;">
+<span class="ltx_tag ltx_tag_item">•</span>
+<div class="ltx_para" id="S1.I1.i2.p1">
+<p class="ltx_p" id="S1.I1.i2.p1.1">A content-based prefix caching mechanism for vision embeddings that achieves up to 28x speedup on repeated image queries and 24.7x on video analysis by eliminating redundant encoding.</p>
+</div>
+</li>
+<li class="ltx_item" id="S1.I1.i3" style="list-style-type:none;">
+<span class="ltx_tag ltx_tag_item">•</span>
+<div class="ltx_para" id="S1.I1.i3.p1">
+<p class="ltx_p" id="S1.I1.i3.p1.1">An open-source implementation with OpenAI-compatible API, continuous batching (4.3x scaling at 16 concurrent requests), and native MLX backend optimized for Apple Silicon’s unified memory.</p>
+</div>
+</li>
+</ul>
+</div>
+<div class="ltx_para" id="S1.p6">
+<p class="ltx_p" id="S1.p6.1">Our evaluation on Apple M4 Max demonstrates throughput of up to 525 tokens per second on text models (<span class="ltx_text" id="S1.p6.1.1">Qwen3-0.6B</span>), with vllm-mlx exceeding both mlx-lm and llama.cpp across all tested configurations. For multimodal workloads, the prefix cache reduces latency from 21.7 seconds to 0.78 seconds on cached queries, and text prefix caching achieves 5.8x speedup on shared prompt prefixes. We release our implementation as open source at <a class="ltx_ref ltx_url ltx_font_typewriter" href="https://github.com/waybarrios/vllm-mlx" title="">https://github.com/waybarrios/vllm-mlx</a>.</p>
+</div>
+</section>
+<section class="ltx_section" id="S2">
+<h2 class="ltx_title ltx_title_section">
+<span class="ltx_tag ltx_tag_section">2. </span>Background</h2>
+<section class="ltx_subsection" id="S2.SS1">
+<h3 class="ltx_title ltx_title_subsection">
+<span class="ltx_tag ltx_tag_subsection">2.1. </span>Apple Silicon and Unified Memory</h3>
+<div class="ltx_para" id="S2.SS1.p1">
+<p class="ltx_p" id="S2.SS1.p1.1">Apple Silicon processors feature a unified memory architecture where CPU, GPU, and Neural Engine share the same physical memory pool. Unlike discrete GPU systems that require explicit data transfers over PCIe, unified memory enables zero-copy access to tensors from any processor. The M4 Max, for example, provides up to 128GB of unified memory with 546GB/s bandwidth, comparable to high-end datacenter GPUs.</p>
+</div>
+<div class="ltx_para" id="S2.SS1.p2">
+<p class="ltx_p" id="S2.SS1.p2.1">This architecture has important implications for LLM inference. KV cache, which grows linearly with context length and can consume tens of gigabytes for long contexts, does not need to be transferred between devices. Similarly, model weights loaded into memory are immediately accessible to both CPU preprocessing and GPU computation without copying.</p>
+</div>
+</section>
+<section class="ltx_subsection" id="S2.SS2">
+<h3 class="ltx_title ltx_title_subsection">
+<span class="ltx_tag ltx_tag_subsection">2.2. </span>MLX Framework</h3>
+<div class="ltx_para" id="S2.SS2.p1">
+<p class="ltx_p" id="S2.SS2.p1.1">MLX <cite class="ltx_cite ltx_citemacro_citep">(Apple, <a class="ltx_ref" href="https://arxiv.org/html/2601.19139v2#bib.bib3" title="">2023</a>)</cite> is Apple’s machine learning framework designed specifically for Apple Silicon. Unlike PyTorch’s MPS backend, which adapts CUDA-style operations to Metal, MLX implements operations natively for the unified memory model with lazy evaluation and automatic differentiation.</p>
+</div>
+<div class="ltx_para" id="S2.SS2.p2">
+<p class="ltx_p" id="S2.SS2.p2.1">Key advantages of MLX for inference include: (1) true zero-copy operations that exploit unified memory, (2) lazy evaluation that fuses operations and reduces memory allocation overhead, and (3) native quantization support with efficient dequantization kernels. The mlx-lm library builds on MLX to provide optimized LLM inference with speculative decoding and KV cache management.</p>
+</div>
+</section>
+<section class="ltx_subsection" id="S2.SS3">
+<h3 class="ltx_title ltx_title_subsection">
+<span class="ltx_tag ltx_tag_subsection">2.3. </span>LLM Inference on Apple Silicon</h3>
+<div class="ltx_para" id="S2.SS3.p1">
+<p class="ltx_p" id="S2.SS3.p1.1">The current landscape for LLM inference on <span class="ltx_text" id="S2.SS3.p1.1.1">Apple Silicon</span> includes several options. llama.cpp <cite class="ltx_cite ltx_citemacro_citep">(Gerganov, <a class="ltx_ref" href="https://arxiv.org/html/2601.19139v2#bib.bib6" title="">2023</a>)</cite> provides highly optimized inference through hand-tuned Metal kernels and GGUF quantization, achieving excellent single-stream throughput. However, it lacks continuous batching for serving multiple concurrent requests. PyTorch with MPS backend offers broad model compatibility but suboptimal performance due to its CUDA-centric design. vLLM-metal <cite class="ltx_cite ltx_citemacro_citep">(vLLM Project, <a class="ltx_ref" href="https://arxiv.org/html/2601.19139v2#bib.bib15" title="">2024</a>)</cite>, the official vLLM backend for Apple Silicon, provides an MLX-based plugin with continuous batching support. Our work differs by adding native multimodal inference with vision-language models and content-based prefix caching that eliminates redundant vision encoding across conversation turns.</p>
+</div>
+</section>
+<section class="ltx_subsection" id="S2.SS4">
+<h3 class="ltx_title ltx_title_subsection">
+<span class="ltx_tag ltx_tag_subsection">2.4. </span>Serving Challenges on Apple Silicon</h3>
+<div class="ltx_para" id="S2.SS4.p1">
+<p class="ltx_p" id="S2.SS4.p1.1">Production LLM serving requires capabilities beyond single-request inference. Continuous batching dynamically groups requests to maximize throughput, allowing new requests to join mid-generation and completed requests to exit without blocking others. OpenAI-compatible APIs enable drop-in replacement of cloud services for privacy-sensitive applications.</p>
+</div>
+<div class="ltx_para" id="S2.SS4.p2">
+<p class="ltx_p" id="S2.SS4.p2.1">Multimodal serving introduces additional challenges. Vision-language models must encode images before text generation, adding 1.5 to 4 seconds of latency depending on resolution. In multi-turn conversations about the same image, this encoding repeats unnecessarily. While datacenter deployments address this through GPU memory caching, Apple Silicon’s unified memory architecture enables a simpler approach: content-based caching that identifies identical images through hashing, storing both vision embeddings and KV cache state for instant reuse.</p>
+</div>
+</section>
+</section>
+<section class="ltx_section" id="S3">
+<h2 class="ltx_title ltx_title_section">
+<span class="ltx_tag ltx_tag_section">3. </span>System Design</h2>
+<section class="ltx_subsection" id="S3.SS1">
+<h3 class="ltx_title ltx_title_subsection">
+<span class="ltx_tag ltx_tag_subsection">3.1. </span>Framework Comparison</h3>
+<div class="ltx_para" id="S3.SS1.p1">
+<p class="ltx_p" id="S3.SS1.p1.1">Figure <a class="ltx_ref" href="https://arxiv.org/html/2601.19139v2#S3.F1" title="Figure 1 ‣ 3.1. Framework Comparison ‣ 3. System Design ‣ Native LLM and MLLM Inference at Scale on Apple Silicon"><span class="ltx_text ltx_ref_tag">1</span></a> compares the proposed framework against existing inference frameworks for Apple Silicon across six capability dimensions. While each existing framework excels in specific areas, the proposed framework uniquely provides the complete feature set required for production multimodal inference.</p>
+</div>
+<figure class="ltx_figure" id="S3.F1"><img alt="Refer to caption" class="ltx_graphics ltx_centering ltx_img_landscape" height="596" id="S3.F1.g1" src="x1.png" width="747"/>
+<figcaption class="ltx_caption ltx_centering"><span class="ltx_tag ltx_tag_figure"><span class="ltx_text" id="S3.F1.2.1.1" style="font-size:90%;">Figure 1</span>. </span><span class="ltx_text" id="S3.F1.3.2" style="font-size:90%;">Framework capability comparison. the proposed framework (green) provides comprehensive coverage: high throughput matching mlx-lm, continuous batching like vLLM-metal, OpenAI-compatible API, plus unique multimodal support with vision caching.</span></figcaption>
+</figure>
+<section class="ltx_paragraph" id="S3.SS1.SSS0.Px1">
+<h4 class="ltx_title ltx_title_paragraph">Key differentiators.</h4>
+<div class="ltx_para" id="S3.SS1.SSS0.Px1.p1">
+<p class="ltx_p" id="S3.SS1.SSS0.Px1.p1.1">Compared to mlx-lm <cite class="ltx_cite ltx_citemacro_citep">(Apple, <a class="ltx_ref" href="https://arxiv.org/html/2601.19139v2#bib.bib3" title="">2023</a>)</cite>, we add continuous batching, OpenAI-compatible API, and multimodal caching. Compared to llama.cpp <cite class="ltx_cite ltx_citemacro_citep">(Gerganov, <a class="ltx_ref" href="https://arxiv.org/html/2601.19139v2#bib.bib6" title="">2023</a>)</cite>, we provide continuous batching (it processes sequentially) and multimodal support with caching. Compared to vLLM-metal <cite class="ltx_cite ltx_citemacro_citep">(vLLM Project, <a class="ltx_ref" href="https://arxiv.org/html/2601.19139v2#bib.bib15" title="">2024</a>)</cite>, we add content-based vision caching that eliminates redundant encoding, the key contribution for interactive multimodal applications.</p>
+</div>
+</section>
+</section>
+<section class="ltx_subsection" id="S3.SS2">
+<h3 class="ltx_title ltx_title_subsection">
+<span class="ltx_tag ltx_tag_subsection">3.2. </span>Text Model Inference</h3>
+<div class="ltx_para" id="S3.SS2.p1">
+<p class="ltx_p" id="S3.SS2.p1.1">For text models, the proposed framework wraps mlx-lm with production serving capabilities.</p>
+</div>
+<section class="ltx_paragraph" id="S3.SS2.SSS0.Px1">
+<h4 class="ltx_title ltx_title_paragraph">Continuous Batching.</h4>
+<div class="ltx_para" id="S3.SS2.SSS0.Px1.p1">
+<p class="ltx_p" id="S3.SS2.SSS0.Px1.p1.1">Unlike llama.cpp which processes requests sequentially, our scheduler dynamically batches multiple concurrent requests. New requests join an existing batch at token boundaries, and completed requests exit without blocking others. Algorithm <a class="ltx_ref" href="https://arxiv.org/html/2601.19139v2#alg1" title="Algorithm 1 ‣ Continuous Batching. ‣ 3.2. Text Model Inference ‣ 3. System Design ‣ Native LLM and MLLM Inference at Scale on Apple Silicon"><span class="ltx_text ltx_ref_tag">1</span></a> describes the core scheduling loop.</p>
+</div>
+<figure class="ltx_float ltx_float_algorithm ltx_framed ltx_framed_top" id="alg1">
+<figcaption class="ltx_caption"><span class="ltx_tag ltx_tag_float"><span class="ltx_text ltx_font_bold" id="alg1.2.1.1">Algorithm 1</span> </span> Continuous Batching Scheduler</figcaption>
+<div class="ltx_listing ltx_listing" id="alg1.3">
+<div class="ltx_listingline" id="alg1.l1">
+<span class="ltx_tag ltx_tag_listingline"><span class="ltx_text" id="alg1.l1.1.1.1" style="font-size:80%;">1:</span></span>Pending queue <math alttext="Q" class="ltx_Math" display="inline" id="alg1.l1.m1" intent=":literal"><semantics><mi>Q</mi><annotation encoding="application/x-tex">Q</annotation></semantics></math>, active batch <math alttext="B" class="ltx_Math" display="inline" id="alg1.l1.m2" intent=":literal"><semantics><mi>B</mi><annotation encoding="application/x-tex">B</annotation></semantics></math>, max batch size <math alttext="M" class="ltx_Math" display="inline" id="alg1.l1.m3" intent=":literal"><semantics><mi>M</mi><annotation encoding="application/x-tex">M</annotation></semantics></math>
+</div>
+<div class="ltx_listingline" id="alg1.l2">
+<span class="ltx_tag ltx_tag_listingline"><span class="ltx_text" id="alg1.l2.1.1.1" style="font-size:80%;">2:</span></span><span class="ltx_text ltx_font_bold" id="alg1.l2.2">loop</span>
+</div>
+<div class="ltx_listingline" id="alg1.l3">
+<span class="ltx_tag ltx_tag_listingline"><span class="ltx_text" id="alg1.l3.1.1.1" style="font-size:80%;">3:</span></span>  <span class="ltx_text ltx_font_bold" id="alg1.l3.2">// Admit new requests at token boundaries</span>
+</div>
+<div class="ltx_listingline" id="alg1.l4">
+<span class="ltx_tag ltx_tag_listingline"><span class="ltx_text" id="alg1.l4.1.1.1" style="font-size:80%;">4:</span></span>  <span class="ltx_text ltx_font_bold" id="alg1.l4.2">while</span> <math alttext="|B|&lt;M" class="ltx_Math" display="inline" id="alg1.l4.m1" intent=":literal"><semantics><mrow><mrow><mo stretchy="false">|</mo><mi>B</mi><mo stretchy="false">|</mo></mrow><mo>&lt;</mo><mi>M</mi></mrow><annotation encoding="application/x-tex">|B|&lt;M</annotation></semantics></math> <span class="ltx_text ltx_font_bold" id="alg1.l4.3">and</span> <math alttext="Q\neq\emptyset" class="ltx_Math" display="inline" id="alg1.l4.m2" intent=":literal"><semantics><mrow><mi>Q</mi><mo>≠</mo><mi mathvariant="normal">∅</mi></mrow><annotation encoding="application/x-tex">Q\neq\emptyset</annotation></semantics></math> <span class="ltx_text ltx_font_bold" id="alg1.l4.4">do</span>
+</div>
+<div class="ltx_listingline" id="alg1.l5">
+<span class="ltx_tag ltx_tag_listingline"><span class="ltx_text" id="alg1.l5.1.1.1" style="font-size:80%;">5:</span></span>   <math alttext="r\leftarrow Q.\text{pop}()" class="ltx_Math" display="inline" id="alg1.l5.m1" intent=":literal"><semantics><mrow><mrow><mi>r</mi><mo stretchy="false">←</mo><mi>Q</mi></mrow><mo lspace="0em" rspace="0.167em">.</mo><mrow><mtext>pop</mtext><mo lspace="0em" rspace="0em">​</mo><mrow><mo stretchy="false">(</mo><mo stretchy="false">)</mo></mrow></mrow></mrow><annotation encoding="application/x-tex">r\leftarrow Q.\text{pop}()</annotation></semantics></math>
+</div>
+<div class="ltx_listingline" id="alg1.l6">
+<span class="ltx_tag ltx_tag_listingline"><span class="ltx_text" id="alg1.l6.1.1.1" style="font-size:80%;">6:</span></span>   <math alttext="B.\text{add}(r)" class="ltx_Math" display="inline" id="alg1.l6.m1" intent=":literal"><semantics><mrow><mi>B</mi><mo lspace="0em" rspace="0.167em">.</mo><mrow><mtext>add</mtext><mo lspace="0em" rspace="0em">​</mo><mrow><mo stretchy="false">(</mo><mi>r</mi><mo stretchy="false">)</mo></mrow></mrow></mrow><annotation encoding="application/x-tex">B.\text{add}(r)</annotation></semantics></math>
+</div>
+<div class="ltx_listingline" id="alg1.l7">
+<span class="ltx_tag ltx_tag_listingline"><span class="ltx_text" id="alg1.l7.1.1.1" style="font-size:80%;">7:</span></span>  <span class="ltx_text ltx_font_bold" id="alg1.l7.2">end</span> <span class="ltx_text ltx_font_bold" id="alg1.l7.3">while</span>
+</div>
+<div class="ltx_listingline" id="alg1.l8">
+<span class="ltx_tag ltx_tag_listingline"><span class="ltx_text" id="alg1.l8.1.1.1" style="font-size:80%;">8:</span></span>  <span class="ltx_text ltx_font_bold" id="alg1.l8.2">// Generate one token for all active requests</span>
+</div>
+<div class="ltx_listingline" id="alg1.l9">
+<span class="ltx_tag ltx_tag_listingline"><span class="ltx_text" id="alg1.l9.1.1.1" style="font-size:80%;">9:</span></span>  <span class="ltx_text ltx_font_bold" id="alg1.l9.2">for</span> each request <math alttext="r" class="ltx_Math" display="inline" id="alg1.l9.m1" intent=":literal"><semantics><mi>r</mi><annotation encoding="application/x-tex">r</annotation></semantics></math> in <math alttext="B" class="ltx_Math" display="inline" id="alg1.l9.m2" intent=":literal"><semantics><mi>B</mi><annotation encoding="application/x-tex">B</annotation></semantics></math> <span class="ltx_text ltx_font_bold" id="alg1.l9.3">do</span>
+</div>
+<div class="ltx_listingline" id="alg1.l10">
+<span class="ltx_tag ltx_tag_listingline"><span class="ltx_text" id="alg1.l10.1.1.1" style="font-size:80%;">10:</span></span>   <math alttext="token_{r}\leftarrow\text{GenerateToken}(r,\text{KVCache}[r])" class="ltx_Math" display="inline" id="alg1.l10.m1" intent=":literal"><semantics><mrow><mrow><mi>t</mi><mo lspace="0em" rspace="0em">​</mo><mi>o</mi><mo lspace="0em" rspace="0em">​</mo><mi>k</mi><mo lspace="0em" rspace="0em">​</mo><mi>e</mi><mo lspace="0em" rspace="0em">​</mo><msub><mi>n</mi><mi>r</mi></msub></mrow><mo stretchy="false">←</mo><mrow><mtext>GenerateToken</mtext><mo lspace="0em" rspace="0em">​</mo><mrow><mo stretchy="false">(</mo><mi>r</mi><mo>,</mo><mrow><mtext>KVCache</mtext><mo lspace="0em" rspace="0em">​</mo><mrow><mo stretchy="false">[</mo><mi>r</mi><mo stretchy="false">]</mo></mrow></mrow><mo stretchy="false">)</mo></mrow></mrow></mrow><annotation encoding="application/x-tex">token_{r}\leftarrow\text{GenerateToken}(r,\text{KVCache}[r])</annotation></semantics></math>
+</div>
+<div class="ltx_listingline" id="alg1.l11">
+<span class="ltx_tag ltx_tag_listingline"><span class="ltx_text" id="alg1.l11.1.1.1" style="font-size:80%;">11:</span></span>   <math alttext="r.\text{output}.\text{append}(token_{r})" class="ltx_Math" display="inline" id="alg1.l11.m1" intent=":literal"><semantics><mrow><mi>r</mi><mo lspace="0em" rspace="0.167em">.</mo><mtext>output</mtext><mo lspace="0em" rspace="0.167em">.</mo><mrow><mtext>append</mtext><mo lspace="0em" rspace="0em">​</mo><mrow><mo stretchy="false">(</mo><mrow><mi>t</mi><mo lspace="0em" rspace="0em">​</mo><mi>o</mi><mo lspace="0em" rspace="0em">​</mo><mi>k</mi><mo lspace="0em" rspace="0em">​</mo><mi>e</mi><mo lspace="0em" rspace="0em">​</mo><msub><mi>n</mi><mi>r</mi></msub></mrow><mo stretchy="false">)</mo></mrow></mrow></mrow><annotation encoding="application/x-tex">r.\text{output}.\text{append}(token_{r})</annotation></semantics></math>
+</div>
+<div class="ltx_listingline" id="alg1.l12">
+<span class="ltx_tag ltx_tag_listingline"><span class="ltx_text" id="alg1.l12.1.1.1" style="font-size:80%;">12:</span></span>  <span class="ltx_text ltx_font_bold" id="alg1.l12.2">end</span> <span class="ltx_text ltx_font_bold" id="alg1.l12.3">for</span>
+</div>
+<div class="ltx_listingline" id="alg1.l13">
+<span class="ltx_tag ltx_tag_listingline"><span class="ltx_text" id="alg1.l13.1.1.1" style="font-size:80%;">13:</span></span>  <span class="ltx_text ltx_font_bold" id="alg1.l13.2">// Remove completed requests immediately</span>
+</div>
+<div class="ltx_listingline" id="alg1.l14">
+<span class="ltx_tag ltx_tag_listingline"><span class="ltx_text" id="alg1.l14.1.1.1" style="font-size:80%;">14:</span></span>  <span class="ltx_text ltx_font_bold" id="alg1.l14.2">for</span> each request <math alttext="r" class="ltx_Math" display="inline" id="alg1.l14.m1" intent=":literal"><semantics><mi>r</mi><annotation encoding="application/x-tex">r</annotation></semantics></math> in <math alttext="B" class="ltx_Math" display="inline" id="alg1.l14.m2" intent=":literal"><semantics><mi>B</mi><annotation encoding="application/x-tex">B</annotation></semantics></math> where <math alttext="r.\text{is\_complete}()" class="ltx_Math" display="inline" id="alg1.l14.m3" intent=":literal"><semantics><mrow><mi>r</mi><mo lspace="0em" rspace="0.167em">.</mo><mrow><mtext>is_complete</mtext><mo lspace="0em" rspace="0em">​</mo><mrow><mo stretchy="false">(</mo><mo stretchy="false">)</mo></mrow></mrow></mrow><annotation encoding="application/x-tex">r.\text{is\_complete}()</annotation></semantics></math> <span class="ltx_text ltx_font_bold" id="alg1.l14.3">do</span>
+</div>
+<div class="ltx_listingline" id="alg1.l15">
+<span class="ltx_tag ltx_tag_listingline"><span class="ltx_text" id="alg1.l15.1.1.1" style="font-size:80%;">15:</span></span>   <math alttext="B.\text{remove}(r)" class="ltx_Math" display="inline" id="alg1.l15.m1" intent=":literal"><semantics><mrow><mi>B</mi><mo lspace="0em" rspace="0.167em">.</mo><mrow><mtext>remove</mtext><mo lspace="0em" rspace="0em">​</mo><mrow><mo stretchy="false">(</mo><mi>r</mi><mo stretchy="false">)</mo></mrow></mrow></mrow><annotation encoding="application/x-tex">B.\text{remove}(r)</annotation></semantics></math>
+</div>
+<div class="ltx_listingline" id="alg1.l16">
+<span class="ltx_tag ltx_tag_listingline"><span class="ltx_text" id="alg1.l16.1.1.1" style="font-size:80%;">16:</span></span>   <span class="ltx_text ltx_font_bold" id="alg1.l16.2">yield</span> <math alttext="r.\text{output}" class="ltx_Math" display="inline" id="alg1.l16.m1" intent=":literal"><semantics><mrow><mi>r</mi><mo lspace="0em" rspace="0.167em">.</mo><mtext>output</mtext></mrow><annotation encoding="application/x-tex">r.\text{output}</annotation></semantics></math>
+</div>
+<div class="ltx_listingline" id="alg1.l17">
+<span class="ltx_tag ltx_tag_listingline"><span class="ltx_text" id="alg1.l17.1.1.1" style="font-size:80%;">17:</span></span>  <span class="ltx_text ltx_font_bold" id="alg1.l17.2">end</span> <span class="ltx_text ltx_font_bold" id="alg1.l17.3">for</span>
+</div>
+<div class="ltx_listingline" id="alg1.l18">
+<span class="ltx_tag ltx_tag_listingline"><span class="ltx_text" id="alg1.l18.1.1.1" style="font-size:80%;">18:</span></span><span class="ltx_text ltx_font_bold" id="alg1.l18.2">end</span> <span class="ltx_text ltx_font_bold" id="alg1.l18.3">loop</span>
+</div>
+</div>
+</figure>
+<div class="ltx_para" id="S3.SS2.SSS0.Px1.p2">
+<p class="ltx_p" id="S3.SS2.SSS0.Px1.p2.1">This approach maximizes GPU utilization by keeping the batch full while allowing requests to exit immediately upon completion, unlike traditional batching which waits for all requests to finish.</p>
+</div>
+</section>
+<section class="ltx_paragraph" id="S3.SS2.SSS0.Px2">
+<h4 class="ltx_title ltx_title_paragraph">Streaming.</h4>
+<div class="ltx_para" id="S3.SS2.SSS0.Px2.p1">
+<p class="ltx_p" id="S3.SS2.SSS0.Px2.p1.1">We implement token-by-token streaming with proper handling of multi-byte UTF-8 sequences and tokenizer artifacts, ensuring clean output for all languages.</p>
+</div>
+</section>
+<section class="ltx_paragraph" id="S3.SS2.SSS0.Px3">
+<h4 class="ltx_title ltx_title_paragraph">Text Prefix Caching.</h4>
+<div class="ltx_para" id="S3.SS2.SSS0.Px3.p1">
+<p class="ltx_p" id="S3.SS2.SSS0.Px3.p1.1">For text-only workloads with shared prompt prefixes (e.g., system prompts), we cache and reuse KV states. Algorithm <a class="ltx_ref" href="https://arxiv.org/html/2601.19139v2#alg2" title="Algorithm 2 ‣ Text Prefix Caching. ‣ 3.2. Text Model Inference ‣ 3. System Design ‣ Native LLM and MLLM Inference at Scale on Apple Silicon"><span class="ltx_text ltx_ref_tag">2</span></a> shows our approach: when a new request shares a prefix with a cached entry, we skip the forward pass for those tokens and resume generation from the cached state.</p>
+</div>
+<figure class="ltx_float ltx_float_algorithm ltx_framed ltx_framed_top" id="alg2">
+<figcaption class="ltx_caption"><span class="ltx_tag ltx_tag_float"><span class="ltx_text ltx_font_bold" id="alg2.2.1.1">Algorithm 2</span> </span> Text Prefix Cache Lookup</figcaption>
+<div class="ltx_listing ltx_listing" id="alg2.3">
+<div class="ltx_listingline" id="alg2.l1">
+<span class="ltx_tag ltx_tag_listingline"><span class="ltx_text" id="alg2.l1.1.1.1" style="font-size:80%;">1:</span></span>Prompt tokens <math alttext="P" class="ltx_Math" display="inline" id="alg2.l1.m1" intent=":literal"><semantics><mi>P</mi><annotation encoding="application/x-tex">P</annotation></semantics></math>, Cache <math alttext="C" class="ltx_Math" display="inline" id="alg2.l1.m2" intent=":literal"><semantics><mi>C</mi><annotation encoding="application/x-tex">C</annotation></semantics></math>
+</div>
+<div class="ltx_listingline" id="alg2.l2">
+<span class="ltx_tag ltx_tag_listingline"><span class="ltx_text" id="alg2.l2.1.1.1" style="font-size:80%;">2:</span></span>KV state, start position
+
+</div>
+<div class="ltx_listingline" id="alg2.l3">
+<span class="ltx_tag ltx_tag_listingline"><span class="ltx_text" id="alg2.l3.1.1.1" style="font-size:80%;">3:</span></span><math alttext="hash\leftarrow\text{SHA256}(P)" class="ltx_Math" display="inline" id="alg2.l3.m1" intent=":literal"><semantics><mrow><mrow><mi>h</mi><mo lspace="0em" rspace="0em">​</mo><mi>a</mi><mo lspace="0em" rspace="0em">​</mo><mi>s</mi><mo lspace="0em" rspace="0em">​</mo><mi>h</mi></mrow><mo stretchy="false">←</mo><mrow><mtext>SHA256</mtext><mo lspace="0em" rspace="0em">​</mo><mrow><mo stretchy="false">(</mo><mi>P</mi><mo stretchy="false">)</mo></mrow></mrow></mrow><annotation encoding="application/x-tex">hash\leftarrow\text{SHA256}(P)</annotation></semantics></math>
+</div>
+<div class="ltx_listingline" id="alg2.l4">
+<span class="ltx_tag ltx_tag_listingline"><span class="ltx_text" id="alg2.l4.1.1.1" style="font-size:80%;">4:</span></span><span class="ltx_text ltx_font_bold" id="alg2.l4.2">if</span> <math alttext="hash\in C" class="ltx_Math" display="inline" id="alg2.l4.m1" intent=":literal"><semantics><mrow><mrow><mi>h</mi><mo lspace="0em" rspace="0em">​</mo><mi>a</mi><mo lspace="0em" rspace="0em">​</mo><mi>s</mi><mo lspace="0em" rspace="0em">​</mo><mi>h</mi></mrow><mo>∈</mo><mi>C</mi></mrow><annotation encoding="application/x-tex">hash\in C</annotation></semantics></math> <span class="ltx_text ltx_font_bold" id="alg2.l4.3">then</span>
+</div>
+<div class="ltx_listingline" id="alg2.l5">
+<span class="ltx_tag ltx_tag_listingline"><span class="ltx_text" id="alg2.l5.2.1.1" style="font-size:80%;">5:</span></span>  <span class="ltx_text ltx_font_bold" id="alg2.l5.3">return</span> <math alttext="C[hash].kv\_state" class="ltx_Math" display="inline" id="alg2.l5.m1" intent=":literal"><semantics><mrow><mrow><mi>C</mi><mo lspace="0em" rspace="0em">​</mo><mrow><mo stretchy="false">[</mo><mrow><mi>h</mi><mo lspace="0em" rspace="0em">​</mo><mi>a</mi><mo lspace="0em" rspace="0em">​</mo><mi>s</mi><mo lspace="0em" rspace="0em">​</mo><mi>h</mi></mrow><mo stretchy="false">]</mo></mrow></mrow><mo lspace="0em" rspace="0.167em">.</mo><mrow><mi>k</mi><mo lspace="0em" rspace="0em">​</mo><mi>v</mi><mo lspace="0em" rspace="0em">​</mo><mi mathvariant="normal">_</mi><mo lspace="0em" rspace="0em">​</mo><mi>s</mi><mo lspace="0em" rspace="0em">​</mo><mi>t</mi><mo lspace="0em" rspace="0em">​</mo><mi>a</mi><mo lspace="0em" rspace="0em">​</mo><mi>t</mi><mo lspace="0em" rspace="0em">​</mo><mi>e</mi></mrow></mrow><annotation encoding="application/x-tex">C[hash].kv\_state</annotation></semantics></math>, <math alttext="|P|" class="ltx_Math" display="inline" id="alg2.l5.m2" intent=":literal"><semantics><mrow><mo stretchy="false">|</mo><mi>P</mi><mo stretchy="false">|</mo></mrow><annotation encoding="application/x-tex">|P|</annotation></semantics></math> <span class="ltx_text" id="alg2.l5.1" style="float:right;"><math alttext="\triangleright" class="ltx_Math" display="inline" id="alg2.l5.1.m1" intent=":literal"><semantics><mo>⊳</mo><annotation encoding="application/x-tex">\triangleright</annotation></semantics></math> Full cache hit
+</span>
+</div>
+<div class="ltx_listingline" id="alg2.l6">
+<span class="ltx_tag ltx_tag_listingline"><span class="ltx_text" id="alg2.l6.1.1.1" style="font-size:80%;">6:</span></span><span class="ltx_text ltx_font_bold" id="alg2.l6.2">end</span> <span class="ltx_text ltx_font_bold" id="alg2.l6.3">if</span>
+</div>
+<div class="ltx_listingline" id="alg2.l7">
+<span class="ltx_tag ltx_tag_listingline"><span class="ltx_text" id="alg2.l7.1.1.1" style="font-size:80%;">7:</span></span><span class="ltx_text ltx_font_bold" id="alg2.l7.2">for</span> <math alttext="i=|P|" class="ltx_Math" display="inline" id="alg2.l7.m1" intent=":literal"><semantics><mrow><mi>i</mi><mo>=</mo><mrow><mo stretchy="false">|</mo><mi>P</mi><mo stretchy="false">|</mo></mrow></mrow><annotation encoding="application/x-tex">i=|P|</annotation></semantics></math> <span class="ltx_text ltx_font_bold" id="alg2.l7.3">down to</span> <math alttext="1" class="ltx_Math" display="inline" id="alg2.l7.m2" intent=":literal"><semantics><mn>1</mn><annotation encoding="application/x-tex">1</annotation></semantics></math> <span class="ltx_text ltx_font_bold" id="alg2.l7.4">do</span>
+</div>
+<div class="ltx_listingline" id="alg2.l8">
+<span class="ltx_tag ltx_tag_listingline"><span class="ltx_text" id="alg2.l8.1.1.1" style="font-size:80%;">8:</span></span>  <math alttext="prefix\_hash\leftarrow\text{SHA256}(P[1:i])" class="ltx_math_unparsed" display="inline" id="alg2.l8.m1" intent=":literal"><semantics><mrow><mi>p</mi><mi>r</mi><mi>e</mi><mi>f</mi><mi>i</mi><mi>x</mi><mi mathvariant="normal">_</mi><mi>h</mi><mi>a</mi><mi>s</mi><mi>h</mi><mo stretchy="false">←</mo><mtext>SHA256</mtext><mrow><mo stretchy="false">(</mo><mi>P</mi><mrow><mo stretchy="false">[</mo><mn>1</mn><mo lspace="0.278em" rspace="0.278em">:</mo><mi>i</mi><mo stretchy="false">]</mo></mrow><mo stretchy="false">)</mo></mrow></mrow><annotation encoding="application/x-tex">prefix\_hash\leftarrow\text{SHA256}(P[1:i])</annotation></semantics></math>
+</div>
+<div class="ltx_listingline" id="alg2.l9">
+<span class="ltx_tag ltx_tag_listingline"><span class="ltx_text" id="alg2.l9.1.1.1" style="font-size:80%;">9:</span></span>  <span class="ltx_text ltx_font_bold" id="alg2.l9.2">if</span> <math alttext="prefix\_hash\in C" class="ltx_Math" display="inline" id="alg2.l9.m1" intent=":literal"><semantics><mrow><mrow><mi>p</mi><mo lspace="0em" rspace="0em">​</mo><mi>r</mi><mo lspace="0em" rspace="0em">​</mo><mi>e</mi><mo lspace="0em" rspace="0em">​</mo><mi>f</mi><mo lspace="0em" rspace="0em">​</mo><mi>i</mi><mo lspace="0em" rspace="0em">​</mo><mi>x</mi><mo lspace="0em" rspace="0em">​</mo><mi mathvariant="normal">_</mi><mo lspace="0em" rspace="0em">​</mo><mi>h</mi><mo lspace="0em" rspace="0em">​</mo><mi>a</mi><mo lspace="0em" rspace="0em">​</mo><mi>s</mi><mo lspace="0em" rspace="0em">​</mo><mi>h</mi></mrow><mo>∈</mo><mi>C</mi></mrow><annotation encoding="application/x-tex">prefix\_hash\in C</annotation></semantics></math> <span class="ltx_text ltx_font_bold" id="alg2.l9.3">then</span>
+</div>
+<div class="ltx_listingline" id="alg2.l10">
+<span class="ltx_tag ltx_tag_listingline"><span class="ltx_text" id="alg2.l10.2.1.1" style="font-size:80%;">10:</span></span>   <span class="ltx_text ltx_font_bold" id="alg2.l10.3">return</span> <math alttext="C[prefix\_hash].kv\_state" class="ltx_Math" display="inline" id="alg2.l10.m1" intent=":literal"><semantics><mrow><mrow><mi>C</mi><mo lspace="0em" rspace="0em">​</mo><mrow><mo stretchy="false">[</mo><mrow><mi>p</mi><mo lspace="0em" rspace="0em">​</mo><mi>r</mi><mo lspace="0em" rspace="0em">​</mo><mi>e</mi><mo lspace="0em" rspace="0em">​</mo><mi>f</mi><mo lspace="0em" rspace="0em">​</mo><mi>i</mi><mo lspace="0em" rspace="0em">​</mo><mi>x</mi><mo lspace="0em" rspace="0em">​</mo><mi mathvariant="normal">_</mi><mo lspace="0em" rspace="0em">​</mo><mi>h</mi><mo lspace="0em" rspace="0em">​</mo><mi>a</mi><mo lspace="0em" rspace="0em">​</mo><mi>s</mi><mo lspace="0em" rspace="0em">​</mo><mi>h</mi></mrow><mo stretchy="false">]</mo></mrow></mrow><mo lspace="0em" rspace="0.167em">.</mo><mrow><mi>k</mi><mo lspace="0em" rspace="0em">​</mo><mi>v</mi><mo lspace="0em" rspace="0em">​</mo><mi mathvariant="normal">_</mi><mo lspace="0em" rspace="0em">​</mo><mi>s</mi><mo lspace="0em" rspace="0em">​</mo><mi>t</mi><mo lspace="0em" rspace="0em">​</mo><mi>a</mi><mo lspace="0em" rspace="0em">​</mo><mi>t</mi><mo lspace="0em" rspace="0em">​</mo><mi>e</mi></mrow></mrow><annotation encoding="application/x-tex">C[prefix\_hash].kv\_state</annotation></semantics></math>, <math alttext="i" class="ltx_Math" display="inline" id="alg2.l10.m2" intent=":literal"><semantics><mi>i</mi><annotation encoding="application/x-tex">i</annotation></semantics></math> <span class="ltx_text" id="alg2.l10.1" style="float:right;"><math alttext="\triangleright" class="ltx_Math" display="inline" id="alg2.l10.1.m1" intent=":literal"><semantics><mo>⊳</mo><annotation encoding="application/x-tex">\triangleright</annotation></semantics></math> Partial hit
+</span>
+</div>
+<div class="ltx_listingline" id="alg2.l11">
+<span class="ltx_tag ltx_tag_listingline"><span class="ltx_text" id="alg2.l11.1.1.1" style="font-size:80%;">11:</span></span>  <span class="ltx_text ltx_font_bold" id="alg2.l11.2">end</span> <span class="ltx_text ltx_font_bold" id="alg2.l11.3">if</span>
+</div>
+<div class="ltx_listingline" id="alg2.l12">
+<span class="ltx_tag ltx_tag_listingline"><span class="ltx_text" id="alg2.l12.1.1.1" style="font-size:80%;">12:</span></span><span class="ltx_text ltx_font_bold" id="alg2.l12.2">end</span> <span class="ltx_text ltx_font_bold" id="alg2.l12.3">for</span>
+</div>
+<div class="ltx_listingline" id="alg2.l13">
+<span class="ltx_tag ltx_tag_listingline"><span class="ltx_text" id="alg2.l13.2.1.1" style="font-size:80%;">13:</span></span><span class="ltx_text ltx_font_bold" id="alg2.l13.3">return</span> <math alttext="\emptyset" class="ltx_Math" display="inline" id="alg2.l13.m1" intent=":literal"><semantics><mi mathvariant="normal">∅</mi><annotation encoding="application/x-tex">\emptyset</annotation></semantics></math>, <math alttext="0" class="ltx_Math" display="inline" id="alg2.l13.m2" intent=":literal"><mn>0</mn></math> <span class="ltx_text" id="alg2.l13.1" style="float:right;"><math alttext="\triangleright" class="ltx_Math" display="inline" id="alg2.l13.1.m1" intent=":literal"><semantics><mo>⊳</mo><annotation encoding="application/x-tex">\triangleright</annotation></semantics></math> Cache miss
+</span>
+</div>
+</div>
+</figure>
+<div class="ltx_para" id="S3.SS2.SSS0.Px3.p2">
+<p class="ltx_p" id="S3.SS2.SSS0.Px3.p2.1">This reduces Time to First Token (TTFT) by up to 5.8x for prompts with 512-token shared prefixes.</p>
+</div>
+</section>
+</section>
+<section class="ltx_subsection" id="S3.SS3">
+<h3 class="ltx_title ltx_title_subsection">
+<span class="ltx_tag ltx_tag_subsection">3.3. </span>Multimodal Inference with Prefix Caching</h3>
+<div class="ltx_para" id="S3.SS3.p1">
+<p class="ltx_p" id="S3.SS3.p1.1">For multimodal models, we introduce content-based prefix caching to eliminate redundant vision encoding across requests.</p>
+</div>
+<section class="ltx_paragraph" id="S3.SS3.SSS0.Px1">
+<h4 class="ltx_title ltx_title_paragraph">Content-Based Hashing.</h4>
+<div class="ltx_para" id="S3.SS3.SSS0.Px1.p1">
+<p class="ltx_p" id="S3.SS3.SSS0.Px1.p1.1">A key challenge is that identical images can arrive in different formats: URLs, base64 strings, or file paths. Our solution computes a SHA-256 hash over decoded pixel values, enabling cache hits regardless of input format. This ensures that the same image always maps to the same cache entry.</p>
+</div>
+</section>
+<section class="ltx_paragraph" id="S3.SS3.SSS0.Px2">
+<h4 class="ltx_title ltx_title_paragraph">Cache-Aware Generation.</h4>
+<div class="ltx_para" id="S3.SS3.SSS0.Px2.p1">
+<p class="ltx_p" id="S3.SS3.SSS0.Px2.p1.1">Algorithm <a class="ltx_ref" href="https://arxiv.org/html/2601.19139v2#alg3" title="Algorithm 3 ‣ Cache-Aware Generation. ‣ 3.3. Multimodal Inference with Prefix Caching ‣ 3. System Design ‣ Native LLM and MLLM Inference at Scale on Apple Silicon"><span class="ltx_text ltx_ref_tag">3</span></a> shows our cache-aware generation process. When a multimodal request arrives, we first compute content hashes for all images and check the cache. On hit, we retrieve stored vision embeddings and KV cache state, skipping both the expensive vision encoder (1.5-4s) and prompt processing. On miss, we process normally and store results for future reuse.</p>
+</div>
+<figure class="ltx_float ltx_float_algorithm ltx_framed ltx_framed_top" id="alg3">
+<figcaption class="ltx_caption"><span class="ltx_tag ltx_tag_float"><span class="ltx_text ltx_font_bold" id="alg3.2.1.1">Algorithm 3</span> </span> Cache-Aware Multimodal Generation</figcaption>
+<div class="ltx_listing ltx_listing" id="alg3.3">
+<div class="ltx_listingline" id="alg3.l1">
+<span class="ltx_tag ltx_tag_listingline"><span class="ltx_text" id="alg3.l1.1.1.1" style="font-size:80%;">1:</span></span>Request <math alttext="R" class="ltx_Math" display="inline" id="alg3.l1.m1" intent=":literal"><semantics><mi>R</mi><annotation encoding="application/x-tex">R</annotation></semantics></math> with images <math alttext="\{I_{i}\}" class="ltx_Math" display="inline" id="alg3.l1.m2" intent=":literal"><semantics><mrow><mo stretchy="false">{</mo><msub><mi>I</mi><mi>i</mi></msub><mo stretchy="false">}</mo></mrow><annotation encoding="application/x-tex">\{I_{i}\}</annotation></semantics></math> and text prompt <math alttext="T" class="ltx_Math" display="inline" id="alg3.l1.m3" intent=":literal"><semantics><mi>T</mi><annotation encoding="application/x-tex">T</annotation></semantics></math>
+</div>
+<div class="ltx_listingline" id="alg3.l2">
+<span class="ltx_tag ltx_tag_listingline"><span class="ltx_text" id="alg3.l2.1.1.1" style="font-size:80%;">2:</span></span>Generated response
+
+</div>
+<div class="ltx_listingline" id="alg3.l3">
+<span class="ltx_tag ltx_tag_listingline"><span class="ltx_text" id="alg3.l3.1.1.1" style="font-size:80%;">3:</span></span><span class="ltx_text ltx_font_bold" id="alg3.l3.2">for</span> each image <math alttext="I_{i}" class="ltx_Math" display="inline" id="alg3.l3.m1" intent=":literal"><semantics><msub><mi>I</mi><mi>i</mi></msub><annotation encoding="application/x-tex">I_{i}</annotation></semantics></math> in request <span class="ltx_text ltx_font_bold" id="alg3.l3.3">do</span>
+</div>
+<div class="ltx_listingline" id="alg3.l4">
+<span class="ltx_tag ltx_tag_listingline"><span class="ltx_text" id="alg3.l4.1.1.1" style="font-size:80%;">4:</span></span>  <math alttext="hash_{i}\leftarrow\text{SHA256}(\text{Decode}(I_{i}))" class="ltx_Math" display="inline" id="alg3.l4.m1" intent=":literal"><semantics><mrow><mrow><mi>h</mi><mo lspace="0em" rspace="0em">​</mo><mi>a</mi><mo lspace="0em" rspace="0em">​</mo><mi>s</mi><mo lspace="0em" rspace="0em">​</mo><msub><mi>h</mi><mi>i</mi></msub></mrow><mo stretchy="false">←</mo><mrow><mtext>SHA256</mtext><mo lspace="0em" rspace="0em">​</mo><mrow><mo stretchy="false">(</mo><mrow><mtext>Decode</mtext><mo lspace="0em" rspace="0em">​</mo><mrow><mo stretchy="false">(</mo><msub><mi>I</mi><mi>i</mi></msub><mo stretchy="false">)</mo></mrow></mrow><mo stretchy="false">)</mo></mrow></mrow></mrow><annotation encoding="application/x-tex">hash_{i}\leftarrow\text{SHA256}(\text{Decode}(I_{i}))</annotation></semantics></math>
+</div>
+<div class="ltx_listingline" id="alg3.l5">
+<span class="ltx_tag ltx_tag_listingline"><span class="ltx_text" id="alg3.l5.1.1.1" style="font-size:80%;">5:</span></span>  <span class="ltx_text ltx_font_bold" id="alg3.l5.2">if</span> <math alttext="hash_{i}\in\text{Cache}" class="ltx_Math" display="inline" id="alg3.l5.m1" intent=":literal"><semantics><mrow><mrow><mi>h</mi><mo lspace="0em" rspace="0em">​</mo><mi>a</mi><mo lspace="0em" rspace="0em">​</mo><mi>s</mi><mo lspace="0em" rspace="0em">​</mo><msub><mi>h</mi><mi>i</mi></msub></mrow><mo>∈</mo><mtext>Cache</mtext></mrow><annotation encoding="application/x-tex">hash_{i}\in\text{Cache}</annotation></semantics></math> <span class="ltx_text ltx_font_bold" id="alg3.l5.3">then</span>
+</div>
+<div class="ltx_listingline" id="alg3.l6">
+<span class="ltx_tag ltx_tag_listingline"><span class="ltx_text" id="alg3.l6.1.1.1" style="font-size:80%;">6:</span></span>   <math alttext="emb_{i}\leftarrow\text{Cache}[hash_{i}].embeddings" class="ltx_Math" display="inline" id="alg3.l6.m1" intent=":literal"><semantics><mrow><mrow><mrow><mi>e</mi><mo lspace="0em" rspace="0em">​</mo><mi>m</mi><mo lspace="0em" rspace="0em">​</mo><msub><mi>b</mi><mi>i</mi></msub></mrow><mo stretchy="false">←</mo><mrow><mtext>Cache</mtext><mo lspace="0em" rspace="0em">​</mo><mrow><mo stretchy="false">[</mo><mrow><mi>h</mi><mo lspace="0em" rspace="0em">​</mo><mi>a</mi><mo lspace="0em" rspace="0em">​</mo><mi>s</mi><mo lspace="0em" rspace="0em">​</mo><msub><mi>h</mi><mi>i</mi></msub></mrow><mo stretchy="false">]</mo></mrow></mrow></mrow><mo lspace="0em" rspace="0.167em">.</mo><mrow><mi>e</mi><mo lspace="0em" rspace="0em">​</mo><mi>m</mi><mo lspace="0em" rspace="0em">​</mo><mi>b</mi><mo lspace="0em" rspace="0em">​</mo><mi>e</mi><mo lspace="0em" rspace="0em">​</mo><mi>d</mi><mo lspace="0em" rspace="0em">​</mo><mi>d</mi><mo lspace="0em" rspace="0em">​</mo><mi>i</mi><mo lspace="0em" rspace="0em">​</mo><mi>n</mi><mo lspace="0em" rspace="0em">​</mo><mi>g</mi><mo lspace="0em" rspace="0em">​</mo><mi>s</mi></mrow></mrow><annotation encoding="application/x-tex">emb_{i}\leftarrow\text{Cache}[hash_{i}].embeddings</annotation></semantics></math>
+</div>
+<div class="ltx_listingline" id="alg3.l7">
+<span class="ltx_tag ltx_tag_listingline"><span class="ltx_text" id="alg3.l7.1.1.1" style="font-size:80%;">7:</span></span>   <math alttext="kv\leftarrow\text{Cache}[hash_{i}].kv\_state" class="ltx_Math" display="inline" id="alg3.l7.m1" intent=":literal"><semantics><mrow><mrow><mrow><mi>k</mi><mo lspace="0em" rspace="0em">​</mo><mi>v</mi></mrow><mo stretchy="false">←</mo><mrow><mtext>Cache</mtext><mo lspace="0em" rspace="0em">​</mo><mrow><mo stretchy="false">[</mo><mrow><mi>h</mi><mo lspace="0em" rspace="0em">​</mo><mi>a</mi><mo lspace="0em" rspace="0em">​</mo><mi>s</mi><mo lspace="0em" rspace="0em">​</mo><msub><mi>h</mi><mi>i</mi></msub></mrow><mo stretchy="false">]</mo></mrow></mrow></mrow><mo lspace="0em" rspace="0.167em">.</mo><mrow><mi>k</mi><mo lspace="0em" rspace="0em">​</mo><mi>v</mi><mo lspace="0em" rspace="0em">​</mo><mi mathvariant="normal">_</mi><mo lspace="0em" rspace="0em">​</mo><mi>s</mi><mo lspace="0em" rspace="0em">​</mo><mi>t</mi><mo lspace="0em" rspace="0em">​</mo><mi>a</mi><mo lspace="0em" rspace="0em">​</mo><mi>t</mi><mo lspace="0em" rspace="0em">​</mo><mi>e</mi></mrow></mrow><annotation encoding="application/x-tex">kv\leftarrow\text{Cache}[hash_{i}].kv\_state</annotation></semantics></math>
+</div>
+<div class="ltx_listingline" id="alg3.l8">
+<span class="ltx_tag ltx_tag_listingline"><span class="ltx_text" id="alg3.l8.1.1.1" style="font-size:80%;">8:</span></span>   <span class="ltx_text ltx_font_bold" id="alg3.l8.2">skip</span> vision encoder for <math alttext="I_{i}" class="ltx_Math" display="inline" id="alg3.l8.m1" intent=":literal"><semantics><msub><mi>I</mi><mi>i</mi></msub><annotation encoding="application/x-tex">I_{i}</annotation></semantics></math>
+</div>
+<div class="ltx_listingline" id="alg3.l9">
+<span class="ltx_tag ltx_tag_listingline"><span class="ltx_text" id="alg3.l9.1.1.1" style="font-size:80%;">9:</span></span>  <span class="ltx_text ltx_font_bold" id="alg3.l9.2">else</span>
+</div>
+<div class="ltx_listingline" id="alg3.l10">
+<span class="ltx_tag ltx_tag_listingline"><span class="ltx_text" id="alg3.l10.1.1.1" style="font-size:80%;">10:</span></span>   <math alttext="emb_{i}\leftarrow\text{VisionEncoder}(I_{i})" class="ltx_Math" display="inline" id="alg3.l10.m1" intent=":literal"><semantics><mrow><mrow><mi>e</mi><mo lspace="0em" rspace="0em">​</mo><mi>m</mi><mo lspace="0em" rspace="0em">​</mo><msub><mi>b</mi><mi>i</mi></msub></mrow><mo stretchy="false">←</mo><mrow><mtext>VisionEncoder</mtext><mo lspace="0em" rspace="0em">​</mo><mrow><mo stretchy="false">(</mo><msub><mi>I</mi><mi>i</mi></msub><mo stretchy="false">)</mo></mrow></mrow></mrow><annotation encoding="application/x-tex">emb_{i}\leftarrow\text{VisionEncoder}(I_{i})</annotation></semantics></math>
+</div>
+<div class="ltx_listingline" id="alg3.l11">
+<span class="ltx_tag ltx_tag_listingline"><span class="ltx_text" id="alg3.l11.1.1.1" style="font-size:80%;">11:</span></span>  <span class="ltx_text ltx_font_bold" id="alg3.l11.2">end</span> <span class="ltx_text ltx_font_bold" id="alg3.l11.3">if</span>
+</div>
+<div class="ltx_listingline" id="alg3.l12">
+<span class="ltx_tag ltx_tag_listingline"><span class="ltx_text" id="alg3.l12.1.1.1" style="font-size:80%;">12:</span></span><span class="ltx_text ltx_font_bold" id="alg3.l12.2">end</span> <span class="ltx_text ltx_font_bold" id="alg3.l12.3">for</span>
+</div>
+<div class="ltx_listingline" id="alg3.l13">
+<span class="ltx_tag ltx_tag_listingline"><span class="ltx_text" id="alg3.l13.1.1.1" style="font-size:80%;">13:</span></span><math alttext="output\leftarrow\text{Generate}(\text{Concat}(emb,T),kv)" class="ltx_Math" display="inline" id="alg3.l13.m1" intent=":literal"><semantics><mrow><mrow><mi>o</mi><mo lspace="0em" rspace="0em">​</mo><mi>u</mi><mo lspace="0em" rspace="0em">​</mo><mi>t</mi><mo lspace="0em" rspace="0em">​</mo><mi>p</mi><mo lspace="0em" rspace="0em">​</mo><mi>u</mi><mo lspace="0em" rspace="0em">​</mo><mi>t</mi></mrow><mo stretchy="false">←</mo><mrow><mtext>Generate</mtext><mo lspace="0em" rspace="0em">​</mo><mrow><mo stretchy="false">(</mo><mrow><mtext>Concat</mtext><mo lspace="0em" rspace="0em">​</mo><mrow><mo stretchy="false">(</mo><mrow><mi>e</mi><mo lspace="0em" rspace="0em">​</mo><mi>m</mi><mo lspace="0em" rspace="0em">​</mo><mi>b</mi></mrow><mo>,</mo><mi>T</mi><mo stretchy="false">)</mo></mrow></mrow><mo>,</mo><mrow><mi>k</mi><mo lspace="0em" rspace="0em">​</mo><mi>v</mi></mrow><mo stretchy="false">)</mo></mrow></mrow></mrow><annotation encoding="application/x-tex">output\leftarrow\text{Generate}(\text{Concat}(emb,T),kv)</annotation></semantics></math>
+</div>
+<div class="ltx_listingline" id="alg3.l14">
+<span class="ltx_tag ltx_tag_listingline"><span class="ltx_text" id="alg3.l14.2.1.1" style="font-size:80%;">14:</span></span><span class="ltx_text" id="alg3.l14.3">Cache</span><math alttext="[hash]\leftarrow(emb,kv)" class="ltx_Math" display="inline" id="alg3.l14.m1" intent=":literal"><semantics><mrow><mrow><mo stretchy="false">[</mo><mrow><mi>h</mi><mo lspace="0em" rspace="0em">​</mo><mi>a</mi><mo lspace="0em" rspace="0em">​</mo><mi>s</mi><mo lspace="0em" rspace="0em">​</mo><mi>h</mi></mrow><mo stretchy="false">]</mo></mrow><mo stretchy="false">←</mo><mrow><mo stretchy="false">(</mo><mrow><mi>e</mi><mo lspace="0em" rspace="0em">​</mo><mi>m</mi><mo lspace="0em" rspace="0em">​</mo><mi>b</mi></mrow><mo>,</mo><mrow><mi>k</mi><mo lspace="0em" rspace="0em">​</mo><mi>v</mi></mrow><mo stretchy="false">)</mo></mrow></mrow><annotation encoding="application/x-tex">[hash]\leftarrow(emb,kv)</annotation></semantics></math> <span class="ltx_text" id="alg3.l14.1" style="float:right;"><math alttext="\triangleright" class="ltx_Math" display="inline" id="alg3.l14.1.m1" intent=":literal"><semantics><mo>⊳</mo><annotation encoding="application/x-tex">\triangleright</annotation></semantics></math> Store for reuse
+</span>
+</div>
+<div class="ltx_listingline" id="alg3.l15">
+<span class="ltx_tag ltx_tag_listingline"><span class="ltx_text" id="alg3.l15.1.1.1" style="font-size:80%;">15:</span></span><span class="ltx_text ltx_font_bold" id="alg3.l15.2">return</span> <math alttext="output" class="ltx_Math" display="inline" id="alg3.l15.m1" intent=":literal"><semantics><mrow><mi>o</mi><mo lspace="0em" rspace="0em">​</mo><mi>u</mi><mo lspace="0em" rspace="0em">​</mo><mi>t</mi><mo lspace="0em" rspace="0em">​</mo><mi>p</mi><mo lspace="0em" rspace="0em">​</mo><mi>u</mi><mo lspace="0em" rspace="0em">​</mo><mi>t</mi></mrow><annotation encoding="application/x-tex">output</annotation></semantics></math>
+</div>
+</div>
+</figure>
+</section>
+<section class="ltx_paragraph" id="S3.SS3.SSS0.Px3">
+<h4 class="ltx_title ltx_title_paragraph">Memory Management.</h4>
+<div class="ltx_para" id="S3.SS3.SSS0.Px3.p1">
+<p class="ltx_p" id="S3.SS3.SSS0.Px3.p1.1">The cache maintains entries containing vision embeddings and KV cache state. We implement LRU eviction to bound memory consumption, with configurable limits (default 512MB). Higher resolution images produce larger cache entries but benefit more from caching due to increased vision encoding cost.</p>
+</div>
+</section>
+</section>
+</section>
+<section class="ltx_section" id="S4">
+<h2 class="ltx_title ltx_title_section">
+<span class="ltx_tag ltx_tag_section">4. </span>Evaluation</h2>
+<div class="ltx_para" id="S4.p1">
+<p class="ltx_p" id="S4.p1.1">We evaluate the proposed framework on text and multimodal workloads, comparing against established baselines on Apple Silicon. Our experiments answer three questions: (1) How does MLX compare to llama.cpp for text model throughput? (2) What benefits does continuous batching provide? (3) How effective is prefix caching for multimodal workloads?</p>
+</div>
+<section class="ltx_paragraph" id="S4.SS0.SSS0.Px1">
+<h4 class="ltx_title ltx_title_paragraph">Setup.</h4>
+<div class="ltx_para" id="S4.SS0.SSS0.Px1.p1">
+<p class="ltx_p" id="S4.SS0.SSS0.Px1.p1.1">All experiments run on Apple M4 Max with 128GB unified memory. We evaluate 10+ models spanning different architectures: Qwen3 <cite class="ltx_cite ltx_citemacro_citep">(Team, <a class="ltx_ref" href="https://arxiv.org/html/2601.19139v2#bib.bib14" title="">2025</a>)</cite>, Llama 3 <cite class="ltx_cite ltx_citemacro_citep">(AI, <a class="ltx_ref" href="https://arxiv.org/html/2601.19139v2#bib.bib2" title="">2024</a>)</cite>, Gemma 3 <cite class="ltx_cite ltx_citemacro_citep">(DeepMind, <a class="ltx_ref" href="https://arxiv.org/html/2601.19139v2#bib.bib5" title="">2025</a>)</cite>, GLM-4 <cite class="ltx_cite ltx_citemacro_citep">(Team, <a class="ltx_ref" href="https://arxiv.org/html/2601.19139v2#bib.bib12" title="">2024</a>)</cite>, and Nemotron <cite class="ltx_cite ltx_citemacro_citep">(NVIDIA, <a class="ltx_ref" href="https://arxiv.org/html/2601.19139v2#bib.bib10" title="">2025</a>)</cite>. All models use 4-bit quantization (Q4_K_M for GGUF, 4-bit for MLX).</p>
+</div>
+</section>
+<section class="ltx_subsection" id="S4.SS1">
+<h3 class="ltx_title ltx_title_subsection">
+<span class="ltx_tag ltx_tag_subsection">4.1. </span>Text Model Performance</h3>
+<div class="ltx_para" id="S4.SS1.p1">
+<p class="ltx_p" id="S4.SS1.p1.1">Table <a class="ltx_ref" href="https://arxiv.org/html/2601.19139v2#S4.T1" title="Table 1 ‣ 4.1. Text Model Performance ‣ 4. Evaluation ‣ Native LLM and MLLM Inference at Scale on Apple Silicon"><span class="ltx_text ltx_ref_tag">1</span></a> compares throughput across frameworks for text models ranging from 0.6B to 30B parameters. vllm-mlx achieves 21% to 87% higher throughput than llama.cpp, and consistently outperforms both vllm-metal <cite class="ltx_cite ltx_citemacro_citep">(vLLM Project, <a class="ltx_ref" href="https://arxiv.org/html/2601.19139v2#bib.bib15" title="">2024</a>)</cite> and mlx-lm through optimized continuous batching.</p>
+</div>
+<figure class="ltx_table" id="S4.T1">
+<figcaption class="ltx_caption ltx_centering"><span class="ltx_tag ltx_tag_table"><span class="ltx_text" id="S4.T1.3.1.1" style="font-size:90%;">Table 1</span>. </span><span class="ltx_text" id="S4.T1.4.2" style="font-size:90%;">Text model throughput (tok/s) on M4 Max (128GB). All models use 4-bit quantization. <span class="ltx_text ltx_font_bold" id="S4.T1.4.2.1">Bold</span> indicates best throughput per row. Speedup = Ours / llama.cpp (higher is better).</span></figcaption>
+<table class="ltx_tabular ltx_centering ltx_guessed_headers ltx_align_middle" id="S4.T1.5">
+<tbody class="ltx_tbody">
+<tr class="ltx_tr" id="S4.T1.5.1.1">
+<th class="ltx_td ltx_align_left ltx_th ltx_th_row ltx_border_tt" id="S4.T1.5.1.1.1"><span class="ltx_text ltx_font_bold" id="S4.T1.5.1.1.1.1">Model</span></th>
+<td class="ltx_td ltx_align_center ltx_border_tt" id="S4.T1.5.1.1.2"><span class="ltx_text ltx_font_bold" id="S4.T1.5.1.1.2.1">Ours</span></td>
+<td class="ltx_td ltx_align_center ltx_border_tt" id="S4.T1.5.1.1.3">
+<span class="ltx_text ltx_font_bold" id="S4.T1.5.1.1.3.1">vllm-metal</span> <cite class="ltx_cite ltx_citemacro_citep">(vLLM Project, <a class="ltx_ref" href="https://arxiv.org/html/2601.19139v2#bib.bib15" title="">2024</a>)</cite>
+</td>
+<td class="ltx_td ltx_align_center ltx_border_tt" id="S4.T1.5.1.1.4">
+<span class="ltx_text ltx_font_bold" id="S4.T1.5.1.1.4.1">mlx-lm</span> <cite class="ltx_cite ltx_citemacro_citep">(Apple, <a class="ltx_ref" href="https://arxiv.org/html/2601.19139v2#bib.bib3" title="">2023</a>)</cite>
+</td>
+<td class="ltx_td ltx_align_center ltx_border_tt" id="S4.T1.5.1.1.5">
+<span class="ltx_text ltx_font_bold" id="S4.T1.5.1.1.5.1">llama.cpp</span> <cite class="ltx_cite ltx_citemacro_citep">(Gerganov, <a class="ltx_ref" href="https://arxiv.org/html/2601.19139v2#bib.bib6" title="">2023</a>)</cite>
+</td>
+<td class="ltx_td ltx_align_center ltx_border_tt" id="S4.T1.5.1.1.6"><span class="ltx_text ltx_font_bold" id="S4.T1.5.1.1.6.1">Speedup</span></td>
+</tr>
+<tr class="ltx_tr" id="S4.T1.5.2.2">
+<th class="ltx_td ltx_align_left ltx_th ltx_th_row ltx_border_t" colspan="6" id="S4.T1.5.2.2.1"><span class="ltx_text ltx_font_italic" id="S4.T1.5.2.2.1.1">Qwen3 Family <cite class="ltx_cite ltx_citemacro_citep">(Team, <a class="ltx_ref" href="https://arxiv.org/html/2601.19139v2#bib.bib14" title="">2025</a>)</cite></span></th>
+</tr>
+<tr class="ltx_tr" id="S4.T1.5.3.3">
+<th class="ltx_td ltx_align_left ltx_th ltx_th_row" id="S4.T1.5.3.3.1">Qwen3-0.6B</th>
+<td class="ltx_td ltx_align_center" id="S4.T1.5.3.3.2"><span class="ltx_text ltx_font_bold" id="S4.T1.5.3.3.2.1">525.5</span></td>
+<td class="ltx_td ltx_align_center" id="S4.T1.5.3.3.3">365.8</td>
+<td class="ltx_td ltx_align_center" id="S4.T1.5.3.3.4">356.2</td>
+<td class="ltx_td ltx_align_center" id="S4.T1.5.3.3.5">281.5</td>
+<td class="ltx_td ltx_align_center" id="S4.T1.5.3.3.6">1.87x</td>
+</tr>
+<tr class="ltx_tr" id="S4.T1.5.4.4">
+<th class="ltx_td ltx_align_left ltx_th ltx_th_row" id="S4.T1.5.4.4.1">Qwen3-4B</th>
+<td class="ltx_td ltx_align_center" id="S4.T1.5.4.4.2"><span class="ltx_text ltx_font_bold" id="S4.T1.5.4.4.2.1">159.0</span></td>
+<td class="ltx_td ltx_align_center" id="S4.T1.5.4.4.3">137.3</td>
+<td class="ltx_td ltx_align_center" id="S4.T1.5.4.4.4">128.9</td>
+<td class="ltx_td ltx_align_center" id="S4.T1.5.4.4.5">118.2</td>
+<td class="ltx_td ltx_align_center" id="S4.T1.5.4.4.6">1.35x</td>
+</tr>
+<tr class="ltx_tr" id="S4.T1.5.5.5">
+<th class="ltx_td ltx_align_left ltx_th ltx_th_row" id="S4.T1.5.5.5.1">Qwen3-8B</th>
+<td class="ltx_td ltx_align_center" id="S4.T1.5.5.5.2"><span class="ltx_text ltx_font_bold" id="S4.T1.5.5.5.2.1">93.3</span></td>
+<td class="ltx_td ltx_align_center" id="S4.T1.5.5.5.3">87.1</td>
+<td class="ltx_td ltx_align_center" id="S4.T1.5.5.5.4">79.9</td>
+<td class="ltx_td ltx_align_center" id="S4.T1.5.5.5.5">76.9</td>
+<td class="ltx_td ltx_align_center" id="S4.T1.5.5.5.6">1.21x</td>
+</tr>
+<tr class="ltx_tr" id="S4.T1.5.6.6">
+<th class="ltx_td ltx_align_left ltx_th ltx_th_row" id="S4.T1.5.6.6.1">Qwen3-30B-A3B</th>
+<td class="ltx_td ltx_align_center" id="S4.T1.5.6.6.2">109.7</td>
+<td class="ltx_td ltx_align_center" id="S4.T1.5.6.6.3"><span class="ltx_text ltx_font_bold" id="S4.T1.5.6.6.3.1">110.3</span></td>
+<td class="ltx_td ltx_align_center" id="S4.T1.5.6.6.4">107.4</td>
+<td class="ltx_td ltx_align_center" id="S4.T1.5.6.6.5">89.9</td>
+<td class="ltx_td ltx_align_center" id="S4.T1.5.6.6.6">1.17x</td>
+</tr>
+<tr class="ltx_tr" id="S4.T1.5.7.7">
+<th class="ltx_td ltx_align_left ltx_th ltx_th_row ltx_border_t" colspan="6" id="S4.T1.5.7.7.1"><span class="ltx_text ltx_font_italic" id="S4.T1.5.7.7.1.1">Llama 3.2 Family <cite class="ltx_cite ltx_citemacro_citep">(AI, <a class="ltx_ref" href="https://arxiv.org/html/2601.19139v2#bib.bib2" title="">2024</a>)</cite></span></th>
+</tr>
+<tr class="ltx_tr" id="S4.T1.5.8.8">
+<th class="ltx_td ltx_align_left ltx_th ltx_th_row" id="S4.T1.5.8.8.1">Llama-3.2-1B</th>
+<td class="ltx_td ltx_align_center" id="S4.T1.5.8.8.2"><span class="ltx_text ltx_font_bold" id="S4.T1.5.8.8.2.1">461.9</span></td>
+<td class="ltx_td ltx_align_center" id="S4.T1.5.8.8.3">350.9</td>
+<td class="ltx_td ltx_align_center" id="S4.T1.5.8.8.4">347.1</td>
+<td class="ltx_td ltx_align_center" id="S4.T1.5.8.8.5">331.3</td>
+<td class="ltx_td ltx_align_center" id="S4.T1.5.8.8.6">1.39x</td>
+</tr>
+<tr class="ltx_tr" id="S4.T1.5.9.9">
+<th class="ltx_td ltx_align_left ltx_th ltx_th_row" id="S4.T1.5.9.9.1">Llama-3.2-3B</th>
+<td class="ltx_td ltx_align_center" id="S4.T1.5.9.9.2"><span class="ltx_text ltx_font_bold" id="S4.T1.5.9.9.2.1">203.6</span></td>
+<td class="ltx_td ltx_align_center" id="S4.T1.5.9.9.3">174.3</td>
+<td class="ltx_td ltx_align_center" id="S4.T1.5.9.9.4">167.5</td>
+<td class="ltx_td ltx_align_center" id="S4.T1.5.9.9.5">155.8</td>
+<td class="ltx_td ltx_align_center" id="S4.T1.5.9.9.6">1.31x</td>
+</tr>
+<tr class="ltx_tr" id="S4.T1.5.10.10">
+<th class="ltx_td ltx_align_left ltx_th ltx_th_row ltx_border_t" colspan="6" id="S4.T1.5.10.10.1"><span class="ltx_text ltx_font_italic" id="S4.T1.5.10.10.1.1">Other Architectures</span></th>
+</tr>
+<tr class="ltx_tr" id="S4.T1.5.11.11">
+<th class="ltx_td ltx_align_left ltx_th ltx_th_row" id="S4.T1.5.11.11.1">Gemma 3-4B <cite class="ltx_cite ltx_citemacro_citep">(DeepMind, <a class="ltx_ref" href="https://arxiv.org/html/2601.19139v2#bib.bib5" title="">2025</a>)</cite>
+</th>
+<td class="ltx_td ltx_align_center" id="S4.T1.5.11.11.2"><span class="ltx_text ltx_font_bold" id="S4.T1.5.11.11.2.1">152.5</span></td>
+<td class="ltx_td ltx_align_center" id="S4.T1.5.11.11.3">117.0</td>
+<td class="ltx_td ltx_align_center" id="S4.T1.5.11.11.4">105.4</td>
+<td class="ltx_td ltx_align_center" id="S4.T1.5.11.11.5">123.2</td>
+<td class="ltx_td ltx_align_center" id="S4.T1.5.11.11.6">1.24x</td>
+</tr>
+<tr class="ltx_tr" id="S4.T1.5.12.12">
+<th class="ltx_td ltx_align_left ltx_th ltx_th_row ltx_border_bb" id="S4.T1.5.12.12.1">Nemotron-30B-A3B <cite class="ltx_cite ltx_citemacro_citep">(NVIDIA, <a class="ltx_ref" href="https://arxiv.org/html/2601.19139v2#bib.bib10" title="">2025</a>)</cite>
+</th>
+<td class="ltx_td ltx_align_center ltx_border_bb" id="S4.T1.5.12.12.2"><span class="ltx_text ltx_font_bold" id="S4.T1.5.12.12.2.1">121.8</span></td>
+<td class="ltx_td ltx_align_center ltx_border_bb" id="S4.T1.5.12.12.3">–</td>
+<td class="ltx_td ltx_align_center ltx_border_bb" id="S4.T1.5.12.12.4">101.6</td>
+<td class="ltx_td ltx_align_center ltx_border_bb" id="S4.T1.5.12.12.5">85.1</td>
+<td class="ltx_td ltx_align_center ltx_border_bb" id="S4.T1.5.12.12.6">1.43x</td>
+</tr>
+</tbody>
+</table>
+</figure>
+<div class="ltx_para" id="S4.SS1.p2">
+<p class="ltx_p" id="S4.SS1.p2.1">For smaller models, vllm-mlx’s advantage is most pronounced (1.87x for <span class="ltx_text" id="S4.SS1.p2.1.1">Qwen3-0.6B</span>) due to MLX’s efficient small-tensor handling. For larger MoE models like <span class="ltx_text" id="S4.SS1.p2.1.2">Nemotron-30B-A3B</span>, vllm-mlx maintains a 1.43x advantage over llama.cpp.</p>
+</div>
+<section class="ltx_paragraph" id="S4.SS1.SSS0.Px1">
+<h4 class="ltx_title ltx_title_paragraph">Continuous Batching Scaling.</h4>
+<div class="ltx_para" id="S4.SS1.SSS0.Px1.p1">
+<p class="ltx_p" id="S4.SS1.SSS0.Px1.p1.1">Figure <a class="ltx_ref" href="https://arxiv.org/html/2601.19139v2#S4.F2" title="Figure 2 ‣ Continuous Batching Scaling. ‣ 4.1. Text Model Performance ‣ 4. Evaluation ‣ Native LLM and MLLM Inference at Scale on Apple Silicon"><span class="ltx_text ltx_ref_tag">2</span></a> shows how vllm-mlx scales with concurrent requests across three model sizes. Unlike llama.cpp which processes requests sequentially, continuous batching achieves significant throughput scaling.</p>
+</div>
+<figure class="ltx_figure" id="S4.F2"><img alt="Refer to caption" class="ltx_graphics ltx_centering ltx_img_landscape" height="316" id="S4.F2.g1" src="x2.png" width="830"/>
+<figcaption class="ltx_caption ltx_centering"><span class="ltx_tag ltx_tag_figure"><span class="ltx_text" id="S4.F2.2.1.1" style="font-size:90%;">Figure 2</span>. </span><span class="ltx_text" id="S4.F2.3.2" style="font-size:90%;">Concurrency scaling on vllm-mlx. (a) Aggregate throughput scales efficiently: Qwen3-0.6B achieves 3.7x higher throughput at 16 concurrent requests. (b) Request throughput (requests/sec) increases with concurrency, showing efficient batching. Qwen3-0.6B handles 25+ requests/sec at 16 concurrent connections.</span></figcaption>
+</figure>
+<div class="ltx_para" id="S4.SS1.SSS0.Px1.p2">
+<p class="ltx_p" id="S4.SS1.SSS0.Px1.p2.1">For <span class="ltx_text" id="S4.SS1.SSS0.Px1.p2.1.1">Qwen3-0.6B</span>, throughput scales from 441 tok/s (single request) to 1642 tok/s (16 concurrent), a 3.7x improvement. Larger models show diminishing returns due to memory bandwidth saturation: <span class="ltx_text" id="S4.SS1.SSS0.Px1.p2.1.2">Qwen3-8B</span> achieves 2.6x scaling. Request throughput (Figure <a class="ltx_ref" href="https://arxiv.org/html/2601.19139v2#S4.F2" title="Figure 2 ‣ Continuous Batching Scaling. ‣ 4.1. Text Model Performance ‣ 4. Evaluation ‣ Native LLM and MLLM Inference at Scale on Apple Silicon"><span class="ltx_text ltx_ref_tag">2</span></a>b) also scales efficiently: <span class="ltx_text" id="S4.SS1.SSS0.Px1.p2.1.3">Qwen3-0.6B</span> handles over 25 requests per second at 16 concurrent connections.</p>
+</div>
+</section>
+</section>
+<section class="ltx_subsection" id="S4.SS2">
+<h3 class="ltx_title ltx_title_subsection">
+<span class="ltx_tag ltx_tag_subsection">4.2. </span>Multimodal Performance</h3>
+<section class="ltx_paragraph" id="S4.SS2.SSS0.Px1">
+<h4 class="ltx_title ltx_title_paragraph">Image Prefix Cache.</h4>
+<div class="ltx_para" id="S4.SS2.SSS0.Px1.p1">
+<p class="ltx_p" id="S4.SS2.SSS0.Px1.p1.1">Table <a class="ltx_ref" href="https://arxiv.org/html/2601.19139v2#S4.T2" title="Table 2 ‣ Image Prefix Cache. ‣ 4.2. Multimodal Performance ‣ 4. Evaluation ‣ Native LLM and MLLM Inference at Scale on Apple Silicon"><span class="ltx_text ltx_ref_tag">2</span></a> demonstrates content-based prefix caching for vision embeddings. In multi-turn conversations about the same image, the cache eliminates redundant vision encoding, reducing latency from 21.7s to under 1s (28x speedup).</p>
+</div>
+<figure class="ltx_table" id="S4.T2">
+<figcaption class="ltx_caption ltx_centering"><span class="ltx_tag ltx_tag_table"><span class="ltx_text" id="S4.T2.10.4.1" style="font-size:90%;">Table 2</span>. </span><span class="ltx_text" id="S4.T2.6.3" style="font-size:90%;">Multi-turn MLLM latency with prefix caching (Qwen3-VL-8B <cite class="ltx_cite ltx_citemacro_citep">(Wang et al<span class="ltx_text">.</span>, <a class="ltx_ref" href="https://arxiv.org/html/2601.19139v2#bib.bib16" title="">2024</a>)</cite>, 1024<math alttext="\times" class="ltx_Math" display="inline" id="S4.T2.4.1.m1" intent=":literal"><semantics><mo>×</mo><annotation encoding="application/x-tex">\times</annotation></semantics></math>1024 image). Cache stores vision embeddings and KV state. Lower latency (<math alttext="\downarrow" class="ltx_Math" display="inline" id="S4.T2.5.2.m2" intent=":literal"><semantics><mo stretchy="false">↓</mo><annotation encoding="application/x-tex">\downarrow</annotation></semantics></math>) and higher speedup (<math alttext="\uparrow" class="ltx_Math" display="inline" id="S4.T2.6.3.m3" intent=":literal"><semantics><mo stretchy="false">↑</mo><annotation encoding="application/x-tex">\uparrow</annotation></semantics></math>) are better.</span></figcaption>
+<table class="ltx_tabular ltx_centering ltx_guessed_headers ltx_align_middle" id="S4.T2.8">
+<thead class="ltx_thead">
+<tr class="ltx_tr" id="S4.T2.8.2">
+<th class="ltx_td ltx_align_left ltx_th ltx_th_column ltx_th_row ltx_border_tt" id="S4.T2.8.2.3"><span class="ltx_text ltx_font_bold" id="S4.T2.8.2.3.1">Turn</span></th>
+<th class="ltx_td ltx_align_right ltx_th ltx_th_column ltx_border_tt" id="S4.T2.8.2.4"><span class="ltx_text ltx_font_bold" id="S4.T2.8.2.4.1">No Cache</span></th>
+<th class="ltx_td ltx_align_right ltx_th ltx_th_column ltx_border_tt" id="S4.T2.7.1.1">
+<span class="ltx_text ltx_font_bold" id="S4.T2.7.1.1.1">With Cache</span> (<math alttext="\downarrow" class="ltx_Math" display="inline" id="S4.T2.7.1.1.m1" intent=":literal"><semantics><mo stretchy="false">↓</mo><annotation encoding="application/x-tex">\downarrow</annotation></semantics></math>)</th>
+<th class="ltx_td ltx_align_right ltx_th ltx_th_column ltx_border_tt" id="S4.T2.8.2.2">
+<span class="ltx_text ltx_font_bold" id="S4.T2.8.2.2.1">Speedup</span> (<math alttext="\uparrow" class="ltx_Math" display="inline" id="S4.T2.8.2.2.m1" intent=":literal"><semantics><mo stretchy="false">↑</mo><annotation encoding="application/x-tex">\uparrow</annotation></semantics></math>)</th>
+</tr>
+</thead>
+<tbody class="ltx_tbody">
+<tr class="ltx_tr" id="S4.T2.8.3.1">
+<th class="ltx_td ltx_align_left ltx_th ltx_th_row ltx_border_t" id="S4.T2.8.3.1.1">1 (cold)</th>
+<td class="ltx_td ltx_align_right ltx_border_t" id="S4.T2.8.3.1.2">21.7s</td>
+<td class="ltx_td ltx_align_right ltx_border_t" id="S4.T2.8.3.1.3">21.7s</td>
+<td class="ltx_td ltx_align_right ltx_border_t" id="S4.T2.8.3.1.4">1.0x</td>
+</tr>
+<tr class="ltx_tr" id="S4.T2.8.4.2">
+<th class="ltx_td ltx_align_left ltx_th ltx_th_row" id="S4.T2.8.4.2.1">2</th>
+<td class="ltx_td ltx_align_right" id="S4.T2.8.4.2.2">21.7s</td>
+<td class="ltx_td ltx_align_right" id="S4.T2.8.4.2.3">1.15s</td>
+<td class="ltx_td ltx_align_right" id="S4.T2.8.4.2.4">19x</td>
+</tr>
+<tr class="ltx_tr" id="S4.T2.8.5.3">
+<th class="ltx_td ltx_align_left ltx_th ltx_th_row ltx_border_bb" id="S4.T2.8.5.3.1">3+</th>
+<td class="ltx_td ltx_align_right ltx_border_bb" id="S4.T2.8.5.3.2">21.7s</td>
+<td class="ltx_td ltx_align_right ltx_border_bb" id="S4.T2.8.5.3.3"><span class="ltx_text ltx_font_bold" id="S4.T2.8.5.3.3.1">0.78s</span></td>
+<td class="ltx_td ltx_align_right ltx_border_bb" id="S4.T2.8.5.3.4"><span class="ltx_text ltx_font_bold" id="S4.T2.8.5.3.4.1">28x</span></td>
+</tr>
+</tbody>
+</table>
+</figure>
+</section>
+<section class="ltx_paragraph" id="S4.SS2.SSS0.Px2">
+<h4 class="ltx_title ltx_title_paragraph">Video Performance.</h4>
+<div class="ltx_para" id="S4.SS2.SSS0.Px2.p1">
+<p class="ltx_p" id="S4.SS2.SSS0.Px2.p1.1">Table <a class="ltx_ref" href="https://arxiv.org/html/2601.19139v2#S4.T3" title="Table 3 ‣ Video Performance. ‣ 4.2. Multimodal Performance ‣ 4. Evaluation ‣ Native LLM and MLLM Inference at Scale on Apple Silicon"><span class="ltx_text ltx_ref_tag">3</span></a> shows video benchmark results across different frame configurations. Higher frame counts increase latency but provide richer temporal understanding.</p>
+</div>
+<figure class="ltx_table" id="S4.T3">
+<figcaption class="ltx_caption ltx_centering"><span class="ltx_tag ltx_tag_table"><span class="ltx_text" id="S4.T3.11.4.1" style="font-size:90%;">Table 3</span>. </span><span class="ltx_text" id="S4.T3.6.3" style="font-size:90%;">Video benchmark on Qwen3-VL-4B <cite class="ltx_cite ltx_citemacro_citep">(Wang et al<span class="ltx_text">.</span>, <a class="ltx_ref" href="https://arxiv.org/html/2601.19139v2#bib.bib16" title="">2024</a>)</cite> (10s test video). More frames improve understanding but increase processing time. Lower time (<math alttext="\downarrow" class="ltx_Math" display="inline" id="S4.T3.4.1.m1" intent=":literal"><semantics><mo stretchy="false">↓</mo><annotation encoding="application/x-tex">\downarrow</annotation></semantics></math>) and memory (<math alttext="\downarrow" class="ltx_Math" display="inline" id="S4.T3.5.2.m2" intent=":literal"><semantics><mo stretchy="false">↓</mo><annotation encoding="application/x-tex">\downarrow</annotation></semantics></math>) are better; higher tok/s (<math alttext="\uparrow" class="ltx_Math" display="inline" id="S4.T3.6.3.m3" intent=":literal"><semantics><mo stretchy="false">↑</mo><annotation encoding="application/x-tex">\uparrow</annotation></semantics></math>) is better.</span></figcaption>
+<table class="ltx_tabular ltx_centering ltx_guessed_headers ltx_align_middle" id="S4.T3.9">
+<thead class="ltx_thead">
+<tr class="ltx_tr" id="S4.T3.9.3">
+<th class="ltx_td ltx_align_left ltx_th ltx_th_column ltx_th_row ltx_border_tt" id="S4.T3.9.3.4"><span class="ltx_text ltx_font_bold" id="S4.T3.9.3.4.1" style="font-size:90%;">Config</span></th>
+<th class="ltx_td ltx_align_right ltx_th ltx_th_column ltx_th_row ltx_border_tt" id="S4.T3.9.3.5"><span class="ltx_text ltx_font_bold" id="S4.T3.9.3.5.1" style="font-size:90%;">Frames</span></th>
+<th class="ltx_td ltx_align_right ltx_th ltx_th_column ltx_border_tt" id="S4.T3.7.1.1">
+<span class="ltx_text ltx_font_bold" id="S4.T3.7.1.1.1" style="font-size:90%;">Time</span><span class="ltx_text" id="S4.T3.7.1.1.2" style="font-size:90%;"> (</span><math alttext="\downarrow" class="ltx_Math" display="inline" id="S4.T3.7.1.1.m1" intent=":literal"><semantics><mo mathsize="0.900em" stretchy="false">↓</mo><annotation encoding="application/x-tex">\downarrow</annotation></semantics></math><span class="ltx_text" id="S4.T3.7.1.1.3" style="font-size:90%;">)</span>
+</th>
+<th class="ltx_td ltx_align_right ltx_th ltx_th_column ltx_border_tt" id="S4.T3.8.2.2">
+<span class="ltx_text ltx_font_bold" id="S4.T3.8.2.2.1" style="font-size:90%;">Tok/s</span><span class="ltx_text" id="S4.T3.8.2.2.2" style="font-size:90%;"> (</span><math alttext="\uparrow" class="ltx_Math" display="inline" id="S4.T3.8.2.2.m1" intent=":literal"><semantics><mo mathsize="0.900em" stretchy="false">↑</mo><annotation encoding="application/x-tex">\uparrow</annotation></semantics></math><span class="ltx_text" id="S4.T3.8.2.2.3" style="font-size:90%;">)</span>
+</th>
+<th class="ltx_td ltx_align_right ltx_th ltx_th_column ltx_border_tt" id="S4.T3.9.3.3">
+<span class="ltx_text ltx_font_bold" id="S4.T3.9.3.3.1" style="font-size:90%;">Memory</span><span class="ltx_text" id="S4.T3.9.3.3.2" style="font-size:90%;"> (</span><math alttext="\downarrow" class="ltx_Math" display="inline" id="S4.T3.9.3.3.m1" intent=":literal"><semantics><mo mathsize="0.900em" stretchy="false">↓</mo><annotation encoding="application/x-tex">\downarrow</annotation></semantics></math><span class="ltx_text" id="S4.T3.9.3.3.3" style="font-size:90%;">)</span>
+</th>
+</tr>
+</thead>
+<tbody class="ltx_tbody">
+<tr class="ltx_tr" id="S4.T3.9.4.1">
+<th class="ltx_td ltx_align_left ltx_th ltx_th_row ltx_border_t" id="S4.T3.9.4.1.1"><span class="ltx_text" id="S4.T3.9.4.1.1.1" style="font-size:90%;">2 @ 0.5fps</span></th>
+<th class="ltx_td ltx_align_right ltx_th ltx_th_row ltx_border_t" id="S4.T3.9.4.1.2"><span class="ltx_text" id="S4.T3.9.4.1.2.1" style="font-size:90%;">2</span></th>
+<td class="ltx_td ltx_align_right ltx_border_t" id="S4.T3.9.4.1.3"><span class="ltx_text ltx_font_bold" id="S4.T3.9.4.1.3.1" style="font-size:90%;">1.8s</span></td>
+<td class="ltx_td ltx_align_right ltx_border_t" id="S4.T3.9.4.1.4"><span class="ltx_text ltx_font_bold" id="S4.T3.9.4.1.4.1" style="font-size:90%;">83.2</span></td>
+<td class="ltx_td ltx_align_right ltx_border_t" id="S4.T3.9.4.1.5"><span class="ltx_text ltx_font_bold" id="S4.T3.9.4.1.5.1" style="font-size:90%;">3.2 GB</span></td>
+</tr>
+<tr class="ltx_tr" id="S4.T3.9.5.2">
+<th class="ltx_td ltx_align_left ltx_th ltx_th_row" id="S4.T3.9.5.2.1"><span class="ltx_text" id="S4.T3.9.5.2.1.1" style="font-size:90%;">4 @ 1fps</span></th>
+<th class="ltx_td ltx_align_right ltx_th ltx_th_row" id="S4.T3.9.5.2.2"><span class="ltx_text" id="S4.T3.9.5.2.2.1" style="font-size:90%;">4</span></th>
+<td class="ltx_td ltx_align_right" id="S4.T3.9.5.2.3"><span class="ltx_text" id="S4.T3.9.5.2.3.1" style="font-size:90%;">2.4s</span></td>
+<td class="ltx_td ltx_align_right" id="S4.T3.9.5.2.4"><span class="ltx_text" id="S4.T3.9.5.2.4.1" style="font-size:90%;">62.5</span></td>
+<td class="ltx_td ltx_align_right" id="S4.T3.9.5.2.5"><span class="ltx_text" id="S4.T3.9.5.2.5.1" style="font-size:90%;">3.8 GB</span></td>
+</tr>
+<tr class="ltx_tr" id="S4.T3.9.6.3">
+<th class="ltx_td ltx_align_left ltx_th ltx_th_row" id="S4.T3.9.6.3.1"><span class="ltx_text" id="S4.T3.9.6.3.1.1" style="font-size:90%;">8 @ 2fps</span></th>
+<th class="ltx_td ltx_align_right ltx_th ltx_th_row" id="S4.T3.9.6.3.2"><span class="ltx_text" id="S4.T3.9.6.3.2.1" style="font-size:90%;">8</span></th>
+<td class="ltx_td ltx_align_right" id="S4.T3.9.6.3.3"><span class="ltx_text" id="S4.T3.9.6.3.3.1" style="font-size:90%;">3.6s</span></td>
+<td class="ltx_td ltx_align_right" id="S4.T3.9.6.3.4"><span class="ltx_text" id="S4.T3.9.6.3.4.1" style="font-size:90%;">41.7</span></td>
+<td class="ltx_td ltx_align_right" id="S4.T3.9.6.3.5"><span class="ltx_text" id="S4.T3.9.6.3.5.1" style="font-size:90%;">4.6 GB</span></td>
+</tr>
+<tr class="ltx_tr" id="S4.T3.9.7.4">
+<th class="ltx_td ltx_align_left ltx_th ltx_th_row" id="S4.T3.9.7.4.1"><span class="ltx_text" id="S4.T3.9.7.4.1.1" style="font-size:90%;">16 @ 2fps</span></th>
+<th class="ltx_td ltx_align_right ltx_th ltx_th_row" id="S4.T3.9.7.4.2"><span class="ltx_text" id="S4.T3.9.7.4.2.1" style="font-size:90%;">16</span></th>
+<td class="ltx_td ltx_align_right" id="S4.T3.9.7.4.3"><span class="ltx_text" id="S4.T3.9.7.4.3.1" style="font-size:90%;">5.8s</span></td>
+<td class="ltx_td ltx_align_right" id="S4.T3.9.7.4.4"><span class="ltx_text" id="S4.T3.9.7.4.4.1" style="font-size:90%;">25.9</span></td>
+<td class="ltx_td ltx_align_right" id="S4.T3.9.7.4.5"><span class="ltx_text" id="S4.T3.9.7.4.5.1" style="font-size:90%;">6.2 GB</span></td>
+</tr>
+<tr class="ltx_tr" id="S4.T3.9.8.5">
+<th class="ltx_td ltx_align_left ltx_th ltx_th_row" id="S4.T3.9.8.5.1"><span class="ltx_text" id="S4.T3.9.8.5.1.1" style="font-size:90%;">32 @ 4fps</span></th>
+<th class="ltx_td ltx_align_right ltx_th ltx_th_row" id="S4.T3.9.8.5.2"><span class="ltx_text" id="S4.T3.9.8.5.2.1" style="font-size:90%;">32</span></th>
+<td class="ltx_td ltx_align_right" id="S4.T3.9.8.5.3"><span class="ltx_text" id="S4.T3.9.8.5.3.1" style="font-size:90%;">9.4s</span></td>
+<td class="ltx_td ltx_align_right" id="S4.T3.9.8.5.4"><span class="ltx_text" id="S4.T3.9.8.5.4.1" style="font-size:90%;">16.0</span></td>
+<td class="ltx_td ltx_align_right" id="S4.T3.9.8.5.5"><span class="ltx_text" id="S4.T3.9.8.5.5.1" style="font-size:90%;">8.4 GB</span></td>
+</tr>
+<tr class="ltx_tr" id="S4.T3.9.9.6">
+<th class="ltx_td ltx_align_left ltx_th ltx_th_row ltx_border_bb" id="S4.T3.9.9.6.1"><span class="ltx_text" id="S4.T3.9.9.6.1.1" style="font-size:90%;">64 @ 8fps</span></th>
+<th class="ltx_td ltx_align_right ltx_th ltx_th_row ltx_border_bb" id="S4.T3.9.9.6.2"><span class="ltx_text" id="S4.T3.9.9.6.2.1" style="font-size:90%;">64</span></th>
+<td class="ltx_td ltx_align_right ltx_border_bb" id="S4.T3.9.9.6.3"><span class="ltx_text" id="S4.T3.9.9.6.3.1" style="font-size:90%;">18.2s</span></td>
+<td class="ltx_td ltx_align_right ltx_border_bb" id="S4.T3.9.9.6.4"><span class="ltx_text" id="S4.T3.9.9.6.4.1" style="font-size:90%;">8.2</span></td>
+<td class="ltx_td ltx_align_right ltx_border_bb" id="S4.T3.9.9.6.5"><span class="ltx_text" id="S4.T3.9.9.6.5.1" style="font-size:90%;">12.1 GB</span></td>
+</tr>
+</tbody>
+</table>
+</figure>
+<div class="ltx_para" id="S4.SS2.SSS0.Px2.p2">
+<p class="ltx_p" id="S4.SS2.SSS0.Px2.p2.1">Video caching follows the same content-based approach: identical video frames map to the same cache entries, enabling speedups for repeated video analysis.</p>
+</div>
+</section>
+</section>
+<section class="ltx_subsection" id="S4.SS3">
+<h3 class="ltx_title ltx_title_subsection">
+<span class="ltx_tag ltx_tag_subsection">4.3. </span>Ablation Studies</h3>
+<div class="ltx_para" id="S4.SS3.p1">
+<p class="ltx_p" id="S4.SS3.p1.1">We conduct ablation studies on vllm-mlx to understand the contribution of each component.</p>
+</div>
+<section class="ltx_paragraph" id="S4.SS3.SSS0.Px1">
+<h4 class="ltx_title ltx_title_paragraph">Cache Components.</h4>
+<div class="ltx_para" id="S4.SS3.SSS0.Px1.p1">
+<p class="ltx_p" id="S4.SS3.SSS0.Px1.p1.1">Table <a class="ltx_ref" href="https://arxiv.org/html/2601.19139v2#S4.T4" title="Table 4 ‣ Cache Components. ‣ 4.3. Ablation Studies ‣ 4. Evaluation ‣ Native LLM and MLLM Inference at Scale on Apple Silicon"><span class="ltx_text ltx_ref_tag">4</span></a> shows the contribution of vision embeddings vs KV cache to the overall speedup.</p>
+</div>
+<figure class="ltx_table" id="S4.T4">
+<figcaption class="ltx_caption ltx_centering"><span class="ltx_tag ltx_tag_table"><span class="ltx_text" id="S4.T4.10.4.1" style="font-size:90%;">Table 4</span>. </span><span class="ltx_text" id="S4.T4.6.3" style="font-size:90%;">Ablation: Cache component contribution (Qwen3-VL-8B <cite class="ltx_cite ltx_citemacro_citep">(Wang et al<span class="ltx_text">.</span>, <a class="ltx_ref" href="https://arxiv.org/html/2601.19139v2#bib.bib16" title="">2024</a>)</cite>, 1024<math alttext="\times" class="ltx_Math" display="inline" id="S4.T4.4.1.m1" intent=":literal"><semantics><mo>×</mo><annotation encoding="application/x-tex">\times</annotation></semantics></math>1024, Turn 2). Lower latency (<math alttext="\downarrow" class="ltx_Math" display="inline" id="S4.T4.5.2.m2" intent=":literal"><semantics><mo stretchy="false">↓</mo><annotation encoding="application/x-tex">\downarrow</annotation></semantics></math>) and higher speedup (<math alttext="\uparrow" class="ltx_Math" display="inline" id="S4.T4.6.3.m3" intent=":literal"><semantics><mo stretchy="false">↑</mo><annotation encoding="application/x-tex">\uparrow</annotation></semantics></math>) are better.</span></figcaption>
+<table class="ltx_tabular ltx_centering ltx_guessed_headers ltx_align_middle" id="S4.T4.8">
+<thead class="ltx_thead">
+<tr class="ltx_tr" id="S4.T4.8.2">
+<th class="ltx_td ltx_align_left ltx_th ltx_th_column ltx_th_row ltx_border_tt" id="S4.T4.8.2.3"><span class="ltx_text ltx_font_bold" id="S4.T4.8.2.3.1">Configuration</span></th>
+<th class="ltx_td ltx_align_right ltx_th ltx_th_column ltx_border_tt" id="S4.T4.7.1.1">
+<span class="ltx_text ltx_font_bold" id="S4.T4.7.1.1.1">Latency</span> (<math alttext="\downarrow" class="ltx_Math" display="inline" id="S4.T4.7.1.1.m1" intent=":literal"><semantics><mo stretchy="false">↓</mo><annotation encoding="application/x-tex">\downarrow</annotation></semantics></math>)</th>
+<th class="ltx_td ltx_align_right ltx_th ltx_th_column ltx_border_tt" id="S4.T4.8.2.2">
+<span class="ltx_text ltx_font_bold" id="S4.T4.8.2.2.1">Speedup</span> (<math alttext="\uparrow" class="ltx_Math" display="inline" id="S4.T4.8.2.2.m1" intent=":literal"><semantics><mo stretchy="false">↑</mo><annotation encoding="application/x-tex">\uparrow</annotation></semantics></math>)</th>
+</tr>
+</thead>
+<tbody class="ltx_tbody">
+<tr class="ltx_tr" id="S4.T4.8.3.1">
+<th class="ltx_td ltx_align_left ltx_th ltx_th_row ltx_border_t" id="S4.T4.8.3.1.1">No caching (baseline)</th>
+<td class="ltx_td ltx_align_right ltx_border_t" id="S4.T4.8.3.1.2">21.7s</td>
+<td class="ltx_td ltx_align_right ltx_border_t" id="S4.T4.8.3.1.3">1.0x</td>
+</tr>
+<tr class="ltx_tr" id="S4.T4.8.4.2">
+<th class="ltx_td ltx_align_left ltx_th ltx_th_row" id="S4.T4.8.4.2.1">Vision embeddings only</th>
+<td class="ltx_td ltx_align_right" id="S4.T4.8.4.2.2">2.8s</td>
+<td class="ltx_td ltx_align_right" id="S4.T4.8.4.2.3">7.8x</td>
+</tr>
+<tr class="ltx_tr" id="S4.T4.8.5.3">
+<th class="ltx_td ltx_align_left ltx_th ltx_th_row" id="S4.T4.8.5.3.1">KV cache only</th>
+<td class="ltx_td ltx_align_right" id="S4.T4.8.5.3.2">18.2s</td>
+<td class="ltx_td ltx_align_right" id="S4.T4.8.5.3.3">1.2x</td>
+</tr>
+<tr class="ltx_tr" id="S4.T4.8.6.4">
+<th class="ltx_td ltx_align_left ltx_th ltx_th_row ltx_border_bb" id="S4.T4.8.6.4.1">Both (full cache)</th>
+<td class="ltx_td ltx_align_right ltx_border_bb" id="S4.T4.8.6.4.2"><span class="ltx_text ltx_font_bold" id="S4.T4.8.6.4.2.1">1.15s</span></td>
+<td class="ltx_td ltx_align_right ltx_border_bb" id="S4.T4.8.6.4.3"><span class="ltx_text ltx_font_bold" id="S4.T4.8.6.4.3.1">19x</span></td>
+</tr>
+</tbody>
+</table>
+</figure>
+<div class="ltx_para" id="S4.SS3.SSS0.Px1.p2">
+<p class="ltx_p" id="S4.SS3.SSS0.Px1.p2.1">Vision embedding caching provides 7.8x speedup by eliminating the vision encoder forward pass. KV cache reuse adds 2.4x by skipping prompt processing. Combined: 19x speedup.</p>
+</div>
+</section>
+<section class="ltx_paragraph" id="S4.SS3.SSS0.Px2">
+<h4 class="ltx_title ltx_title_paragraph">Image Resolution Impact.</h4>
+<div class="ltx_para" id="S4.SS3.SSS0.Px2.p1">
+<p class="ltx_p" id="S4.SS3.SSS0.Px2.p1.1">Table <a class="ltx_ref" href="https://arxiv.org/html/2601.19139v2#S4.T5" title="Table 5 ‣ Image Resolution Impact. ‣ 4.3. Ablation Studies ‣ 4. Evaluation ‣ Native LLM and MLLM Inference at Scale on Apple Silicon"><span class="ltx_text ltx_ref_tag">5</span></a> shows cache effectiveness vs resolution. Higher resolutions benefit more from caching.</p>
+</div>
+<figure class="ltx_table" id="S4.T5">
+<figcaption class="ltx_caption ltx_centering"><span class="ltx_tag ltx_tag_table"><span class="ltx_text" id="S4.T5.15.4.1" style="font-size:90%;">Table 5</span>. </span><span class="ltx_text" id="S4.T5.6.3" style="font-size:90%;">Ablation: Cache effectiveness vs image resolution (Qwen3-VL-4B <cite class="ltx_cite ltx_citemacro_citep">(Wang et al<span class="ltx_text">.</span>, <a class="ltx_ref" href="https://arxiv.org/html/2601.19139v2#bib.bib16" title="">2024</a>)</cite>). Lower cached latency (<math alttext="\downarrow" class="ltx_Math" display="inline" id="S4.T5.4.1.m1" intent=":literal"><semantics><mo stretchy="false">↓</mo><annotation encoding="application/x-tex">\downarrow</annotation></semantics></math>) and cache size (<math alttext="\downarrow" class="ltx_Math" display="inline" id="S4.T5.5.2.m2" intent=":literal"><semantics><mo stretchy="false">↓</mo><annotation encoding="application/x-tex">\downarrow</annotation></semantics></math>) are better; higher speedup (<math alttext="\uparrow" class="ltx_Math" display="inline" id="S4.T5.6.3.m3" intent=":literal"><semantics><mo stretchy="false">↑</mo><annotation encoding="application/x-tex">\uparrow</annotation></semantics></math>) is better.</span></figcaption>
+<table class="ltx_tabular ltx_centering ltx_guessed_headers ltx_align_middle" id="S4.T5.13">
+<thead class="ltx_thead">
+<tr class="ltx_tr" id="S4.T5.9.3">
+<th class="ltx_td ltx_align_left ltx_th ltx_th_column ltx_th_row ltx_border_tt" id="S4.T5.9.3.4"><span class="ltx_text ltx_font_bold" id="S4.T5.9.3.4.1">Resolution</span></th>
+<th class="ltx_td ltx_align_right ltx_th ltx_th_column ltx_border_tt" id="S4.T5.9.3.5"><span class="ltx_text ltx_font_bold" id="S4.T5.9.3.5.1">Cold</span></th>
+<th class="ltx_td ltx_align_right ltx_th ltx_th_column ltx_border_tt" id="S4.T5.7.1.1">
+<span class="ltx_text ltx_font_bold" id="S4.T5.7.1.1.1">Cached</span> (<math alttext="\downarrow" class="ltx_Math" display="inline" id="S4.T5.7.1.1.m1" intent=":literal"><semantics><mo stretchy="false">↓</mo><annotation encoding="application/x-tex">\downarrow</annotation></semantics></math>)</th>
+<th class="ltx_td ltx_align_right ltx_th ltx_th_column ltx_border_tt" id="S4.T5.8.2.2">
+<span class="ltx_text ltx_font_bold" id="S4.T5.8.2.2.1">Speedup</span> (<math alttext="\uparrow" class="ltx_Math" display="inline" id="S4.T5.8.2.2.m1" intent=":literal"><semantics><mo stretchy="false">↑</mo><annotation encoding="application/x-tex">\uparrow</annotation></semantics></math>)</th>
+<th class="ltx_td ltx_align_right ltx_th ltx_th_column ltx_border_tt" id="S4.T5.9.3.3">
+<span class="ltx_text ltx_font_bold" id="S4.T5.9.3.3.1">Cache</span> (<math alttext="\downarrow" class="ltx_Math" display="inline" id="S4.T5.9.3.3.m1" intent=":literal"><semantics><mo stretchy="false">↓</mo><annotation encoding="application/x-tex">\downarrow</annotation></semantics></math>)</th>
+</tr>
+</thead>
+<tbody class="ltx_tbody">
+<tr class="ltx_tr" id="S4.T5.10.4">
+<th class="ltx_td ltx_align_left ltx_th ltx_th_row ltx_border_t" id="S4.T5.10.4.1">224<math alttext="\times" class="ltx_Math" display="inline" id="S4.T5.10.4.1.m1" intent=":literal"><semantics><mo>×</mo><annotation encoding="application/x-tex">\times</annotation></semantics></math>224</th>
+<td class="ltx_td ltx_align_right ltx_border_t" id="S4.T5.10.4.2">0.8s</td>
+<td class="ltx_td ltx_align_right ltx_border_t" id="S4.T5.10.4.3"><span class="ltx_text ltx_font_bold" id="S4.T5.10.4.3.1">0.12s</span></td>
+<td class="ltx_td ltx_align_right ltx_border_t" id="S4.T5.10.4.4">6.7x</td>
+<td class="ltx_td ltx_align_right ltx_border_t" id="S4.T5.10.4.5"><span class="ltx_text ltx_font_bold" id="S4.T5.10.4.5.1">48 MB</span></td>
+</tr>
+<tr class="ltx_tr" id="S4.T5.11.5">
+<th class="ltx_td ltx_align_left ltx_th ltx_th_row" id="S4.T5.11.5.1">448<math alttext="\times" class="ltx_Math" display="inline" id="S4.T5.11.5.1.m1" intent=":literal"><semantics><mo>×</mo><annotation encoding="application/x-tex">\times</annotation></semantics></math>448</th>
+<td class="ltx_td ltx_align_right" id="S4.T5.11.5.2">1.2s</td>
+<td class="ltx_td ltx_align_right" id="S4.T5.11.5.3">0.14s</td>
+<td class="ltx_td ltx_align_right" id="S4.T5.11.5.4">8.6x</td>
+<td class="ltx_td ltx_align_right" id="S4.T5.11.5.5">89 MB</td>
+</tr>
+<tr class="ltx_tr" id="S4.T5.12.6">
+<th class="ltx_td ltx_align_left ltx_th ltx_th_row" id="S4.T5.12.6.1">768<math alttext="\times" class="ltx_Math" display="inline" id="S4.T5.12.6.1.m1" intent=":literal"><semantics><mo>×</mo><annotation encoding="application/x-tex">\times</annotation></semantics></math>768</th>
+<td class="ltx_td ltx_align_right" id="S4.T5.12.6.2">1.8s</td>
+<td class="ltx_td ltx_align_right" id="S4.T5.12.6.3">0.15s</td>
+<td class="ltx_td ltx_align_right" id="S4.T5.12.6.4">12.0x</td>
+<td class="ltx_td ltx_align_right" id="S4.T5.12.6.5">124 MB</td>
+</tr>
+<tr class="ltx_tr" id="S4.T5.13.7">
+<th class="ltx_td ltx_align_left ltx_th ltx_th_row ltx_border_bb" id="S4.T5.13.7.1">1024<math alttext="\times" class="ltx_Math" display="inline" id="S4.T5.13.7.1.m1" intent=":literal"><semantics><mo>×</mo><annotation encoding="application/x-tex">\times</annotation></semantics></math>1024</th>
+<td class="ltx_td ltx_align_right ltx_border_bb" id="S4.T5.13.7.2">2.1s</td>
+<td class="ltx_td ltx_align_right ltx_border_bb" id="S4.T5.13.7.3">0.16s</td>
+<td class="ltx_td ltx_align_right ltx_border_bb" id="S4.T5.13.7.4"><span class="ltx_text ltx_font_bold" id="S4.T5.13.7.4.1">13.1x</span></td>
+<td class="ltx_td ltx_align_right ltx_border_bb" id="S4.T5.13.7.5">156 MB</td>
+</tr>
+</tbody>
+</table>
+</figure>
+</section>
+<section class="ltx_paragraph" id="S4.SS3.SSS0.Px3">
+<h4 class="ltx_title ltx_title_paragraph">Video Frame Count Impact.</h4>
+<div class="ltx_para" id="S4.SS3.SSS0.Px3.p1">
+<p class="ltx_p" id="S4.SS3.SSS0.Px3.p1.1">Table <a class="ltx_ref" href="https://arxiv.org/html/2601.19139v2#S4.T6" title="Table 6 ‣ Video Frame Count Impact. ‣ 4.3. Ablation Studies ‣ 4. Evaluation ‣ Native LLM and MLLM Inference at Scale on Apple Silicon"><span class="ltx_text ltx_ref_tag">6</span></a> shows how video caching scales with frame count.</p>
+</div>
+<figure class="ltx_table" id="S4.T6">
+<figcaption class="ltx_caption ltx_centering"><span class="ltx_tag ltx_tag_table"><span class="ltx_text" id="S4.T6.11.4.1" style="font-size:90%;">Table 6</span>. </span><span class="ltx_text" id="S4.T6.6.3" style="font-size:90%;">Ablation: Video cache effectiveness vs frame count (Qwen3-VL-4B <cite class="ltx_cite ltx_citemacro_citep">(Wang et al<span class="ltx_text">.</span>, <a class="ltx_ref" href="https://arxiv.org/html/2601.19139v2#bib.bib16" title="">2024</a>)</cite>). Lower cached latency (<math alttext="\downarrow" class="ltx_Math" display="inline" id="S4.T6.4.1.m1" intent=":literal"><semantics><mo stretchy="false">↓</mo><annotation encoding="application/x-tex">\downarrow</annotation></semantics></math>) and cache size (<math alttext="\downarrow" class="ltx_Math" display="inline" id="S4.T6.5.2.m2" intent=":literal"><semantics><mo stretchy="false">↓</mo><annotation encoding="application/x-tex">\downarrow</annotation></semantics></math>) are better; higher speedup (<math alttext="\uparrow" class="ltx_Math" display="inline" id="S4.T6.6.3.m3" intent=":literal"><semantics><mo stretchy="false">↑</mo><annotation encoding="application/x-tex">\uparrow</annotation></semantics></math>) is better.</span></figcaption>
+<table class="ltx_tabular ltx_centering ltx_guessed_headers ltx_align_middle" id="S4.T6.9">
+<thead class="ltx_thead">
+<tr class="ltx_tr" id="S4.T6.9.3">
+<th class="ltx_td ltx_align_left ltx_th ltx_th_column ltx_th_row ltx_border_tt" id="S4.T6.9.3.4"><span class="ltx_text ltx_font_bold" id="S4.T6.9.3.4.1">Frames</span></th>
+<th class="ltx_td ltx_align_right ltx_th ltx_th_column ltx_border_tt" id="S4.T6.9.3.5"><span class="ltx_text ltx_font_bold" id="S4.T6.9.3.5.1">Cold</span></th>
+<th class="ltx_td ltx_align_right ltx_th ltx_th_column ltx_border_tt" id="S4.T6.7.1.1">
+<span class="ltx_text ltx_font_bold" id="S4.T6.7.1.1.1">Cached</span> (<math alttext="\downarrow" class="ltx_Math" display="inline" id="S4.T6.7.1.1.m1" intent=":literal"><semantics><mo stretchy="false">↓</mo><annotation encoding="application/x-tex">\downarrow</annotation></semantics></math>)</th>
+<th class="ltx_td ltx_align_right ltx_th ltx_th_column ltx_border_tt" id="S4.T6.8.2.2">
+<span class="ltx_text ltx_font_bold" id="S4.T6.8.2.2.1">Speedup</span> (<math alttext="\uparrow" class="ltx_Math" display="inline" id="S4.T6.8.2.2.m1" intent=":literal"><semantics><mo stretchy="false">↑</mo><annotation encoding="application/x-tex">\uparrow</annotation></semantics></math>)</th>
+<th class="ltx_td ltx_align_right ltx_th ltx_th_column ltx_border_tt" id="S4.T6.9.3.3">
+<span class="ltx_text ltx_font_bold" id="S4.T6.9.3.3.1">Cache</span> (<math alttext="\downarrow" class="ltx_Math" display="inline" id="S4.T6.9.3.3.m1" intent=":literal"><semantics><mo stretchy="false">↓</mo><annotation encoding="application/x-tex">\downarrow</annotation></semantics></math>)</th>
+</tr>
+</thead>
+<tbody class="ltx_tbody">
+<tr class="ltx_tr" id="S4.T6.9.4.1">
+<th class="ltx_td ltx_align_left ltx_th ltx_th_row ltx_border_t" id="S4.T6.9.4.1.1">4</th>
+<td class="ltx_td ltx_align_right ltx_border_t" id="S4.T6.9.4.1.2">2.4s</td>
+<td class="ltx_td ltx_align_right ltx_border_t" id="S4.T6.9.4.1.3"><span class="ltx_text ltx_font_bold" id="S4.T6.9.4.1.3.1">0.18s</span></td>
+<td class="ltx_td ltx_align_right ltx_border_t" id="S4.T6.9.4.1.4">13.3x</td>
+<td class="ltx_td ltx_align_right ltx_border_t" id="S4.T6.9.4.1.5"><span class="ltx_text ltx_font_bold" id="S4.T6.9.4.1.5.1">86 MB</span></td>
+</tr>
+<tr class="ltx_tr" id="S4.T6.9.5.2">
+<th class="ltx_td ltx_align_left ltx_th ltx_th_row" id="S4.T6.9.5.2.1">8</th>
+<td class="ltx_td ltx_align_right" id="S4.T6.9.5.2.2">3.6s</td>
+<td class="ltx_td ltx_align_right" id="S4.T6.9.5.2.3">0.22s</td>
+<td class="ltx_td ltx_align_right" id="S4.T6.9.5.2.4">16.4x</td>
+<td class="ltx_td ltx_align_right" id="S4.T6.9.5.2.5">142 MB</td>
+</tr>
+<tr class="ltx_tr" id="S4.T6.9.6.3">
+<th class="ltx_td ltx_align_left ltx_th ltx_th_row" id="S4.T6.9.6.3.1">16</th>
+<td class="ltx_td ltx_align_right" id="S4.T6.9.6.3.2">5.8s</td>
+<td class="ltx_td ltx_align_right" id="S4.T6.9.6.3.3">0.28s</td>
+<td class="ltx_td ltx_align_right" id="S4.T6.9.6.3.4">20.7x</td>
+<td class="ltx_td ltx_align_right" id="S4.T6.9.6.3.5">256 MB</td>
+</tr>
+<tr class="ltx_tr" id="S4.T6.9.7.4">
+<th class="ltx_td ltx_align_left ltx_th ltx_th_row ltx_border_bb" id="S4.T6.9.7.4.1">32</th>
+<td class="ltx_td ltx_align_right ltx_border_bb" id="S4.T6.9.7.4.2">9.4s</td>
+<td class="ltx_td ltx_align_right ltx_border_bb" id="S4.T6.9.7.4.3">0.38s</td>
+<td class="ltx_td ltx_align_right ltx_border_bb" id="S4.T6.9.7.4.4"><span class="ltx_text ltx_font_bold" id="S4.T6.9.7.4.4.1">24.7x</span></td>
+<td class="ltx_td ltx_align_right ltx_border_bb" id="S4.T6.9.7.4.5">486 MB</td>
+</tr>
+</tbody>
+</table>
+</figure>
+<div class="ltx_para" id="S4.SS3.SSS0.Px3.p2">
+<p class="ltx_p" id="S4.SS3.SSS0.Px3.p2.1">Video caching becomes increasingly valuable with more frames: 32-frame videos achieve 24.7x speedup on cache hits despite larger cache entries.</p>
+</div>
+</section>
+<section class="ltx_paragraph" id="S4.SS3.SSS0.Px4">
+<h4 class="ltx_title ltx_title_paragraph">Text Prefix Caching.</h4>
+<div class="ltx_para" id="S4.SS3.SSS0.Px4.p1">
+<p class="ltx_p" id="S4.SS3.SSS0.Px4.p1.1">For text-only workloads, KV cache reuse also provides significant benefits. Table <a class="ltx_ref" href="https://arxiv.org/html/2601.19139v2#S4.T7" title="Table 7 ‣ Text Prefix Caching. ‣ 4.3. Ablation Studies ‣ 4. Evaluation ‣ Native LLM and MLLM Inference at Scale on Apple Silicon"><span class="ltx_text ltx_ref_tag">7</span></a> shows speedup for repeated prompts with shared prefixes.</p>
+</div>
+<figure class="ltx_table" id="S4.T7">
+<figcaption class="ltx_caption ltx_centering"><span class="ltx_tag ltx_tag_table"><span class="ltx_text" id="S4.T7.8.3.1" style="font-size:90%;">Table 7</span>. </span><span class="ltx_text" id="S4.T7.4.2" style="font-size:90%;">Ablation: Text prefix caching (Qwen3-4B <cite class="ltx_cite ltx_citemacro_citep">(Team, <a class="ltx_ref" href="https://arxiv.org/html/2601.19139v2#bib.bib14" title="">2025</a>)</cite>, 512-token shared prefix). Lower TTFT (<math alttext="\downarrow" class="ltx_Math" display="inline" id="S4.T7.3.1.m1" intent=":literal"><semantics><mo stretchy="false">↓</mo><annotation encoding="application/x-tex">\downarrow</annotation></semantics></math>) and higher speedup (<math alttext="\uparrow" class="ltx_Math" display="inline" id="S4.T7.4.2.m2" intent=":literal"><semantics><mo stretchy="false">↑</mo><annotation encoding="application/x-tex">\uparrow</annotation></semantics></math>) are better.</span></figcaption>
+<table class="ltx_tabular ltx_centering ltx_guessed_headers ltx_align_middle" id="S4.T7.6">
+<thead class="ltx_thead">
+<tr class="ltx_tr" id="S4.T7.6.2">
+<th class="ltx_td ltx_align_left ltx_th ltx_th_column ltx_th_row ltx_border_tt" id="S4.T7.6.2.3"><span class="ltx_text ltx_font_bold" id="S4.T7.6.2.3.1">Configuration</span></th>
+<th class="ltx_td ltx_align_right ltx_th ltx_th_column ltx_border_tt" id="S4.T7.5.1.1">
+<span class="ltx_text ltx_font_bold" id="S4.T7.5.1.1.1">TTFT</span> (<math alttext="\downarrow" class="ltx_Math" display="inline" id="S4.T7.5.1.1.m1" intent=":literal"><semantics><mo stretchy="false">↓</mo><annotation encoding="application/x-tex">\downarrow</annotation></semantics></math>)</th>
+<th class="ltx_td ltx_align_right ltx_th ltx_th_column ltx_border_tt" id="S4.T7.6.2.2">
+<span class="ltx_text ltx_font_bold" id="S4.T7.6.2.2.1">Speedup</span> (<math alttext="\uparrow" class="ltx_Math" display="inline" id="S4.T7.6.2.2.m1" intent=":literal"><semantics><mo stretchy="false">↑</mo><annotation encoding="application/x-tex">\uparrow</annotation></semantics></math>)</th>
+</tr>
+</thead>
+<tbody class="ltx_tbody">
+<tr class="ltx_tr" id="S4.T7.6.3.1">
+<th class="ltx_td ltx_align_left ltx_th ltx_th_row ltx_border_t" id="S4.T7.6.3.1.1">No caching (baseline)</th>
+<td class="ltx_td ltx_align_right ltx_border_t" id="S4.T7.6.3.1.2">245 ms</td>
+<td class="ltx_td ltx_align_right ltx_border_t" id="S4.T7.6.3.1.3">1.0x</td>
+</tr>
+<tr class="ltx_tr" id="S4.T7.6.4.2">
+<th class="ltx_td ltx_align_left ltx_th ltx_th_row ltx_border_bb" id="S4.T7.6.4.2.1">Prefix cache hit</th>
+<td class="ltx_td ltx_align_right ltx_border_bb" id="S4.T7.6.4.2.2"><span class="ltx_text ltx_font_bold" id="S4.T7.6.4.2.2.1">42 ms</span></td>
+<td class="ltx_td ltx_align_right ltx_border_bb" id="S4.T7.6.4.2.3"><span class="ltx_text ltx_font_bold" id="S4.T7.6.4.2.3.1">5.8x</span></td>
+</tr>
+</tbody>
+</table>
+</figure>
+<div class="ltx_para" id="S4.SS3.SSS0.Px4.p2">
+<p class="ltx_p" id="S4.SS3.SSS0.Px4.p2.1">Text prefix caching achieves 5.8x speedup on TTFT by reusing KV cache from previously processed prompts with matching prefixes.</p>
+</div>
+</section>
+</section>
+<section class="ltx_subsection" id="S4.SS4">
+<h3 class="ltx_title ltx_title_subsection">
+<span class="ltx_tag ltx_tag_subsection">4.4. </span>Discussion</h3>
+<section class="ltx_paragraph" id="S4.SS4.SSS0.Px1">
+<h4 class="ltx_title ltx_title_paragraph">Why MLX Outperforms llama.cpp.</h4>
+<div class="ltx_para" id="S4.SS4.SSS0.Px1.p1">
+<p class="ltx_p" id="S4.SS4.SSS0.Px1.p1.1">Our results show vllm-mlx consistently exceeds llama.cpp throughput by 21% to 87%. We attribute this to three factors: (1) MLX’s native unified memory design enables zero-copy tensor operations, avoiding the memory transfer overhead present in llama.cpp’s Metal backend; (2) MLX’s lazy evaluation allows operation fusion and reduces kernel launch overhead; (3) our continuous batching scheduler maximizes GPU utilization by processing multiple sequences simultaneously.</p>
+</div>
+</section>
+<section class="ltx_paragraph" id="S4.SS4.SSS0.Px2">
+<h4 class="ltx_title ltx_title_paragraph">When to Use vllm-mlx.</h4>
+<div class="ltx_para" id="S4.SS4.SSS0.Px2.p1">
+<p class="ltx_p" id="S4.SS4.SSS0.Px2.p1.1">For single-user scenarios requiring maximum simplicity, llama.cpp remains a strong choice with its broad model support and minimal dependencies. However, vllm-mlx is preferred when: (1) serving multiple concurrent users, where continuous batching provides up to 3.7x throughput scaling; (2) multimodal applications with repeated image/video analysis, where prefix caching eliminates redundant encoding; (3) applications requiring an OpenAI-compatible API for drop-in replacement of cloud services.</p>
+</div>
+</section>
+<section class="ltx_paragraph" id="S4.SS4.SSS0.Px3">
+<h4 class="ltx_title ltx_title_paragraph">Enabling Local AI Agents.</h4>
+<div class="ltx_para" id="S4.SS4.SSS0.Px3.p1">
+<p class="ltx_p" id="S4.SS4.SSS0.Px3.p1.1">The combination of continuous batching and efficient concurrency scaling opens new possibilities for local AI agent systems. Multi-agent architectures, where several specialized agents collaborate on complex tasks, typically require multiple concurrent LLM calls. Cloud-based deployments incur latency penalties from network round-trips and API rate limits. With vllm-mlx handling 25+ requests per second on consumer hardware (Figure <a class="ltx_ref" href="https://arxiv.org/html/2601.19139v2#S4.F2" title="Figure 2 ‣ Continuous Batching Scaling. ‣ 4.1. Text Model Performance ‣ 4. Evaluation ‣ Native LLM and MLLM Inference at Scale on Apple Silicon"><span class="ltx_text ltx_ref_tag">2</span></a>b), developers can deploy agent swarms entirely on-device. This enables privacy-preserving agent workflows where sensitive data never leaves the local machine, real-time agent collaboration without network latency, and cost-effective development iterations without API charges. The OpenAI-compatible API ensures existing agent frameworks (LangChain <cite class="ltx_cite ltx_citemacro_citep">(Chase, <a class="ltx_ref" href="https://arxiv.org/html/2601.19139v2#bib.bib4" title="">2023</a>)</cite>, AutoGPT <cite class="ltx_cite ltx_citemacro_citep">(Richards, <a class="ltx_ref" href="https://arxiv.org/html/2601.19139v2#bib.bib11" title="">2023</a>)</cite>, CrewAI <cite class="ltx_cite ltx_citemacro_citep">(Moura, <a class="ltx_ref" href="https://arxiv.org/html/2601.19139v2#bib.bib9" title="">2024</a>)</cite>) work without modification.</p>
+</div>
+</section>
+<section class="ltx_paragraph" id="S4.SS4.SSS0.Px4">
+<h4 class="ltx_title ltx_title_paragraph">Limitations and Future Work.</h4>
+<div class="ltx_para" id="S4.SS4.SSS0.Px4.p1">
+<p class="ltx_p" id="S4.SS4.SSS0.Px4.p1.1">Our framework currently supports only Apple Silicon, limiting deployment to macOS environments. Model support depends on MLX community. Future directions include speculative decoding for improved single-stream latency, distributed inference across multiple Apple Silicon devices via network-connected Mac clusters, and energy profiling for battery-powered deployments. We also plan to extend our caching approach to audio modalities for speech-enabled multimodal applications, and explore tensor parallelism across the GPU cores available in higher-end Apple Silicon configurations.</p>
+</div>
+</section>
+</section>
+</section>
+<section class="ltx_section" id="S5">
+<h2 class="ltx_title ltx_title_section">
+<span class="ltx_tag ltx_tag_section">5. </span>Related Work</h2>
+<section class="ltx_paragraph" id="S5.SS0.SSS0.Px1">
+<h4 class="ltx_title ltx_title_paragraph">KV Cache Optimization.</h4>
+<div class="ltx_para" id="S5.SS0.SSS0.Px1.p1">
+<p class="ltx_p" id="S5.SS0.SSS0.Px1.p1.1">Efficient management of the key-value cache has been a focus of recent LLM serving research. PagedAttention <cite class="ltx_cite ltx_citemacro_citep">(Kwon et al<span class="ltx_text">.</span>, <a class="ltx_ref" href="https://arxiv.org/html/2601.19139v2#bib.bib7" title="">2023</a>)</cite> introduced memory-efficient KV cache management through paging, enabling higher throughput in vLLM. SGLang <cite class="ltx_cite ltx_citemacro_citep">(Zheng et al<span class="ltx_text">.</span>, <a class="ltx_ref" href="https://arxiv.org/html/2601.19139v2#bib.bib17" title="">2023</a>)</cite> extended this with RadixAttention for prefix caching in text workloads. Our work builds on these foundations, extending prefix caching to multimodal inputs with vision embedding reuse.</p>
+</div>
+</section>
+<section class="ltx_paragraph" id="S5.SS0.SSS0.Px2">
+<h4 class="ltx_title ltx_title_paragraph">Multimodal Caching.</h4>
+<div class="ltx_para" id="S5.SS0.SSS0.Px2.p1">
+<p class="ltx_p" id="S5.SS0.SSS0.Px2.p1.1">LMCache <cite class="ltx_cite ltx_citemacro_citep">(Liu et al<span class="ltx_text">.</span>, <a class="ltx_ref" href="https://arxiv.org/html/2601.19139v2#bib.bib8" title="">2024</a>)</cite> recently introduced KV cache reuse for multimodal models in vLLM, achieving significant speedups on NVIDIA GPUs. Their approach uses mm_hashes to identify identical vision inputs. Our work addresses the same problem for Apple Silicon, with a native MLX implementation that leverages unified memory for zero-copy caching. While LMCache operates as an external layer atop vLLM, our approach integrates caching directly into the inference engine.</p>
+</div>
+</section>
+<section class="ltx_paragraph" id="S5.SS0.SSS0.Px3">
+<h4 class="ltx_title ltx_title_paragraph">Apple Silicon ML Inference.</h4>
+<div class="ltx_para" id="S5.SS0.SSS0.Px3.p1">
+<p class="ltx_p" id="S5.SS0.SSS0.Px3.p1.1">MLX <cite class="ltx_cite ltx_citemacro_citep">(Apple, <a class="ltx_ref" href="https://arxiv.org/html/2601.19139v2#bib.bib3" title="">2023</a>)</cite> provides a framework for ML on Apple Silicon with native Metal support. The mlx-lm library enables efficient LLM inference with quantization support. vLLM-metal is a community plugin that brings vLLM to Apple Silicon through a hybrid MLX and PyTorch approach. Our work differs in providing pure MLX inference with integrated multimodal caching, which vLLM-metal does not support. We note that the proposed framework is an independent project that draws architectural inspiration from vLLM but shares no code with it.</p>
+</div>
+</section>
+<section class="ltx_paragraph" id="S5.SS0.SSS0.Px4">
+<h4 class="ltx_title ltx_title_paragraph">Edge LLM Inference.</h4>
+<div class="ltx_para" id="S5.SS0.SSS0.Px4.p1">
+<p class="ltx_p" id="S5.SS0.SSS0.Px4.p1.1">llama.cpp <cite class="ltx_cite ltx_citemacro_citep">(Gerganov, <a class="ltx_ref" href="https://arxiv.org/html/2601.19139v2#bib.bib6" title="">2023</a>)</cite> has become the standard for efficient LLM inference on consumer hardware, including Apple Silicon via Metal. MLC-LLM <cite class="ltx_cite ltx_citemacro_citep">(Team, <a class="ltx_ref" href="https://arxiv.org/html/2601.19139v2#bib.bib13" title="">2023</a>)</cite> provides cross-platform deployment with compilation-based optimization. These systems focus primarily on text models; our work extends efficient inference to multimodal workloads with caching support.</p>
+</div>
+</section>
+</section>
+<section class="ltx_section" id="S6">
+<h2 class="ltx_title ltx_title_section">
+<span class="ltx_tag ltx_tag_section">6. </span>Conclusion</h2>
+<div class="ltx_para" id="S6.p1">
+<p class="ltx_p" id="S6.p1.1">We introduced an efficient framework for multimodal LLM inference on Apple Silicon via content-based prefix caching for vision embeddings. Using content hashing to detect identical images, we cache both vision embeddings and KV cache states, removing redundant vision encoding across requests. Our native MLX implementation exploits unified memory to enable zero-copy cache management.</p>
+</div>
+<div class="ltx_para" id="S6.p2">
+<p class="ltx_p" id="S6.p2.1">Across repeated image queries, we achieve up to 28<math alttext="\times" class="ltx_Math" display="inline" id="S6.p2.1.m1" intent=":literal"><semantics><mo>×</mo><annotation encoding="application/x-tex">\times</annotation></semantics></math> speedup, cutting latency from 21.7 seconds to under 1 second. Benchmarks on more than 10 recent models show MLX is a strong Apple Silicon backend, reaching 143 tokens per second on <span class="ltx_text" id="S6.p2.1.1">Qwen3-VL-4B</span>.</p>
+</div>
+<div class="ltx_para" id="S6.p3">
+<p class="ltx_p" id="S6.p3.1">We release our implementation as open source to support further research on efficient multimodal inference on consumer hardware.</p>
+</div>
+</section>
+<section class="ltx_bibliography" id="bib">
+<h2 class="ltx_title ltx_title_bibliography">References</h2>
+<ul class="ltx_biblist">
+<li class="ltx_bibitem" id="bib.bib1">
+<span class="ltx_tag ltx_role_refnum ltx_tag_bibitem">(1)</span>
+<span class="ltx_bibblock">
+</span>
+</li>
+<li class="ltx_bibitem" id="bib.bib2">
+<span class="ltx_tag ltx_role_refnum ltx_tag_bibitem">AI (2024)</span>
+<span class="ltx_bibblock">
+Meta AI. 2024.
+
+</span>
+<span class="ltx_bibblock">The Llama 3 Herd of Models.
+
+</span>
+<span class="ltx_bibblock"><em class="ltx_emph ltx_font_italic" id="bib.bib2.1.1">arXiv preprint arXiv:2407.21783</em>
+(2024).
+
+</span>
+<span class="ltx_bibblock">
+</span>
+</li>
+<li class="ltx_bibitem" id="bib.bib3">
+<span class="ltx_tag ltx_role_refnum ltx_tag_bibitem">Apple (2023)</span>
+<span class="ltx_bibblock">
+Apple. 2023.
+
+</span>
+<span class="ltx_bibblock">MLX: Efficient and Flexible Machine Learning on Apple
+Silicon.
+
+</span>
+<span class="ltx_bibblock"><a class="ltx_ref ltx_url ltx_font_typewriter" href="https://github.com/ml-explore/mlx" title="">https://github.com/ml-explore/mlx</a>.
+
+</span>
+<span class="ltx_bibblock">
+</span>
+</li>
+<li class="ltx_bibitem" id="bib.bib4">
+<span class="ltx_tag ltx_role_refnum ltx_tag_bibitem">Chase (2023)</span>
+<span class="ltx_bibblock">
+Harrison Chase.
+2023.
+
+</span>
+<span class="ltx_bibblock">LangChain: Building Applications with LLMs.
+
+</span>
+<span class="ltx_bibblock"><a class="ltx_ref ltx_url ltx_font_typewriter" href="https://github.com/langchain-ai/langchain" title="">https://github.com/langchain-ai/langchain</a>.
+
+</span>
+<span class="ltx_bibblock">
+</span>
+</li>
+<li class="ltx_bibitem" id="bib.bib5">
+<span class="ltx_tag ltx_role_refnum ltx_tag_bibitem">DeepMind (2025)</span>
+<span class="ltx_bibblock">
+Google DeepMind.
+2025.
+
+</span>
+<span class="ltx_bibblock">Gemma 3 Technical Report.
+
+</span>
+<span class="ltx_bibblock"><em class="ltx_emph ltx_font_italic" id="bib.bib5.1.1">arXiv preprint</em> (2025).
+
+</span>
+<span class="ltx_bibblock">
+</span>
+</li>
+<li class="ltx_bibitem" id="bib.bib6">
+<span class="ltx_tag ltx_role_refnum ltx_tag_bibitem">Gerganov (2023)</span>
+<span class="ltx_bibblock">
+Georgi Gerganov.
+2023.
+
+</span>
+<span class="ltx_bibblock">llama.cpp: Port of Facebook’s LLaMA model in C/C++.
+
+</span>
+<span class="ltx_bibblock"><a class="ltx_ref ltx_url ltx_font_typewriter" href="https://github.com/ggerganov/llama.cpp" title="">https://github.com/ggerganov/llama.cpp</a>.
+
+</span>
+<span class="ltx_bibblock">
+</span>
+</li>
+<li class="ltx_bibitem" id="bib.bib7">
+<span class="ltx_tag ltx_role_refnum ltx_tag_bibitem">Kwon et al<span class="ltx_text" id="bib.bib7.2.2.1">.</span> (2023)</span>
+<span class="ltx_bibblock">
+Woosuk Kwon, Zhuohan Li,
+Siyuan Zhuang, Ying Sheng,
+Lianmin Zheng, Cody Hao Yu,
+Joseph E Gonzalez, Hao Zhang, and
+Ion Stoica. 2023.
+
+</span>
+<span class="ltx_bibblock">Efficient Memory Management for Large Language
+Model Serving with PagedAttention.
+
+</span>
+<span class="ltx_bibblock"><em class="ltx_emph ltx_font_italic" id="bib.bib7.3.1">Proceedings of the 29th Symposium on
+Operating Systems Principles</em> (2023).
+
+</span>
+<span class="ltx_bibblock">
+</span>
+</li>
+<li class="ltx_bibitem" id="bib.bib8">
+<span class="ltx_tag ltx_role_refnum ltx_tag_bibitem">Liu et al<span class="ltx_text" id="bib.bib8.2.2.1">.</span> (2024)</span>
+<span class="ltx_bibblock">
+Yuhan Liu et al<span class="ltx_text" id="bib.bib8.3.1">.</span>
+2024.
+
+</span>
+<span class="ltx_bibblock">LMCache: An Efficient KV Cache Layer for
+Enterprise-Scale LLM Inference.
+
+</span>
+<span class="ltx_bibblock"><em class="ltx_emph ltx_font_italic" id="bib.bib8.4.1">arXiv preprint arXiv:2510.09665</em>
+(2024).
+
+</span>
+<span class="ltx_bibblock">
+</span>
+</li>
+<li class="ltx_bibitem" id="bib.bib9">
+<span class="ltx_tag ltx_role_refnum ltx_tag_bibitem">Moura (2024)</span>
+<span class="ltx_bibblock">
+Joao Moura.
+2024.
+
+</span>
+<span class="ltx_bibblock">CrewAI: Framework for Orchestrating Role-Playing AI
+Agents.
+
+</span>
+<span class="ltx_bibblock"><a class="ltx_ref ltx_url ltx_font_typewriter" href="https://github.com/crewAIInc/crewAI" title="">https://github.com/crewAIInc/crewAI</a>.
+
+</span>
+<span class="ltx_bibblock">
+</span>
+</li>
+<li class="ltx_bibitem" id="bib.bib10">
+<span class="ltx_tag ltx_role_refnum ltx_tag_bibitem">NVIDIA (2025)</span>
+<span class="ltx_bibblock">
+NVIDIA. 2025.
+
+</span>
+<span class="ltx_bibblock">Nemotron-3-Nano: Efficient Language Models for Edge
+Deployment.
+
+</span>
+<span class="ltx_bibblock"><a class="ltx_ref ltx_url ltx_font_typewriter" href="https://huggingface.co/nvidia/Nemotron-3-Nano-30B-A3B-BF16" title="">https://huggingface.co/nvidia/Nemotron-3-Nano-30B-A3B-BF16</a>.
+
+</span>
+<span class="ltx_bibblock">
+</span>
+</li>
+<li class="ltx_bibitem" id="bib.bib11">
+<span class="ltx_tag ltx_role_refnum ltx_tag_bibitem">Richards (2023)</span>
+<span class="ltx_bibblock">
+Toran Richards.
+2023.
+
+</span>
+<span class="ltx_bibblock">AutoGPT: An Autonomous GPT-4 Experiment.
+
+</span>
+<span class="ltx_bibblock"><a class="ltx_ref ltx_url ltx_font_typewriter" href="https://github.com/Significant-Gravitas/AutoGPT" title="">https://github.com/Significant-Gravitas/AutoGPT</a>.
+
+</span>
+<span class="ltx_bibblock">
+</span>
+</li>
+<li class="ltx_bibitem" id="bib.bib12">
+<span class="ltx_tag ltx_role_refnum ltx_tag_bibitem">Team (2024)</span>
+<span class="ltx_bibblock">
+GLM Team. 2024.
+
+</span>
+<span class="ltx_bibblock">ChatGLM: A Family of Large Language Models from
+GLM-130B to GLM-4 All Tools.
+
+</span>
+<span class="ltx_bibblock"><em class="ltx_emph ltx_font_italic" id="bib.bib12.1.1">arXiv preprint arXiv:2406.12793</em>
+(2024).
+
+</span>
+<span class="ltx_bibblock">
+</span>
+</li>
+<li class="ltx_bibitem" id="bib.bib13">
+<span class="ltx_tag ltx_role_refnum ltx_tag_bibitem">Team (2023)</span>
+<span class="ltx_bibblock">
+MLC Team. 2023.
+
+</span>
+<span class="ltx_bibblock">MLC-LLM: Universal Deployment of Large Language
+Models.
+
+</span>
+<span class="ltx_bibblock"><a class="ltx_ref ltx_url ltx_font_typewriter" href="https://github.com/mlc-ai/mlc-llm" title="">https://github.com/mlc-ai/mlc-llm</a>.
+
+</span>
+<span class="ltx_bibblock">
+</span>
+</li>
+<li class="ltx_bibitem" id="bib.bib14">
+<span class="ltx_tag ltx_role_refnum ltx_tag_bibitem">Team (2025)</span>
+<span class="ltx_bibblock">
+Qwen Team.
+2025.
+
+</span>
+<span class="ltx_bibblock">Qwen3 Technical Report.
+
+</span>
+<span class="ltx_bibblock"><em class="ltx_emph ltx_font_italic" id="bib.bib14.1.1">arXiv preprint arXiv:2505.09388</em>
+(2025).
+
+</span>
+<span class="ltx_bibblock">
+</span>
+</li>
+<li class="ltx_bibitem" id="bib.bib15">
+<span class="ltx_tag ltx_role_refnum ltx_tag_bibitem">vLLM Project (2024)</span>
+<span class="ltx_bibblock">
+vLLM Project.
+2024.
+
+</span>
+<span class="ltx_bibblock">vLLM-Metal: vLLM Backend for Apple Silicon.
+
+</span>
+<span class="ltx_bibblock"><a class="ltx_ref ltx_url ltx_font_typewriter" href="https://github.com/vllm-project/vllm-metal" title="">https://github.com/vllm-project/vllm-metal</a>.
+
+</span>
+<span class="ltx_bibblock">
+</span>
+</li>
+<li class="ltx_bibitem" id="bib.bib16">
+<span class="ltx_tag ltx_role_refnum ltx_tag_bibitem">Wang et al<span class="ltx_text" id="bib.bib16.2.2.1">.</span> (2024)</span>
+<span class="ltx_bibblock">
+Peng Wang et al<span class="ltx_text" id="bib.bib16.3.1">.</span>
+2024.
+
+</span>
+<span class="ltx_bibblock">Qwen2-VL: Enhancing Vision-Language Model’s
+Perception of the World at Any Resolution.
+
+</span>
+<span class="ltx_bibblock"><em class="ltx_emph ltx_font_italic" id="bib.bib16.4.1">arXiv preprint arXiv:2409.12191</em>
+(2024).
+
+</span>
+<span class="ltx_bibblock">
+</span>
+</li>
+<li class="ltx_bibitem" id="bib.bib17">
+<span class="ltx_tag ltx_role_refnum ltx_tag_bibitem">Zheng et al<span class="ltx_text" id="bib.bib17.2.2.1">.</span> (2023)</span>
+<span class="ltx_bibblock">
+Lianmin Zheng et al<span class="ltx_text" id="bib.bib17.3.1">.</span>
+2023.
+
+</span>
+<span class="ltx_bibblock">SGLang: Efficient Execution of Structured Language
+Model Programs.
+
+</span>
+<span class="ltx_bibblock"><em class="ltx_emph ltx_font_italic" id="bib.bib17.4.1">arXiv preprint arXiv:2312.07104</em>
+(2023).
+
+</span>
+<span class="ltx_bibblock">
+</span>
+</li>
+</ul>
+</section>
+</article>
+</div>
+<footer class="ltx_page_footer">
+<div class="ltx_page_logo">Generated  on Thu Jan 29 06:11:53 2026 by <a class="ltx_LaTeXML_logo" href="http://dlmf.nist.gov/LaTeXML/"><span style="letter-spacing:-0.2em; margin-right:0.1em;">L<span class="ltx_font_smallcaps" style="position:relative; bottom:2.2pt;">a</span>T<span class="ltx_font_smallcaps" style="font-size:120%;position:relative; bottom:-0.2ex;">e</span></span><span style="font-size:90%; position:relative; bottom:-0.2ex;">XML</span><img alt="Mascot Sammy" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAsAAAAOCAYAAAD5YeaVAAAAAXNSR0IArs4c6QAAAAZiS0dEAP8A/wD/oL2nkwAAAAlwSFlzAAALEwAACxMBAJqcGAAAAAd0SU1FB9wKExQZLWTEaOUAAAAddEVYdENvbW1lbnQAQ3JlYXRlZCB3aXRoIFRoZSBHSU1Q72QlbgAAAdpJREFUKM9tkL+L2nAARz9fPZNCKFapUn8kyI0e4iRHSR1Kb8ng0lJw6FYHFwv2LwhOpcWxTjeUunYqOmqd6hEoRDhtDWdA8ApRYsSUCDHNt5ul13vz4w0vWCgUnnEc975arX6ORqN3VqtVZbfbTQC4uEHANM3jSqXymFI6yWazP2KxWAXAL9zCUa1Wy2tXVxheKA9YNoR8Pt+aTqe4FVVVvz05O6MBhqUIBGk8Hn8HAOVy+T+XLJfLS4ZhTiRJgqIoVBRFIoric47jPnmeB1mW/9rr9ZpSSn3Lsmir1fJZlqWlUonKsvwWwD8ymc/nXwVBeLjf7xEKhdBut9Hr9WgmkyGEkJwsy5eHG5vN5g0AKIoCAEgkEkin0wQAfN9/cXPdheu6P33fBwB4ngcAcByHJpPJl+fn54mD3Gg0NrquXxeLRQAAwzAYj8cwTZPwPH9/sVg8PXweDAauqqr2cDjEer1GJBLBZDJBs9mE4zjwfZ85lAGg2+06hmGgXq+j3+/DsixYlgVN03a9Xu8jgCNCyIegIAgx13Vfd7vdu+FweG8YRkjXdWy329+dTgeSJD3ieZ7RNO0VAXAPwDEAO5VKndi2fWrb9jWl9Esul6PZbDY9Go1OZ7PZ9z/lyuD3OozU2wAAAABJRU5ErkJggg=="/></a>
+</div></footer>
+</div>
+</body>
+</html>

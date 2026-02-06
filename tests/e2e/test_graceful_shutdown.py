@@ -1,4 +1,4 @@
-"""E2E tests for graceful shutdown (Sprint 7 Day 0).
+"""E2E tests for graceful shutdown.
 
 Tests verify graceful shutdown behavior:
 - Requests in-flight complete before shutdown
@@ -144,7 +144,7 @@ def test_drain_prevents_new_requests():
 
     # Should accept requests normally
     uid1 = engine.submit(agent_id="test-agent", prompt="Hello", max_tokens=10)
-    assert uid1 is not None
+    assert isinstance(uid1, str)
 
     # Set draining flag
     engine._draining = True

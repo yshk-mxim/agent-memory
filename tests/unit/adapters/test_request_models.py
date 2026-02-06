@@ -185,7 +185,6 @@ class TestMessagesRequest:
             thinking=ThinkingConfig(type="enabled", budget_tokens=2000),
         )
 
-        assert request.thinking is not None
         assert request.thinking.type == "enabled"
         assert request.thinking.budget_tokens == 2000
 

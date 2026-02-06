@@ -1,0 +1,165 @@
+\begin{thebibliography}{20}
+\providecommand{\natexlab}[1]{#1}
+\providecommand{\url}[1]{\texttt{#1}}
+\expandafter\ifx\csname urlstyle\endcsname\relax
+  \providecommand{\doi}[1]{doi: #1}\else
+  \providecommand{\doi}{doi: \begingroup \urlstyle{rm}\Url}\fi
+
+\bibitem[Anonymous(2026)]{memart2026iclr}
+Anonymous.
+\newblock Kvcache-centric memory for llm agents.
+\newblock In \emph{International Conference on Learning Representations}, 2026.
+\newblock URL \url{https://openreview.net/forum?id=YolJOZOGhI}.
+\newblock Submitted to ICLR 2026.
+
+\bibitem[{Apple Inc.}(2024)]{apple2024m4pro}
+{Apple Inc.}
+\newblock Mac mini with m4 pro - technical specifications.
+\newblock \url{https://www.apple.com/mac-mini/specs/}, 2024.
+\newblock M4 Pro: 273 GB/s memory bandwidth, up to 64GB unified memory.
+
+\bibitem[Barrios(2026)]{barrios2026vllmmlx}
+Wayner Barrios.
+\newblock Native llm and mllm inference at scale on apple silicon.
+\newblock \emph{arXiv preprint arXiv:2601.19139}, 2026.
+
+\bibitem[Bui et~al.(2024)Bui, Sharma, Lamba, Mishra, and Ying]{bui2024trimkv}
+Ngoc Bui, Shubham Sharma, Simran Lamba, Saumitra Mishra, and Rex Ying.
+\newblock Cache what lasts: Token retention for memory-bounded kv cache in
+  llms.
+\newblock \emph{arXiv preprint arXiv:2512.03324}, 2024.
+
+\bibitem[Feng et~al.(2024)Feng, Liu, Li, Chen, Shen, Du, Gu, Zhang, Huang,
+  Cheng, Yao, Zhang, Ananthanarayanan, and Jiang]{feng2024evicpress}
+Shaoting Feng, Yuhan Liu, Hanchen Li, Xiaokun Chen, Samuel Shen, Kuntai Du,
+  Zhuohan Gu, Rui Zhang, Yuyang Huang, Yihua Cheng, Jiayi Yao, Qizheng Zhang,
+  Ganesh Ananthanarayanan, and Junchen Jiang.
+\newblock Evicpress: Joint kv-cache compression and eviction for efficient llm
+  serving.
+\newblock \emph{arXiv preprint arXiv:2512.14946}, 2024.
+
+\bibitem[Hooper et~al.(2024)Hooper, Kim, Mohammadzadeh, Mahoney, Shao, Keutzer,
+  and Gholami]{hooper2024kvquant}
+Coleman Hooper, Sehoon Kim, Hiva Mohammadzadeh, Michael~W. Mahoney,
+  Yakun~Sophia Shao, Kurt Keutzer, and Amir Gholami.
+\newblock Kvquant: Towards 10 million context length llm inference with kv
+  cache quantization.
+\newblock In \emph{Advances in Neural Information Processing Systems},
+  volume~37, 2024.
+
+\bibitem[{Hyperstack}(2024)]{nvidia2024a100bench}
+{Hyperstack}.
+\newblock Llm inference benchmark: Nvidia a100 nvlink vs nvidia h100 sxm.
+\newblock
+  \url{https://www.hyperstack.cloud/technical-resources/performance-benchmarks/llm-inference-benchmark-comparing-nvidia-a100-nvlink-vs-nvidia-h100-sxm},
+  2024.
+\newblock A100 prefill performance: approximately 10,000-20,000 tokens/s
+  depending on model size.
+
+\bibitem[Jiang et~al.(2025)]{jiang2025emllm}
+Yi~Jiang et~al.
+\newblock Em-llm: Human-inspired episodic memory for infinite context llms.
+\newblock In \emph{International Conference on Learning Representations}, 2025.
+
+\bibitem[Kwon et~al.(2023)Kwon, Li, Zhuang, Sheng, Zheng, Yu, Gonzalez, Zhang,
+  and Stoica]{kwon2023pagedattention}
+Woosuk Kwon, Zhuohan Li, Siyuan Zhuang, Ying Sheng, Lianmin Zheng, Cody~Hao Yu,
+  Joseph~E. Gonzalez, Hao Zhang, and Ion Stoica.
+\newblock Efficient memory management for large language model serving with
+  pagedattention.
+\newblock In \emph{Proceedings of the 29th Symposium on Operating Systems
+  Principles}, pp.\  611--626, 2023.
+
+\bibitem[Li et~al.(2025)Li, Zhang, Zhao, Zheng, Yang, and Ding]{li2025commvq}
+Shikai Li, Yuke Zhang, Xin Zhao, Zhijie Zheng, Xiaopeng Yang, and Xiaolong
+  Ding.
+\newblock Commvq: Commutative vector quantization for kv cache compression.
+\newblock In \emph{Proceedings of the 42nd International Conference on Machine
+  Learning}, PMLR, 2025.
+
+\bibitem[Liu et~al.(2024{\natexlab{a}})Liu, Huang, Yao, Feng, Gu, Du, Li,
+  Cheng, Jiang, Lu, Musuvathi, and Choukse]{liu2024droidspeak}
+Yuhan Liu, Yuyang Huang, Jiayi Yao, Shaoting Feng, Zhuohan Gu, Kuntai Du,
+  Hanchen Li, Yihua Cheng, Junchen Jiang, Shan Lu, Madan Musuvathi, and Esha
+  Choukse.
+\newblock Droidspeak: Kv cache sharing for cross-llm communication and
+  multi-llm serving.
+\newblock \emph{arXiv preprint arXiv:2411.02820}, 2024{\natexlab{a}}.
+\newblock URL \url{https://arxiv.org/abs/2411.02820}.
+
+\bibitem[Liu et~al.(2024{\natexlab{b}})Liu, Li, Cheng, Ray, Huang, Zhang, Du,
+  Yao, Lu, Ananthanarayanan, Maire, Hoffmann, Holtzman, and
+  Jiang]{liu2024cachegen}
+Yuhan Liu, Hanchen Li, Yihua Cheng, Siddhant Ray, Yuyang Huang, Qizheng Zhang,
+  Kuntai Du, Jiayi Yao, Shan Lu, Ganesh Ananthanarayanan, Michael Maire, Henry
+  Hoffmann, Ari Holtzman, and Junchen Jiang.
+\newblock Cachegen: Kv cache compression and streaming for fast large language
+  model serving.
+\newblock In \emph{Proceedings of the ACM SIGCOMM 2024 Conference}, Sydney,
+  Australia, 2024{\natexlab{b}}.
+
+\bibitem[Liu et~al.(2024{\natexlab{c}})Liu, Yuan, Jin, Zhong, Xu, Braverman,
+  Chen, and Hu]{liu2024kivi}
+Zirui Liu, Jiayi Yuan, Hongye Jin, Shaochen Zhong, Zhaozhuo Xu, Vladimir
+  Braverman, Beidi Chen, and Xia Hu.
+\newblock Kivi: A tuning-free asymmetric 2bit quantization for kv cache.
+\newblock In \emph{Proceedings of the 41st International Conference on Machine
+  Learning}, volume 235 of \emph{Proceedings of Machine Learning Research},
+  pp.\  32332--32344. PMLR, 2024{\natexlab{c}}.
+
+\bibitem[{NVIDIA Corporation}(2025)]{nvidia2025dgxspark}
+{NVIDIA Corporation}.
+\newblock Nvidia dgx spark - a grace blackwell ai supercomputer on your desk.
+\newblock \url{https://www.nvidia.com/en-us/products/workstations/dgx-spark/},
+  2025.
+\newblock 128GB unified memory, 273 GB/s bandwidth, \$3,999. Announced March
+  2025.
+
+\bibitem[Pan et~al.(2025)Pan, Patel, Hu, Shen, Guan, Li, Qin, Wang, and
+  Ding]{pan2025kvflow}
+Zaifeng Pan, Ajjkumar Patel, Zhengding Hu, Yipeng Shen, Yue Guan, Wan-Lu Li,
+  Lianhui Qin, Yida Wang, and Yufei Ding.
+\newblock Kvflow: Efficient prefix caching for accelerating llm-based
+  multi-agent workflows.
+\newblock In \emph{Advances in Neural Information Processing Systems}, 2025.
+\newblock URL \url{https://arxiv.org/abs/2507.07400}.
+
+\bibitem[Sarthi et~al.(2024)Sarthi, Abdullah, Tuli, Khanna, Goldie, and
+  Manning]{sarthi2024raptor}
+Parth Sarthi, Salman Abdullah, Aditi Tuli, Shubh Khanna, Anna Goldie, and
+  Christopher~D. Manning.
+\newblock Raptor: Recursive abstractive processing for tree-organized
+  retrieval.
+\newblock In \emph{International Conference on Learning Representations}, 2024.
+\newblock URL \url{https://arxiv.org/abs/2401.18059}.
+
+\bibitem[Yang et~al.(2024)Yang, Lin, et~al.]{yang2025memory3}
+Hongkang Yang, Zehao Lin, et~al.
+\newblock Memory3: Language modeling with explicit memory.
+\newblock \emph{arXiv preprint}, 2024.
+\newblock Referenced in MemOS: https://arxiv.org/abs/2507.03724.
+
+\bibitem[Ye et~al.(2025)Ye, Gao, Ma, Wang, Fu, Chung, Lin, Liu, Zhang, Zhuo,
+  and Chen]{ye2025kvcomm}
+Hancheng Ye, Zhengqi Gao, Mingyuan Ma, Qinsi Wang, Yuzhe Fu, Ming-Yu Chung,
+  Yueqian Lin, Zhijian Liu, Jianyi Zhang, Danyang Zhuo, and Yiran Chen.
+\newblock Kvcomm: Online cross-context kv-cache communication for efficient
+  llm-based multi-agent systems.
+\newblock In \emph{Advances in Neural Information Processing Systems}, 2025.
+\newblock URL \url{https://arxiv.org/abs/2510.12872}.
+
+\bibitem[Zhang et~al.(2024)Zhang, Xia, and Wang]{zhang2024kvswap}
+Huawei Zhang, Chunwei Xia, and Zheng Wang.
+\newblock Kvswap: Disk-aware kv cache offloading for long-context on-device
+  inference.
+\newblock \emph{arXiv preprint arXiv:2511.11907}, 2024.
+
+\bibitem[Zheng et~al.(2024)Zheng, Yin, Xie, Huang, Sun, Yu, Cao, Kozyrakis,
+  Stoica, Gonzalez, Barrett, and Sheng]{zheng2024sglang}
+Lianmin Zheng, Liangsheng Yin, Zhiqiang Xie, Jeff Huang, Chuyue Sun, Cody~Hao
+  Yu, Shiyi Cao, Christos Kozyrakis, Ion Stoica, Joseph~E. Gonzalez, Clark
+  Barrett, and Ying Sheng.
+\newblock Sglang: Efficient execution of structured language model programs.
+\newblock In \emph{Advances in Neural Information Processing Systems}, 2024.
+
+\end{thebibliography}

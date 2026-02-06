@@ -1,0 +1,1010 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta content="text/html; charset=utf-8" http-equiv="content-type"/>
+<title>EvicPress: Joint KV-Cache Compression and Eviction for Efficient LLM Serving</title>
+<!--Generated on Tue Dec 16 22:14:02 2025 by LaTeXML (version 0.8.8) http://dlmf.nist.gov/LaTeXML/.-->
+<meta content="width=device-width, initial-scale=1, shrink-to-fit=no" name="viewport"/>
+<link href="/static/browse/0.3.4/css/arxiv-html-papers-20250916.css" rel="stylesheet" type="text/css"/>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.3.3/html2canvas.min.js"></script>
+<script src="/static/browse/0.3.4/js/addons_new.js"></script>
+<script src="/static/browse/0.3.4/js/feedbackOverlay.js"></script>
+<base href="/html/2512.14946v1/"/></head>
+<body>
+<nav class="ltx_page_navbar">
+<nav class="ltx_TOC">
+<ol class="ltx_toclist">
+<li class="ltx_tocentry ltx_tocentry_section"><a class="ltx_ref" href="https://arxiv.org/html/2512.14946v1#S1" title="In EvicPress: Joint KV-Cache Compression and Eviction for Efficient LLM Serving"><span class="ltx_text ltx_ref_title"><span class="ltx_tag ltx_tag_ref">1 </span>Introduction</span></a></li>
+<li class="ltx_tocentry ltx_tocentry_section">
+<a class="ltx_ref" href="https://arxiv.org/html/2512.14946v1#S2" title="In EvicPress: Joint KV-Cache Compression and Eviction for Efficient LLM Serving"><span class="ltx_text ltx_ref_title"><span class="ltx_tag ltx_tag_ref">2 </span>Background</span></a>
+<ol class="ltx_toclist ltx_toclist_section">
+<li class="ltx_tocentry ltx_tocentry_subsection"><a class="ltx_ref" href="https://arxiv.org/html/2512.14946v1#S2.SS1" title="In 2 Background ‣ EvicPress: Joint KV-Cache Compression and Eviction for Efficient LLM Serving"><span class="ltx_text ltx_ref_title"><span class="ltx_tag ltx_tag_ref">2.1 </span>KV cache reusing and eviction in LLMs</span></a></li>
+<li class="ltx_tocentry ltx_tocentry_subsection"><a class="ltx_ref" href="https://arxiv.org/html/2512.14946v1#S2.SS2" title="In 2 Background ‣ EvicPress: Joint KV-Cache Compression and Eviction for Efficient LLM Serving"><span class="ltx_text ltx_ref_title"><span class="ltx_tag ltx_tag_ref">2.2 </span>KV cache compression</span></a></li>
+</ol>
+</li>
+<li class="ltx_tocentry ltx_tocentry_section">
+<a class="ltx_ref" href="https://arxiv.org/html/2512.14946v1#S3" title="In EvicPress: Joint KV-Cache Compression and Eviction for Efficient LLM Serving"><span class="ltx_text ltx_ref_title"><span class="ltx_tag ltx_tag_ref">3 </span>Motivation</span></a>
+<ol class="ltx_toclist ltx_toclist_section">
+<li class="ltx_tocentry ltx_tocentry_subsection"><a class="ltx_ref" href="https://arxiv.org/html/2512.14946v1#S3.SS1" title="In 3 Motivation ‣ EvicPress: Joint KV-Cache Compression and Eviction for Efficient LLM Serving"><span class="ltx_text ltx_ref_title"><span class="ltx_tag ltx_tag_ref">3.1 </span>Why not compress or evict all contexts?</span></a></li>
+<li class="ltx_tocentry ltx_tocentry_subsection"><a class="ltx_ref" href="https://arxiv.org/html/2512.14946v1#S3.SS2" title="In 3 Motivation ‣ EvicPress: Joint KV-Cache Compression and Eviction for Efficient LLM Serving"><span class="ltx_text ltx_ref_title"><span class="ltx_tag ltx_tag_ref">3.2 </span>Why not the same compression method and ratio for all contexts?</span></a></li>
+</ol>
+</li>
+<li class="ltx_tocentry ltx_tocentry_section">
+<a class="ltx_ref" href="https://arxiv.org/html/2512.14946v1#S4" title="In EvicPress: Joint KV-Cache Compression and Eviction for Efficient LLM Serving"><span class="ltx_text ltx_ref_title"><span class="ltx_tag ltx_tag_ref">4 </span><span class="ltx_text ltx_font_smallcaps">EvicPress</span> Design</span></a>
+<ol class="ltx_toclist ltx_toclist_section">
+<li class="ltx_tocentry ltx_tocentry_subsection"><a class="ltx_ref" href="https://arxiv.org/html/2512.14946v1#S4.SS1" title="In 4 EvicPress Design ‣ EvicPress: Joint KV-Cache Compression and Eviction for Efficient LLM Serving"><span class="ltx_text ltx_ref_title"><span class="ltx_tag ltx_tag_ref">4.1 </span>Overall workflow</span></a></li>
+<li class="ltx_tocentry ltx_tocentry_subsection"><a class="ltx_ref" href="https://arxiv.org/html/2512.14946v1#S4.SS2" title="In 4 EvicPress Design ‣ EvicPress: Joint KV-Cache Compression and Eviction for Efficient LLM Serving"><span class="ltx_text ltx_ref_title"><span class="ltx_tag ltx_tag_ref">4.2 </span>Utility function: Balancing quality and loading delay</span></a></li>
+<li class="ltx_tocentry ltx_tocentry_subsection"><a class="ltx_ref" href="https://arxiv.org/html/2512.14946v1#S4.SS3" title="In 4 EvicPress Design ‣ EvicPress: Joint KV-Cache Compression and Eviction for Efficient LLM Serving"><span class="ltx_text ltx_ref_title"><span class="ltx_tag ltx_tag_ref">4.3 </span>Profiler module: Computing the utility function scores and choosing eviction-compression configuration</span></a></li>
+<li class="ltx_tocentry ltx_tocentry_subsection"><a class="ltx_ref" href="https://arxiv.org/html/2512.14946v1#S4.SS4" title="In 4 EvicPress Design ‣ EvicPress: Joint KV-Cache Compression and Eviction for Efficient LLM Serving"><span class="ltx_text ltx_ref_title"><span class="ltx_tag ltx_tag_ref">4.4 </span>Eviction-compression configuration selection module</span></a></li>
+</ol>
+</li>
+<li class="ltx_tocentry ltx_tocentry_section"><a class="ltx_ref" href="https://arxiv.org/html/2512.14946v1#S5" title="In EvicPress: Joint KV-Cache Compression and Eviction for Efficient LLM Serving"><span class="ltx_text ltx_ref_title"><span class="ltx_tag ltx_tag_ref">5 </span>Implementation</span></a></li>
+<li class="ltx_tocentry ltx_tocentry_section">
+<a class="ltx_ref" href="https://arxiv.org/html/2512.14946v1#S6" title="In EvicPress: Joint KV-Cache Compression and Eviction for Efficient LLM Serving"><span class="ltx_text ltx_ref_title"><span class="ltx_tag ltx_tag_ref">6 </span>Evaluation</span></a>
+<ol class="ltx_toclist ltx_toclist_section">
+<li class="ltx_tocentry ltx_tocentry_subsection"><a class="ltx_ref" href="https://arxiv.org/html/2512.14946v1#S6.SS1" title="In 6 Evaluation ‣ EvicPress: Joint KV-Cache Compression and Eviction for Efficient LLM Serving"><span class="ltx_text ltx_ref_title"><span class="ltx_tag ltx_tag_ref">6.1 </span>Evaluation setup</span></a></li>
+<li class="ltx_tocentry ltx_tocentry_subsection"><a class="ltx_ref" href="https://arxiv.org/html/2512.14946v1#S6.SS2" title="In 6 Evaluation ‣ EvicPress: Joint KV-Cache Compression and Eviction for Efficient LLM Serving"><span class="ltx_text ltx_ref_title"><span class="ltx_tag ltx_tag_ref">6.2 </span>Evaluation results</span></a></li>
+<li class="ltx_tocentry ltx_tocentry_subsection"><a class="ltx_ref" href="https://arxiv.org/html/2512.14946v1#S6.SS3" title="In 6 Evaluation ‣ EvicPress: Joint KV-Cache Compression and Eviction for Efficient LLM Serving"><span class="ltx_text ltx_ref_title"><span class="ltx_tag ltx_tag_ref">6.3 </span>Microbenchmarks</span></a></li>
+</ol>
+</li>
+<li class="ltx_tocentry ltx_tocentry_section"><a class="ltx_ref" href="https://arxiv.org/html/2512.14946v1#S7" title="In EvicPress: Joint KV-Cache Compression and Eviction for Efficient LLM Serving"><span class="ltx_text ltx_ref_title"><span class="ltx_tag ltx_tag_ref">7 </span>Related Work</span></a></li>
+<li class="ltx_tocentry ltx_tocentry_section"><a class="ltx_ref" href="https://arxiv.org/html/2512.14946v1#S8" title="In EvicPress: Joint KV-Cache Compression and Eviction for Efficient LLM Serving"><span class="ltx_text ltx_ref_title"><span class="ltx_tag ltx_tag_ref">8 </span>Limitations and future work</span></a></li>
+<li class="ltx_tocentry ltx_tocentry_section"><a class="ltx_ref" href="https://arxiv.org/html/2512.14946v1#S9" title="In EvicPress: Joint KV-Cache Compression and Eviction for Efficient LLM Serving"><span class="ltx_text ltx_ref_title"><span class="ltx_tag ltx_tag_ref">9 </span>Conclusion</span></a></li>
+<li class="ltx_tocentry ltx_tocentry_appendix"><a class="ltx_ref" href="https://arxiv.org/html/2512.14946v1#A1" title="In EvicPress: Joint KV-Cache Compression and Eviction for Efficient LLM Serving"><span class="ltx_text ltx_ref_title"><span class="ltx_tag ltx_tag_ref">A </span>Pseudo Code for Algorithm</span></a></li>
+</ol></nav>
+</nav>
+<div class="ltx_page_main">
+<div class="ltx_page_content">
+<article class="ltx_document ltx_authors_1line" lang="en">
+<h1 class="ltx_title ltx_title_document">
+<span class="ltx_text ltx_font_smallcaps">EvicPress</span>: Joint KV-Cache Compression and Eviction for Efficient LLM Serving</h1>
+<div class="ltx_authors">
+<span class="ltx_creator ltx_role_author">
+<span class="ltx_personname">
+Shaoting Feng<sup class="ltx_sup"><span class="ltx_text ltx_font_italic">∗,1</span></sup>  Yuhan Liu<sup class="ltx_sup"><span class="ltx_text ltx_font_italic">∗,1</span></sup>  Hanchen Li<sup class="ltx_sup"><span class="ltx_text ltx_font_italic">2</span></sup>  Xiaokun Chen<sup class="ltx_sup"><span class="ltx_text ltx_font_italic">3</span></sup>  Samuel Shen<sup class="ltx_sup">3</sup>  Kuntai Du<sup class="ltx_sup">3</sup>  Zhuohan Gu<sup class="ltx_sup">4</sup>
+<br class="ltx_break"/>Rui Zhang<sup class="ltx_sup">5</sup>  
+Yuyang Huang<sup class="ltx_sup">1</sup>  
+Yihua Cheng<sup class="ltx_sup">3</sup>  
+Jiayi Yao<sup class="ltx_sup">1</sup>  
+Qizheng Zhang<sup class="ltx_sup">6</sup>  
+Ganesh Ananthanarayanan<sup class="ltx_sup">7</sup>  
+Junchen Jiang<sup class="ltx_sup"><span class="ltx_text ltx_font_italic">1,3</span></sup>
+<br class="ltx_break"/><sup class="ltx_sup">1</sup>University of Chicago    <sup class="ltx_sup">2</sup>UC Berkeley    <sup class="ltx_sup">3</sup>Tensormesh, Inc.    <sup class="ltx_sup">4</sup>MIT    <sup class="ltx_sup">5</sup>UC Santa Cruz    <sup class="ltx_sup">6</sup>Stanford    <sup class="ltx_sup">7</sup>Microsoft
+</span></span>
+</div>
+<div class="ltx_abstract">
+<h6 class="ltx_title ltx_title_abstract">Abstract</h6>
+<p class="ltx_p">Reusing KV cache is essential for high efficiency of Large Language Model (LLM) inference systems.
+With more LLM users, the KV cache footprint can easily exceed GPU memory capacity, so prior work has proposed to either <em class="ltx_emph ltx_font_italic">evict</em> KV cache to lower-tier storage devices, or <em class="ltx_emph ltx_font_italic">compress</em> KV cache so that more KV cache can be fit in the fast memory.
+However, prior work misses an important opportunity: <span class="ltx_text ltx_font_italic">jointly</span> optimizing the eviction and compression decisions across <em class="ltx_emph ltx_font_italic">all</em> KV caches to minimize average generation latency without hurting quality.</p>
+<p class="ltx_p">We propose <span class="ltx_text ltx_font_smallcaps">EvicPress</span>, a KV-cache management system that applies <em class="ltx_emph ltx_font_italic">lossy compression</em> and <span class="ltx_text ltx_font_italic">adaptive eviction</span> to KV cache across multiple storage tiers.
+Specifically, for each KV cache of a context, <span class="ltx_text ltx_font_smallcaps">EvicPress</span> considers the effect of compression and eviction of the KV cache on the average generation quality and delay across all contexts as a whole.
+To achieve this, <span class="ltx_text ltx_font_smallcaps">EvicPress</span> proposes a unified <em class="ltx_emph ltx_font_italic">utility function</em> that quantifies the effect of quality and delay of the lossy compression or eviction.
+To this end, <span class="ltx_text ltx_font_smallcaps">EvicPress</span>’s profiling module periodically updates the utility function scores on all possible eviction-compression configurations for all contexts
+and places KV caches using a fast heuristic to rearrange KV caches on all storage tiers, with the goal of maximizing the utility function scores on each storage tier.
+Compared to the baselines that evict KV cache or compress KV cache,
+<span class="ltx_text ltx_font_smallcaps">EvicPress</span> achieves higher KV-cache hit rates on fast devices, i.e., lower delay, while preserving high generation quality by applying conservative compression to contexts that are sensitive to compression errors.
+Evaluation on 12 datasets and 5 models demonstrates that <span class="ltx_text ltx_font_smallcaps">EvicPress</span> achieves up to 2.19<math alttext="\times" class="ltx_Math" display="inline" id="m22" intent=":literal"><semantics><mo>×</mo><annotation encoding="application/x-tex">\times</annotation></semantics></math> faster time-to-first-token (TTFT) at equivalent generation quality.</p>
+</div>
+<span class="ltx_note ltx_role_footnotetext" id="footnotex1"><sup class="ltx_note_mark">1</sup><span class="ltx_note_outer"><span class="ltx_note_content"><sup class="ltx_note_mark">1</sup><span class="ltx_note_type">footnotetext: </span>Equal contribution</span></span></span>
+<section class="ltx_section" id="S1">
+<h2 class="ltx_title ltx_title_section">
+<span class="ltx_tag ltx_tag_section">1 </span>Introduction</h2>
+<figure class="ltx_figure" id="S1.F1"><img alt="Refer to caption" class="ltx_graphics ltx_centering ltx_img_landscape" height="215" id="S1.F1.g1" src="x1.png" width="330"/>
+<figcaption class="ltx_caption ltx_centering"><span class="ltx_tag ltx_tag_figure">Figure 1: </span><span class="ltx_text ltx_font_smallcaps">EvicPress<span class="ltx_text ltx_font_italic"> jointly optimizes offloading and compression, achieving much better trade-off in terms of quality and TTFT. This figure is illustrative. </span></span></figcaption>
+</figure>
+<div class="ltx_para" id="S1.p1">
+<p class="ltx_p">Large Language Models (LLMs) are used ubiquitously, in chatbot, agentic, personal assistance, and many other use cases.
+Thus, improving the <span class="ltx_text ltx_font_italic">efficiency of LLM inference</span>, which provides low-delay experience for users at a low compute cost, is one of the most important problems in both industry and academia.
+To this end, <span class="ltx_text ltx_font_italic">reusing KV cache</span>—the intermediate states generated during LLM inference—has become the de-facto optimization in modern LLM inference systems.
+By storing and reusing the KV cache of a context in different requests, the inference latency could be significantly reduced, and throughput can be greatly improved <cite class="ltx_cite ltx_citemacro_cite">[<span class="ltx_ref ltx_missing_citation ltx_ref_self">lmcache</span>, <span class="ltx_ref ltx_missing_citation ltx_ref_self">cacheblend</span>, <span class="ltx_ref ltx_missing_citation ltx_ref_self">jin2025computeloadkvcache</span>, <span class="ltx_ref ltx_missing_citation ltx_ref_self">yang2025kvlinkacceleratinglargelanguage</span>]</cite>.</p>
+</div>
+<div class="ltx_para" id="S1.p2">
+<p class="ltx_p">Realizing the potential performance benefit, however, brings a new system challenge:
+the total size of KV cache that needs to be stored continues to grow due to growing model context window limits <span class="ltx_text ltx_font_italic">and</span> an increased number of concurrent users being served.
+Thus, it is challenging to fit all KV cache inside GPU memory.
+Two lines of work exist to avoid re-computing the KV caches that do not fit in GPU memory.
+First, KV cache <em class="ltx_emph ltx_font_italic">eviction</em><span class="ltx_note ltx_role_footnote" id="footnote1"><sup class="ltx_note_mark">1</sup><span class="ltx_note_outer"><span class="ltx_note_content"><sup class="ltx_note_mark">1</sup><span class="ltx_tag ltx_tag_note">1</span>KV cache eviction, in this work, means that a KV cache is moved from a faster storage device to the next tier, slower, device. It does not mean deleting the KV cache from the system.</span></span></span> has been proposed to improve the cache hit rate <cite class="ltx_cite ltx_citemacro_cite">[<span class="ltx_ref ltx_missing_citation ltx_ref_self">h2o</span>, <span class="ltx_ref ltx_missing_citation ltx_ref_self">chen2024naclgeneraleffectivekv</span>, <span class="ltx_ref ltx_missing_citation ltx_ref_self">qin2025cakecascadingadaptivekv</span>]</cite>.
+These works apply classic caching policies, such as least recent used (LRU), to evict KV cache from GPU memory to lower-tier storage devices, which have larger and cheaper space.
+This might increase the cache hit rate by allowing more KV caches to be stored and thus avoid repeatedly recomputing the KV cache.
+The second line of work applies KV cache <em class="ltx_emph ltx_font_italic">compression</em> to reduce the memory footprint of each KV cache, allowing more KV caches to fit in the GPU memory <cite class="ltx_cite ltx_citemacro_cite">[<span class="ltx_ref ltx_missing_citation ltx_ref_self">cachegen</span>, <span class="ltx_ref ltx_missing_citation ltx_ref_self">kvquant</span>, <span class="ltx_ref ltx_missing_citation ltx_ref_self">kivi</span>, <span class="ltx_ref ltx_missing_citation ltx_ref_self">jiang2025kvcomphighperformancellmawarelossy</span>, <span class="ltx_ref ltx_missing_citation ltx_ref_self">zhu2025fastcacheoptimizingmultimodalllm</span>]</cite>.</p>
+</div>
+<figure class="ltx_figure" id="S1.F2"><img alt="Refer to caption" class="ltx_graphics ltx_centering ltx_img_landscape" height="186" id="S1.F2.g1" src="x2.png" width="330"/>
+<figcaption class="ltx_caption ltx_centering"><span class="ltx_tag ltx_tag_figure">Figure 2: </span><span class="ltx_text ltx_font_italic">A simple example to illustrate the benefit of jointly deciding compression and eviction. Consider two KV caches (a 4 GB KV cache that can be compressed to 5% without quality drop, and a 8 GB KV cache where slight compression drops its quality to 50%), which are originally stored on a fast memory (20GB/s loading bandwidth) and a slow device (2GB/s). A compression-only scheme compresses both KV caches by half, causing low TTFT (0.3 seconds) but low quality (only 75%); an eviction-only scheme evicts half of the KV cache to slow storage, which has high quality (100%) but with high TTFT (2.4 seconds) when reusing the evicted KV cache; by considering compression and eviction, we simultaneously achieve high quality (100%) and low TTFT (0.5 seconds).</span></figcaption>
+</figure>
+<div class="ltx_para" id="S1.p3">
+<p class="ltx_p">However, both eviction and compression approaches are limited when used separately.
+When compression is applied, prior works only consider using more aggressive compression when reaching the space limit of the storage devices, and do not consider the possibility of eviction or simply using traditional eviction policies, such as LRU <cite class="ltx_cite ltx_citemacro_cite">[<span class="ltx_ref ltx_missing_citation ltx_ref_self">cachegen</span>, <span class="ltx_ref ltx_missing_citation ltx_ref_self">kvquant</span>, <span class="ltx_ref ltx_missing_citation ltx_ref_self">kivi</span>, <span class="ltx_ref ltx_missing_citation ltx_ref_self">jiang2025kvcomphighperformancellmawarelossy</span>]</cite>.
+When eviction is applied, these works do not adapt compression configurations based on the eviction decisions <cite class="ltx_cite ltx_citemacro_cite">[<span class="ltx_ref ltx_missing_citation ltx_ref_self">h2o</span>, <span class="ltx_ref ltx_missing_citation ltx_ref_self">chen2024naclgeneraleffectivekv</span>, <span class="ltx_ref ltx_missing_citation ltx_ref_self">qin2025cakecascadingadaptivekv</span>]</cite>.
+This is often suboptimal.
+As shown in Figure <a class="ltx_ref" href="https://arxiv.org/html/2512.14946v1#S1.F2" title="Figure 2 ‣ 1 Introduction ‣ EvicPress: Joint KV-Cache Compression and Eviction for Efficient LLM Serving"><span class="ltx_text ltx_ref_tag">2</span></a>, if we consider KV cache for two contexts (context 1 is 4 GB in size and context 2 is 8 GB), context 1 can keep a quality score of 100% even it is aggressively compressed, while context 2’s quality collapses to 50% even with minimal compression.
+When compression-only is applied, compressing both KV cache to 50% of their original size, the quality score degrades to 50% for context 2, with an average quality of 75% and average TTFT of 0.3 seconds.
+When eviction only is applied, context 1 is evicted to slow device, and context 2 is kept at the fast device, achieving a quality score of 100% and TTFT of 2.4 seconds.
+A better choice is to combine compression and eviction, specifically keeping context 2 in fast storage, and compressing context 1’s KV cache to 0.2GB and evicted to slow storage. This achieves 100% quality score with TTFT of 0.5 seconds.</p>
+</div>
+<div class="ltx_para" id="S1.p4">
+<p class="ltx_p">Prior works do not consider decisions of eviction or compression on all contexts, primarily due to the huge search space this problem incurs.
+First, when applying compression, compression methods and rates can be adapted.
+Secondly, compression needs to be combined with eviction; for example, after a certain compression rate, eviction should be used to avoid a huge quality drop.
+Furthermore, when dealing with any context’s KV cache, considering the impact of compression and eviction on itself is not enough; instead, its impact on other contexts also needs to be considered.
+Compressing a KV cache to a moderate rate and placing it on a fast storage device is beneficial to its quality and TTFT; however, this space can be used to store substantially more KV cache that can be aggressively compressed to improve <em class="ltx_emph ltx_font_italic">overall</em> TTFT and quality.</p>
+</div>
+<div class="ltx_para" id="S1.p5">
+<p class="ltx_p">A key insight is that different contexts benefit differently from compression or eviction, since they have various <span class="ltx_text ltx_font_italic">sensitivities</span> to lossy compression (§<a class="ltx_ref" href="https://arxiv.org/html/2512.14946v1#S3.SS1" title="3.1 Why not compress or evict all contexts? ‣ 3 Motivation ‣ EvicPress: Joint KV-Cache Compression and Eviction for Efficient LLM Serving"><span class="ltx_text ltx_ref_tag">3.1</span></a>).
+Some contexts are
+highly sensitive to compression errors, and even a conservative compression ratio can lead to a huge
+quality drop; while others can be largely compressed without affecting generation quality.
+Thus, compression and eviction decisions should be made globally to consider the sensitivities of all contexts in the system.
+For example, we should choose to evict highly sensitive contexts that suffer greatly from lossy compression when a higher storage tier is full, while bringing up KV cache from a lower tier that has lower sensitivity to compress them aggressively to fit into the higher storage tier.</p>
+</div>
+<div class="ltx_para" id="S1.p6">
+<p class="ltx_p">Making global cache management decisions based on all contexts creates a search space to the power of the number of contexts.
+To make it practical, our paper proposes a utility function, taking the storage tier, compression method, and rate as input, outputting a single score that quantitatively measures the effect of each decision on delay and quality.
+This allows us to easily compute the overall delay and quality trade-off based on all contexts for each cache management decision.</p>
+</div>
+<div class="ltx_para" id="S1.p7">
+<p class="ltx_p">Putting it together, we propose <span class="ltx_text ltx_font_smallcaps">EvicPress</span>, a system that adaptively chooses the optimal <span class="ltx_text ltx_font_italic">compression-eviction configuration</span>—whether to evict, to which storage device, and whether to compress, by what method and at which ratio—on a per KV-cache (per context) basis.
+<span class="ltx_text ltx_font_smallcaps">EvicPress</span> first calculates all possible configurations’ utility function scores for each context, based on a set of initially generated queries. Then <span class="ltx_text ltx_font_smallcaps">EvicPress</span> puts KV cache that maximizes the total utility function score on a certain storage device.
+Since real-world queries may drift from the initial set of queries, <span class="ltx_text ltx_font_smallcaps">EvicPress</span> records new incoming queries for each context, and performs periodic re-profiling based on the newest set of queries.
+After re-profiling, <span class="ltx_text ltx_font_smallcaps">EvicPress</span> uses a greedy-based algorithm to re-arrange KV cache in different storage tiers, such that the utility function scores can be maximized on each tier.</p>
+</div>
+<div class="ltx_para" id="S1.p8">
+<p class="ltx_p">We implement <span class="ltx_text ltx_font_smallcaps">EvicPress</span> within the existing LLM serving stack by extending vLLM and LMCache with ~3K lines of code that add multi-tier KV-cache placement, compression, and eviction control.
+Concretely, our implementation intercepts KV-cache lookups, retrievals, and stores, applies per-context compression/eviction policies, and integrates tightly with vLLM’s paged GPU memory management to orchestrate cache movement across GPU, CPU, and SSD tiers.</p>
+</div>
+<div class="ltx_para" id="S1.p9">
+<p class="ltx_p">In short, our contributions are:</p>
+<ul class="ltx_itemize" id="S1.I1">
+<li class="ltx_item" id="S1.I1.i1" style="list-style-type:none;">
+<span class="ltx_tag ltx_tag_item">•</span>
+<div class="ltx_para" id="S1.I1.i1.p1">
+<p class="ltx_p">We design and implement <span class="ltx_text ltx_font_smallcaps">EvicPress</span>, the first system that jointly considers both lossy compression and eviction for a multi-tier KV cache eviction system.</p>
+</div>
+</li>
+<li class="ltx_item" id="S1.I1.i2" style="list-style-type:none;">
+<span class="ltx_tag ltx_tag_item">•</span>
+<div class="ltx_para" id="S1.I1.i2.p1">
+<p class="ltx_p">We propose a <span class="ltx_text ltx_font_italic">utility function</span> that quantifies the effect of lossy compression and eviction on both quality and delay to make cache management decisions. Using this utility function, <span class="ltx_text ltx_font_smallcaps">EvicPress</span> can compare <span class="ltx_text ltx_font_italic">all</span> feasible compression-eviction configurations at once with a clear optimization criterion.</p>
+</div>
+</li>
+<li class="ltx_item" id="S1.I1.i3" style="list-style-type:none;">
+<span class="ltx_tag ltx_tag_item">•</span>
+<div class="ltx_para" id="S1.I1.i3.p1">
+<p class="ltx_p">We implement <span class="ltx_text ltx_font_smallcaps">EvicPress</span> in the state-of-the-art inference engine, vLLM <cite class="ltx_cite ltx_citemacro_cite">[<span class="ltx_ref ltx_missing_citation ltx_ref_self">vllm</span>]</cite>, and show that compared to baselines that apply the same compression methods and ratios on all contexts, <span class="ltx_text ltx_font_smallcaps">EvicPress</span> reduces TTFT by 1.43–3.77<math alttext="\times" class="ltx_Math" display="inline" id="S1.I1.i3.p1.m1" intent=":literal"><semantics><mo>×</mo><annotation encoding="application/x-tex">\times</annotation></semantics></math> across five different models with the same quality score; compared to the baseline that only applies LRU-based eviction, <span class="ltx_text ltx_font_smallcaps">EvicPress</span> reduces TTFT by 1.22 to 1.56<math alttext="\times" class="ltx_Math" display="inline" id="S1.I1.i3.p1.m2" intent=":literal"><semantics><mo>×</mo><annotation encoding="application/x-tex">\times</annotation></semantics></math> within 3% quality drop, and improves inference throughput by 2.0–3.6<math alttext="\times" class="ltx_Math" display="inline" id="S1.I1.i3.p1.m3" intent=":literal"><semantics><mo>×</mo><annotation encoding="application/x-tex">\times</annotation></semantics></math> compared best baseline at a quality score target of 80%.</p>
+</div>
+</li>
+</ul>
+</div>
+<div class="ltx_para" id="S1.p10">
+<p class="ltx_p">We should note that the idea of using utility function which captures the effect of delay and quality and adapting compression configurations based on sensitivity are not new <cite class="ltx_cite ltx_citemacro_cite">[<span class="ltx_ref ltx_missing_citation ltx_ref_self">zhou2025dynamickvtaskawareadaptivekv</span>, <span class="ltx_ref ltx_missing_citation ltx_ref_self">yu2025evolkvevolutionarykvcache</span>, <span class="ltx_ref ltx_missing_citation ltx_ref_self">kim2025kvzipqueryagnostickvcache</span>, <span class="ltx_ref ltx_missing_citation ltx_ref_self">ray2025metis</span>]</cite>.
+However, we are the first to apply the utility function to enable the joint optimization of eviction and compression, achieving much better results than fixed compression or eviction.</p>
+</div>
+</section>
+<section class="ltx_section" id="S2">
+<h2 class="ltx_title ltx_title_section">
+<span class="ltx_tag ltx_tag_section">2 </span>Background</h2>
+<section class="ltx_subsection" id="S2.SS1">
+<h3 class="ltx_title ltx_title_subsection">
+<span class="ltx_tag ltx_tag_subsection">2.1 </span>KV cache reusing and eviction in LLMs</h3>
+<div class="ltx_para" id="S2.SS1.p1">
+<p class="ltx_p">LLM inference includes two phases, the prefill phase where the entire input context is fed into the LLM at once to produce the <em class="ltx_emph ltx_font_italic">KV cache</em>, and decode phase where the KV cache is used to generate consecutive output tokens.
+The prefill phase is computation-heavy, especially under long-context scenarios, since its computational complexity grows super-linearly with the input length.
+To accelerate the prefill phase, many recent systems improve inference efficiency by storing and reusing previously computed KV caches to skip redundant computation <cite class="ltx_cite ltx_citemacro_cite">[<span class="ltx_ref ltx_missing_citation ltx_ref_self">cachegen</span>, <span class="ltx_ref ltx_missing_citation ltx_ref_self">lmcache</span>, <span class="ltx_ref ltx_missing_citation ltx_ref_self">gu2024llmsteerimprovinglongcontextllm</span>]</cite>. Prior works in systems mainly focused on KV cache management inside a hierarchical storage system.</p>
+</div>
+<div class="ltx_para" id="S2.SS1.p2">
+<p class="ltx_p">To reduce memory waste, vLLM <cite class="ltx_cite ltx_citemacro_cite">[<span class="ltx_ref ltx_missing_citation ltx_ref_self">vllm</span>]</cite> uses PagedAttention to handle the KV cache in smaller, page-like blocks instead of large contiguous chunks, reducing memory fragmentation. SGLang <cite class="ltx_cite ltx_citemacro_cite">[<span class="ltx_ref ltx_missing_citation ltx_ref_self">sglang</span>]</cite> optimizes computation and memory usage by employing a tree-based caching mechanism called RadixAttention, which stores KV caches in a radix tree and maintains them via a least recently used (LRU) eviction policy. Some recent works further push the boundary by extending KV cache management across the memory hierarchy and storage. LMCache <cite class="ltx_cite ltx_citemacro_cite">[<span class="ltx_ref ltx_missing_citation ltx_ref_self">lmcache</span>]</cite> reuses KV caches for any repeated text, regardless of whether it is a prefix, and offloads KV caches that are not selected to hierarchical caching devices such as CPU memory. Works like Mooncake <cite class="ltx_cite ltx_citemacro_cite">[<span class="ltx_ref ltx_missing_citation ltx_ref_self">qin2025mooncakekvcachecentricdisaggregatedarchitecture</span>]</cite>, Attentionstore <cite class="ltx_cite ltx_citemacro_cite">[<span class="ltx_ref ltx_missing_citation ltx_ref_self">gao2024attentionstore</span>]</cite>, and InstInfer <cite class="ltx_cite ltx_citemacro_cite">[<span class="ltx_ref ltx_missing_citation ltx_ref_self">pan2024instinferinstorageattentionoffloading</span>]</cite> leverage disaggregated resources (i.e., CPU, DRAM, and SSD) to offload KV caches and accelerate LLM serving.</p>
+</div>
+</section>
+<section class="ltx_subsection" id="S2.SS2">
+<h3 class="ltx_title ltx_title_subsection">
+<span class="ltx_tag ltx_tag_subsection">2.2 </span>KV cache compression</h3>
+<div class="ltx_para" id="S2.SS2.p1">
+<p class="ltx_p">Due to the relatively large sizes of KV caches (7.81 GB for 32k token context in Qwen3-32B), much previous work has been done on compressing KV cache.
+KV cache compression gives two key benefits in LLM serving. First, by reducing the size of each cache entry, one can store more KV caches within a given memory budget, which increases the probability of reuse and leads to higher cache hit rates. Second, it substantially reduces the data transfer overhead in offloading-based inference systems where KV caches are stored in CPU or SSD memory. This is crucial since transferring large KV caches over bandwidth-limited interconnects can become a performance bottleneck.
+</p>
+</div>
+<div class="ltx_para" id="S2.SS2.p2">
+<p class="ltx_p">There have been many KV cache compression methods, and they differ in both quality retention and system efficiency. These methods can be broadly categorized into: (1) token dropping (e.g., H2O, SnapKV) <cite class="ltx_cite ltx_citemacro_cite">[<span class="ltx_ref ltx_missing_citation ltx_ref_self">h2o</span>, <span class="ltx_ref ltx_missing_citation ltx_ref_self">li2024snapkvllmknowslooking</span>]</cite>, which selectively removes less important tokens from the KV cache; (2) quantization (e.g., CacheGen (Adaptive quantization), KIVI (Uniform quantization)) <cite class="ltx_cite ltx_citemacro_cite">[<span class="ltx_ref ltx_missing_citation ltx_ref_self">cachegen</span>, <span class="ltx_ref ltx_missing_citation ltx_ref_self">kivi</span>]</cite>, which reduces the bit-width representation of KV entries; (3) merging (e.g., HOMER, Look-M) <cite class="ltx_cite ltx_citemacro_cite">[<span class="ltx_ref ltx_missing_citation ltx_ref_self">song2024hierarchicalcontextmergingbetter</span>, <span class="ltx_ref ltx_missing_citation ltx_ref_self">wan2024lookmlookonceoptimizationkv</span>]</cite>; (4) prompt compression (e.g., LLMlingua, LongLLMlingua) <cite class="ltx_cite ltx_citemacro_cite">[<span class="ltx_ref ltx_missing_citation ltx_ref_self">jiang2023llmlingua</span>, <span class="ltx_ref ltx_missing_citation ltx_ref_self">jiang2023longllmlingua</span>]</cite>.</p>
+</div>
+<div class="ltx_para" id="S2.SS2.p3">
+<p class="ltx_p">Due to the different natures of these categories, these methods have widely different performances. As we demonstrate later in Sec <a class="ltx_ref" href="https://arxiv.org/html/2512.14946v1#S3.SS2" title="3.2 Why not the same compression method and ratio for all contexts? ‣ 3 Motivation ‣ EvicPress: Joint KV-Cache Compression and Eviction for Efficient LLM Serving"><span class="ltx_text ltx_ref_tag">3.2</span></a>, depending on the specific model size, dataset properties, and generation lengths, different methods will have different tradeoffs. Some methods, like CacheGen or KIVI, have a decompression overhead, while others, like H2O, can be directly used in decoding. Moreover, more novel research on KV cache compression is being created on top of previous work every month. Yet there is no principled method to choose and adopt this wide variety of compression algorithms in real systems.</p>
+</div>
+</section>
+</section>
+<section class="ltx_section" id="S3">
+<h2 class="ltx_title ltx_title_section">
+<span class="ltx_tag ltx_tag_section">3 </span>Motivation</h2>
+<figure class="ltx_table" id="S3.T1">
+<table class="ltx_tabular ltx_centering ltx_align_middle">
+<tr class="ltx_tr">
+<td class="ltx_td ltx_align_left ltx_border_tt" style="padding-left:3.0pt;padding-right:3.0pt;"><span class="ltx_text" style="font-size:90%;">Dataset</span></td>
+<td class="ltx_td ltx_align_left ltx_border_tt" style="padding-left:3.0pt;padding-right:3.0pt;"><span class="ltx_text" style="font-size:90%;">Length (mean)</span></td>
+<td class="ltx_td ltx_align_left ltx_border_tt" style="padding-left:3.0pt;padding-right:3.0pt;"><span class="ltx_text" style="font-size:90%;">Type of contexts</span></td>
+<td class="ltx_td ltx_nopad_r ltx_align_left ltx_border_tt" style="padding-left:3.0pt;padding-right:3.0pt;"><span class="ltx_text" style="font-size:90%;">#Contexts</span></td>
+</tr>
+<tr class="ltx_tr">
+<td class="ltx_td ltx_align_left ltx_border_t" style="padding-left:3.0pt;padding-right:3.0pt;"><span class="ltx_text" style="font-size:90%;">Samsum</span></td>
+<td class="ltx_td ltx_align_left ltx_border_t" style="padding-left:3.0pt;padding-right:3.0pt;"><span class="ltx_text" style="font-size:90%;">11586</span></td>
+<td class="ltx_td ltx_align_left ltx_border_t" style="padding-left:3.0pt;padding-right:3.0pt;"><span class="ltx_text" style="font-size:90%;">Few-shot</span></td>
+<td class="ltx_td ltx_nopad_r ltx_align_left ltx_border_t" style="padding-left:3.0pt;padding-right:3.0pt;"><span class="ltx_text" style="font-size:90%;">50</span></td>
+</tr>
+<tr class="ltx_tr">
+<td class="ltx_td ltx_align_left" style="padding-left:3.0pt;padding-right:3.0pt;"><span class="ltx_text" style="font-size:90%;">TriviaQA</span></td>
+<td class="ltx_td ltx_align_left" style="padding-left:3.0pt;padding-right:3.0pt;"><span class="ltx_text" style="font-size:90%;">12311</span></td>
+<td class="ltx_td ltx_align_left" style="padding-left:3.0pt;padding-right:3.0pt;"><span class="ltx_text" style="font-size:90%;">Few-shot</span></td>
+<td class="ltx_td ltx_nopad_r ltx_align_left" style="padding-left:3.0pt;padding-right:3.0pt;"><span class="ltx_text" style="font-size:90%;">50</span></td>
+</tr>
+<tr class="ltx_tr">
+<td class="ltx_td ltx_align_left" style="padding-left:3.0pt;padding-right:3.0pt;"><span class="ltx_text" style="font-size:90%;">MultiNews</span></td>
+<td class="ltx_td ltx_align_left" style="padding-left:3.0pt;padding-right:3.0pt;"><span class="ltx_text" style="font-size:90%;">2741</span></td>
+<td class="ltx_td ltx_align_left" style="padding-left:3.0pt;padding-right:3.0pt;"><span class="ltx_text" style="font-size:90%;">Multi-document</span></td>
+<td class="ltx_td ltx_nopad_r ltx_align_left" style="padding-left:3.0pt;padding-right:3.0pt;"><span class="ltx_text" style="font-size:90%;">50</span></td>
+</tr>
+<tr class="ltx_tr">
+<td class="ltx_td ltx_align_left" style="padding-left:3.0pt;padding-right:3.0pt;"><span class="ltx_text" style="font-size:90%;">2wikimQA</span></td>
+<td class="ltx_td ltx_align_left" style="padding-left:3.0pt;padding-right:3.0pt;"><span class="ltx_text" style="font-size:90%;">7526</span></td>
+<td class="ltx_td ltx_align_left" style="padding-left:3.0pt;padding-right:3.0pt;"><span class="ltx_text" style="font-size:90%;">Multi-document</span></td>
+<td class="ltx_td ltx_nopad_r ltx_align_left" style="padding-left:3.0pt;padding-right:3.0pt;"><span class="ltx_text" style="font-size:90%;">50</span></td>
+</tr>
+<tr class="ltx_tr">
+<td class="ltx_td ltx_align_left" style="padding-left:3.0pt;padding-right:3.0pt;"><span class="ltx_text" style="font-size:90%;">Qasper</span></td>
+<td class="ltx_td ltx_align_left" style="padding-left:3.0pt;padding-right:3.0pt;"><span class="ltx_text" style="font-size:90%;">4885</span></td>
+<td class="ltx_td ltx_align_left" style="padding-left:3.0pt;padding-right:3.0pt;"><span class="ltx_text" style="font-size:90%;">Single-document</span></td>
+<td class="ltx_td ltx_nopad_r ltx_align_left" style="padding-left:3.0pt;padding-right:3.0pt;"><span class="ltx_text" style="font-size:90%;">50</span></td>
+</tr>
+<tr class="ltx_tr">
+<td class="ltx_td ltx_align_left ltx_border_bb" style="padding-left:3.0pt;padding-right:3.0pt;"><span class="ltx_text" style="font-size:90%;">NarrativeQA</span></td>
+<td class="ltx_td ltx_align_left ltx_border_bb" style="padding-left:3.0pt;padding-right:3.0pt;"><span class="ltx_text" style="font-size:90%;">40003</span></td>
+<td class="ltx_td ltx_align_left ltx_border_bb" style="padding-left:3.0pt;padding-right:3.0pt;"><span class="ltx_text" style="font-size:90%;">Single-document</span></td>
+<td class="ltx_td ltx_nopad_r ltx_align_left ltx_border_bb" style="padding-left:3.0pt;padding-right:3.0pt;"><span class="ltx_text" style="font-size:90%;">50</span></td>
+</tr>
+</table>
+<figcaption class="ltx_caption ltx_centering" style="font-size:90%;"><span class="ltx_tag ltx_tag_table">Table 1: </span><span class="ltx_text ltx_font_italic">Lengths, type and number of contexts used in §<a class="ltx_ref" href="https://arxiv.org/html/2512.14946v1#S3" title="3 Motivation ‣ EvicPress: Joint KV-Cache Compression and Eviction for Efficient LLM Serving"><span class="ltx_text ltx_ref_tag">3</span></a>. </span></figcaption>
+</figure>
+<div class="ltx_para" id="S3.p1">
+<p class="ltx_p">The most straightforward way of managing KV cache memory is to either apply uniform compression or to use a cache eviction scheme, such as Least Recently Used (LRU) or Least Frequently Used (LFU), on all contexts.
+Both compression and eviction can greatly improve inference throughput, either by compressing the memory footprint of KV cache, so it is faster to fetch from remote storage devices <cite class="ltx_cite ltx_citemacro_cite">[<span class="ltx_ref ltx_missing_citation ltx_ref_self">cachegen</span>, <span class="ltx_ref ltx_missing_citation ltx_ref_self">jin2025computeloadkvcache</span>, <span class="ltx_ref ltx_missing_citation ltx_ref_self">liu2024minicachekvcachecompression</span>]</cite>,
+or by keeping KV cache that is more likely to be needed in the near future in faster storage devices to make loading faster <cite class="ltx_cite ltx_citemacro_cite">[<span class="ltx_ref ltx_missing_citation ltx_ref_self">chen2025impress</span>, <span class="ltx_ref ltx_missing_citation ltx_ref_self">lmcache</span>, <span class="ltx_ref ltx_missing_citation ltx_ref_self">feng2025adaptcachekvcachenative</span>, <span class="ltx_ref ltx_missing_citation ltx_ref_self">gao2024attentionstore</span>]</cite>.</p>
+</div>
+<div class="ltx_para" id="S3.p2">
+<p class="ltx_p">However, as we will show in this section, further optimization is possible, as KV cache management decisions should depend on context-specific characteristics.</p>
+</div>
+<div class="ltx_para" id="S3.p3">
+<p class="ltx_p">In this section, we present an empirical study with six datasets from LongBench dataset <cite class="ltx_cite ltx_citemacro_cite">[<span class="ltx_ref ltx_missing_citation ltx_ref_self">longbench</span>]</cite>, which is a widely-used dataset for verifying LLM’s ability to answer long-context questions.
+The dataset details are shown in Table <a class="ltx_ref" href="https://arxiv.org/html/2512.14946v1#S3.T1" title="Table 1 ‣ 3 Motivation ‣ EvicPress: Joint KV-Cache Compression and Eviction for Efficient LLM Serving"><span class="ltx_text ltx_ref_tag">1</span></a>.
+Specifically, we randomly draw 50 contexts from 12 datasets in the LongBench <cite class="ltx_cite ltx_citemacro_cite">[<span class="ltx_ref ltx_missing_citation ltx_ref_self">longbench</span>]</cite> dataset, covering various types of tasks, including few-shot, single-document question answering, and multi-document question answering.</p>
+</div>
+<section class="ltx_subsection" id="S3.SS1">
+<h3 class="ltx_title ltx_title_subsection">
+<span class="ltx_tag ltx_tag_subsection">3.1 </span>Why not compress or evict all contexts? </h3>
+<figure class="ltx_figure" id="S3.F3"><img alt="Refer to caption" class="ltx_graphics ltx_centering ltx_img_landscape" height="246" id="S3.F3.g1" src="x3.png" width="646"/>
+<figcaption class="ltx_caption ltx_centering"><span class="ltx_tag ltx_tag_figure">Figure 3: </span><span class="ltx_text ltx_font_italic">Different contexts have different compression error sensitivities in the six datasets mentioned in Table <a class="ltx_ref" href="https://arxiv.org/html/2512.14946v1#S3.T1" title="Table 1 ‣ 3 Motivation ‣ EvicPress: Joint KV-Cache Compression and Eviction for Efficient LLM Serving"><span class="ltx_text ltx_ref_tag">1</span></a>.
+Compression error sensitivity is defined as the quality score drop when applied with keydiff compression at a ratio of 0.9.
+Plotted with Llama-3.1-8B-Instruct.
+</span></figcaption>
+</figure>
+<div class="ltx_para" id="S3.SS1.p1">
+<p class="ltx_p">KV caches for some contexts are highly sensitive to compression errors: even applying an extremely conservative compression ratio can lead to a substantial quality drop. In contrast, other contexts are minimally affected.
+This leads to our first insight as follows.</p>
+</div>
+<div class="ltx_theorem ltx_theorem_insight" id="Thminsight1">
+<h6 class="ltx_title ltx_runin ltx_title_theorem"><span class="ltx_tag ltx_tag_theorem"><span class="ltx_text ltx_font_bold">Insight 1</span></span></h6>
+<div class="ltx_para" id="Thminsight1.p1">
+<p class="ltx_p"><span class="ltx_text ltx_font_italic">Different contexts have different sensitivities to compression errors, thus simply applying the same eviction or compression schemes on all contexts is not optimal.</span></p>
+</div>
+</div>
+<div class="ltx_para" id="S3.SS1.p2">
+<p class="ltx_p">Figure <a class="ltx_ref" href="https://arxiv.org/html/2512.14946v1#S3.F3" title="Figure 3 ‣ 3.1 Why not compress or evict all contexts? ‣ 3 Motivation ‣ EvicPress: Joint KV-Cache Compression and Eviction for Efficient LLM Serving"><span class="ltx_text ltx_ref_tag">3</span></a> illustrates this, where the CDF of compression error sensitivities, defined as relative quality drop under a compression ratio of 0.9<span class="ltx_note ltx_role_footnote" id="footnote2"><sup class="ltx_note_mark">2</sup><span class="ltx_note_outer"><span class="ltx_note_content"><sup class="ltx_note_mark">2</sup><span class="ltx_tag ltx_tag_note">2</span>Compression ratio is defined as the ratio between compressed KV cache size and original KV cache size. </span></span></span>, is plotted with datasets in Table <a class="ltx_ref" href="https://arxiv.org/html/2512.14946v1#S3.T1" title="Table 1 ‣ 3 Motivation ‣ EvicPress: Joint KV-Cache Compression and Eviction for Efficient LLM Serving"><span class="ltx_text ltx_ref_tag">1</span></a> of different types.
+The figure is plotted with the Llama-3.1-8B-Instruct model with <span class="ltx_text ltx_font_typewriter">keydiff</span> compression.
+As shown in the figure,
+for example, Wikipedia articles (2wikimQA) have high sensitivities, with median of 0.681.
+Our intuition is that critical information is distributed at a high density in all contexts.
+Meanwhile, story narratives (NarrativeQA) have a much lower sensitivity, with a median of 0.340, since they are based on dialogues containing redundant information.</p>
+</div>
+<div class="ltx_para" id="S3.SS1.p3">
+<p class="ltx_p">Moreover, we find that even though two datasets belong to the same type of context, they may have completely different distribution of sensitivities.
+For example, Samsum and TriviaQA are both few-shot datasets, where several example question-answer pairs are provided to LLMs before answering the real questions, while Samsum has sensitivity with a median of 0.676 and TriviaQA has sensitivity with a median of 0.392.
+Also, MultiNews samples are multi-document contexts, where multiple news articles are concatenated to form each sample, and Qasper samples are single-document, where each sample only contains a single document on a specific topic.
+However, the MultiNews and Qasper datasets have very similar median sensitivities, 0.738 and 0.759 specifically.</p>
+</div>
+<div class="ltx_para" id="S3.SS1.p4">
+<p class="ltx_p">Overall, sensitivities vary significantly across contexts.
+Specifically, the coefficient of variation (a measure of variance) is from 0.078 to 0.394, and this shows that different contexts have very different sensitivities, even within the same dataset.</p>
+</div>
+</section>
+<section class="ltx_subsection" id="S3.SS2">
+<h3 class="ltx_title ltx_title_subsection">
+<span class="ltx_tag ltx_tag_subsection">3.2 </span>Why not the same compression method and ratio for all contexts? </h3>
+<figure class="ltx_figure" id="S3.F4"><img alt="Refer to caption" class="ltx_graphics ltx_centering ltx_img_landscape" height="187" id="S3.F4.g1" src="x4.png" width="330"/>
+<figcaption class="ltx_caption ltx_centering"><span class="ltx_tag ltx_tag_figure">Figure 4: </span><span class="ltx_text ltx_font_italic">Length distributions for contexts whose least quality drop occurs when using kvzip, knorm, and snapkv, under a compression ratio of 0.6.</span></figcaption>
+</figure>
+<figure class="ltx_figure" id="S3.F5"><img alt="Refer to caption" class="ltx_graphics ltx_centering ltx_img_landscape" height="235" id="S3.F5.g1" src="x5.png" width="330"/>
+<figcaption class="ltx_caption ltx_centering"><span class="ltx_tag ltx_tag_figure">Figure 5: </span><span class="ltx_text ltx_font_italic">Different types of contexts have different optimal compression ratios. Here, each bar shows the mean and standard deviation of optimal compression ratios for different type of contexts. </span></figcaption>
+</figure>
+<div class="ltx_para" id="S3.SS2.p1">
+<p class="ltx_p">Another natural question to ask is why not apply a fixed compression method and ratio on all contexts?
+As also discussed in §<a class="ltx_ref" href="https://arxiv.org/html/2512.14946v1#S2.SS2" title="2.2 KV cache compression ‣ 2 Background ‣ EvicPress: Joint KV-Cache Compression and Eviction for Efficient LLM Serving"><span class="ltx_text ltx_ref_tag">2.2</span></a>, many parameters can be adjusted, including different compression methods and compression ratios for each method.
+As different methods look at different metrics for dropping information from the KV cache, we hypothesize that different contexts have their own optimal compression method and ratios.</p>
+</div>
+<div class="ltx_theorem ltx_theorem_insight" id="Thminsight2">
+<h6 class="ltx_title ltx_runin ltx_title_theorem"><span class="ltx_tag ltx_tag_theorem"><span class="ltx_text ltx_font_bold">Insight 2</span></span></h6>
+<div class="ltx_para" id="Thminsight2.p1">
+<p class="ltx_p"><span class="ltx_text ltx_font_italic">The optimal compression method and ratio cannot be simply determined by the lengths of contexts or the type of contexts.</span></p>
+</div>
+</div>
+<div class="ltx_para" id="S3.SS2.p2">
+<p class="ltx_p">To verify this, in Figure <a class="ltx_ref" href="https://arxiv.org/html/2512.14946v1#S3.F4" title="Figure 4 ‣ 3.2 Why not the same compression method and ratio for all contexts? ‣ 3 Motivation ‣ EvicPress: Joint KV-Cache Compression and Eviction for Efficient LLM Serving"><span class="ltx_text ltx_ref_tag">4</span></a>, we plot the length distribution for three groups of contexts whose optimal compression methods are <span class="ltx_text ltx_font_typewriter">kvzip</span>, <span class="ltx_text ltx_font_typewriter">knorm</span> and <span class="ltx_text ltx_font_typewriter">snapkv</span>, respectively.
+Here, <em class="ltx_emph ltx_font_italic">optimal</em> compression method is defined as the method with the lowest quality<span class="ltx_note ltx_role_footnote" id="footnote3"><sup class="ltx_note_mark">3</sup><span class="ltx_note_outer"><span class="ltx_note_content"><sup class="ltx_note_mark">3</sup><span class="ltx_tag ltx_tag_note">3</span>Generation quality is defined as the similarity between the generated answer after compression and the original prefill answer.</span></span></span> drop at the same compression ratio.
+There are 40.3%, 40.0% and 19.7% contexts whose optimal methods are <span class="ltx_text ltx_font_typewriter">kvzip</span>, <span class="ltx_text ltx_font_typewriter">knorm</span> and <span class="ltx_text ltx_font_typewriter">snapkv</span>, suggesting that there is no dominant compression method that works for all contexts, and per-context method adaptation is needed.
+Furthermore, we can see that the context lengths distribution for the three groups overlaps with each other, indicating that there is not a clear relationship between context length and which compression method to select.</p>
+</div>
+<div class="ltx_para" id="S3.SS2.p3">
+<p class="ltx_p">Secondly, in Figure <a class="ltx_ref" href="https://arxiv.org/html/2512.14946v1#S3.F5" title="Figure 5 ‣ 3.2 Why not the same compression method and ratio for all contexts? ‣ 3 Motivation ‣ EvicPress: Joint KV-Cache Compression and Eviction for Efficient LLM Serving"><span class="ltx_text ltx_ref_tag">5</span></a>, we plot the mean optimal compression ratio and the standard deviation for different datasets in Table <a class="ltx_ref" href="https://arxiv.org/html/2512.14946v1#S3.T1" title="Table 1 ‣ 3 Motivation ‣ EvicPress: Joint KV-Cache Compression and Eviction for Efficient LLM Serving"><span class="ltx_text ltx_ref_tag">1</span></a>.
+The optimal compression ratio is defined as the ratio with best quality-delay trade-off among all compression methods<span class="ltx_note ltx_role_footnote" id="footnote4"><sup class="ltx_note_mark">4</sup><span class="ltx_note_outer"><span class="ltx_note_content"><sup class="ltx_note_mark">4</sup><span class="ltx_tag ltx_tag_note">4</span>To measure the correlation between TTFT and quality, we use <math alttext="\text{normalized quality}-\text{normalized TTFT}" class="ltx_Math" display="inline" id="footnote4.m1" intent=":literal"><semantics><mrow><mtext>normalized quality</mtext><mo>−</mo><mtext>normalized TTFT</mtext></mrow><annotation encoding="application/x-tex">\text{normalized quality}-\text{normalized TTFT}</annotation></semantics></math> to make sure that quality and TTFT are comparable in terms of scale.</span></span></span>.
+We can see that even within each dataset, the optimal compression ratio varies greatly across different contexts, with coefficient of variation being 0.068 to 0.806.
+This shows that the optimal compression ratios cannot be simply determined by the dataset.</p>
+</div>
+<div class="ltx_para" id="S3.SS2.p4">
+<p class="ltx_p">Moreover, we observe that even though two datasets belong to the same type, such as MultiNews and Musique, which are both multi-document contexts, they have non-overlapping distributions.
+This suggests that the optimal compression ratios cannot be trivially determined by type of contexts either.</p>
+</div>
+</section>
+</section>
+<section class="ltx_section" id="S4">
+<h2 class="ltx_title ltx_title_section">
+<span class="ltx_tag ltx_tag_section">4 </span><span class="ltx_text ltx_font_smallcaps">EvicPress</span> Design</h2>
+<div class="ltx_para" id="S4.p1">
+<p class="ltx_p">We now describe the design of <span class="ltx_text ltx_font_smallcaps">EvicPress</span>, starting with an overall workflow (§<a class="ltx_ref" href="https://arxiv.org/html/2512.14946v1#S4.SS1" title="4.1 Overall workflow ‣ 4 EvicPress Design ‣ EvicPress: Joint KV-Cache Compression and Eviction for Efficient LLM Serving"><span class="ltx_text ltx_ref_tag">4.1</span></a>), a utility function that determines the quality-rate trade-off of each compression configuration (§<a class="ltx_ref" href="https://arxiv.org/html/2512.14946v1#S4.SS2" title="4.2 Utility function: Balancing quality and loading delay ‣ 4 EvicPress Design ‣ EvicPress: Joint KV-Cache Compression and Eviction for Efficient LLM Serving"><span class="ltx_text ltx_ref_tag">4.2</span></a>), a profiling mechanism to determine the right compression configuration for each context (§<a class="ltx_ref" href="https://arxiv.org/html/2512.14946v1#S4.SS3" title="4.3 Profiler module: Computing the utility function scores and choosing eviction-compression configuration ‣ 4 EvicPress Design ‣ EvicPress: Joint KV-Cache Compression and Eviction for Efficient LLM Serving"><span class="ltx_text ltx_ref_tag">4.3</span></a>), and a policy to manage the KV cache when a storage tier is full (§<a class="ltx_ref" href="https://arxiv.org/html/2512.14946v1#S4.SS4" title="4.4 Eviction-compression configuration selection module ‣ 4 EvicPress Design ‣ EvicPress: Joint KV-Cache Compression and Eviction for Efficient LLM Serving"><span class="ltx_text ltx_ref_tag">4.4</span></a>).</p>
+</div>
+<section class="ltx_subsection" id="S4.SS1">
+<h3 class="ltx_title ltx_title_subsection">
+<span class="ltx_tag ltx_tag_subsection">4.1 </span>Overall workflow</h3>
+<figure class="ltx_figure" id="S4.F6"><img alt="Refer to caption" class="ltx_graphics ltx_centering ltx_img_landscape" height="169" id="S4.F6.g1" src="x6.png" width="330"/>
+<figcaption class="ltx_caption ltx_centering"><span class="ltx_tag ltx_tag_figure">Figure 6: </span><span class="ltx_text ltx_font_italic">End-to-end workflow of <span class="ltx_text ltx_font_smallcaps">EvicPress</span>.</span></figcaption>
+</figure>
+<div class="ltx_para" id="S4.SS1.p1">
+<p class="ltx_p"><span class="ltx_text ltx_font_smallcaps">EvicPress</span> contains two phases: an initial offline phase and an online inference phase.</p>
+</div>
+<div class="ltx_para ltx_noindent" id="S4.SS1.p2">
+<p class="ltx_p"><span class="ltx_text ltx_font_bold">Initial offline phase:</span>  During the initial offline phase, <span class="ltx_text ltx_font_smallcaps">EvicPress</span>’s profiler (§<a class="ltx_ref" href="https://arxiv.org/html/2512.14946v1#S4.SS3" title="4.3 Profiler module: Computing the utility function scores and choosing eviction-compression configuration ‣ 4 EvicPress Design ‣ EvicPress: Joint KV-Cache Compression and Eviction for Efficient LLM Serving"><span class="ltx_text ltx_ref_tag">4.3</span></a>) computes the utility function scores (§<a class="ltx_ref" href="https://arxiv.org/html/2512.14946v1#S4.SS2" title="4.2 Utility function: Balancing quality and loading delay ‣ 4 EvicPress Design ‣ EvicPress: Joint KV-Cache Compression and Eviction for Efficient LLM Serving"><span class="ltx_text ltx_ref_tag">4.2</span></a>) for all possible eviction-compression configurations of each context.
+To compute the quality and delay items in the utility function, we use an initial set of generated questions for each context.</p>
+</div>
+<div class="ltx_para ltx_noindent" id="S4.SS1.p3">
+<p class="ltx_p"><span class="ltx_text ltx_font_bold">Online inference phase:</span>  In the online inference phase, when a user request comes in, the lookup module first determines whether the KV cache for the requested context exists in the multi-tier storage system managed by <span class="ltx_text ltx_font_smallcaps">EvicPress</span>.
+If it exists, <span class="ltx_text ltx_font_smallcaps">EvicPress</span>’s retriever fetches the KV cache from the location that the lookup module returns.
+If it does not, the KV cache is generated by the LLM, and then saved by <span class="ltx_text ltx_font_smallcaps">EvicPress</span> to the remote disk, which is assumed to have unlimited space.
+As the online queries may differ from the initial set of profile queries, <span class="ltx_text ltx_font_smallcaps">EvicPress</span>’s profiling module also performs periodic re-profiling based on an updated set of queries for each context, when the achieved quality is lower than threshold <math alttext="X\%" class="ltx_Math" display="inline" id="S4.SS1.p3.m1" intent=":literal"><semantics><mrow><mi>X</mi><mo>%</mo></mrow><annotation encoding="application/x-tex">X\%</annotation></semantics></math> and free GPU cycles are available.</p>
+</div>
+<div class="ltx_para" id="S4.SS1.p4">
+<p class="ltx_p">Note that the KV cache storing operation runs on the CPU, which does not block the online inference computations for other queries.
+Furthermore, the re-profiling step first compresses the KV cache into multiple versions and runs <em class="ltx_emph ltx_font_italic">decoding</em> phases with different KV cache versions.
+Both the compression step and decoding computations are lightweight in terms of GPU computations, and can be batched with other requests’ decoding computations.
+As we will show soon (§<a class="ltx_ref" href="https://arxiv.org/html/2512.14946v1#S6.SS3" title="6.3 Microbenchmarks ‣ 6 Evaluation ‣ EvicPress: Joint KV-Cache Compression and Eviction for Efficient LLM Serving"><span class="ltx_text ltx_ref_tag">6.3</span></a>), re-profiling incurs minimal system overhead.</p>
+</div>
+</section>
+<section class="ltx_subsection" id="S4.SS2">
+<h3 class="ltx_title ltx_title_subsection">
+<span class="ltx_tag ltx_tag_subsection">4.2 </span>Utility function: Balancing quality and loading delay</h3>
+<div class="ltx_para" id="S4.SS2.p1">
+<p class="ltx_p">Each compression and eviction configuration presents a point on the generation quality and loading delay trade-off.
+To easily measure the impact of each configuration on quality and loading delay, we design a utility function which outputs a single score for each eviction-compression configuration – the storage tier that the eviction scheme offloads KV cache to, and the compression method and ratio it applies:
+</p>
+<table class="ltx_equationgroup ltx_eqn_table" id="S4.Ex1">
+<tbody id="S4.Ex1X"><tr class="ltx_equation ltx_eqn_row ltx_align_baseline">
+<td class="ltx_eqn_cell ltx_eqn_center_padleft"></td>
+<td class="ltx_td ltx_align_right ltx_eqn_cell"><math alttext="\displaystyle\mathrm{Util}(\text{method},\text{ratio},\text{device})" class="ltx_Math" display="inline" id="S4.Ex1X.m2" intent=":literal"><semantics><mrow><mi>Util</mi><mo lspace="0em" rspace="0em">​</mo><mrow><mo stretchy="false">(</mo><mtext>method</mtext><mo>,</mo><mtext>ratio</mtext><mo>,</mo><mtext>device</mtext><mo stretchy="false">)</mo></mrow></mrow><annotation encoding="application/x-tex">\displaystyle\mathrm{Util}(\text{method},\text{ratio},\text{device})</annotation></semantics></math></td>
+<td class="ltx_td ltx_align_left ltx_eqn_cell"><math alttext="\displaystyle=(\alpha\cdot\text{quality}-\text{TTFT})\cdot\text{frequency}," class="ltx_Math" display="inline" id="S4.Ex1X.m3" intent=":literal"><semantics><mrow><mrow><mi></mi><mo>=</mo><mrow><mrow><mo stretchy="false">(</mo><mrow><mrow><mi>α</mi><mo lspace="0.222em" rspace="0.222em">⋅</mo><mtext>quality</mtext></mrow><mo>−</mo><mtext>TTFT</mtext></mrow><mo rspace="0.055em" stretchy="false">)</mo></mrow><mo rspace="0.222em">⋅</mo><mtext>frequency</mtext></mrow></mrow><mo>,</mo></mrow><annotation encoding="application/x-tex">\displaystyle=(\alpha\cdot\text{quality}-\text{TTFT})\cdot\text{frequency},</annotation></semantics></math></td>
+<td class="ltx_eqn_cell ltx_eqn_center_padright"></td>
+</tr></tbody>
+</table>
+<p class="ltx_p">where <math alttext="\alpha" class="ltx_Math" display="inline" id="S4.SS2.p1.m1" intent=":literal"><semantics><mi>α</mi><annotation encoding="application/x-tex">\alpha</annotation></semantics></math> is the trade-off parameter between quality and loading delay — higher <math alttext="\alpha" class="ltx_Math" display="inline" id="S4.SS2.p1.m2" intent=":literal"><semantics><mi>α</mi><annotation encoding="application/x-tex">\alpha</annotation></semantics></math> improves the quality of <span class="ltx_text ltx_font_smallcaps">EvicPress</span> at the cost of higher loading delay in average, and in our evaluation we will vary <math alttext="\alpha" class="ltx_Math" display="inline" id="S4.SS2.p1.m3" intent=":literal"><semantics><mi>α</mi><annotation encoding="application/x-tex">\alpha</annotation></semantics></math> to show the trade-off of <span class="ltx_text ltx_font_smallcaps">EvicPress</span> between quality and loading delay.</p>
+</div>
+<div class="ltx_para" id="S4.SS2.p2">
+<p class="ltx_p">In the above equation, the input to the function is the storage device tier which the eviction algorithm sends the KV cache to, and the compression method/ratio that is applied. The quality is computed based on the compression method and ratio, averaged across all the data in the profiling query set; the delay item is computed with estimated latency to fetch a (compressed) KV cache from the corresponding storage device; and the frequency item is the number of times the context is accessed.</p>
+</div>
+<div class="ltx_para" id="S4.SS2.p3">
+<p class="ltx_p">To make it concrete, take the examples from §<a class="ltx_ref" href="https://arxiv.org/html/2512.14946v1#S3.SS1" title="3.1 Why not compress or evict all contexts? ‣ 3 Motivation ‣ EvicPress: Joint KV-Cache Compression and Eviction for Efficient LLM Serving"><span class="ltx_text ltx_ref_tag">3.1</span></a>, when using <span class="ltx_text ltx_font_typewriter">keydiff</span> compression, across the contexts from 2wikimQA dataset which has higher sensitivity, with compression ratio of 0.6, we can reach a quality score of 0.65 and TTFT of 0.05 seconds; while across contexts from NarrativeQA dataset that has lower sensitivity, with compression ratio of 0.9, we can get a quality score of 0.67 with TTFT of 0.05 seconds.
+Assuming <math alttext="\alpha=1" class="ltx_Math" display="inline" id="S4.SS2.p3.m1" intent=":literal"><semantics><mrow><mi>α</mi><mo>=</mo><mn>1</mn></mrow><annotation encoding="application/x-tex">\alpha=1</annotation></semantics></math> and equal frequency for each context, the utility function score is 0.607 and 0.621 respectively.
+The configuration of (keydiff, 0.6, CPU) is strictly worse than (keydiff, 0.9, CPU) as the former one has the same TTFT and lower quality.
+This is reflected by the utility function score too, with the former one having a lower score than the latter.</p>
+</div>
+<div class="ltx_para" id="S4.SS2.p4">
+<p class="ltx_p">The system enables users to navigate the trade-off between generation quality and latency with the tunable parameter <math alttext="\alpha" class="ltx_Math" display="inline" id="S4.SS2.p4.m1" intent=":literal"><semantics><mi>α</mi><annotation encoding="application/x-tex">\alpha</annotation></semantics></math>. A larger <math alttext="\alpha" class="ltx_Math" display="inline" id="S4.SS2.p4.m2" intent=":literal"><semantics><mi>α</mi><annotation encoding="application/x-tex">\alpha</annotation></semantics></math> prioritizes generation quality, while a smaller <math alttext="\alpha" class="ltx_Math" display="inline" id="S4.SS2.p4.m3" intent=":literal"><semantics><mi>α</mi><annotation encoding="application/x-tex">\alpha</annotation></semantics></math> prioritizes smaller TTFT. For example, in the 2wikimQA dataset, a compression ratio of 0.4 yields a quality score of 0.82 and a TTFT of 0.20 seconds, whereas a ratio of 0.2 improves quality to 0.92 but increases TTFT to 0.24 seconds. Consequently, if a user sets <math alttext="\alpha&gt;0.3" class="ltx_Math" display="inline" id="S4.SS2.p4.m4" intent=":literal"><semantics><mrow><mi>α</mi><mo>&gt;</mo><mn>0.3</mn></mrow><annotation encoding="application/x-tex">\alpha&gt;0.3</annotation></semantics></math>, the utility function favors the higher quality provided by the 0.2 ratio; conversely, a lower <math alttext="\alpha" class="ltx_Math" display="inline" id="S4.SS2.p4.m5" intent=":literal"><semantics><mi>α</mi><annotation encoding="application/x-tex">\alpha</annotation></semantics></math> prioritizes the latency reduction offered by the 0.4 ratio.</p>
+</div>
+<div class="ltx_para" id="S4.SS2.p5">
+<p class="ltx_p">Another important design question when calculating the utility function is: what is a suitable granularity to compute this utility function on?
+<span class="ltx_text ltx_font_smallcaps">EvicPress</span> computes this utility function based on context-level, instead of chunk-level which splits the whole context’s KV cache into multiple chunks, or token-level.
+This is because context-level profiling has a global view of important token distribution considering the entire context.
+On the other hand, for chunk-level profiling, some tokens may be important within the scope of a chunk, while unimportant at the scope of the whole context.
+Token-level profiling is even more suboptimal since quality measurement is not feasible. And token-level retrieval cannot saturate bandwidth and leads to low speed and high overhead because of inconsistent memory access.</p>
+</div>
+</section>
+<section class="ltx_subsection" id="S4.SS3">
+<h3 class="ltx_title ltx_title_subsection">
+<span class="ltx_tag ltx_tag_subsection">4.3 </span>Profiler module: Computing the utility function scores and choosing eviction-compression configuration</h3>
+<div class="ltx_para" id="S4.SS3.p1">
+<p class="ltx_p">Based on insight <a class="ltx_ref" href="https://arxiv.org/html/2512.14946v1#Thminsight1" title="Insight 1 ‣ 3.1 Why not compress or evict all contexts? ‣ 3 Motivation ‣ EvicPress: Joint KV-Cache Compression and Eviction for Efficient LLM Serving"><span class="ltx_text ltx_ref_tag">1</span></a>, the compression-eviction configuration must adapt to different contexts.
+Insight <a class="ltx_ref" href="https://arxiv.org/html/2512.14946v1#Thminsight2" title="Insight 2 ‣ 3.2 Why not the same compression method and ratio for all contexts? ‣ 3 Motivation ‣ EvicPress: Joint KV-Cache Compression and Eviction for Efficient LLM Serving"><span class="ltx_text ltx_ref_tag">2</span></a> indicates that the configuration cannot simply be determined by the characteristics of the context, such as lengths or types.
+Thus, instead of coming up with context characteristics that indicate the benefits of each configuration, <span class="ltx_text ltx_font_smallcaps">EvicPress</span> directly profiles the impact of all configurations on overall <em class="ltx_emph ltx_font_italic">quality</em> and <em class="ltx_emph ltx_font_italic">delay</em>.
+Specifically, <span class="ltx_text ltx_font_smallcaps">EvicPress</span> uses the utility function (§<a class="ltx_ref" href="https://arxiv.org/html/2512.14946v1#S4.SS2" title="4.2 Utility function: Balancing quality and loading delay ‣ 4 EvicPress Design ‣ EvicPress: Joint KV-Cache Compression and Eviction for Efficient LLM Serving"><span class="ltx_text ltx_ref_tag">4.2</span></a>) that outputs a single score for each configuration of (storage device, compression method, compression ratio) to capture both delay and quality.</p>
+</div>
+<div class="ltx_para" id="S4.SS3.p2">
+<p class="ltx_p">Before the online inference stage,
+as the system does not see any queries before, the profiling module generates a set of training questions for each context following prior works <cite class="ltx_cite ltx_citemacro_cite">[<span class="ltx_ref ltx_missing_citation ltx_ref_self">catridges</span>, <span class="ltx_ref ltx_missing_citation ltx_ref_self">wei2024simplesyntheticdatareduces</span>, <span class="ltx_ref ltx_missing_citation ltx_ref_self">zhang2024inftybenchextendinglongcontext</span>, <span class="ltx_ref ltx_missing_citation ltx_ref_self">wei2024longformfactualitylargelanguage</span>, <span class="ltx_ref ltx_missing_citation ltx_ref_self">white2025livebenchchallengingcontaminationlimitedllm</span>]</cite>, to compute the average quality and delay on them.
+The questions are generated by the GPT-5 API about different paragraphs in the contexts, aiming to obtain the eviction-compression configuration that drops as much redundancy for each paragraph as possible to reduce delay.</p>
+</div>
+<div class="ltx_para" id="S4.SS3.p3">
+<p class="ltx_p">During online inference, as real-world queries may drift from the training queries, the profiling module also periodically re-profiles with a newer dataset.
+The re-profiling is triggered whenever the quality achieved on the online testing dataset is below the quality achieved on the profiling dataset by a threshold of <math alttext="X\%" class="ltx_Math" display="inline" id="S4.SS3.p3.m1" intent=":literal"><semantics><mrow><mi>X</mi><mo>%</mo></mrow><annotation encoding="application/x-tex">X\%</annotation></semantics></math>, and when the system has free GPU cycles.
+Note that the profiling process only requires the KV cache to be compressed with different methods and ratios, which incurs very minimal overhead, and running the decoding phase with these different compressed versions.
+The decoding phase is known to be largely batchable (batching with other requests does not increase decoding delay).
+Thus, available GPU cycles occur when the number of online inference requests is smaller than the maximum batch size in the system.
+In practice, users can freely adapt <math alttext="X\%" class="ltx_Math" display="inline" id="S4.SS3.p3.m2" intent=":literal"><semantics><mrow><mi>X</mi><mo>%</mo></mrow><annotation encoding="application/x-tex">X\%</annotation></semantics></math> based on their quality requirements.</p>
+</div>
+</section>
+<section class="ltx_subsection" id="S4.SS4">
+<h3 class="ltx_title ltx_title_subsection">
+<span class="ltx_tag ltx_tag_subsection">4.4 </span>Eviction-compression configuration selection module</h3>
+<div class="ltx_para" id="S4.SS4.p1">
+<p class="ltx_p">Given an initial set of contexts, where each context has a set of generated queries for profiling, <span class="ltx_text ltx_font_smallcaps">EvicPress</span> computes the utility function scores for all possible eviction-compression configurations on each context.
+<span class="ltx_text ltx_font_smallcaps">EvicPress</span>’s configuration selection module then places the (compressed) KV cache to a certain storage tier for each context with the configuration corresponding to the highest utility function score.</p>
+</div>
+<figure class="ltx_figure" id="S4.F7"><img alt="Refer to caption" class="ltx_graphics ltx_centering ltx_img_landscape" height="366" id="S4.F7.g1" src="x7.png" width="597"/>
+<figcaption class="ltx_caption ltx_centering"><span class="ltx_tag ltx_tag_figure">Figure 7: </span><span class="ltx_text ltx_font_smallcaps">EvicPress<span class="ltx_text ltx_font_italic"> reduces TTFT by 1.43 to 3.77<math alttext="\times" class="ltx_Math" display="inline" id="S4.F7.m3" intent=":literal"><semantics><mo>×</mo><annotation encoding="application/x-tex">\times</annotation></semantics></math> with the same quality score compared to compression + LRU-based eviction, and reduces TTFT by 1.22 to 1.56<math alttext="\times" class="ltx_Math" display="inline" id="S4.F7.m4" intent=":literal"><semantics><mo>×</mo><annotation encoding="application/x-tex">\times</annotation></semantics></math> compared to prefill and eviction only scheme. </span></span></figcaption>
+</figure>
+<div class="ltx_para" id="S4.SS4.p2">
+<p class="ltx_p">When a storage device <math alttext="S" class="ltx_Math" display="inline" id="S4.SS4.p2.m1" intent=":literal"><semantics><mi>S</mi><annotation encoding="application/x-tex">S</annotation></semantics></math> is full, existing KV cache on that device needs to be updated.
+Specifically, each context’s KV cache can be updated either by more aggressive compression to fit in <math alttext="S" class="ltx_Math" display="inline" id="S4.SS4.p2.m2" intent=":literal"><semantics><mi>S</mi><annotation encoding="application/x-tex">S</annotation></semantics></math>, or by evicting it to a lower-tier storage to save space.
+Each context has <math alttext="(\#\text{compression methods}\times\#\text{compression ratios}\times\#\text{lower-tier storage devices})" class="ltx_Math" display="inline" id="S4.SS4.p2.m3" intent=":literal"><semantics><mrow><mo stretchy="false">(</mo><mrow><mrow><mrow><mrow><mrow><mi mathvariant="normal">#</mi><mo lspace="0em" rspace="0em">​</mo><mtext>compression methods</mtext></mrow><mo lspace="0.222em" rspace="0.222em">×</mo><mi mathvariant="normal">#</mi></mrow><mo lspace="0em" rspace="0em">​</mo><mtext>compression ratios</mtext></mrow><mo lspace="0.222em" rspace="0.222em">×</mo><mi mathvariant="normal">#</mi></mrow><mo lspace="0em" rspace="0em">​</mo><mtext>lower-tier storage devices</mtext></mrow><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">(\#\text{compression methods}\times\#\text{compression ratios}\times\#\text{lower-tier storage devices})</annotation></semantics></math> of options to choose from.
+Here, we filter out options that keep KV cache on storage <math alttext="S" class="ltx_Math" display="inline" id="S4.SS4.p2.m4" intent=":literal"><semantics><mi>S</mi><annotation encoding="application/x-tex">S</annotation></semantics></math> but do not save space (such as keeping the compression ratios and not evicting to the next tier).</p>
+</div>
+<div class="ltx_para" id="S4.SS4.p3">
+<p class="ltx_p">The problem of deciding the configuration for each context while maximizing the total utility function score on device <math alttext="S" class="ltx_Math" display="inline" id="S4.SS4.p3.m1" intent=":literal"><semantics><mi>S</mi><annotation encoding="application/x-tex">S</annotation></semantics></math> is a Multi-Choice Knapsack Problem, which is NP-hard.
+We greedily solve this problem by repeating the greedy process of finding updated configurations with the lowest utility score drop for contexts on <math alttext="S" class="ltx_Math" display="inline" id="S4.SS4.p3.m2" intent=":literal"><semantics><mi>S</mi><annotation encoding="application/x-tex">S</annotation></semantics></math>, until the updated KV cache fits successfully.
+Then, the same update process is applied recursively if the lower-tier storage is also full.
+The exact greedy algorithm for this process is described in §<a class="ltx_ref" href="https://arxiv.org/html/2512.14946v1#A1" title="Appendix A Pseudo Code for Algorithm ‣ EvicPress: Joint KV-Cache Compression and Eviction for Efficient LLM Serving"><span class="ltx_text ltx_ref_tag">A</span></a>.</p>
+</div>
+</section>
+</section>
+<section class="ltx_section" id="S5">
+<h2 class="ltx_title ltx_title_section">
+<span class="ltx_tag ltx_tag_section">5 </span>Implementation</h2>
+<div class="ltx_para" id="S5.p1">
+<p class="ltx_p">We implement <span class="ltx_text ltx_font_smallcaps">EvicPress</span> on top of vLLM <span class="ltx_text ltx_font_typewriter">v0.11.2</span> and LMCache <span class="ltx_text ltx_font_typewriter">v0.3.9post2</span>, with about 3K lines of code in Python based on PyTorch <span class="ltx_text ltx_font_typewriter">v2.9</span>.</p>
+</div>
+<div class="ltx_para" id="S5.p2">
+<p class="ltx_p">When a new text query comes in, we call LMCache’s KV cache lookup module, specifically <span class="ltx_text ltx_font_typewriter">lookup(tokens)</span>.
+If it finds that the requested KV cache exists in the system, the number of hit tokens is returned, and the vLLM engine allocates the amount of GPU memory for storing the KV cache for the hit tokens.
+Then, LMCache’s <span class="ltx_text ltx_font_typewriter">retrieve(tokens)--&gt;KV Cache</span> function is triggered to load the KV cache from <span class="ltx_text ltx_font_smallcaps">EvicPress</span>-managed multi-tier storage backend, and put it into the paged GPU memory allocated by vLLM.</p>
+</div>
+<div class="ltx_para" id="S5.p3">
+<p class="ltx_p">If it does not find the requested KV cache, LMCache’s <span class="ltx_text ltx_font_typewriter">store(tokens, KV Cache)</span> function is triggered to save the generated KV cache to CPU DRAM, and then <span class="ltx_text ltx_font_smallcaps">EvicPress</span> calls the <span class="ltx_text ltx_font_typewriter">manage</span> function, which places the new KV cache on a storage device and updates existing KV cache entries if the device is full.
+Specifically, we use a class <span class="ltx_text ltx_font_typewriter">KVConfig(KV Cache)</span> which records the utility function scores for all possible configurations for the given KV cache.
+The <span class="ltx_text ltx_font_typewriter">manage</span> function takes in <span class="ltx_text ltx_font_typewriter">[KVConfig(KV Cache 1), ..., KVConfig(KV Cache n)]</span> and computes <span class="ltx_text ltx_font_typewriter">(device placement, compression method, compression ratio)</span> for each KV cache that needs updating, calculated by <span class="ltx_text ltx_font_smallcaps">EvicPress</span>’s configuration selection module (§<a class="ltx_ref" href="https://arxiv.org/html/2512.14946v1#S4.SS4" title="4.4 Eviction-compression configuration selection module ‣ 4 EvicPress Design ‣ EvicPress: Joint KV-Cache Compression and Eviction for Efficient LLM Serving"><span class="ltx_text ltx_ref_tag">4.4</span></a>).
+Finally, the <span class="ltx_text ltx_font_typewriter">manage</span> function updates those KV caches with the new configuration.</p>
+</div>
+<figure class="ltx_figure" id="S5.F8"><img alt="Refer to caption" class="ltx_graphics ltx_centering ltx_img_landscape" height="345" id="S5.F8.g1" src="x8.png" width="602"/>
+<figcaption class="ltx_caption ltx_centering"><span class="ltx_tag ltx_tag_figure">Figure 8: </span><span class="ltx_text ltx_font_smallcaps">EvicPress<span class="ltx_text ltx_font_italic"> maintains consistently low TTFT and ITL across all QPS levels.</span></span></figcaption>
+</figure>
+</section>
+<section class="ltx_section" id="S6">
+<h2 class="ltx_title ltx_title_section">
+<span class="ltx_tag ltx_tag_section">6 </span>Evaluation</h2>
+<div class="ltx_para" id="S6.p1">
+<p class="ltx_p">The key takeaways from the evaluation are:</p>
+</div>
+<div class="ltx_para" id="S6.p2">
+<ul class="ltx_itemize" id="S6.I1">
+<li class="ltx_item" id="S6.I1.i1" style="list-style-type:none;">
+<span class="ltx_tag ltx_tag_item">•</span>
+<div class="ltx_para" id="S6.I1.i1.p1">
+<p class="ltx_p">Across 5 models and 555 contexts from 12 datasets from LongBench <cite class="ltx_cite ltx_citemacro_cite">[<span class="ltx_ref ltx_missing_citation ltx_ref_self">longbench</span>]</cite>, <span class="ltx_text ltx_font_smallcaps">EvicPress</span> reduces TTFT by 1.43 to 3.77<math alttext="\times" class="ltx_Math" display="inline" id="S6.I1.i1.p1.m1" intent=":literal"><semantics><mo>×</mo><annotation encoding="application/x-tex">\times</annotation></semantics></math> and improves quality by 13.58% to 55.40% at the same TTFT, compared to the baseline that combines fixed compression and classic eviction.</p>
+</div>
+</li>
+<li class="ltx_item" id="S6.I1.i2" style="list-style-type:none;">
+<span class="ltx_tag ltx_tag_item">•</span>
+<div class="ltx_para" id="S6.I1.i2.p1">
+<p class="ltx_p">Compared to smart KV cache eviction system IMPRESS<cite class="ltx_cite ltx_citemacro_cite">[<span class="ltx_ref ltx_missing_citation ltx_ref_self">chen2025impress</span>]</cite>, <span class="ltx_text ltx_font_smallcaps">EvicPress</span> reduces TTFT by 1.5 to 5.2 <math alttext="\times" class="ltx_Math" display="inline" id="S6.I1.i2.p1.m1" intent=":literal"><semantics><mo>×</mo><annotation encoding="application/x-tex">\times</annotation></semantics></math> and improves quality by 14.29% to 27.00% at the same TTFT.</p>
+</div>
+</li>
+<li class="ltx_item" id="S6.I1.i3" style="list-style-type:none;">
+<span class="ltx_tag ltx_tag_item">•</span>
+<div class="ltx_para" id="S6.I1.i3.p1">
+<p class="ltx_p">Compared to full prefill or full eviction, <span class="ltx_text ltx_font_smallcaps">EvicPress</span> reduces TTFT by 1.29 to 2.19<math alttext="\times" class="ltx_Math" display="inline" id="S6.I1.i3.p1.m1" intent=":literal"><semantics><mo>×</mo><annotation encoding="application/x-tex">\times</annotation></semantics></math> within 3% of quality drop.</p>
+</div>
+</li>
+</ul>
+</div>
+<section class="ltx_subsection" id="S6.SS1">
+<h3 class="ltx_title ltx_title_subsection">
+<span class="ltx_tag ltx_tag_subsection">6.1 </span>Evaluation setup</h3>
+<figure class="ltx_table" id="S6.T2">
+<table class="ltx_tabular ltx_centering ltx_align_middle">
+<tr class="ltx_tr">
+<td class="ltx_td ltx_align_left ltx_border_t"><span class="ltx_text ltx_font_bold" style="font-size:80%;">Dataset</span></td>
+<td class="ltx_td ltx_align_right ltx_border_t"><span class="ltx_text ltx_font_bold" style="font-size:80%;">Mean</span></td>
+<td class="ltx_td ltx_align_right ltx_border_t"><span class="ltx_text ltx_font_bold" style="font-size:80%;">Std</span></td>
+<td class="ltx_td ltx_align_justify ltx_align_top ltx_border_t">
+<span class="ltx_inline-block ltx_align_top">
+<span class="ltx_p" style="width:113.8pt;"><span class="ltx_text ltx_font_bold" style="font-size:80%;">Topic</span></span>
+</span>
+</td>
+</tr>
+<tr class="ltx_tr">
+<td class="ltx_td ltx_align_left ltx_border_t"><span class="ltx_text" style="font-size:80%;">narrativeqa</span></td>
+<td class="ltx_td ltx_align_right ltx_border_t"><span class="ltx_text" style="font-size:80%;">108K</span></td>
+<td class="ltx_td ltx_align_right ltx_border_t"><span class="ltx_text" style="font-size:80%;">55K</span></td>
+<td class="ltx_td ltx_align_justify ltx_align_top ltx_border_t">
+<span class="ltx_inline-block ltx_align_top">
+<span class="ltx_p" style="width:113.8pt;"><span class="ltx_text" style="font-size:80%;">Long stories (literature, film).</span></span>
+</span>
+</td>
+</tr>
+<tr class="ltx_tr">
+<td class="ltx_td ltx_align_left"><span class="ltx_text" style="font-size:80%;">qasper</span></td>
+<td class="ltx_td ltx_align_right"><span class="ltx_text" style="font-size:80%;">24K</span></td>
+<td class="ltx_td ltx_align_right"><span class="ltx_text" style="font-size:80%;">12K</span></td>
+<td class="ltx_td ltx_align_justify ltx_align_top">
+<span class="ltx_inline-block ltx_align_top">
+<span class="ltx_p" style="width:113.8pt;"><span class="ltx_text" style="font-size:80%;">NLP research papers</span></span>
+</span>
+</td>
+</tr>
+<tr class="ltx_tr">
+<td class="ltx_td ltx_align_left"><span class="ltx_text" style="font-size:80%;">multifieldqa_en</span></td>
+<td class="ltx_td ltx_align_right"><span class="ltx_text" style="font-size:80%;">29K</span></td>
+<td class="ltx_td ltx_align_right"><span class="ltx_text" style="font-size:80%;">15K</span></td>
+<td class="ltx_td ltx_align_justify ltx_align_top">
+<span class="ltx_inline-block ltx_align_top">
+<span class="ltx_p" style="width:113.8pt;"><span class="ltx_text" style="font-size:80%;">Legal documents and reports.</span></span>
+</span>
+</td>
+</tr>
+<tr class="ltx_tr">
+<td class="ltx_td ltx_align_left"><span class="ltx_text" style="font-size:80%;">hotpotqa</span></td>
+<td class="ltx_td ltx_align_right"><span class="ltx_text" style="font-size:80%;">57K</span></td>
+<td class="ltx_td ltx_align_right"><span class="ltx_text" style="font-size:80%;">18K</span></td>
+<td class="ltx_td ltx_align_justify ltx_align_top">
+<span class="ltx_inline-block ltx_align_top">
+<span class="ltx_p" style="width:113.8pt;"><span class="ltx_text" style="font-size:80%;">Wikipedia articles.</span></span>
+</span>
+</td>
+</tr>
+<tr class="ltx_tr">
+<td class="ltx_td ltx_align_left"><span class="ltx_text" style="font-size:80%;">2wikimqa</span></td>
+<td class="ltx_td ltx_align_right"><span class="ltx_text" style="font-size:80%;">30K</span></td>
+<td class="ltx_td ltx_align_right"><span class="ltx_text" style="font-size:80%;">15K</span></td>
+<td class="ltx_td ltx_align_justify ltx_align_top">
+<span class="ltx_inline-block ltx_align_top">
+<span class="ltx_p" style="width:113.8pt;"><span class="ltx_text" style="font-size:80%;">Wikipedia articles.</span></span>
+</span>
+</td>
+</tr>
+<tr class="ltx_tr">
+<td class="ltx_td ltx_align_left"><span class="ltx_text" style="font-size:80%;">musique</span></td>
+<td class="ltx_td ltx_align_right"><span class="ltx_text" style="font-size:80%;">69K</span></td>
+<td class="ltx_td ltx_align_right"><span class="ltx_text" style="font-size:80%;">9K</span></td>
+<td class="ltx_td ltx_align_justify ltx_align_top">
+<span class="ltx_inline-block ltx_align_top">
+<span class="ltx_p" style="width:113.8pt;"><span class="ltx_text" style="font-size:80%;">Wikipedia articles.</span></span>
+</span>
+</td>
+</tr>
+<tr class="ltx_tr">
+<td class="ltx_td ltx_align_left"><span class="ltx_text" style="font-size:80%;">gov_report</span></td>
+<td class="ltx_td ltx_align_right"><span class="ltx_text" style="font-size:80%;">54K</span></td>
+<td class="ltx_td ltx_align_right"><span class="ltx_text" style="font-size:80%;">34K</span></td>
+<td class="ltx_td ltx_align_justify ltx_align_top">
+<span class="ltx_inline-block ltx_align_top">
+<span class="ltx_p" style="width:113.8pt;"><span class="ltx_text" style="font-size:80%;">US GAO and CRS reports.</span></span>
+</span>
+</td>
+</tr>
+<tr class="ltx_tr">
+<td class="ltx_td ltx_align_left"><span class="ltx_text" style="font-size:80%;">qmsum</span></td>
+<td class="ltx_td ltx_align_right"><span class="ltx_text" style="font-size:80%;">57K</span></td>
+<td class="ltx_td ltx_align_right"><span class="ltx_text" style="font-size:80%;">27K</span></td>
+<td class="ltx_td ltx_align_justify ltx_align_top">
+<span class="ltx_inline-block ltx_align_top">
+<span class="ltx_p" style="width:113.8pt;"><span class="ltx_text" style="font-size:80%;">Meeting scripts and records.</span></span>
+</span>
+</td>
+</tr>
+<tr class="ltx_tr">
+<td class="ltx_td ltx_align_left"><span class="ltx_text" style="font-size:80%;">multi_news</span></td>
+<td class="ltx_td ltx_align_right"><span class="ltx_text" style="font-size:80%;">12K</span></td>
+<td class="ltx_td ltx_align_right"><span class="ltx_text" style="font-size:80%;">10K</span></td>
+<td class="ltx_td ltx_align_justify ltx_align_top">
+<span class="ltx_inline-block ltx_align_top">
+<span class="ltx_p" style="width:113.8pt;"><span class="ltx_text" style="font-size:80%;">News articles on the same event.</span></span>
+</span>
+</td>
+</tr>
+<tr class="ltx_tr">
+<td class="ltx_td ltx_align_left"><span class="ltx_text" style="font-size:80%;">trec</span></td>
+<td class="ltx_td ltx_align_right"><span class="ltx_text" style="font-size:80%;">30K</span></td>
+<td class="ltx_td ltx_align_right"><span class="ltx_text" style="font-size:80%;">12K</span></td>
+<td class="ltx_td ltx_align_justify ltx_align_top">
+<span class="ltx_inline-block ltx_align_top">
+<span class="ltx_p" style="width:113.8pt;"><span class="ltx_text" style="font-size:80%;">News articles and web pages.</span></span>
+</span>
+</td>
+</tr>
+<tr class="ltx_tr">
+<td class="ltx_td ltx_align_left"><span class="ltx_text" style="font-size:80%;">triviaqa</span></td>
+<td class="ltx_td ltx_align_right"><span class="ltx_text" style="font-size:80%;">47K</span></td>
+<td class="ltx_td ltx_align_right"><span class="ltx_text" style="font-size:80%;">25K</span></td>
+<td class="ltx_td ltx_align_justify ltx_align_top">
+<span class="ltx_inline-block ltx_align_top">
+<span class="ltx_p" style="width:113.8pt;"><span class="ltx_text" style="font-size:80%;">Trivia questions.</span></span>
+</span>
+</td>
+</tr>
+<tr class="ltx_tr">
+<td class="ltx_td ltx_align_left ltx_border_b"><span class="ltx_text" style="font-size:80%;">samsum</span></td>
+<td class="ltx_td ltx_align_right ltx_border_b"><span class="ltx_text" style="font-size:80%;">34K</span></td>
+<td class="ltx_td ltx_align_right ltx_border_b"><span class="ltx_text" style="font-size:80%;">17K</span></td>
+<td class="ltx_td ltx_align_justify ltx_align_top ltx_border_b">
+<span class="ltx_inline-block ltx_align_top">
+<span class="ltx_p" style="width:113.8pt;"><span class="ltx_text" style="font-size:80%;">Messenger-like conversation histories.</span></span>
+</span>
+</td>
+</tr>
+</table>
+<figcaption class="ltx_caption ltx_centering" style="font-size:80%;"><span class="ltx_tag ltx_tag_table">Table 2: </span>Dataset Statistics and description. </figcaption>
+</figure>
+<div class="ltx_para ltx_noindent" id="S6.SS1.p1">
+<p class="ltx_p"><span class="ltx_text ltx_font_bold">LLMs:</span> 
+We cover a wide range of popular open-source LLMs, including dense LLMs, including Llama (meta-llama/Llama-3.1-8B-Instruct), Qwen (Qwen/Qwen2.5-14B-Instruct), LongChat (lmsys/longchat-7b-v1.5-32k) and Mistral (mistralai/Mistral-7B-Instruct-v0.3), and also Mixture-of-Expert LLM (Qwen/Qwen3-30B-A3B-Instruct-2507).</p>
+</div>
+<div class="ltx_para ltx_noindent" id="S6.SS1.p2">
+<p class="ltx_p"><span class="ltx_text ltx_font_bold">Dataset:</span> 
+We use LongBench benchmark <cite class="ltx_cite ltx_citemacro_cite">[<span class="ltx_ref ltx_missing_citation ltx_ref_self">longbench</span>]</cite>, which combines many long-context datasets and includes a wide range of context genres (including government reports, news, conversations and stories), as our evaluation dataset.
+The dataset statistics, including the mean and standard deviation of the context lengths, and the dataset description is listed in Table <a class="ltx_ref" href="https://arxiv.org/html/2512.14946v1#S6.T2" title="Table 2 ‣ 6.1 Evaluation setup ‣ 6 Evaluation ‣ EvicPress: Joint KV-Cache Compression and Eviction for Efficient LLM Serving"><span class="ltx_text ltx_ref_tag">2</span></a>.</p>
+</div>
+<div class="ltx_para ltx_noindent" id="S6.SS1.p3">
+<p class="ltx_p"><span class="ltx_text ltx_font_bold">Query construction:</span> 
+We randomly sampled 555 contexts from longbench dataset.
+For each context, we prompts gpt-5 to generate 100 QA queries (following previous works <cite class="ltx_cite ltx_citemacro_cite">[<span class="ltx_ref ltx_missing_citation ltx_ref_self">catridges</span>, <span class="ltx_ref ltx_missing_citation ltx_ref_self">wei2024simplesyntheticdatareduces</span>, <span class="ltx_ref ltx_missing_citation ltx_ref_self">zhang2024inftybenchextendinglongcontext</span>, <span class="ltx_ref ltx_missing_citation ltx_ref_self">wei2024longformfactualitylargelanguage</span>, <span class="ltx_ref ltx_missing_citation ltx_ref_self">white2025livebenchchallengingcontaminationlimitedllm</span>]</cite>), 50 as training queries to build the profiler of <span class="ltx_text ltx_font_smallcaps">EvicPress</span> and 50 for testing.</p>
+</div>
+<div class="ltx_para ltx_noindent" id="S6.SS1.p4">
+<p class="ltx_p"><span class="ltx_text ltx_font_bold">Hardware:</span> 
+We run our experiments on one 80GB H100 GPU that hosts the model weights for each model.
+We allocate 80GB CPU DRAM, 800GB SSD, and assume that the remote storage has unlimited space.</p>
+</div>
+<div class="ltx_para ltx_noindent" id="S6.SS1.p5">
+<p class="ltx_p"><span class="ltx_text ltx_font_bold">Baselines:</span> 
+We compare <span class="ltx_text ltx_font_smallcaps">EvicPress</span> with baselines that apply KV cache compression or eviction.</p>
+<ul class="ltx_itemize">
+<li class="ltx_item" id="S6.I2.i1" style="list-style-type:none;">
+<span class="ltx_tag ltx_tag_item"><math alttext="\bullet" class="ltx_Math" display="inline" id="S6.I2.i1.m1" intent=":literal"><semantics><mo>∙</mo><annotation encoding="application/x-tex">\bullet</annotation></semantics></math></span>
+<div class="ltx_para" id="S6.I2.i1.p1">
+<p class="ltx_p"><span class="ltx_text ltx_font_italic">Prefill</span>: This baseline performs full prefill on each query without prefix caching. We run this with vLLM <span class="ltx_text ltx_font_typewriter">v0.11.2</span>.</p>
+</div>
+</li>
+<li class="ltx_item" id="S6.I2.i2" style="list-style-type:none;">
+<span class="ltx_tag ltx_tag_item"><math alttext="\bullet" class="ltx_Math" display="inline" id="S6.I2.i2.m1" intent=":literal"><semantics><mo>∙</mo><annotation encoding="application/x-tex">\bullet</annotation></semantics></math></span>
+<div class="ltx_para" id="S6.I2.i2.p1">
+<p class="ltx_p"><span class="ltx_text ltx_font_italic">Eviction only</span>: When a storage tier becomes full, this system evicts KV cache to the next storage tier using an least-recently used (LRU) policy, without any compression.</p>
+</div>
+</li>
+<li class="ltx_item" id="S6.I2.i3" style="list-style-type:none;">
+<span class="ltx_tag ltx_tag_item"><math alttext="\bullet" class="ltx_Math" display="inline" id="S6.I2.i3.m1" intent=":literal"><semantics><mo>∙</mo><annotation encoding="application/x-tex">\bullet</annotation></semantics></math></span>
+<div class="ltx_para" id="S6.I2.i3.p1">
+<p class="ltx_p"><span class="ltx_text ltx_font_italic">(keydiff/knorm/snapkv) Compression + LRU-based eviction</span>: This baseline applies either keydiff <cite class="ltx_cite ltx_citemacro_cite">[<span class="ltx_ref ltx_missing_citation ltx_ref_self">park2025keydiffkeysimilaritybasedkv</span>]</cite>, knorm <cite class="ltx_cite ltx_citemacro_cite">[<span class="ltx_ref ltx_missing_citation ltx_ref_self">devoto2024simpleeffectivel2normbased</span>]</cite> or snapkv <cite class="ltx_cite ltx_citemacro_cite">[<span class="ltx_ref ltx_missing_citation ltx_ref_self">li2024snapkvllmknowslooking</span>]</cite> compression on all contexts.
+We also vary the compression ratio for each method, which forms the quality-TTFT trade-off.
+At a certain compression ratio, when a storage tier is full, the system evicts the compressed KV cache to lower-tier storage with LRU.
+Among these methods, keydiff computes the average cosine similarity of every token to all other tokens, and drops the tokens whose similarities are high among all;
+knorm computes the L2 norm of the key cache, and drops those with low L2 norm;
+snapkv computes the cross attention between tokens near the query and the earlier contexts, and drops those tokens with low cross-attention scores.</p>
+</div>
+</li>
+<li class="ltx_item" id="S6.I2.i4" style="list-style-type:none;">
+<span class="ltx_tag ltx_tag_item"><math alttext="\bullet" class="ltx_Math" display="inline" id="S6.I2.i4.m1" intent=":literal"><semantics><mo>∙</mo><annotation encoding="application/x-tex">\bullet</annotation></semantics></math></span>
+<div class="ltx_para" id="S6.I2.i4.p1">
+<p class="ltx_p"><span class="ltx_text ltx_font_italic">IMPRESS</span>:
+IMPRESS <cite class="ltx_cite ltx_citemacro_cite">[<span class="ltx_ref ltx_missing_citation ltx_ref_self">chen2025impress</span>]</cite> uses three out of eight attention heads to compute the attention scores to profile important tokens in the KV cache.
+IMPRESS keeps <math alttext="X\%" class="ltx_Math" display="inline" id="S6.I2.i4.p1.m1" intent=":literal"><semantics><mrow><mi>X</mi><mo>%</mo></mrow><annotation encoding="application/x-tex">X\%</annotation></semantics></math> of important tokens whose attention scores are among the top <math alttext="X\%" class="ltx_Math" display="inline" id="S6.I2.i4.p1.m2" intent=":literal"><semantics><mrow><mi>X</mi><mo>%</mo></mrow><annotation encoding="application/x-tex">X\%</annotation></semantics></math> of all tokens.
+Then it splits each KV cache into chunks, and only loads KV cache chunks containing important tokens during inference.
+We vary <math alttext="X\%" class="ltx_Math" display="inline" id="S6.I2.i4.p1.m3" intent=":literal"><semantics><mrow><mi>X</mi><mo>%</mo></mrow><annotation encoding="application/x-tex">X\%</annotation></semantics></math> in our experiments to achieve the quality-delay trade-off of IMPRESS.</p>
+</div>
+</li>
+</ul>
+</div>
+<div class="ltx_para ltx_noindent" id="S6.SS1.p6">
+<p class="ltx_p"><span class="ltx_text ltx_font_bold">Evaluation metrics:</span></p>
+<ul class="ltx_itemize">
+<li class="ltx_item" id="S6.I3.i1" style="list-style-type:none;">
+<span class="ltx_tag ltx_tag_item"><math alttext="\bullet" class="ltx_Math" display="inline" id="S6.I3.i1.m1" intent=":literal"><semantics><mo>∙</mo><annotation encoding="application/x-tex">\bullet</annotation></semantics></math></span>
+<div class="ltx_para" id="S6.I3.i1.p1">
+<p class="ltx_p"><span class="ltx_text ltx_font_italic">Quality score</span>: measures the similarity of answers based on compressed KV cache vs. answers based on uncompressed KV cache. Following prior work <cite class="ltx_cite ltx_citemacro_cite">[<span class="ltx_ref ltx_missing_citation ltx_ref_self">arabzadeh2024adaptingstandardretrievalbenchmarks</span>, <span class="ltx_ref ltx_missing_citation ltx_ref_self">gaikwad2024generative</span>, <span class="ltx_ref ltx_missing_citation ltx_ref_self">reimers-2019-sentence-bert</span>]</cite>, we compute the cosine similarity between the embedding of the generated answer and that of the answer based on uncompressed KV cache using the <span class="ltx_text ltx_font_italic">MiniLM-L6-v2</span> model.
+The higher this score is, the closer the generated answers is compared to answers on uncompressed KV cache, which is the better.</p>
+</div>
+</li>
+<li class="ltx_item" id="S6.I3.i2" style="list-style-type:none;">
+<span class="ltx_tag ltx_tag_item"><math alttext="\bullet" class="ltx_Math" display="inline" id="S6.I3.i2.m1" intent=":literal"><semantics><mo>∙</mo><annotation encoding="application/x-tex">\bullet</annotation></semantics></math></span>
+<div class="ltx_para" id="S6.I3.i2.p1">
+<p class="ltx_p"><span class="ltx_text ltx_font_italic">Time-to-first-token (TTFT)</span> is the time between the arrival of a query to the time of the first generated token.
+This includes the delay to retrieve KV cache from the storage devices, and the time to prefill the new queries.</p>
+</div>
+</li>
+<li class="ltx_item" id="S6.I3.i3" style="list-style-type:none;">
+<span class="ltx_tag ltx_tag_item"><math alttext="\bullet" class="ltx_Math" display="inline" id="S6.I3.i3.m1" intent=":literal"><semantics><mo>∙</mo><annotation encoding="application/x-tex">\bullet</annotation></semantics></math></span>
+<div class="ltx_para" id="S6.I3.i3.p1">
+<p class="ltx_p"><span class="ltx_text ltx_font_italic">Inter-token-latency (ITL)</span> is the average delay for generating consecutive tokens.
+ITL reflects the encoding throughput, and increases when the inference engine has more running requests.</p>
+</div>
+</li>
+<li class="ltx_item" id="S6.I3.i4" style="list-style-type:none;">
+<span class="ltx_tag ltx_tag_item"><math alttext="\bullet" class="ltx_Math" display="inline" id="S6.I3.i4.m1" intent=":literal"><semantics><mo>∙</mo><annotation encoding="application/x-tex">\bullet</annotation></semantics></math></span>
+<div class="ltx_para" id="S6.I3.i4.p1">
+<p class="ltx_p"><span class="ltx_text ltx_font_italic">End-to-end latency</span> is the time between when the request comes in and when the last token is received.</p>
+</div>
+</li>
+</ul>
+</div>
+<figure class="ltx_figure" id="S6.F9"><img alt="Refer to caption" class="ltx_graphics ltx_centering ltx_img_landscape" height="155" id="S6.F9.g1" src="x9.png" width="330"/>
+<figcaption class="ltx_caption ltx_centering"><span class="ltx_tag ltx_tag_figure">Figure 9: </span><span class="ltx_text ltx_font_italic">With Qwen2.5-14B-Instruct, <span class="ltx_text ltx_font_smallcaps">EvicPress</span> has higher fast device (CPU) hit request percentage while maintaining higher quality.</span></figcaption>
+</figure>
+</section>
+<section class="ltx_subsection" id="S6.SS2">
+<h3 class="ltx_title ltx_title_subsection">
+<span class="ltx_tag ltx_tag_subsection">6.2 </span>Evaluation results</h3>
+<div class="ltx_para ltx_noindent" id="S6.SS2.p1">
+<p class="ltx_p"><span class="ltx_text ltx_font_bold">TTFT v.s. generation quality:</span> 
+In Figure <a class="ltx_ref" href="https://arxiv.org/html/2512.14946v1#S4.F7" title="Figure 7 ‣ 4.4 Eviction-compression configuration selection module ‣ 4 EvicPress Design ‣ EvicPress: Joint KV-Cache Compression and Eviction for Efficient LLM Serving"><span class="ltx_text ltx_ref_tag">7</span></a>, compared to</p>
+</div>
+<div class="ltx_para ltx_noindent" id="S6.SS2.p2">
+<p class="ltx_p">the baselines that applies keydiff, knorm and snapkv and</p>
+</div>
+<div class="ltx_para ltx_noindent" id="S6.SS2.p3">
+<p class="ltx_p">LRU-based eviction, <span class="ltx_text ltx_font_smallcaps">EvicPress</span> reduces TTFT by 1.43 to 3.77<math alttext="\times" class="ltx_Math" display="inline" id="S6.SS2.p3.m1" intent=":literal"><semantics><mo>×</mo><annotation encoding="application/x-tex">\times</annotation></semantics></math> at the same quality score, and improves quality scores by 13.58% to 55.40% at the same TTFT.
+Compared to full prefill that does not affect generation quality, <span class="ltx_text ltx_font_smallcaps">EvicPress</span> reduces TTFT by 1.29 to 2.19<math alttext="\times" class="ltx_Math" display="inline" id="S6.SS2.p3.m2" intent=":literal"><semantics><mo>×</mo><annotation encoding="application/x-tex">\times</annotation></semantics></math> within 3% of quality drop.
+Compared to LRU-based eviction, <span class="ltx_text ltx_font_smallcaps">EvicPress</span> reduces TTFT by 1.22 to 1.56<math alttext="\times" class="ltx_Math" display="inline" id="S6.SS2.p3.m3" intent=":literal"><semantics><mo>×</mo><annotation encoding="application/x-tex">\times</annotation></semantics></math> with quality drop less than 3%.
+Finally, compared to IMPRESS, <span class="ltx_text ltx_font_smallcaps">EvicPress</span> reduces TTFT by 1.5 to 5.2<math alttext="\times" class="ltx_Math" display="inline" id="S6.SS2.p3.m4" intent=":literal"><semantics><mo>×</mo><annotation encoding="application/x-tex">\times</annotation></semantics></math> without degrading generation quality, or improves generation quality by 14.29% to 27.00% without increasing TTFT.</p>
+</div>
+<div class="ltx_para ltx_noindent" id="S6.SS2.p4">
+<p class="ltx_p"><span class="ltx_text ltx_font_bold">TTFT and ITL v.s. QPS:</span> 
+Figure <a class="ltx_ref" href="https://arxiv.org/html/2512.14946v1#S5.F8" title="Figure 8 ‣ 5 Implementation ‣ EvicPress: Joint KV-Cache Compression and Eviction for Efficient LLM Serving"><span class="ltx_text ltx_ref_tag">8</span></a> shows the TTFT and ITL under different query-per-second (QPS), at a quality score target of 80% for Llama-3.1-8B-Instruct, Mistral-7B-Instruct-v0.3 and Qwen2.5-14B-Instruct.
+At the same TTFT level, <span class="ltx_text ltx_font_smallcaps">EvicPress</span> achieves 2.0 to 3.6<math alttext="\times" class="ltx_Math" display="inline" id="S6.SS2.p4.m1" intent=":literal"><semantics><mo>×</mo><annotation encoding="application/x-tex">\times</annotation></semantics></math> higher request processing rate, compared to the best baseline.
+Similarly, at the same ITL level, <span class="ltx_text ltx_font_smallcaps">EvicPress</span> achieves 1.9 to 3.4<math alttext="\times" class="ltx_Math" display="inline" id="S6.SS2.p4.m2" intent=":literal"><semantics><mo>×</mo><annotation encoding="application/x-tex">\times</annotation></semantics></math> higher QPS compared to the best baseline.</p>
+</div>
+<div class="ltx_para ltx_noindent" id="S6.SS2.p5">
+<p class="ltx_p"><span class="ltx_text ltx_font_smallcaps">EvicPress</span><span class="ltx_text ltx_font_bold">’s improvement:</span> <span class="ltx_text ltx_font_smallcaps">EvicPress</span> outperforms different baselines for different reasons.
+First, compared to the baselines that apply same compression methods and ratios on all contexts, <span class="ltx_text ltx_font_smallcaps">EvicPress</span> is better as the context sensitivity difference is considered and eviction-compression configuration is adjusted for different contexts.
+Secondly, compared to LRU-based eviction, which evicts all contexts that cannot fit on the CPU DRAM to lower tier storage, <span class="ltx_text ltx_font_smallcaps">EvicPress</span> is better since some low-sensitivity contexts can be largely compressed without being evicted to slow storage.
+Thirdly, compared to full prefill which incurs significant amount of GPU computation, <span class="ltx_text ltx_font_smallcaps">EvicPress</span> is better since the prefill computation is skipped.
+Finally, compared with IMPRESS, which splits KV cache into chunks, and not only loads important tokens, but also unimportant tokens in each chunk to fast device, <span class="ltx_text ltx_font_smallcaps">EvicPress</span> only puts KV cache that maximize the total utility function scores on fast device.</p>
+</div>
+<div class="ltx_para" id="S6.SS2.p6">
+<p class="ltx_p">In summary, <span class="ltx_text ltx_font_smallcaps">EvicPress</span> achieves much higher cache hit rate in CPU DRAM, as shown in Figure <a class="ltx_ref" href="https://arxiv.org/html/2512.14946v1#S6.F9" title="Figure 9 ‣ 6.1 Evaluation setup ‣ 6 Evaluation ‣ EvicPress: Joint KV-Cache Compression and Eviction for Efficient LLM Serving"><span class="ltx_text ltx_ref_tag">9</span></a>, compared to baselines that apply the same compression methods and LRU-based eviction on all contexts and IMPRESS.
+On the other hand, as shown in the right hand side of the figure, the cache hit rate on local SSD for <span class="ltx_text ltx_font_smallcaps">EvicPress</span> is lower than other baselines, which illustrates that most of the cache hit tokens reside on CPU DRAM, providing much faster loading delay than baselines.</p>
+</div>
+<div class="ltx_para" id="S6.SS2.p7">
+<p class="ltx_p">We acknowledge that the improvement of <span class="ltx_text ltx_font_smallcaps">EvicPress</span> depends on the sizes of KV cache for different LLMs.
+When the KV cache is small, DRAM can hold most tokens, leaving little room for improvement. For example, the MoE model Qwen3-30B-A3B-Instruct-2507 has a small KV cache (0.0915  GB per 1K tokens), while a smaller dense model such as Llama-3.1-8B-Instruct has 0.12GB KV cache per 1K tokens, so even with a conservative compression ratio, most of the KV cache can be stored in CPU DRAM, leading to low TTFT.</p>
+</div>
+</section>
+<section class="ltx_subsection" id="S6.SS3">
+<h3 class="ltx_title ltx_title_subsection">
+<span class="ltx_tag ltx_tag_subsection">6.3 </span>Microbenchmarks</h3>
+<figure class="ltx_figure" id="S6.F10"><img alt="Refer to caption" class="ltx_graphics ltx_centering ltx_img_landscape" height="208" id="S6.F10.g1" src="x10.png" width="330"/>
+<figcaption class="ltx_caption ltx_centering"><span class="ltx_tag ltx_tag_figure">Figure 10: </span><span class="ltx_text ltx_font_italic">Quality and latency over time under Azure workload<cite class="ltx_cite ltx_citemacro_cite">[<span class="ltx_ref ltx_missing_citation ltx_ref_self">wang2025burstgptrealworldworkloaddataset</span>, <span class="ltx_ref ltx_missing_citation ltx_ref_self">shahrad2020serverless</span>, <span class="ltx_ref ltx_missing_citation ltx_ref_self">zhang2021faster</span>]</cite> with only one training query per context. <span class="ltx_text ltx_font_bold">Red vertical lines</span> denote periodic profiling events with Llama-3.1-8B-Instruct. Frequent profiling at the beginning and around 3.75–4 minutes introduces brief latency spikes, but latency quickly returns to baseline. As profiling corrects stale compression decisions, model quality steadily improves throughout execution.</span></figcaption>
+</figure>
+<div class="ltx_para ltx_noindent" id="S6.SS3.p1">
+<p class="ltx_p"><span class="ltx_text ltx_font_bold">The effect of periodic update:</span>  Figure <a class="ltx_ref" href="https://arxiv.org/html/2512.14946v1#S6.F10" title="Figure 10 ‣ 6.3 Microbenchmarks ‣ 6 Evaluation ‣ EvicPress: Joint KV-Cache Compression and Eviction for Efficient LLM Serving"><span class="ltx_text ltx_ref_tag">10</span></a> evaluates our periodic-profiling mechanism (§<a class="ltx_ref" href="https://arxiv.org/html/2512.14946v1#S4.SS3" title="4.3 Profiler module: Computing the utility function scores and choosing eviction-compression configuration ‣ 4 EvicPress Design ‣ EvicPress: Joint KV-Cache Compression and Eviction for Efficient LLM Serving"><span class="ltx_text ltx_ref_tag">4.3</span></a>) using real timestamps from the Azure inference trace <cite class="ltx_cite ltx_citemacro_cite">[<span class="ltx_ref ltx_missing_citation ltx_ref_self">wang2025burstgptrealworldworkloaddataset</span>]</cite>.
+As Azure inference trace does not include the concrete content of the request, we use the request we generated (described in §<a class="ltx_ref" href="https://arxiv.org/html/2512.14946v1#S4.SS3" title="4.3 Profiler module: Computing the utility function scores and choosing eviction-compression configuration ‣ 4 EvicPress Design ‣ EvicPress: Joint KV-Cache Compression and Eviction for Efficient LLM Serving"><span class="ltx_text ltx_ref_tag">4.3</span></a>) instead.
+<span class="ltx_text ltx_font_smallcaps">EvicPress</span> then performs profiling when the discrepancy between the profiled quality and the predicted quality of the query decoded with the stored KV cache exceeds 0.3.</p>
+</div>
+<div class="ltx_para" id="S6.SS3.p2">
+<p class="ltx_p">We illustrate the time series of using periodic profiling versus not in Figure <a class="ltx_ref" href="https://arxiv.org/html/2512.14946v1#S6.F10" title="Figure 10 ‣ 6.3 Microbenchmarks ‣ 6 Evaluation ‣ EvicPress: Joint KV-Cache Compression and Eviction for Efficient LLM Serving"><span class="ltx_text ltx_ref_tag">10</span></a>:</p>
+<ul class="ltx_itemize">
+<li class="ltx_item" id="S6.I4.i1" style="list-style-type:none;">
+<span class="ltx_tag ltx_tag_item"><math alttext="\bullet" class="ltx_Math" display="inline" id="S6.I4.i1.m1" intent=":literal"><semantics><mo>∙</mo><annotation encoding="application/x-tex">\bullet</annotation></semantics></math></span>
+<div class="ltx_para" id="S6.I4.i1.p1">
+<p class="ltx_p">The figure above shows how the quality gain of using periodic profiling versus not evolves over time.
+From this figure, we can see that the quality gain increases gradually over time and eventually saturates at around 11%, because periodic profiling allows <span class="ltx_text ltx_font_smallcaps">EvicPress</span> to use up-to-date profile to make near-optimal compression decision, while the profile of not doing periodic update gradually gets outdated and result in lower accuracy under the same storage resource budget.</p>
+</div>
+</li>
+<li class="ltx_item" id="S6.I4.i2" style="list-style-type:none;">
+<span class="ltx_tag ltx_tag_item"><math alttext="\bullet" class="ltx_Math" display="inline" id="S6.I4.i2.m1" intent=":literal"><semantics><mo>∙</mo><annotation encoding="application/x-tex">\bullet</annotation></semantics></math></span>
+<div class="ltx_para" id="S6.I4.i2.p1">
+<p class="ltx_p">The figure below shows how the end-to-end latency of requests of <span class="ltx_text ltx_font_smallcaps">EvicPress</span> vaaries over time. We can see that, <span class="ltx_text ltx_font_smallcaps">EvicPress</span> has higher end-to-end latency in the periodic profiling intervals (the red intervals) in average, because periodic profiling requires GPU resources and slow down the execution of existing requests.
+That said, the quality improvement brought by periodic profiling (about 10%) still justifies its cost.</p>
+</div>
+</li>
+</ul>
+</div>
+<div class="ltx_para ltx_noindent" id="S6.SS3.p3">
+<p class="ltx_p"><span class="ltx_text ltx_font_bold">Different context needs different eviction-compression configurations:</span> 
+Figure <a class="ltx_ref" href="https://arxiv.org/html/2512.14946v1#S6.F11" title="Figure 11 ‣ 6.3 Microbenchmarks ‣ 6 Evaluation ‣ EvicPress: Joint KV-Cache Compression and Eviction for Efficient LLM Serving"><span class="ltx_text ltx_ref_tag">11</span></a> visualizes the distribution of selected eviction-compression configurations.
+We observe that the system indeed makes use of a diverse set of compression configurations, indicating that a large search space is not only necessary but actively exploited.
+We highlight two insights:</p>
+<ul class="ltx_itemize">
+<li class="ltx_item" id="S6.I5.i1" style="list-style-type:none;">
+<span class="ltx_tag ltx_tag_item"><math alttext="\bullet" class="ltx_Math" display="inline" id="S6.I5.i1.m1" intent=":literal"><semantics><mo>∙</mo><annotation encoding="application/x-tex">\bullet</annotation></semantics></math></span>
+<div class="ltx_para" id="S6.I5.i1.p1">
+<p class="ltx_p">KV caches on disk actually requires higher compression ratio in average compared to KV caches on CPU.
+This is because KV caches on disk are slower to read, which requires <span class="ltx_text ltx_font_smallcaps">EvicPress</span> to further compress the KV caches to reduce their loading time.</p>
+</div>
+</li>
+<li class="ltx_item" id="S6.I5.i2" style="list-style-type:none;">
+<span class="ltx_tag ltx_tag_item"><math alttext="\bullet" class="ltx_Math" display="inline" id="S6.I5.i2.m1" intent=":literal"><semantics><mo>∙</mo><annotation encoding="application/x-tex">\bullet</annotation></semantics></math></span>
+<div class="ltx_para" id="S6.I5.i2.p1">
+<p class="ltx_p">We note that, though <span class="ltx_text ltx_font_italic">keydiff</span> generally outperforms <span class="ltx_text ltx_font_italic">snapkv</span> (which in turn outperforms <span class="ltx_text ltx_font_italic">knorm</span>), yet a non-negligible portion of KV caches still adopts <span class="ltx_text ltx_font_italic">snapkv</span> due to context-specific benefits.</p>
+</div>
+</li>
+</ul>
+</div>
+<figure class="ltx_figure" id="S6.F11"><img alt="Refer to caption" class="ltx_graphics ltx_centering ltx_img_square" height="330" id="S6.F11.g1" src="x11.png" width="330"/>
+<figcaption class="ltx_caption ltx_centering"><span class="ltx_tag ltx_tag_figure">Figure 11: </span><span class="ltx_text ltx_font_italic">Distribution of selected compression methods and compression rates across CPU and SSD storage tiers under <math alttext="\alpha=1" class="ltx_Math" display="inline" id="S6.F11.m2" intent=":literal"><semantics><mrow><mi>α</mi><mo>=</mo><mn>1</mn></mrow><annotation encoding="application/x-tex">\alpha=1</annotation></semantics></math> with Mistral-7B-Instruct-v0.3. <span class="ltx_text ltx_font_smallcaps">EvicPress</span> actively uses a broad combination of configurations, validating the need for a large search space.</span></figcaption>
+</figure>
+<figure class="ltx_figure" id="S6.F12"><img alt="Refer to caption" class="ltx_graphics ltx_centering ltx_img_landscape" height="406" id="S6.F12.g1" src="x12.png" width="603"/>
+<figcaption class="ltx_caption ltx_centering"><span class="ltx_tag ltx_tag_figure">Figure 12: </span><span class="ltx_text ltx_font_smallcaps">EvicPress<span class="ltx_text ltx_font_italic">’s consistently improves TTFT-quality trade-off on different datasets.
+Among these datasets, </span>EvicPress<span class="ltx_text ltx_font_italic"> has better improvement on shorter contexts (such as <span class="ltx_text ltx_font_typewriter">multi_news</span> and <span class="ltx_text ltx_font_typewriter">qasper</span>). </span></span></figcaption>
+</figure>
+<div class="ltx_para ltx_noindent" id="S6.SS3.p4">
+<p class="ltx_p"><span class="ltx_text ltx_font_bold">Improvements across heterogeneous contexts:</span> 
+Figure <a class="ltx_ref" href="https://arxiv.org/html/2512.14946v1#S6.F12" title="Figure 12 ‣ 6.3 Microbenchmarks ‣ 6 Evaluation ‣ EvicPress: Joint KV-Cache Compression and Eviction for Efficient LLM Serving"><span class="ltx_text ltx_ref_tag">12</span></a> illustrates the TTFT — Average score trade-off of <span class="ltx_text ltx_font_smallcaps">EvicPress</span> and baselines across different subtasks of longbench dataset.
+We draw two conclusions:</p>
+<ul class="ltx_itemize">
+<li class="ltx_item" id="S6.I6.i1" style="list-style-type:none;">
+<span class="ltx_tag ltx_tag_item"><math alttext="\bullet" class="ltx_Math" display="inline" id="S6.I6.i1.m1" intent=":literal"><semantics><mo>∙</mo><annotation encoding="application/x-tex">\bullet</annotation></semantics></math></span>
+<div class="ltx_para" id="S6.I6.i1.p1">
+<p class="ltx_p"><span class="ltx_text ltx_font_smallcaps">EvicPress</span> has higher improvement on tasks that corresponds to shorter contexts (<span class="ltx_text ltx_font_italic">e.g.,</span> <span class="ltx_text ltx_font_typewriter">multi_news</span> and <span class="ltx_text ltx_font_typewriter">qasper</span>).
+This is because, in order to achieve higher CPU cache hit rate, <span class="ltx_text ltx_font_smallcaps">EvicPress</span> puts shorter contexts in CPU instead of longer ones, so that the CPU can fit into the KV caches of more requests.</p>
+</div>
+</li>
+<li class="ltx_item" id="S6.I6.i2" style="list-style-type:none;">
+<span class="ltx_tag ltx_tag_item"><math alttext="\bullet" class="ltx_Math" display="inline" id="S6.I6.i2.m1" intent=":literal"><semantics><mo>∙</mo><annotation encoding="application/x-tex">\bullet</annotation></semantics></math></span>
+<div class="ltx_para" id="S6.I6.i2.p1">
+<p class="ltx_p"><span class="ltx_text ltx_font_smallcaps">EvicPress</span> improves the performance for 11 out of 12 tasks. The only exception is on <span class="ltx_text ltx_font_typewriter">musique</span>, where <span class="ltx_text ltx_font_smallcaps">EvicPress</span> performs slightly worse than the keydiff with LRU eviction baseline.</p>
+</div>
+</li>
+</ul>
+</div>
+</section>
+</section>
+<section class="ltx_section" id="S7">
+<h2 class="ltx_title ltx_title_section">
+<span class="ltx_tag ltx_tag_section">7 </span>Related Work</h2>
+<div class="ltx_para ltx_noindent" id="S7.p1">
+<p class="ltx_p"><span class="ltx_text ltx_font_bold">KV cache reuse and eviction systems:</span>  Storing and reusing KV cache across multiple requests has been a critical focus in the design of high-performance LLM serving systems.
+This includes paged memory management in GPU, such as vLLM <cite class="ltx_cite ltx_citemacro_cite">[<span class="ltx_ref ltx_missing_citation ltx_ref_self">vllm</span>]</cite> and SGLang <cite class="ltx_cite ltx_citemacro_cite">[<span class="ltx_ref ltx_missing_citation ltx_ref_self">sglang</span>]</cite>.
+However, this line of work suffers from low cache hit rate when the request arrival rate is high and the number of concurrent users is large, since GPU memory only has limited space (40 to 80 GB for A100 or H100 GPUs).
+Thus, more work is proposed to evict KV cache that cannot fit in GPU memory to lower-tier storage devices, such as CPU DRAM <cite class="ltx_cite ltx_citemacro_cite">[<span class="ltx_ref ltx_missing_citation ltx_ref_self">lmcache</span>, <span class="ltx_ref ltx_missing_citation ltx_ref_self">xiong2024layerkvoptimizinglargelanguage</span>, <span class="ltx_ref ltx_missing_citation ltx_ref_self">sglang</span>, <span class="ltx_ref ltx_missing_citation ltx_ref_self">li2025continuumefficientrobustmultiturn</span>]</cite>, local disks <cite class="ltx_cite ltx_citemacro_cite">[<span class="ltx_ref ltx_missing_citation ltx_ref_self">zhang2025kvswapdiskawarekvcache</span>, <span class="ltx_ref ltx_missing_citation ltx_ref_self">jin2025computeloadkvcache</span>, <span class="ltx_ref ltx_missing_citation ltx_ref_self">lmcache</span>]</cite>, and even remote disks <cite class="ltx_cite ltx_citemacro_cite">[<span class="ltx_ref ltx_missing_citation ltx_ref_self">jin2025computeloadkvcache</span>, <span class="ltx_ref ltx_missing_citation ltx_ref_self">lmcache</span>]</cite>.
+For example, LMCache <cite class="ltx_cite ltx_citemacro_cite">[<span class="ltx_ref ltx_missing_citation ltx_ref_self">lmcache</span>, <span class="ltx_ref ltx_missing_citation ltx_ref_self">jiang2025networking</span>]</cite> reuses splits each KV cache into multiple chunks, and optimizes the loading speed from CPU/disks to GPU memory with high-performance CUDA kernels; Mooncake <cite class="ltx_cite ltx_citemacro_cite">[<span class="ltx_ref ltx_missing_citation ltx_ref_self">qin2025mooncakekvcachecentricdisaggregatedarchitecture</span>]</cite> and InstInfer <cite class="ltx_cite ltx_citemacro_cite">[<span class="ltx_ref ltx_missing_citation ltx_ref_self">pan2024instinferinstorageattentionoffloading</span>]</cite> optimizes the loading bandwidths across different GPU clusters and performance of prefill-decode disaggregation; IMPRESS applies fine-grained token-level eviction, which uses a subset of attention heads to determine important tokens from the KV cache, and evicts non-important ones to lower-tier storage <cite class="ltx_cite ltx_citemacro_cite">[<span class="ltx_ref ltx_missing_citation ltx_ref_self">chen2025impress</span>, <span class="ltx_ref ltx_missing_citation ltx_ref_self">xie2025strata</span>]</cite>.
+However, this line of work only applies different eviction schemes on KV cache, not even considering combining with compression schemes to achieve higher cache hit rates.</p>
+</div>
+<div class="ltx_para ltx_noindent" id="S7.p2">
+<p class="ltx_p"><span class="ltx_text ltx_font_bold">KV cache compression:</span>  To achieve higher cache hit rate, many works have explored orthogonal methods to compress KV caches to reduce memory footprint.
+Token dropping methods drop less important tokens from the KV cache, either based on attention scores or learned importance signals <cite class="ltx_cite ltx_citemacro_cite">[<span class="ltx_ref ltx_missing_citation ltx_ref_self">h2o</span>, <span class="ltx_ref ltx_missing_citation ltx_ref_self">chen2024naclgeneraleffectivekv</span>, <span class="ltx_ref ltx_missing_citation ltx_ref_self">qin2025cakecascadingadaptivekv</span>]</cite>. Quantization methods reduce the size of KV cache by using fewer bits to represent each KV cache element, including adaptive quantization where different layers are applied with different levels of quantization <cite class="ltx_cite ltx_citemacro_cite">[<span class="ltx_ref ltx_missing_citation ltx_ref_self">cachegen</span>, <span class="ltx_ref ltx_missing_citation ltx_ref_self">kvquant</span>]</cite> and uniform quantization <cite class="ltx_cite ltx_citemacro_cite">[<span class="ltx_ref ltx_missing_citation ltx_ref_self">kivi</span>]</cite>.
+Similarly, this line of work only considers the possibility of compression, without combining it with eviction, even when the quality drop is high.
+Another line of work applies different levels of compression considering the error sensitivity of each context <cite class="ltx_cite ltx_citemacro_cite">[<span class="ltx_ref ltx_missing_citation ltx_ref_self">cheng2025qaq</span>, <span class="ltx_ref ltx_missing_citation ltx_ref_self">xiong2025uncompmatrixentropyuncover</span>]</cite>.
+However, it does not consider per-context sensitivity difference to the problem of joint optimization between eviction and compression as <span class="ltx_text ltx_font_smallcaps">EvicPress</span> does.</p>
+</div>
+<div class="ltx_para ltx_noindent" id="S7.p3">
+<p class="ltx_p"><span class="ltx_text ltx_font_bold">Faster LLM serving:</span>  Another complementary line of work speeds up LLM serving by better scheduling to reduce the bubbles across different inference stages (<span class="ltx_text ltx_font_italic">e.g.,</span> prefill, decode or tool-calling) <cite class="ltx_cite ltx_citemacro_cite">[<span class="ltx_ref ltx_missing_citation ltx_ref_self">agrawal2023sarathi</span>, <span class="ltx_ref ltx_missing_citation ltx_ref_self">cui2025optimizingsloorientedllmserving</span>]</cite>; prefill-decode disaggregation to place the prefill and decode phases to different GPUs to reduce SLO violation rate <cite class="ltx_cite ltx_citemacro_cite">[<span class="ltx_ref ltx_missing_citation ltx_ref_self">zhong2024distserve</span>, <span class="ltx_ref ltx_missing_citation ltx_ref_self">patel2024splitwiseefficientgenerativellm</span>]</cite>;
+speculative decoding approaches which proposes using a smaller, faster draft model to propose a sequence of future tokens, and using the larger target model to verify the tokens in parallel <cite class="ltx_cite ltx_citemacro_cite">[<span class="ltx_ref ltx_missing_citation ltx_ref_self">Leviathan2022FastIF</span>, <span class="ltx_ref ltx_missing_citation ltx_ref_self">miao2023specinfer</span>]</cite>;
+and chunked-prefill to enable piggy-backed decoding and reduce memory consumption of prefill <cite class="ltx_cite ltx_citemacro_cite">[<span class="ltx_ref ltx_missing_citation ltx_ref_self">agrawal2023sarathi</span>]</cite>.
+This line of work is complementary and orthogonal to <span class="ltx_text ltx_font_smallcaps">EvicPress</span>, and can be combined with <span class="ltx_text ltx_font_smallcaps">EvicPress</span> to further increase the efficiency of LLM inference.</p>
+</div>
+<div class="ltx_para ltx_noindent" id="S7.p4">
+<p class="ltx_p"><span class="ltx_text ltx_font_bold">Other KV cache related optimizations:</span>  There are a lot of other works that optimize KV cache in LLM inference, including non-prefix KV cache sharing with approximation <cite class="ltx_cite ltx_citemacro_cite">[<span class="ltx_ref ltx_missing_citation ltx_ref_self">cacheblend</span>, <span class="ltx_ref ltx_missing_citation ltx_ref_self">gim2023prompt</span>]</cite>, cross-LLM KV cache reusing with partial layer recomputation <cite class="ltx_cite ltx_citemacro_cite">[<span class="ltx_ref ltx_missing_citation ltx_ref_self">liu2025droidspeakkvcachesharing</span>]</cite>, request routing that is aware of KV cache location <cite class="ltx_cite ltx_citemacro_cite">[<span class="ltx_ref ltx_missing_citation ltx_ref_self">srivatsa2024prebleefficientdistributedprompt</span>]</cite>, improving paged attention for multi-modality models with different shapes of KV cache <cite class="ltx_cite ltx_citemacro_cite">[<span class="ltx_ref ltx_missing_citation ltx_ref_self">tu2024vlcachesparsitymodalityawarekv</span>]</cite>, and managing KV cache for sparse-attention models <cite class="ltx_cite ltx_citemacro_cite">[<span class="ltx_ref ltx_missing_citation ltx_ref_self">cao2025sparseattentionmultiplecontextkv</span>]</cite>.
+While this line of work also makes KV cache in LLM inference more practical in multiple use cases, <span class="ltx_text ltx_font_smallcaps">EvicPress</span> is complementary to them as they jointly optimize eviction and compression.</p>
+</div>
+</section>
+<section class="ltx_section" id="S8">
+<h2 class="ltx_title ltx_title_section">
+<span class="ltx_tag ltx_tag_section">8 </span>Limitations and future work</h2>
+<div class="ltx_para ltx_noindent" id="S8.p1">
+<p class="ltx_p"><span class="ltx_text ltx_font_bold">Deployment scope and assumptions:</span>
+<span class="ltx_text ltx_font_smallcaps">EvicPress</span> targets a common and challenging deployment scenario with limited GPU and CPU memory and a multi-tier storage hierarchy, where KV caches routinely contend for capacity, and eviction or compression decisions concretely affect end-to-end latency and quality.
+In settings with abundant DRAM (<span class="ltx_text ltx_font_italic">e.g.,</span> models with small KV cache size or workloads where all KV caches can be kept in fast memory), the advantage of sophisticated joint optimization over simpler policies naturally diminishes.
+Moreover, when the loading bandwidths for fast and slow storage devices are similar, <span class="ltx_text ltx_font_smallcaps">EvicPress</span>’s benefits of joint optimization will decrease.
+Our prototype is evaluated on a single-node GPU setup.
+Extending <span class="ltx_text ltx_font_smallcaps">EvicPress</span> to multi-node deployments, cross-GPU cache sharing, highly multi-tenant environments with strict isolation requirements, and alternative serving systems and storage hierarchies is an important direction for future work.</p>
+</div>
+<div class="ltx_para ltx_noindent" id="S8.p2">
+<p class="ltx_p"><span class="ltx_text ltx_font_bold">Adapting to changing loading bandwidth:</span>
+<span class="ltx_text ltx_font_smallcaps">EvicPress</span> currently assumes that the bandwidth of each storage tier is known and relatively stable over the time at which we profile and re-profile configurations.
+When the available bandwidth changes more rapidly than our re-profiling frequency or when bandwidth fluctuations are strongly correlated with bursty query arrivals, the precomputed utility function scores could temporarily deviate from the true quality-latency trade-offs and lead to suboptimal decisions.
+As part of our future work, we plan to extend <span class="ltx_text ltx_font_smallcaps">EvicPress</span> to react more quickly to bandwidth shifts, incorporate richer online telemetry, and co-design bandwidth-aware profiling and scheduling policies.</p>
+</div>
+<div class="ltx_para ltx_noindent" id="S8.p3">
+<p class="ltx_p"><span class="ltx_text ltx_font_bold">Extending to a richer set of compression methods:</span>  In the evaluation section, <span class="ltx_text ltx_font_smallcaps">EvicPress</span> selects compression methods from three methods that drop important tokens from KV cache to shrink its memory footprint.
+<span class="ltx_text ltx_font_smallcaps">EvicPress</span> can be easily extended to choose from KV cache quantization methods <cite class="ltx_cite ltx_citemacro_cite">[<span class="ltx_ref ltx_missing_citation ltx_ref_self">kivi</span>, <span class="ltx_ref ltx_missing_citation ltx_ref_self">kvquant</span>, <span class="ltx_ref ltx_missing_citation ltx_ref_self">he2024zipcacheaccurateefficientkv</span>]</cite>.
+Similarly, we can build a profiling configuration pool that combines both token dropping and quantization, and adapts the fraction of tokens to be dropped and the number of bits used to represent each KV element.</p>
+</div>
+</section>
+<section class="ltx_section" id="S9">
+<h2 class="ltx_title ltx_title_section">
+<span class="ltx_tag ltx_tag_section">9 </span>Conclusion</h2>
+<div class="ltx_para" id="S9.p1">
+<p class="ltx_p">We present CacheServe, a caching system for large language model inference workload that co-designs compression and eviction policies under hierarchical storage devices to achieve better quality-delay tradeoff.
+CacheServe’s core innovation lies in its capability to jointly exploit the benefit of both eviction and compression, by defining a utility function and selecting the compression-eviction that maximizes such utility.
+We implement our system on top of production level LLM serving engine (vLLM) and cache engine (LMCache).
+Our evaluations across diverse models and datasets demonstrate that CacheServe significantly reduces average Time-To-First-Token by 1.43 to 3.77<math alttext="\times" class="ltx_Math" display="inline" id="S9.p1.m1" intent=":literal"><semantics><mo>×</mo><annotation encoding="application/x-tex">\times</annotation></semantics></math> with equivalent quality as baselines or improves quality by 13.58% to 55.40% at the same TTFT. By designing our forward-compatible architecture for future KV cache compression and eviction techniques, <span class="ltx_text ltx_font_smallcaps">EvicPress</span> opens up a new dimension for LLM inference optimizations.</p>
+</div>
+<div class="ltx_pagination ltx_role_newpage"></div>
+</section>
+<section class="ltx_appendix" id="A1">
+<h2 class="ltx_title ltx_title_appendix">
+<span class="ltx_tag ltx_tag_appendix">Appendix A </span>Pseudo Code for Algorithm</h2>
+<figure class="ltx_float ltx_algorithm" id="alg1">
+<div class="ltx_listing ltx_lst_numbers_left ltx_listing">
+<div class="ltx_listingline">
+<div class="ltx_listing ltx_listing">
+<div class="ltx_listingline" id="alg1.l0">
+<span class="ltx_tag ltx_tag_listingline">1</span><span class="ltx_tag ltx_tag_listingline"><span class="ltx_text" style="font-size:80%;">0:</span></span> Incoming KV Cache that needs to be stored <math alttext="i" class="ltx_Math" display="inline" id="alg1.l0.m1" intent=":literal"><semantics><mi>i</mi><annotation encoding="application/x-tex">i</annotation></semantics></math> (size of the kv cache <math alttext="l_{i}" class="ltx_Math" display="inline" id="alg1.l0.m2" intent=":literal"><semantics><msub><mi>l</mi><mi>i</mi></msub><annotation encoding="application/x-tex">l_{i}</annotation></semantics></math>, quality function <math alttext="Q_{i}(compression\ ratio)" class="ltx_Math" display="inline" id="alg1.l0.m3" intent=":literal"><semantics><mrow><msub><mi>Q</mi><mi>i</mi></msub><mo lspace="0em" rspace="0em">​</mo><mrow><mo stretchy="false">(</mo><mrow><mi>c</mi><mo lspace="0em" rspace="0em">​</mo><mi>o</mi><mo lspace="0em" rspace="0em">​</mo><mi>m</mi><mo lspace="0em" rspace="0em">​</mo><mi>p</mi><mo lspace="0em" rspace="0em">​</mo><mi>r</mi><mo lspace="0em" rspace="0em">​</mo><mi>e</mi><mo lspace="0em" rspace="0em">​</mo><mi>s</mi><mo lspace="0em" rspace="0em">​</mo><mi>s</mi><mo lspace="0em" rspace="0em">​</mo><mi>i</mi><mo lspace="0em" rspace="0em">​</mo><mi>o</mi><mo lspace="0em" rspace="0em">​</mo><mi>n</mi><mo lspace="0.500em" rspace="0em">​</mo><mi>r</mi><mo lspace="0em" rspace="0em">​</mo><mi>a</mi><mo lspace="0em" rspace="0em">​</mo><mi>t</mi><mo lspace="0em" rspace="0em">​</mo><mi>i</mi><mo lspace="0em" rspace="0em">​</mo><mi>o</mi></mrow><mo stretchy="false">)</mo></mrow></mrow><annotation encoding="application/x-tex">Q_{i}(compression\ ratio)</annotation></semantics></math>), Storage queue <math alttext="T" class="ltx_Math" display="inline" id="alg1.l0.m4" intent=":literal"><semantics><mi>T</mi><annotation encoding="application/x-tex">T</annotation></semantics></math>, Current Occupied size <math alttext="S_{T}" class="ltx_Math" display="inline" id="alg1.l0.m5" intent=":literal"><semantics><msub><mi>S</mi><mi>T</mi></msub><annotation encoding="application/x-tex">S_{T}</annotation></semantics></math>, Storage memory size <math alttext="C" class="ltx_Math" display="inline" id="alg1.l0.m6" intent=":literal"><semantics><mi>C</mi><annotation encoding="application/x-tex">C</annotation></semantics></math>
+</div>
+<div class="ltx_listingline">
+</div>
+<div class="ltx_listingline" id="alg1.l0a">
+<span class="ltx_tag ltx_tag_listingline"><span class="ltx_text" style="font-size:80%;">0:</span></span> List of operations on KV Cache: [( KV Cache <math alttext="i" class="ltx_Math" display="inline" id="alg1.l0a.m1" intent=":literal"><semantics><mi>i</mi><annotation encoding="application/x-tex">i</annotation></semantics></math>, compression ratio <math alttext="r_{i}" class="ltx_Math" display="inline" id="alg1.l0a.m2" intent=":literal"><semantics><msub><mi>r</mi><mi>i</mi></msub><annotation encoding="application/x-tex">r_{i}</annotation></semantics></math>, operation <math alttext="o_{i}" class="ltx_Math" display="inline" id="alg1.l0a.m3" intent=":literal"><semantics><msub><mi>o</mi><mi>i</mi></msub><annotation encoding="application/x-tex">o_{i}</annotation></semantics></math>)]
+
+</div>
+<div class="ltx_listingline" id="alg1.l1">
+<span class="ltx_tag ltx_tag_listingline"><span class="ltx_text" style="font-size:80%;">1:</span></span> <math alttext="r_{i}\leftarrow\arg\max Q_{i}(r)" class="ltx_Math" display="inline" id="alg1.l1.m1" intent=":literal"><semantics><mrow><msub><mi>r</mi><mi>i</mi></msub><mo stretchy="false">←</mo><mrow><mrow><mi>arg</mi><mo lspace="0.167em">⁡</mo><mrow><mi>max</mi><mo lspace="0.167em">⁡</mo><msub><mi>Q</mi><mi>i</mi></msub></mrow></mrow><mo lspace="0em" rspace="0em">​</mo><mrow><mo stretchy="false">(</mo><mi>r</mi><mo stretchy="false">)</mo></mrow></mrow></mrow><annotation encoding="application/x-tex">r_{i}\leftarrow\arg\max Q_{i}(r)</annotation></semantics></math>
+</div>
+<div class="ltx_listingline" id="alg1.l2">
+<span class="ltx_tag ltx_tag_listingline"><span class="ltx_text" style="font-size:80%;">2:</span></span> <math alttext="T" class="ltx_Math" display="inline" id="alg1.l2.m1" intent=":literal"><semantics><mi>T</mi><annotation encoding="application/x-tex">T</annotation></semantics></math>.append<math alttext="(i,r_{i})" class="ltx_Math" display="inline" id="alg1.l2.m2" intent=":literal"><semantics><mrow><mo stretchy="false">(</mo><mi>i</mi><mo>,</mo><msub><mi>r</mi><mi>i</mi></msub><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">(i,r_{i})</annotation></semantics></math>
+</div>
+<div class="ltx_listingline" id="alg1.l3">
+<span class="ltx_tag ltx_tag_listingline"><span class="ltx_text" style="font-size:80%;">3:</span></span> <math alttext="L" class="ltx_Math" display="inline" id="alg1.l3.m1" intent=":literal"><semantics><mi>L</mi><annotation encoding="application/x-tex">L</annotation></semantics></math>.append<math alttext="((i,r_{i},insert))" class="ltx_Math" display="inline" id="alg1.l3.m2" intent=":literal"><semantics><mrow><mo stretchy="false">(</mo><mrow><mo stretchy="false">(</mo><mi>i</mi><mo>,</mo><msub><mi>r</mi><mi>i</mi></msub><mo>,</mo><mrow><mi>i</mi><mo lspace="0em" rspace="0em">​</mo><mi>n</mi><mo lspace="0em" rspace="0em">​</mo><mi>s</mi><mo lspace="0em" rspace="0em">​</mo><mi>e</mi><mo lspace="0em" rspace="0em">​</mo><mi>r</mi><mo lspace="0em" rspace="0em">​</mo><mi>t</mi></mrow><mo stretchy="false">)</mo></mrow><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">((i,r_{i},insert))</annotation></semantics></math>
+</div>
+<div class="ltx_listingline" id="alg1.l4">
+<span class="ltx_tag ltx_tag_listingline"><span class="ltx_text" style="font-size:80%;">4:</span></span> <math alttext="S_{T}=S_{T}+sizeof(l_{i}*r_{i})" class="ltx_Math" display="inline" id="alg1.l4.m1" intent=":literal"><semantics><mrow><msub><mi>S</mi><mi>T</mi></msub><mo>=</mo><mrow><msub><mi>S</mi><mi>T</mi></msub><mo>+</mo><mrow><mi>s</mi><mo lspace="0em" rspace="0em">​</mo><mi>i</mi><mo lspace="0em" rspace="0em">​</mo><mi>z</mi><mo lspace="0em" rspace="0em">​</mo><mi>e</mi><mo lspace="0em" rspace="0em">​</mo><mi>o</mi><mo lspace="0em" rspace="0em">​</mo><mi>f</mi><mo lspace="0em" rspace="0em">​</mo><mrow><mo stretchy="false">(</mo><mrow><msub><mi>l</mi><mi>i</mi></msub><mo lspace="0.222em" rspace="0.222em">∗</mo><msub><mi>r</mi><mi>i</mi></msub></mrow><mo stretchy="false">)</mo></mrow></mrow></mrow></mrow><annotation encoding="application/x-tex">S_{T}=S_{T}+sizeof(l_{i}*r_{i})</annotation></semantics></math>
+</div>
+<div class="ltx_listingline" id="alg1.l5">
+<span class="ltx_tag ltx_tag_listingline">2</span><span class="ltx_tag ltx_tag_listingline"><span class="ltx_text" style="font-size:80%;">5:</span></span> <span class="ltx_text ltx_font_bold">while</span> <math alttext="S_{T}&gt;C" class="ltx_Math" display="inline" id="alg1.l5.m1" intent=":literal"><semantics><mrow><msub><mi>S</mi><mi>T</mi></msub><mo>&gt;</mo><mi>C</mi></mrow><annotation encoding="application/x-tex">S_{T}&gt;C</annotation></semantics></math> <span class="ltx_text ltx_font_bold">do</span>
+</div>
+<div class="ltx_listingline">
+</div>
+<div class="ltx_listingline" id="alg1.l6">
+<span class="ltx_tag ltx_tag_listingline"><span class="ltx_text" style="font-size:80%;">6:</span></span>  <math alttext="j,r,o,\leftarrow" class="ltx_Math" display="inline" id="alg1.l6.m1" intent=":literal"><semantics><mrow><mi>j</mi><mo>,</mo><mi>r</mi><mo>,</mo><mi>o</mi><mo>,</mo><mo lspace="0em" stretchy="false">←</mo></mrow><annotation encoding="application/x-tex">j,r,o,\leftarrow</annotation></semantics></math> KV Cache in <math alttext="T" class="ltx_Math" display="inline" id="alg1.l6.m2" intent=":literal"><semantics><mi>T</mi><annotation encoding="application/x-tex">T</annotation></semantics></math> with the least utility drop operation and the operation.
+
+</div>
+<div class="ltx_listingline" id="alg1.l7">
+<span class="ltx_tag ltx_tag_listingline"><span class="ltx_text" style="font-size:80%;">7:</span></span>  <span class="ltx_text ltx_font_bold">if</span> <math alttext="o==compress" class="ltx_math_unparsed" display="inline" id="alg1.l7.m1" intent=":literal"><semantics><mrow><mi>o</mi><mo rspace="0em">=</mo><mo lspace="0em">=</mo><mi>c</mi><mi>o</mi><mi>m</mi><mi>p</mi><mi>r</mi><mi>e</mi><mi>s</mi><mi>s</mi></mrow><annotation encoding="application/x-tex">o==compress</annotation></semantics></math> <span class="ltx_text ltx_font_bold">then</span>
+</div>
+<div class="ltx_listingline" id="alg1.l8">
+<span class="ltx_tag ltx_tag_listingline"><span class="ltx_text" style="font-size:80%;">8:</span></span>   <math alttext="S=S_{T}-T_{j}*(r_{j}-r)" class="ltx_Math" display="inline" id="alg1.l8.m1" intent=":literal"><semantics><mrow><mi>S</mi><mo>=</mo><mrow><msub><mi>S</mi><mi>T</mi></msub><mo>−</mo><mrow><msub><mi>T</mi><mi>j</mi></msub><mo lspace="0.222em" rspace="0.222em">∗</mo><mrow><mo stretchy="false">(</mo><mrow><msub><mi>r</mi><mi>j</mi></msub><mo>−</mo><mi>r</mi></mrow><mo stretchy="false">)</mo></mrow></mrow></mrow></mrow><annotation encoding="application/x-tex">S=S_{T}-T_{j}*(r_{j}-r)</annotation></semantics></math>
+</div>
+<div class="ltx_listingline" id="alg1.l9">
+<span class="ltx_tag ltx_tag_listingline"><span class="ltx_text" style="font-size:80%;">9:</span></span>  <span class="ltx_text ltx_font_bold">else</span> <span class="ltx_text ltx_font_bold">if</span> <math alttext="o==evict" class="ltx_math_unparsed" display="inline" id="alg1.l9.m1" intent=":literal"><semantics><mrow><mi>o</mi><mo rspace="0em">=</mo><mo lspace="0em">=</mo><mi>e</mi><mi>v</mi><mi>i</mi><mi>c</mi><mi>t</mi></mrow><annotation encoding="application/x-tex">o==evict</annotation></semantics></math> <span class="ltx_text ltx_font_bold">then</span>
+</div>
+<div class="ltx_listingline" id="alg1.l10">
+<span class="ltx_tag ltx_tag_listingline"><span class="ltx_text" style="font-size:80%;">10:</span></span>   <math alttext="r\leftarrow 0" class="ltx_Math" display="inline" id="alg1.l10.m1" intent=":literal"><semantics><mrow><mi>r</mi><mo stretchy="false">←</mo><mn>0</mn></mrow><annotation encoding="application/x-tex">r\leftarrow 0</annotation></semantics></math>
+</div>
+<div class="ltx_listingline" id="alg1.l11">
+<span class="ltx_tag ltx_tag_listingline"><span class="ltx_text" style="font-size:80%;">11:</span></span>   <math alttext="S=S_{T}-(T_{j}*r_{j})" class="ltx_Math" display="inline" id="alg1.l11.m1" intent=":literal"><semantics><mrow><mi>S</mi><mo>=</mo><mrow><msub><mi>S</mi><mi>T</mi></msub><mo>−</mo><mrow><mo stretchy="false">(</mo><mrow><msub><mi>T</mi><mi>j</mi></msub><mo lspace="0.222em" rspace="0.222em">∗</mo><msub><mi>r</mi><mi>j</mi></msub></mrow><mo stretchy="false">)</mo></mrow></mrow></mrow><annotation encoding="application/x-tex">S=S_{T}-(T_{j}*r_{j})</annotation></semantics></math>
+</div>
+<div class="ltx_listingline" id="alg1.l12">
+<span class="ltx_tag ltx_tag_listingline"><span class="ltx_text" style="font-size:80%;">12:</span></span>  <span class="ltx_text ltx_font_bold">end</span> <span class="ltx_text ltx_font_bold">if</span>
+</div>
+<div class="ltx_listingline" id="alg1.l13">
+<span class="ltx_tag ltx_tag_listingline"><span class="ltx_text" style="font-size:80%;">13:</span></span>  <math alttext="L" class="ltx_Math" display="inline" id="alg1.l13.m1" intent=":literal"><semantics><mi>L</mi><annotation encoding="application/x-tex">L</annotation></semantics></math>.append<math alttext="((j,r,o))" class="ltx_Math" display="inline" id="alg1.l13.m2" intent=":literal"><semantics><mrow><mo stretchy="false">(</mo><mrow><mo stretchy="false">(</mo><mi>j</mi><mo>,</mo><mi>r</mi><mo>,</mo><mi>o</mi><mo stretchy="false">)</mo></mrow><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">((j,r,o))</annotation></semantics></math>
+</div>
+<div class="ltx_listingline" id="alg1.l14">
+<span class="ltx_tag ltx_tag_listingline"><span class="ltx_text" style="font-size:80%;">14:</span></span> <span class="ltx_text ltx_font_bold">end</span> <span class="ltx_text ltx_font_bold">while</span>
+</div>
+<div class="ltx_listingline" id="alg1.l15">
+<span class="ltx_tag ltx_tag_listingline"><span class="ltx_text" style="font-size:80%;">15:</span></span> <span class="ltx_text ltx_font_bold">return</span> <math alttext="L" class="ltx_Math" display="inline" id="alg1.l15.m1" intent=":literal"><semantics><mi>L</mi><annotation encoding="application/x-tex">L</annotation></semantics></math> to executor.
+
+</div>
+</div>
+</div>
+</div>
+<figcaption class="ltx_caption"><span class="ltx_tag ltx_tag_float"><span class="ltx_text ltx_font_bold">Algorithm 1</span> </span>Policy Optimizer</figcaption>
+</figure>
+</section>
+</article>
+</div>
+<footer class="ltx_page_footer">
+<div class="ltx_page_logo">Generated  on Tue Dec 16 22:14:02 2025 by <a class="ltx_LaTeXML_logo" href="http://dlmf.nist.gov/LaTeXML/"><span style="letter-spacing:-0.2em; margin-right:0.1em;">L<span class="ltx_font_smallcaps" style="position:relative; bottom:2.2pt;">a</span>T<span class="ltx_font_smallcaps" style="font-size:120%;position:relative; bottom:-0.2ex;">e</span></span><span style="font-size:90%; position:relative; bottom:-0.2ex;">XML</span><img alt="Mascot Sammy" src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAsAAAAOCAYAAAD5YeaVAAAAAXNSR0IArs4c6QAAAAZiS0dEAP8A/wD/oL2nkwAAAAlwSFlzAAALEwAACxMBAJqcGAAAAAd0SU1FB9wKExQZLWTEaOUAAAAddEVYdENvbW1lbnQAQ3JlYXRlZCB3aXRoIFRoZSBHSU1Q72QlbgAAAdpJREFUKM9tkL+L2nAARz9fPZNCKFapUn8kyI0e4iRHSR1Kb8ng0lJw6FYHFwv2LwhOpcWxTjeUunYqOmqd6hEoRDhtDWdA8ApRYsSUCDHNt5ul13vz4w0vWCgUnnEc975arX6ORqN3VqtVZbfbTQC4uEHANM3jSqXymFI6yWazP2KxWAXAL9zCUa1Wy2tXVxheKA9YNoR8Pt+aTqe4FVVVvz05O6MBhqUIBGk8Hn8HAOVy+T+XLJfLS4ZhTiRJgqIoVBRFIoric47jPnmeB1mW/9rr9ZpSSn3Lsmir1fJZlqWlUonKsvwWwD8ymc/nXwVBeLjf7xEKhdBut9Hr9WgmkyGEkJwsy5eHG5vN5g0AKIoCAEgkEkin0wQAfN9/cXPdheu6P33fBwB4ngcAcByHJpPJl+fn54mD3Gg0NrquXxeLRQAAwzAYj8cwTZPwPH9/sVg8PXweDAauqqr2cDjEer1GJBLBZDJBs9mE4zjwfZ85lAGg2+06hmGgXq+j3+/DsixYlgVN03a9Xu8jgCNCyIegIAgx13Vfd7vdu+FweG8YRkjXdWy329+dTgeSJD3ieZ7RNO0VAXAPwDEAO5VKndi2fWrb9jWl9Esul6PZbDY9Go1OZ7PZ9z/lyuD3OozU2wAAAABJRU5ErkJggg=="/></a>
+</div></footer>
+</div>
+</body>
+</html>

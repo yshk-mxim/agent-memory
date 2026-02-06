@@ -7,9 +7,9 @@ import pytest
 from fastapi.testclient import TestClient
 
 # MLX modules are mocked in conftest.py — do not override here
-
 from semantic.adapters.inbound.admin_api import get_old_engine, get_orchestrator, router
 from semantic.application.agent_cache_store import AgentCacheStore, ModelTag
+from semantic.application.batch_engine import BlockPoolBatchEngine
 from semantic.application.model_registry import ModelRegistry
 from semantic.application.model_swap_orchestrator import ModelSwapOrchestrator
 from semantic.domain.services import BlockPool
@@ -114,7 +114,7 @@ class TestFullHotSwapFlow:
         mock_components["registry"].load_model.assert_called_with("large-model")
 
         # Verify new engine created
-        assert new_engine is not None
+        assert isinstance(new_engine, BlockPoolBatchEngine)
 
     async def test_swap_with_active_requests_drains_first(self, mock_components):
         """Swap with active requests waits for drain before proceeding."""

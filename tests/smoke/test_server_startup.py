@@ -1,4 +1,4 @@
-"""Smoke tests for server lifecycle (Sprint 6 Day 0).
+"""Smoke tests for server lifecycle.
 
 These tests verify basic server functionality:
 - Server starts successfully

@@ -1,4 +1,4 @@
-"""Integration tests for request ID middleware (Sprint 7 Day 2).
+"""Integration tests for request ID middleware.
 
 Tests verify that request correlation IDs are:
 - Generated automatically when not provided
@@ -96,7 +96,7 @@ def test_request_id_in_logs(test_app):
 
     # Verify response is successful
     assert response.status_code == 200
-    assert request_id is not None
+    assert isinstance(request_id, str)
     assert len(request_id) == 16
 
     # In a full logging setup, we would capture logs here

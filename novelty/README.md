@@ -84,16 +84,6 @@ This directory contains novelty analysis for building a **persistent multi-agent
 
 ---
 
-## Archived Materials
-
-Previous research direction (semantic KV cache isolation within single session) archived to:
-- `archive_semantic_isolation/NOVELTY.md` - Original novelty analysis
-- `archive_semantic_isolation/DEBATE_*.md` - Multi-round debates
-
-**Reason for pivot**: Single-turn agents don't benefit from semantic KV cache partitioning. Persistent multi-agent memory fills clearer gap in existing tools.
-
----
-
 ### 3. Q4 Direct Injection
 **File**: `q4_direct_injection.md`
 
@@ -114,19 +104,29 @@ Continuous batching combined with persistent per-agent KV caches for multi-agent
 
 Replaces token-level prefix matching with character-level text comparison to fix BPE tokenization boundary mismatches that caused warm TTFT to equal cold TTFT. Only the new portion of a conversation is tokenized, eliminating false cache misses from tokenizer non-compositionality.
 
-### 7. MLX/UMA System-Level Novelty (Unified)
+### 7. Q4 KV Cache with Attention Sinks
+**File**: `q4_attention_sink_compat.md`
+
+Runtime monkey-patch enabling Q4 quantized KV cache for models with attention sinks (e.g., GPT-OSS-20B). MLX's quantized SDPA kernel doesn't support sinks, so we dequantize Q4 to FP16 transiently during attention compute while preserving Q4 storage. Achieves 2.2x multi-turn speedup on GPT-OSS-20B with full Q4 memory savings.
+
+### 8. MLX/UMA System-Level Novelty (Unified)
 **File**: `mlx_uma_system_novelty.md`
 
 Unified document tying all five techniques together around the Apple Silicon Unified Memory Architecture thesis. Covers why UMA fundamentally changes the design space for persistent KV cache management: zero-copy disk↔GPU, compute-bound prefill making cache reuse 10-50x more valuable than datacenter, MLX lazy evaluation discipline, three-step memory reclamation, and the co-designed system synergy across all techniques.
+
+### 9. Config-Driven Multi-Agent Coordination
+**File**: `multi_agent_coordination.md`
+
+YAML-driven multi-agent scenario specification with cross-phase context injection via a template system (`${phase.messages[agent]}` patterns). Separates agent definitions, interaction topology, prompt construction, and UI layout into declarative config. Integrates with persistent KV cache: cross-phase prompts share long prefixes that the EXTEND path (character-level prefix matching) reuses efficiently, turning context injection into incremental cache extensions rather than full re-prefill.
 
 ---
 
 ## Related Documentation
 
-- **POC Plan**: `/Users/dev_user/semantic/plans/POC_PLAN.md`
-- **Sprint Plans**: `/Users/dev_user/semantic/plans/SPRINT_*.md`
-- **Code Archive**: `/Users/dev_user/semantic/archive/semantic_isolation/`
+- **Architecture Overview**: `../ARCHITECTURE.md`
+- **Benchmark Results**: `../benchmarks/BENCHMARK_RESULTS.md`
+- **API Documentation**: `../docs/`
 
 ---
 
-**Last Updated**: January 30, 2026
+**Last Updated**: February 2, 2026

@@ -193,6 +193,11 @@ async def swap_model(
 
             # CRITICAL: Update app.state with new engine (CR-1 fix)
             request.app.state.semantic.batch_engine = new_engine
+
+            # Update CoordinationService's engine reference
+            if hasattr(request.app.state, "coordination_service"):
+                request.app.state.coordination_service.update_engine(new_engine)
+
             logger.info("Admin API: App state updated with new batch engine")
 
             return SwapModelResponse(
@@ -267,12 +272,180 @@ async def get_available_models(
         - Any HuggingFace model ID can be used, but these are validated
         - All models optimized for M4 Pro 24GB memory
     """
-    # Recommended models from ADR-007
+    # Recommended models (all validated on M4 Pro 24GB)
     supported_models = [
+        "mlx-community/gemma-3-12b-it-4bit",
+        "mlx-community/DeepSeek-Coder-V2-Lite-Instruct-4bit-mlx",
         "mlx-community/Qwen2.5-14B-Instruct-4bit",
         "mlx-community/Llama-3.1-8B-Instruct-4bit",
-        "mlx-community/gemma-3-12b-it-4bit",
-        "mlx-community/SmolLM2-135M-Instruct",  # Small model for testing
+        "mlx-community/gpt-oss-20b-MXFP4-Q4",
+        "mlx-community/SmolLM2-135M-Instruct",
     ]
 
     return AvailableModelsResponse(models=supported_models)
+
+
+class OffloadModelResponse(BaseModel):
+    """Response from model offload operation."""
+
+    status: str = Field(..., description="Offload status: 'success' or 'failed'")
+    model_id: str | None = Field(..., description="Model that was offloaded")
+    message: str = Field(..., description="Human-readable status message")
+
+
+@router.post("/models/offload", response_model=OffloadModelResponse)
+async def offload_model(
+    request: Request,
+    registry: ModelRegistry = Depends(get_registry),  # noqa: B008
+    _auth: None = Depends(verify_admin_key),
+) -> OffloadModelResponse:
+    """Offload current model to free memory before loading a new one.
+
+    This endpoint:
+    1. Drains active requests
+    2. Evicts all caches to disk
+    3. Unloads model from memory
+    4. Clears GPU/Metal cache
+
+    After offload, no model is loaded. Call /models/swap to load a new model.
+
+    Args:
+        request: FastAPI Request (for accessing app.state)
+        registry: ModelRegistry (injected)
+        _auth: Admin authentication (dependency)
+
+    Returns:
+        OffloadModelResponse with status
+    """
+    import gc
+
+    try:
+        model_id = registry.get_current_id()
+        if model_id is None:
+            return OffloadModelResponse(
+                status="success",
+                model_id=None,
+                message="No model currently loaded",
+            )
+
+        logger.info(f"Admin API: Offloading model {model_id}")
+
+        engine = request.app.state.semantic.batch_engine
+        if engine:
+            logger.info("Draining active requests...")
+            await engine.drain(timeout_seconds=30.0)
+
+        cache_store = request.app.state.semantic.cache_store
+        if cache_store:
+            logger.info("Evicting caches to disk...")
+            evicted = cache_store.evict_all_to_disk()
+            logger.info(f"Evicted {evicted} caches")
+
+        block_pool = request.app.state.semantic.block_pool
+        if block_pool:
+            logger.info("Clearing block pool allocations...")
+            cleared = block_pool.force_clear_all_allocations()
+            logger.info(f"Cleared {cleared} agent allocations from pool")
+
+        if engine:
+            logger.info("Shutting down batch engine...")
+            engine.shutdown()
+            request.app.state.semantic.batch_engine = None
+
+        logger.info("Unloading model...")
+        registry.unload_model()
+
+        gc.collect()
+
+        logger.info(f"Model {model_id} offloaded successfully")
+        return OffloadModelResponse(
+            status="success",
+            model_id=model_id,
+            message=f"Model {model_id} offloaded. Memory freed.",
+        )
+
+    except Exception as e:
+        logger.error(f"Admin API: Offload failed: {e}")
+        return OffloadModelResponse(
+            status="failed",
+            model_id=registry.get_current_id(),
+            message=f"Offload failed: {e!s}",
+        )
+
+
+class ClearCachesResponse(BaseModel):
+    """Response from cache clear operation."""
+
+    status: str = Field(..., description="Clear status: 'success' or 'failed'")
+    hot_cleared: int = Field(..., description="Number of hot caches cleared")
+    disk_cleared: int = Field(..., description="Number of disk caches cleared")
+    pool_cleared: int = Field(..., description="Number of pool allocations cleared")
+    message: str = Field(..., description="Human-readable status message")
+
+
+@router.delete("/caches", response_model=ClearCachesResponse)
+async def clear_all_caches(
+    request: Request,
+    _auth: None = Depends(verify_admin_key),
+) -> ClearCachesResponse:
+    """Clear ALL caches from memory and disk.
+
+    This endpoint:
+    1. Clears all hot-tier caches (memory)
+    2. Deletes all disk caches
+    3. Clears BlockPool allocations
+
+    Use with caution - all agent context will be permanently lost.
+
+    Args:
+        request: FastAPI Request (for accessing app.state)
+        _auth: Admin authentication (dependency)
+
+    Returns:
+        ClearCachesResponse with counts of cleared items
+    """
+    import shutil
+
+    try:
+        hot_cleared = 0
+        disk_cleared = 0
+        pool_cleared = 0
+
+        semantic = request.app.state.semantic
+
+        cache_store = semantic.cache_store
+        if cache_store:
+            hot_cleared = len(cache_store._hot_cache)
+            cache_store._hot_cache.clear()
+            logger.info(f"Cleared {hot_cleared} hot caches")
+
+        cache_dir = cache_store.cache_dir if cache_store else None
+        if cache_dir and cache_dir.exists():
+            for cache_file in cache_dir.glob("*.safetensors"):
+                cache_file.unlink()
+                disk_cleared += 1
+            logger.info(f"Deleted {disk_cleared} disk cache files")
+
+        block_pool = semantic.block_pool
+        if block_pool:
+            pool_cleared = block_pool.force_clear_all_allocations()
+            logger.info(f"Cleared {pool_cleared} pool allocations")
+
+        total = hot_cleared + disk_cleared + pool_cleared
+        return ClearCachesResponse(
+            status="success",
+            hot_cleared=hot_cleared,
+            disk_cleared=disk_cleared,
+            pool_cleared=pool_cleared,
+            message=f"Cleared {total} total items (hot: {hot_cleared}, disk: {disk_cleared}, pool: {pool_cleared})",
+        )
+
+    except Exception as e:
+        logger.error(f"Admin API: Clear caches failed: {e}")
+        return ClearCachesResponse(
+            status="failed",
+            hot_cleared=0,
+            disk_cleared=0,
+            pool_cleared=0,
+            message=f"Clear failed: {e!s}",
+        )

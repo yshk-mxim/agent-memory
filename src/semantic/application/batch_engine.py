@@ -12,8 +12,6 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from semantic.domain.entities import AgentBlocks as AgentBlocksType
 
-# Import Q4 extensions to enable QuantizedKVCache.merge() for batching
-from semantic.adapters.outbound import mlx_quantized_extensions  # noqa: F401
 from semantic.domain.entities import AgentBlocks, KVBlock
 from semantic.domain.errors import (
     GenerationError,
@@ -27,6 +25,12 @@ from semantic.domain.value_objects import CompletedGeneration, ModelCacheSpec, S
 logger = logging.getLogger(__name__)
 
 
+# Adaptive chunk size thresholds (token counts)
+_CHUNK_TIER_SMALL_CACHE = 2000
+_CHUNK_TIER_MEDIUM_CACHE = 8000
+_CHUNK_TIER_LARGE_CACHE = 20000
+
+
 def adaptive_chunk_size(
     cache_pos: int,
     min_chunk: int = 512,
@@ -34,29 +38,17 @@ def adaptive_chunk_size(
 ) -> int:
     """Calculate optimal chunk size based on current cache position.
 
-    Larger chunks = faster (fewer forward passes)
-    Smaller chunks = less peak memory
-
-    Strategy: Aggressive early (large chunks), conservative late (small chunks).
-    This balances speed and memory - large chunks are fast when cache is small,
-    but as cache grows, we need smaller chunks to avoid OOM.
-
-    Args:
-        cache_pos: Current position in the sequence (tokens processed so far)
-        min_chunk: Minimum chunk size (for large cache positions)
-        max_chunk: Maximum chunk size (for small cache positions)
-
-    Returns:
-        Optimal chunk size for current position
+    Aggressive early (large chunks for speed), conservative late
+    (small chunks to avoid OOM as cache grows).
     """
-    if cache_pos < 2000:
-        return max_chunk  # Large chunks when cache small
-    elif cache_pos < 8000:
-        return max(min_chunk, max_chunk // 2)  # Medium chunks
-    elif cache_pos < 20000:
-        return max(min_chunk, max_chunk // 4)  # Standard chunks
+    if cache_pos < _CHUNK_TIER_SMALL_CACHE:
+        return max_chunk
+    elif cache_pos < _CHUNK_TIER_MEDIUM_CACHE:
+        return max(min_chunk, max_chunk // 2)
+    elif cache_pos < _CHUNK_TIER_LARGE_CACHE:
+        return max(min_chunk, max_chunk // 4)
     else:
-        return min_chunk  # Small chunks for huge cache
+        return min_chunk
 
 
 class BlockPoolBatchEngine:
@@ -84,17 +76,27 @@ class BlockPoolBatchEngine:
     _RE_MULTI_SPACES = re.compile(r" {3,}")
     _RE_MULTI_NEWLINES = re.compile(r"\n\n\n+")
 
+    # Default chunked prefill settings
+    DEFAULT_CHUNKED_PREFILL_ENABLED = True
+    DEFAULT_CHUNKED_PREFILL_THRESHOLD = 2048
+    DEFAULT_CHUNKED_PREFILL_MIN_CHUNK = 512
+    DEFAULT_CHUNKED_PREFILL_MAX_CHUNK = 4096
+    MAX_SAFE_CACHE_MEMORY_MB = 7500  # Safe on 24GB GPU with ~8GB model
+
     def __init__(
         self,
-        model: Any,  # MLX model
-        tokenizer: Any,  # MLX tokenizer
+        model: Any,
+        tokenizer: Any,
         pool: BlockPool,
         spec: ModelCacheSpec,
-        cache_adapter: Any,  # CacheOperationsPort (MLXCacheAdapter)
-        batch_gen_factory: Callable[[Any, Any], Any] | None = None,  # For testing
-        adaptive_config: Any | None = None,  # AdaptiveConfig (optional)
+        cache_adapter: Any,
+        batch_gen_factory: Callable[[Any, Any], Any] | None = None,
+        adaptive_config: Any | None = None,
+        chunked_prefill_enabled: bool = DEFAULT_CHUNKED_PREFILL_ENABLED,
+        chunked_prefill_threshold: int = DEFAULT_CHUNKED_PREFILL_THRESHOLD,
+        chunked_prefill_min_chunk: int = DEFAULT_CHUNKED_PREFILL_MIN_CHUNK,
+        chunked_prefill_max_chunk: int = DEFAULT_CHUNKED_PREFILL_MAX_CHUNK,
     ) -> None:
-        """Initialize batch engine."""
         if model is None:
             raise ModelNotFoundError("Model must be loaded before creating engine")
         if tokenizer is None:
@@ -114,51 +116,22 @@ class BlockPoolBatchEngine:
         self._batch_gen_factory = batch_gen_factory
         self._adaptive_config = adaptive_config
 
-        self._batch_gen: Any | None = None  # Lazy - created on first submit
+        self._batch_gen: Any | None = None
         self._lock = threading.RLock()
         self._active_requests: dict[str, tuple[str, list[int], Any, list[int], str]] = {}
         self._agent_blocks: dict[str, AgentBlocks] = {}
         self._draining: bool = False
-        self._native_completions: dict[
-            str, CompletedGeneration
-        ] = {}  # Pre-computed native path results
+        self._native_completions: dict[str, CompletedGeneration] = {}
 
-        # Chunked prefill settings (loaded lazily)
-        self._chunked_prefill_enabled: bool | None = None
-        self._chunked_prefill_threshold: int | None = None
-        self._chunked_prefill_min_chunk: int | None = None
-        self._chunked_prefill_max_chunk: int | None = None
+        self._chunked_prefill_enabled: bool | None = chunked_prefill_enabled
+        self._chunked_prefill_threshold: int | None = chunked_prefill_threshold
+        self._chunked_prefill_min_chunk: int | None = chunked_prefill_min_chunk
+        self._chunked_prefill_max_chunk: int | None = chunked_prefill_max_chunk
 
     def _get_chunked_prefill_settings(self) -> tuple[bool, int, int, int]:
-        """Lazily load chunked prefill settings.
-
-        If adaptive_config is set, chunk sizes are adjusted dynamically
-        based on workload (memory pressure, batch depth).
-        """
-        if self._chunked_prefill_enabled is None:
-            try:
-                from semantic.adapters.config.settings import get_settings
-
-                settings = get_settings()
-                self._chunked_prefill_enabled = settings.mlx.chunked_prefill_enabled
-                self._chunked_prefill_threshold = settings.mlx.chunked_prefill_threshold
-                self._chunked_prefill_min_chunk = settings.mlx.chunked_prefill_min_chunk
-                self._chunked_prefill_max_chunk = settings.mlx.chunked_prefill_max_chunk
-            except ImportError:
-                logger.debug("Settings module not available, using chunked prefill defaults")
-                self._chunked_prefill_enabled = True
-                self._chunked_prefill_threshold = 2048
-                self._chunked_prefill_min_chunk = 512
-                self._chunked_prefill_max_chunk = 4096
-            except AttributeError as e:
-                logger.warning(f"Chunked prefill settings incomplete: {e}, using defaults")
-                self._chunked_prefill_enabled = True
-                self._chunked_prefill_threshold = 2048
-                self._chunked_prefill_min_chunk = 512
-                self._chunked_prefill_max_chunk = 4096
-
-        min_chunk = self._chunked_prefill_min_chunk or 512
-        max_chunk = self._chunked_prefill_max_chunk or 4096
+        """Get chunked prefill settings, applying adaptive adjustments if configured."""
+        min_chunk = self._chunked_prefill_min_chunk or self.DEFAULT_CHUNKED_PREFILL_MIN_CHUNK
+        max_chunk = self._chunked_prefill_max_chunk or self.DEFAULT_CHUNKED_PREFILL_MAX_CHUNK
 
         # Override chunk sizes from adaptive config if available
         if self._adaptive_config is not None:
@@ -170,6 +143,75 @@ class BlockPoolBatchEngine:
             min_chunk,
             max_chunk,
         )
+
+    def _is_gpt_oss_model(self) -> bool:
+        """Check if current model uses GPT-OSS Harmony format.
+
+        GPT-OSS uses <|channel|> markers and <|end|> is a delimiter, not EOS.
+        Only <|return|> should be a stop token for GPT-OSS.
+        """
+        chat_template = getattr(self._tokenizer, "chat_template", "") or ""
+        return "<|channel|>" in chat_template and "<|start|>" in chat_template
+
+    def _build_stop_tokens(self) -> set[int]:
+        """Build set of stop tokens for current model.
+
+        Different models use different special tokens for end-of-turn:
+        - Standard: eos_token_id
+        - Llama 3.1: <|eot_id|> (128009) for end-of-turn
+        - GPT-OSS: <|return|> only (NOT <|end|>, which is a message delimiter)
+        - DeepSeek: <｜end▁of▁sentence｜> (special unicode)
+
+        Returns:
+            Set of token IDs that should stop generation.
+        """
+        stop_tokens: set[int] = set()
+
+        # Always include standard EOS
+        if self._tokenizer.eos_token_id is not None:
+            stop_tokens.add(self._tokenizer.eos_token_id)
+
+        # Check if this is a GPT-OSS model (uses Harmony format)
+        is_gpt_oss = self._is_gpt_oss_model()
+
+        # Model-specific stop tokens
+        special_stop_tokens = [
+            # Llama 3.1 end-of-turn
+            "<|eot_id|>",
+            # GPT-OSS return (end of full response)
+            "<|return|>",
+            # DeepSeek (special unicode)
+            "<｜end▁of▁sentence｜>",
+            # Common alternatives
+            "<|endoftext|>",
+            "<|im_end|>",
+        ]
+
+        # For non-GPT-OSS models, also include <|end|> as stop token
+        # GPT-OSS uses <|end|> as message delimiter, not EOS
+        if not is_gpt_oss:
+            special_stop_tokens.append("<|end|>")
+        else:
+            logger.info("[STOP_TOKENS] GPT-OSS detected, excluding <|end|> from stop tokens")
+
+        for token_str in special_stop_tokens:
+            try:
+                token_id = self._tokenizer.convert_tokens_to_ids(token_str)
+                # Only add if it's a valid token (not UNK)
+                if token_id != self._tokenizer.unk_token_id and token_id is not None:
+                    stop_tokens.add(token_id)
+            except (KeyError, AttributeError):
+                # Token doesn't exist in this tokenizer's vocabulary
+                pass
+
+        logger.debug(
+            "[STOP_TOKENS] Built stop set: %s (eos=%s, gpt_oss=%s)",
+            stop_tokens,
+            self._tokenizer.eos_token_id,
+            is_gpt_oss,
+        )
+
+        return stop_tokens
 
     def _log_memory(self, label: str) -> tuple[float, float, float]:
         """Log current MLX memory state.
@@ -200,14 +242,49 @@ class BlockPoolBatchEngine:
     def get_agent_blocks(self, agent_id: str) -> "AgentBlocksType | None":
         """Get agent blocks by ID (thread-safe).
 
+        Returns a SNAPSHOT of the agent's blocks to prevent race conditions
+        where the caller saves blocks while another thread mutates them.
+
         Args:
             agent_id: The agent identifier
 
         Returns:
-            AgentBlocks if found, None otherwise
+            AgentBlocks snapshot if found, None otherwise
         """
+        from semantic.domain.entities import AgentBlocks, KVBlock
+
         with self._lock:
-            return self._agent_blocks.get(agent_id)
+            original = self._agent_blocks.get(agent_id)
+            if original is None:
+                return None
+
+            # Create a DEEP COPY of blocks to prevent mutation races
+            # Without this, concurrent requests can corrupt the cache being saved
+            blocks_copy: dict[int, list[KVBlock]] = {}
+            for layer_id, layer_blocks in original.blocks.items():
+                # Only copy blocks with actual data
+                valid_blocks = []
+                for block in layer_blocks:
+                    if block.layer_data is not None:
+                        # Shallow copy of KVBlock (layer_data references are OK)
+                        block_copy = KVBlock(
+                            block_id=block.block_id,
+                            layer_id=block.layer_id,
+                            token_count=block.token_count,
+                            layer_data=block.layer_data,  # Reference is fine
+                            metadata=block.metadata.copy() if block.metadata else None,
+                        )
+                        valid_blocks.append(block_copy)
+                blocks_copy[layer_id] = valid_blocks
+
+            # Create snapshot AgentBlocks
+            return AgentBlocks(
+                agent_id=original.agent_id,
+                blocks=blocks_copy,
+                total_tokens=original.total_tokens,
+                token_sequence=original.token_sequence.copy() if original.token_sequence else [],
+                prompt_text=original.prompt_text,
+            )
 
     def has_agent_blocks(self, agent_id: str) -> bool:
         """Check if agent has blocks (thread-safe).
@@ -413,10 +490,13 @@ class BlockPoolBatchEngine:
         logits = y[:, -1, :]
         next_token = int(mx.argmax(logits, axis=-1).item())
 
-        # Check for immediate EOS
-        if next_token == self._tokenizer.eos_token_id:
-            logger.debug("[NATIVE GEN] EOS at token 1 (immediate)")
-            generated = []  # Don't include EOS in output
+        # Build stop tokens set (includes model-specific end-of-turn tokens)
+        stop_tokens = self._build_stop_tokens()
+
+        # Check for immediate stop token
+        if next_token in stop_tokens:
+            logger.debug("[NATIVE GEN] Stop token %d at token 1 (immediate)", next_token)
+            generated = []  # Don't include stop token in output
         else:
             generated = [next_token]
 
@@ -429,9 +509,9 @@ class BlockPoolBatchEngine:
                 logits = y[:, -1, :]
                 next_token = int(mx.argmax(logits, axis=-1).item())
 
-                # Check for EOS BEFORE adding to output
-                if next_token == self._tokenizer.eos_token_id:
-                    logger.debug("[NATIVE GEN] EOS at token %d", i + 2)
+                # Check for stop token BEFORE adding to output
+                if next_token in stop_tokens:
+                    logger.debug("[NATIVE GEN] Stop token %d at token %d", next_token, i + 2)
                     break
 
                 generated.append(next_token)
@@ -518,7 +598,7 @@ class BlockPoolBatchEngine:
             bytes_per_token_q4 = (
                 self._spec.n_kv_heads * self._spec.head_dim * 2 * 0.5 * self._spec.n_layers
             )
-            max_safe_memory_mb = 7500  # 7.5GB - safe on 24GB GPU with 8GB model
+            max_safe_memory_mb = self.MAX_SAFE_CACHE_MEMORY_MB
             max_safe_cache_tokens = int((max_safe_memory_mb * 1024 * 1024) / bytes_per_token_q4)
 
             if cache.total_tokens > max_safe_cache_tokens:
@@ -578,8 +658,11 @@ class BlockPoolBatchEngine:
                             for layer_blocks in cache.blocks.values():
                                 tokens_seen = 0
                                 for block in layer_blocks:
+                                    block_start = tokens_seen  # Start position of this block
                                     tokens_seen += block.token_count
-                                    if tokens_seen > n_prompt and block.layer_data is not None:
+                                    # Only free blocks that START after the prompt
+                                    # (contain ONLY generated tokens, not prompt tokens)
+                                    if block_start >= n_prompt and block.layer_data is not None:
                                         block.layer_data = None
                                         freed_blocks += 1
                             if freed_blocks > 0:
@@ -597,7 +680,16 @@ class BlockPoolBatchEngine:
                         reconstruct_tokens,
                     )
 
+                    import time as _time
+
+                    t_reconstruct_start = _time.perf_counter()
                     kv_cache = self._reconstruct_cache(cache, max_tokens=max_reconstruct)
+                    t_reconstruct_end = _time.perf_counter()
+                    logger.info(
+                        "[TIMING] reconstruct=%.3fs tokens=%d",
+                        t_reconstruct_end - t_reconstruct_start,
+                        reconstruct_tokens,
+                    )
 
                     # Memory tracking AFTER reconstruction (should be SAME as before - no dequant!)
                     mem_after_reconstruct = mx.get_active_memory() / (1024**3)
@@ -803,9 +895,12 @@ class BlockPoolBatchEngine:
                 if self._batch_gen_factory is not None:
                     self._batch_gen = self._batch_gen_factory(self._model, self._tokenizer)
                 else:
+                    # Build model-specific stop tokens
+                    stop_tokens = self._build_stop_tokens()
+
                     self._batch_gen = self._cache_adapter.create_batch_generator(
                         model=self._model,
-                        stop_tokens={self._tokenizer.eos_token_id},
+                        stop_tokens=stop_tokens,
                         kv_bits=self._spec.kv_bits,
                         kv_group_size=self._spec.kv_group_size,
                     )
@@ -814,6 +909,8 @@ class BlockPoolBatchEngine:
         try:
             # Create sampler via adapter if using real MLX (not fake for testing)
             samplers = None
+            logits_processors_list = None
+
             if self._batch_gen_factory is None:
                 sampler = self._cache_adapter.create_sampler(
                     temperature=temperature,
@@ -853,8 +950,42 @@ class BlockPoolBatchEngine:
                 # Character-level prefix matching (avoids BPE boundary mismatches)
                 stored_text = getattr(cache, "prompt_text", "")
 
+                t_match_start = _time.perf_counter()
                 if stored_text:
                     char_match = cache.common_prefix_chars(prompt)
+                    logger.info(
+                        "[CACHE PREFIX] agent=%s char_match=%d stored=%d prompt=%d ratio=%.1f%%",
+                        agent_id,
+                        char_match,
+                        len(stored_text),
+                        len(prompt),
+                        (char_match / len(stored_text) * 100) if stored_text else 0,
+                    )
+                    if char_match < len(stored_text) and char_match < len(prompt):
+                        ctx = 40
+                        stored_at = stored_text[char_match:char_match + ctx]
+                        prompt_at = prompt[char_match:char_match + ctx]
+                        logger.debug(
+                            "[CACHE DIVERGE AT] stored='%s' vs prompt='%s'",
+                            stored_at.replace("\n", "\\n"),
+                            prompt_at.replace("\n", "\\n"),
+                        )
+                        # When char_match=0, log the start of both strings to understand mismatch
+                        if char_match == 0:
+                            logger.info(
+                                "[CACHE ZERO MATCH] stored[:80]=%r prompt[:80]=%r",
+                                stored_text[:80],
+                                prompt[:80],
+                            )
+                        # Log divergence point for debugging
+                        if char_match > 0 and char_match < len(stored_text):
+                            ctx = 30
+                            logger.info(
+                                "[CACHE DIVERGE POINT] at char %d: stored='...%s' vs prompt='...%s'",
+                                char_match,
+                                stored_text[char_match:char_match+ctx].replace('\n', '\\n'),
+                                prompt[char_match:char_match+ctx].replace('\n', '\\n'),
+                            )
 
                     if char_match == len(stored_text) == len(prompt):
                         # EXACT MATCH: Reuse prompt portion of cache only.
@@ -925,24 +1056,45 @@ class BlockPoolBatchEngine:
                         # DIVERGE: Prompt diverges from stored text
                         match_ratio = char_match / len(stored_text)
 
-                        if match_ratio >= 0.8 and char_match > 100:
-                            # Partial reuse: re-tokenize matched prefix to find token boundary
-                            matched_tokens = self._tokenizer.encode(prompt[:char_match])
-                            usable_tokens = len(matched_tokens)
-                            logger.debug(
-                                "[CACHE DIVERGE PARTIAL] %d chars matched (%.0f%%), trimming to %d tokens",
+                        if match_ratio >= 0.5 and char_match > 100:
+                            # FIX: Tokenize FULL prompt first, then find token boundary
+                            # This avoids BPE boundary issues from split tokenization
+                            full_tokens = self._tokenizer.encode(prompt)
+
+                            # Find token boundary: decode tokens until we exceed char_match
+                            # This gives us the exact token count for the matched prefix
+                            usable_tokens = 0
+                            decoded_len = 0
+                            for i, tok in enumerate(full_tokens):
+                                tok_text = self._tokenizer.decode([tok])
+                                decoded_len += len(tok_text)
+                                if decoded_len >= char_match:
+                                    usable_tokens = i  # Stop BEFORE exceeding char_match
+                                    break
+
+                            # If we couldn't find boundary, fall back to prefix tokenization
+                            if usable_tokens == 0:
+                                matched_tokens = self._tokenizer.encode(prompt[:char_match])
+                                usable_tokens = len(matched_tokens)
+                                remaining_tokens = self._tokenizer.encode(prompt[char_match:])
+                            else:
+                                # Use exact tokens from full tokenization
+                                remaining_tokens = full_tokens[usable_tokens:]
+
+                            logger.info(
+                                "[CACHE DIVERGE PARTIAL] chars=%d (%.0f%%), "
+                                "cache_tokens=%d, new_tokens=%d, full_tokens=%d",
                                 char_match,
                                 match_ratio * 100,
                                 usable_tokens,
+                                len(remaining_tokens),
+                                len(full_tokens),
                             )
                             self._slice_cache_to_length(kv_cache, usable_tokens)
                             import mlx.core as mx
 
                             gc.collect()
                             mx.clear_cache()
-
-                            remaining_text = prompt[char_match:]
-                            remaining_tokens = self._tokenizer.encode(remaining_text)
 
                             # Chunked prefill for long remaining portion
                             cp_enabled, cp_threshold, _, _ = self._get_chunked_prefill_settings()
@@ -960,8 +1112,8 @@ class BlockPoolBatchEngine:
                                 tokens_to_process = remaining_tokens
                         else:
                             # Not enough overlap — discard cache entirely
-                            logger.debug(
-                                "[CACHE DIVERGE MISS] %d chars matched (%.0f%% < 80%%)",
+                            logger.info(
+                                "[CACHE DIVERGE MISS] %d chars matched (%.0f%% < 50%%)",
                                 char_match,
                                 match_ratio * 100,
                             )
@@ -975,8 +1127,19 @@ class BlockPoolBatchEngine:
                             cache = None
                             tokens_to_process = prompt_tokens
 
+                    t_match_end = _time.perf_counter()
+                    logger.info(
+                        "[TIMING] prefix_match=%.3fs tokens_to_process=%d",
+                        t_match_end - t_match_start,
+                        len(tokens_to_process),
+                    )
                 else:
                     # No prompt_text stored — fall back to token comparison (legacy)
+                    logger.info(
+                        "[CACHE NO PROMPT_TEXT] agent=%s cached_tokens=%d — using legacy path",
+                        agent_id,
+                        cached_tokens,
+                    )
                     cached_token_seq = getattr(cache, "token_sequence", [])
                     if cached_token_seq:
                         common_prefix = cache.common_prefix_length(prompt_tokens)
@@ -1016,7 +1179,7 @@ class BlockPoolBatchEngine:
                     logger.warning("[CACHE FALLBACK] Empty tokens_to_process, using last token")
                     tokens_to_process = [prompt_tokens[-1]]
 
-                logger.debug(
+                logger.info(
                     "[CACHE INJECT] %s: offset=%d, quantized=%s, prompt=%d, processing=%d",
                     cache_type,
                     cached_tokens,
@@ -1035,6 +1198,8 @@ class BlockPoolBatchEngine:
             }
             if samplers is not None:
                 insert_kwargs["samplers"] = samplers
+            if logits_processors_list is not None:
+                insert_kwargs["logits_processors"] = logits_processors_list
             if kv_cache is not None:
                 insert_kwargs["caches"] = [kv_cache]
 
@@ -1131,9 +1296,12 @@ class BlockPoolBatchEngine:
                 if self._batch_gen_factory is not None:
                     self._batch_gen = self._batch_gen_factory(self._model, self._tokenizer)
                 else:
+                    # Build model-specific stop tokens
+                    stop_tokens = self._build_stop_tokens()
+
                     self._batch_gen = self._cache_adapter.create_batch_generator(
                         model=self._model,
-                        stop_tokens={self._tokenizer.eos_token_id},
+                        stop_tokens=stop_tokens,
                         kv_bits=self._spec.kv_bits,
                         kv_group_size=self._spec.kv_group_size,
                     )
@@ -1142,6 +1310,8 @@ class BlockPoolBatchEngine:
         # BatchGenerator requires at least one token to produce initial logits.
         try:
             samplers = None
+            logits_processors_list = None
+
             if self._batch_gen_factory is None:
                 sampler = self._cache_adapter.create_sampler(
                     temperature=temperature,
@@ -1157,6 +1327,8 @@ class BlockPoolBatchEngine:
             }
             if samplers is not None:
                 insert_kwargs["samplers"] = samplers
+            if logits_processors_list is not None:
+                insert_kwargs["logits_processors"] = logits_processors_list
 
             cached_tokens = kv_caches[0].offset if hasattr(kv_caches[0], "offset") else 0
             logger.debug(
@@ -1265,14 +1437,57 @@ class BlockPoolBatchEngine:
                     )
 
     def _clean_text(self, text: str) -> str:
-        """Remove BPE artifacts and normalize whitespace."""
+        """Remove BPE artifacts, model-specific tokens, and normalize whitespace.
+
+        For GPT-OSS models that output analysis before final response, extracts
+        only the final channel content.
+        """
+        # GPT-OSS: Extract final channel content
+        # Normal: <|channel|>analysis<|message|>...<|end|><|start|>assistant<|channel|>final<|message|>...
+        # Malformed: <|channel|>final<|channel|>commentary<|message|>... (missing <|message|> after final)
+        if "<|channel|>final" in text:
+            # Find the last occurrence of final channel marker
+            final_idx = text.rfind("<|channel|>final")
+            text_after_final = text[final_idx:]
+
+            # Look for <|message|> after the final channel marker
+            msg_idx = text_after_final.find("<|message|>")
+            if msg_idx != -1:
+                text = text_after_final[msg_idx + len("<|message|>"):]
+                # Remove trailing markers
+                for marker in ("<|end|>", "<|return|>"):
+                    if marker in text:
+                        text = text.split(marker)[0]
+            else:
+                # No <|message|> found - malformed, return empty
+                logger.warning("[GPT-OSS] Malformed final channel (no message marker)")
+                return ""
+        elif "<|channel|>analysis<|message|>" in text and "<|channel|>final" not in text:
+            # Pure analysis mode - don't leak internal reasoning
+            logger.warning("[GPT-OSS] Model stuck in analysis mode, returning empty response")
+            return ""
+        else:
+            # No channel markers - clean up any stray markers
+            text = text.replace("<|channel|>commentary<|message|>", "")
+            text = text.replace("<|channel|>final<|message|>", "")
+            text = text.replace("<|end|>", "")
+            text = text.replace("<|return|>", "")
+
+        # Remove any remaining start markers (from incomplete generation)
+        if "<|start|>assistant" in text:
+            text = text.split("<|start|>assistant")[0]
+
+        # Remove any remaining <|...|> markers (GPT-OSS artifacts)
+        text = re.sub(r"<\|[^|]+\|>", "", text)
+
+        # BPE artifacts
         text = text.replace("Ġ", " ")
         text = text.replace("Ċ", "\n")
         text = text.replace("ċ", "\n")
         text = text.replace("▁", " ")
         text = self._RE_MULTI_SPACES.sub("  ", text)
         text = self._RE_MULTI_NEWLINES.sub("\n\n", text)
-        return text
+        return text.strip()
 
     def _finalize_sequence(
         self,
@@ -1312,8 +1527,41 @@ class BlockPoolBatchEngine:
         with self._lock:
             self._agent_blocks[agent_id] = blocks
 
+        # DEBUG: Log tokens being decoded
+        logger.info(
+            "[DECODE] uid=%s agent=%s token_count=%d first_10_tokens=%s",
+            uid,
+            agent_id,
+            len(tokens),
+            tokens[:10] if tokens else [],
+        )
+
         text = self._tokenizer.decode(tokens)
+
+        # DEBUG: Log raw decoded text
+        logger.info(
+            "[RAW_DECODED] uid=%s length=%d text=%s",
+            uid,
+            len(text),
+            repr(text[:200]) if text else "(empty)",
+        )
+
+        # Debug: log raw text before cleaning to diagnose GPT-OSS channel issues
+        if "<|" in text or "channel" in text.lower():
+            logger.info("[RAW OUTPUT] %s: %s", uid, text[:500])
+
+        text_before_clean = text
         text = self._clean_text(text)
+
+        # DEBUG: Log what cleaning did
+        if text != text_before_clean:
+            logger.info(
+                "[CLEANED] uid=%s before_len=%d after_len=%d removed=%d chars",
+                uid,
+                len(text_before_clean),
+                len(text),
+                len(text_before_clean) - len(text),
+            )
 
         logger.debug("Finalized %s: %d tokens", uid, len(tokens))
 

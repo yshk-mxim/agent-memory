@@ -1,0 +1,57 @@
+# Configuration for Llama 3.1 8B Instruct 4-bit (MLX community)
+# Model: mlx-community/Llama-3.1-8B-Instruct-4bit
+# Platform: Apple Silicon (M-series), 16GB+ recommended
+#
+# Chat Template: Uses special header tokens
+#   <|begin_of_text|><|start_header_id|>system<|end_header_id|>
+#   {system_message}<|eot_id|><|start_header_id|>user<|end_header_id|>
+#   {user_message}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
+#
+# Source: https://www.llama.com/docs/model-cards-and-prompt-formats/llama3_1/
+
+[model]
+model_id = "mlx-community/Llama-3.1-8B-Instruct-4bit"
+n_layers = 32
+n_kv_heads = 8
+head_dim = 128
+
+[inference]
+# Llama 3.1 recommended settings
+temperature = 0.6
+top_p = 0.9
+top_k = 50
+repetition_penalty = 1.0
+extended_thinking = false
+supports_thinking = false
+
+[optimal]
+max_batch_size = 2
+prefill_step_size = 256
+kv_bits = 4
+kv_group_size = 64
+
+chunked_prefill_enabled = true
+chunked_prefill_threshold = 2048
+chunked_prefill_min_chunk = 512
+chunked_prefill_max_chunk = 2048
+
+batch_window_ms = 10
+scheduler_enabled = true
+
+max_agents_in_memory = 5
+evict_to_disk = true
+
+[thresholds]
+long_context_threshold = 4000
+high_batch_threshold = 3
+memory_pressure_mb = 12000
+min_cache_benefit_ratio = 0.8
+
+[chat_template]
+# Llama 3.1 uses header tokens for role indication
+format = "llama3"
+begin_of_text = "<|begin_of_text|>"
+start_header = "<|start_header_id|>"
+end_header = "<|end_header_id|>"
+eot = "<|eot_id|>"
+roles = ["system", "user", "assistant", "ipython"]

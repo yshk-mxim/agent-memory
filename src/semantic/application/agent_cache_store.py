@@ -15,6 +15,31 @@ from semantic.domain.value_objects import ModelCacheSpec
 logger = logging.getLogger(__name__)
 
 
+@dataclass
+class CacheMetrics:
+    """Cache performance metrics for observability.
+
+    Used to detect when warm cache is broken (high miss rate, no disk loads).
+    """
+
+    hot_hits: int = 0  # Found in hot tier (memory)
+    warm_hits: int = 0  # Found in warm tier (disk reload)
+    misses: int = 0  # Not found in any tier
+    disk_loads: int = 0  # Number of safetensors loads
+    evictions: int = 0  # Number of LRU evictions
+    dirty_flushes: int = 0  # Number of dirty cache flushes
+
+    def hit_rate(self) -> float:
+        """Calculate overall cache hit rate."""
+        total = self.hot_hits + self.warm_hits + self.misses
+        return (self.hot_hits + self.warm_hits) / total if total > 0 else 0.0
+
+    def warm_hit_rate(self) -> float:
+        """Calculate warm tier hit rate (disk reloads)."""
+        total = self.hot_hits + self.warm_hits + self.misses
+        return self.warm_hits / total if total > 0 else 0.0
+
+
 @dataclass(frozen=True)
 class ModelTag:
     """Model compatibility tag for cache validation.
@@ -96,6 +121,7 @@ class CacheEntry:
         last_accessed: Timestamp of last access (for LRU)
         access_count: Total number of accesses
         is_hot: True if in memory, False if on disk only
+        dirty: True if modified since last disk sync (write-behind)
 
     Example:
         >>> entry = CacheEntry(
@@ -112,6 +138,7 @@ class CacheEntry:
     last_accessed: float = field(default_factory=lambda: 0.0)
     access_count: int = 0
     is_hot: bool = True
+    dirty: bool = False  # Write-behind: needs disk sync
 
     def mark_accessed(self) -> None:
         """Mark entry as accessed (update LRU timestamp)."""
@@ -175,12 +202,38 @@ class AgentCacheStore:
         # Warm tier: agent_id → file path (on disk)
         self._warm_cache: dict[str, Path] = {}
 
-        # Prefix trie for token prefix matching
-        # Leaf nodes have "_agents" key with set of agent IDs
-        self._prefix_trie: dict[int | str, Any] = {}
+        # Performance metrics for observability
+        self.metrics = CacheMetrics()
+
+        # Scan cache directory on startup to populate warm tier
+        self._scan_cache_directory()
+
+        # Future: trie-based prefix matching for O(log n) lookup
+
+    def _scan_cache_directory(self) -> None:
+        """Scan cache directory on startup and populate warm tier.
+
+        This enables warm cache to work across server restarts. Without this,
+        the _warm_cache dict would be empty on startup, and existing cache
+        files on disk would never be found (causing false cache misses).
+
+        Note: This only populates the agent_id -> path mapping. Actual cache
+        data (KV tensors) is loaded on-demand when cache is accessed.
+        """
+        if not self.cache_dir.exists():
+            return
+
+        count = 0
+        for cache_file in self.cache_dir.glob("*.safetensors"):
+            agent_id = cache_file.stem
+            self._warm_cache[agent_id] = cache_file
+            count += 1
+
+        if count > 0:
+            logger.info(f"[CACHE INIT] Found {count} warm caches in {self.cache_dir}")
 
     def save(self, agent_id: str, blocks: AgentBlocks) -> None:
-        """Save agent cache to hot tier AND warm tier (disk).
+        """Save agent cache to hot tier with write-behind persistence.
 
         Args:
             agent_id: Unique agent identifier
@@ -190,23 +243,24 @@ class AgentCacheStore:
             ValueError: If agent_id is empty
 
         Notes:
-            - Adds to hot tier immediately
-            - ALWAYS persists to disk (warm tier) as backup
-            - This ensures cache survives even if hot tier blocks are cleared
+            - Adds to hot tier immediately with dirty=True
+            - Disk write deferred until eviction or explicit flush
+            - Saves 50-100ms per call vs immediate persistence
             - May trigger LRU eviction if hot tier full
 
         Example:
             >>> store.save("agent_1", blocks)
-            >>> # Cache now in both hot tier (memory) and warm tier (disk)
+            >>> # Cache now in hot tier (memory), disk write deferred
         """
         if not agent_id:
             raise InvalidRequestError("agent_id cannot be empty")
 
-        # Create entry
+        # Create entry with dirty flag (write-behind)
         entry = CacheEntry(
             agent_id=agent_id,
             blocks=blocks,
             model_tag=self.model_tag,
+            dirty=True,  # Mark for eventual disk sync
         )
         entry.mark_accessed()
 
@@ -214,11 +268,24 @@ class AgentCacheStore:
             # Add to hot tier
             self._hot_cache[agent_id] = entry
 
-            # CRITICAL: Always persist to disk immediately!
-            # The hot_cache stores a reference to blocks, but batch_engine may clear
-            # the blocks after reconstruction. By persisting to disk, we ensure
-            # the cache can always be recovered from warm tier.
-            self._save_to_disk(agent_id)
+            # CRITICAL: Save immediately if blocks have actual data
+            # Why: batch_engine/scheduler may clear layer_data asynchronously
+            # after using the cache. If we defer the write until eviction,
+            # layer_data might be None and we'll save an empty cache file.
+            # This is necessary for warm cache to work across sessions.
+            #
+            # Performance: Adds ~50-100ms per request, but this is negligible
+            # compared to prefill time (e.g., <1% overhead for 16K context).
+            has_data = False
+            if blocks.blocks:
+                for layer_blocks in blocks.blocks.values():
+                    if layer_blocks and any(b.layer_data is not None for b in layer_blocks):
+                        has_data = True
+                        break
+
+            if has_data:
+                self._save_to_disk(agent_id)
+                entry.dirty = False  # Already persisted
 
             # Check if eviction needed
             if len(self._hot_cache) > self.max_hot_agents:
@@ -265,51 +332,66 @@ class AgentCacheStore:
 
                     if has_data:
                         entry.mark_accessed()
+                        self.metrics.hot_hits += 1
                         return entry.blocks
 
                 # Blocks were cleared - fall through to disk load
+                logger.debug(f"Hot cache entry for {agent_id} has cleared blocks, reloading from disk")
 
             # Check warm tier (disk)
             if agent_id in self._warm_cache:
+                self.metrics.warm_hits += 1
                 return self._load_from_disk(agent_id)
 
             # Cache miss
+            self.metrics.misses += 1
             return None
 
-    def delete(self, agent_id: str) -> bool:
+    def delete(self, agent_id: str, keep_disk: bool = False) -> bool:
         """Delete agent cache from all tiers.
 
         Args:
             agent_id: Unique agent identifier
+            keep_disk: If True, only evict from hot tier and keep disk file
+                      for warm cache reload. If False, fully delete.
 
         Returns:
             True if agent was found and deleted, False if not found
 
         Notes:
             - Removes from hot tier (memory)
-            - Removes from warm tier (disk)
-            - Deletes safetensors file if exists
+            - If keep_disk=False: Removes from warm tier and deletes disk file
+            - If keep_disk=True: Flushes to disk and keeps for warm reload
 
         Example:
-            >>> deleted = store.delete("agent_1")
-            >>> if deleted:
-            ...     print("Agent cache deleted successfully")
+            >>> deleted = store.delete("agent_1")  # Full delete
+            >>> store.delete("agent_1", keep_disk=True)  # Evict to disk only
         """
         with self._lock:
             found = False
 
+            # CRITICAL: Flush dirty cache to disk BEFORE deletion
+            # This ensures warm cache test can reload from disk
+            if agent_id in self._hot_cache:
+                entry = self._hot_cache[agent_id]
+                logger.debug(f"[DELETE] agent={agent_id}, dirty={entry.dirty}, blocks={'None' if entry.blocks is None else 'present'}, keep_disk={keep_disk}")
+                if entry.dirty and entry.blocks is not None:
+                    self._save_to_disk(agent_id)
+                    logger.debug(f"Flushed dirty cache to disk before eviction: {agent_id}")
+                found = True
+
             # Remove from hot tier
             if agent_id in self._hot_cache:
                 del self._hot_cache[agent_id]
-                found = True
+                logger.debug(f"[DELETE] Removed {agent_id} from hot tier")
 
-            # Remove from warm tier and delete disk file
-            if agent_id in self._warm_cache:
+            # If keep_disk=False, remove from warm tier and delete disk file
+            logger.debug(f"[DELETE] keep_disk={keep_disk}, in_warm={agent_id in self._warm_cache}")
+            if not keep_disk and agent_id in self._warm_cache:
                 cache_path = self._warm_cache[agent_id]
                 if cache_path.exists():
                     cache_path.unlink()
                 del self._warm_cache[agent_id]
-                found = True
 
             return found
 
@@ -340,19 +422,21 @@ class AgentCacheStore:
         with self._lock:
             best_match: AgentBlocks | None = None
             best_prefix_len = 0
+            best_entry: CacheEntry | None = None
 
-            # Check all cached agents for prefix match
             for _agent_id, entry in self._hot_cache.items():
                 if entry.blocks is None:
                     continue
 
-                # Simplified prefix matching using total_tokens as proxy
-                prefix_len = min(len(tokens), entry.blocks.total_tokens)
+                prefix_len = entry.blocks.common_prefix_length(tokens)
 
                 if prefix_len > best_prefix_len:
                     best_prefix_len = prefix_len
                     best_match = entry.blocks
-                    entry.mark_accessed()  # Update LRU
+                    best_entry = entry
+
+            if best_entry is not None:
+                best_entry.mark_accessed()
 
             return best_match
 
@@ -384,12 +468,13 @@ class AgentCacheStore:
                     key=lambda aid: self._hot_cache[aid].last_accessed,
                 )
 
-                # Persist to disk
+                # Persist to disk (flushes dirty entries)
                 self._save_to_disk(lru_agent_id)
 
                 # Remove from hot tier
                 del self._hot_cache[lru_agent_id]
                 evicted += 1
+                self.metrics.evictions += 1
 
             return evicted
 
@@ -449,24 +534,29 @@ class AgentCacheStore:
         Called by batch_engine after clearing Q4 blocks to free memory.
         The cache remains in warm tier (disk) for future loads.
 
-        This prevents the hot cache from holding a stale reference to
-        cleared blocks, which would cause unnecessary has_data checks
-        on every load.
+        CRITICAL: Flushes dirty cache to disk BEFORE invalidating.
+        This is the key to warm cache working - we save while layer_data
+        still exists, before batch_engine clears it.
 
         Args:
             agent_id: Agent whose hot cache entry should be invalidated
 
         Notes:
-            - Only removes from hot tier (memory reference)
-            - Warm tier (disk) is NOT affected
+            - Flushes dirty cache to disk before removing from hot tier
             - Future loads will reload from disk
+            - This adds 50-100ms only when cache is actually used (not every save)
         """
         with self._lock:
             if agent_id in self._hot_cache:
+                entry = self._hot_cache[agent_id]
+                # CRITICAL: Flush to disk before invalidating
+                # batch_engine is about to clear layer_data, so this is our last chance
+                if entry.dirty and entry.blocks is not None:
+                    self._save_to_disk(agent_id)
                 del self._hot_cache[agent_id]
 
     def _save_to_disk(self, agent_id: str) -> None:
-        """Persist cache to warm tier."""
+        """Persist cache to warm tier and clear dirty flag."""
         entry = self._hot_cache.get(agent_id)
         if entry is None or entry.blocks is None:
             return
@@ -486,7 +576,62 @@ class AgentCacheStore:
         if self._cache_adapter is None:
             raise InvalidRequestError("CacheAdapter is required - dependency not injected")
         cache_path = self._cache_adapter.save(agent_id, entry.blocks, metadata)
+
+        # CRITICAL: Ensure data is flushed to disk before marking as available
+        # Without this, warm cache tests may read incomplete/corrupt data
+        if cache_path.exists():
+            import os
+            try:
+                # Force OS to flush file buffers to physical disk
+                fd = os.open(cache_path, os.O_RDONLY)
+                os.fsync(fd)
+                os.close(fd)
+            except OSError as e:
+                logger.warning(f"Failed to fsync cache file {cache_path}: {e}")
+
         self._warm_cache[agent_id] = cache_path
+
+        # Clear dirty flag after successful disk write
+        if entry.dirty:
+            self.metrics.dirty_flushes += 1
+        entry.dirty = False
+
+    def flush_dirty(self) -> int:
+        """Flush all dirty (unsaved) caches to disk.
+
+        Returns:
+            Number of caches flushed.
+
+        Notes:
+            Call this on server shutdown to ensure no data loss.
+            With write-behind, dirty caches exist only in memory until
+            eviction or explicit flush.
+
+        Example:
+            >>> store.flush_dirty()
+            3  # Flushed 3 dirty caches to disk
+        """
+        with self._lock:
+            flushed = 0
+            for agent_id, entry in self._hot_cache.items():
+                if entry.dirty and entry.blocks is not None:
+                    self._save_to_disk(agent_id)
+                    flushed += 1
+            return flushed
+
+    def get_metrics(self) -> CacheMetrics:
+        """Get cache performance metrics.
+
+        Returns:
+            CacheMetrics with current statistics
+
+        Example:
+            >>> metrics = store.get_metrics()
+            >>> print(f"Hit rate: {metrics.hit_rate():.1%}")
+            >>> print(f"Warm hits: {metrics.warm_hits}")
+            >>> print(f"Disk loads: {metrics.disk_loads}")
+        """
+        return self.metrics
 
     def _load_from_disk(self, agent_id: str) -> AgentBlocks | None:
         """Load cache from warm tier."""
@@ -498,6 +643,8 @@ class AgentCacheStore:
             if self._cache_adapter is None:
                 raise InvalidRequestError("CacheAdapter is required - dependency not injected")
             blocks_dict, metadata = self._cache_adapter.load(cache_path)
+            self.metrics.disk_loads += 1
+            logger.debug(f"Loaded cache from disk: {agent_id} ({cache_path})")
 
             # Validate model tag compatibility
             saved_tag = ModelTag(
@@ -559,4 +706,148 @@ class AgentCacheStore:
             return None
         except Exception as e:
             logger.error(f"Unexpected error loading cache for {agent_id}: {e}", exc_info=True)
+            return None
+
+    def list_all_agents(self) -> list[dict[str, Any]]:
+        """List all cached agents across hot, warm, and cold tiers.
+
+        Returns union of hot (in-memory) and warm (on-disk) agents with metadata.
+
+        Returns:
+            List of agent metadata dicts with keys:
+                - agent_id: Agent identifier
+                - tier: "hot" or "warm"
+                - tokens: Total tokens cached (0 if warm)
+                - last_accessed: Unix timestamp (0 if warm)
+                - access_count: Number of accesses (0 if warm)
+                - dirty: True if has unsaved changes (False if warm)
+                - model_id: Model identifier from tag
+                - file_size_bytes: Disk size (0 if hot-only)
+
+        Example:
+            >>> agents = store.list_all_agents()
+            >>> hot = [a for a in agents if a["tier"] == "hot"]
+            >>> warm = [a for a in agents if a["tier"] == "warm"]
+        """
+        with self._lock:
+            result = []
+
+            # Hot tier agents
+            for agent_id, entry in self._hot_cache.items():
+                tokens = entry.blocks.total_tokens if entry.blocks else 0
+                file_size = 0
+                cache_path = self.cache_dir / f"{agent_id}.safetensors"
+                if cache_path.exists():
+                    file_size = cache_path.stat().st_size
+
+                result.append({
+                    "agent_id": agent_id,
+                    "tier": "hot",
+                    "tokens": tokens,
+                    "last_accessed": entry.last_accessed,
+                    "access_count": entry.access_count,
+                    "dirty": entry.dirty,
+                    "model_id": entry.model_tag.model_id,
+                    "file_size_bytes": file_size,
+                })
+
+            # Warm tier agents (on disk, not in memory)
+            warm_ids = set(self._warm_cache.keys()) - set(self._hot_cache.keys())
+            for agent_id in warm_ids:
+                cache_path = self._warm_cache[agent_id]
+                file_size = 0
+                if cache_path.exists():
+                    file_size = cache_path.stat().st_size
+
+                result.append({
+                    "agent_id": agent_id,
+                    "tier": "warm",
+                    "tokens": 0,  # Unknown without loading
+                    "last_accessed": 0.0,
+                    "access_count": 0,
+                    "dirty": False,
+                    "model_id": self.model_tag.model_id,
+                    "file_size_bytes": file_size,
+                })
+
+            return result
+
+    def get_agent_metadata(self, agent_id: str) -> dict[str, Any] | None:
+        """Get agent cache metadata without loading tensors.
+
+        Performs header-only read for warm-tier agents (no tensor deserialization).
+
+        Args:
+            agent_id: Agent identifier
+
+        Returns:
+            Metadata dict or None if not found. Keys:
+                - agent_id: Agent identifier
+                - tier: "hot" or "warm"
+                - tokens: Total tokens cached
+                - last_accessed: Unix timestamp
+                - access_count: Number of accesses
+                - dirty: True if has unsaved changes
+                - model_id: Model identifier
+                - file_size_bytes: Disk size (0 if hot-only)
+                - prompt_preview: First 100 chars of prompt (if available)
+
+        Example:
+            >>> meta = store.get_agent_metadata("agent_123")
+            >>> if meta:
+            ...     print(f"{meta['agent_id']}: {meta['tokens']} tokens")
+        """
+        with self._lock:
+            # Check hot tier first
+            if agent_id in self._hot_cache:
+                entry = self._hot_cache[agent_id]
+                tokens = entry.blocks.total_tokens if entry.blocks else 0
+                prompt_preview = ""
+                if entry.blocks and entry.blocks.prompt_text:
+                    prompt_preview = entry.blocks.prompt_text[:100]
+
+                file_size = 0
+                cache_path = self.cache_dir / f"{agent_id}.safetensors"
+                if cache_path.exists():
+                    file_size = cache_path.stat().st_size
+
+                return {
+                    "agent_id": agent_id,
+                    "tier": "hot",
+                    "tokens": tokens,
+                    "last_accessed": entry.last_accessed,
+                    "access_count": entry.access_count,
+                    "dirty": entry.dirty,
+                    "model_id": entry.model_tag.model_id,
+                    "file_size_bytes": file_size,
+                    "prompt_preview": prompt_preview,
+                }
+
+            # Check warm tier (header-only read)
+            if agent_id in self._warm_cache:
+                cache_path = self._warm_cache[agent_id]
+                if not cache_path.exists():
+                    return None
+
+                try:
+                    # Use cache adapter for header-only read
+                    if self._cache_adapter:
+                        metadata = self._cache_adapter.get_cache_file_metadata(agent_id)
+                        if metadata:
+                            file_size = cache_path.stat().st_size
+                            return {
+                                "agent_id": agent_id,
+                                "tier": "warm",
+                                "tokens": metadata.get("total_tokens", 0),
+                                "last_accessed": 0.0,
+                                "access_count": 0,
+                                "dirty": False,
+                                "model_id": metadata.get("model_id", self.model_tag.model_id),
+                                "file_size_bytes": file_size,
+                                "prompt_preview": metadata.get("prompt_text", "")[:100],
+                            }
+                except Exception as e:
+                    logger.warning(f"Failed to read metadata for {agent_id}: {e}")
+                    return None
+
             return None

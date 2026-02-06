@@ -1,7 +1,7 @@
-"""Concurrent tests for thread-safety (Sprint 2.5).
+"""Concurrent tests for thread-safety.
 
-These tests verify that BlockPool and batch engine are thread-safe
-after Sprint 2.5 hotfix. They use real threading to catch race conditions.
+These tests verify that BlockPool and batch engine are thread-safe.
+They use real threading to catch race conditions.
 
 Requires: No MLX dependency (uses mocks)
 """

@@ -5,10 +5,10 @@ This allows us to keep Q4 format end-to-end (storage -> injection -> generation)
 without dequantizing to FP16, maintaining 75% memory savings.
 
 Patches applied on import:
-  1. QuantizedKVCache.merge()  -> delegates to BatchQuantizedKVCache.merge()
-  2. QuantizedKVCache.size()   -> returns offset (not 0)
-  3. BatchKVCache.merge()      -> delegates to Q4 merge for QuantizedKVCache inputs
-  4. _make_cache()             -> creates BatchQuantizedKVCache for cold starts
+  - QuantizedKVCache.merge()  -> delegates to BatchQuantizedKVCache.merge()
+  - QuantizedKVCache.size()   -> returns offset (not 0)
+  - BatchKVCache.merge()      -> delegates to Q4 merge for QuantizedKVCache inputs
+  - _make_cache()             -> creates BatchQuantizedKVCache for cold starts
 """
 
 import logging
@@ -48,11 +48,15 @@ class BatchQuantizedKVCache(_BaseCache):
         left_padding: list[int] | None = None,
         group_size: int = 64,
         bits: int = 4,
+        n_q_heads: int | None = None,
+        n_kv_heads: int | None = None,
     ):
         self.keys: tuple[Any, Any, Any] | None = None
         self.values: tuple[Any, Any, Any] | None = None
         self.group_size = group_size
         self.bits = bits
+        self._n_q_heads = n_q_heads
+        self._n_kv_heads = n_kv_heads
         self._right_padding: mx.array | None = None
 
         if left_padding:
@@ -82,6 +86,9 @@ class BatchQuantizedKVCache(_BaseCache):
             raise ValueError("No QuantizedKVCache found in merge list")
         group_size = q4_source.group_size
         bits = q4_source.bits
+        # Preserve head counts if available (for DeepSeek MLA fix)
+        n_q_heads = getattr(q4_source, "_n_q_heads", None)
+        n_kv_heads = getattr(q4_source, "_n_kv_heads", None)
 
         lengths = [c.offset for c in caches]
         max_length = max(lengths)
@@ -89,7 +96,12 @@ class BatchQuantizedKVCache(_BaseCache):
         B = len(caches)
 
         if max_length == 0:
-            batch_cache = cls(group_size=group_size, bits=bits)
+            batch_cache = cls(
+                group_size=group_size,
+                bits=bits,
+                n_q_heads=n_q_heads,
+                n_kv_heads=n_kv_heads,
+            )
             batch_cache.left_padding = mx.array([0] * B)
             batch_cache.offset = mx.array([0] * B)
             logger.info(f"[Q4 MERGE] Cold start batch of {B} empty caches")
@@ -135,9 +147,15 @@ class BatchQuantizedKVCache(_BaseCache):
             values_scales[i : i + 1, :, p:dest_end, :] = v_s[..., :actual_offset, :]
             values_zeros[i : i + 1, :, p:dest_end, :] = v_z[..., :actual_offset, :]
 
-        mx.eval(keys_quant, keys_scales, keys_zeros, values_quant, values_scales, values_zeros)
+        # NOTE: Do NOT call mx.eval() here - let MLX handle lazy evaluation.
+        # Forcing eval mid-graph can cause Metal command buffer conflicts.
 
-        batch_cache = cls(group_size=group_size, bits=bits)
+        batch_cache = cls(
+            group_size=group_size,
+            bits=bits,
+            n_q_heads=n_q_heads,
+            n_kv_heads=n_kv_heads,
+        )
         batch_cache.keys = (keys_quant, keys_scales, keys_zeros)
         batch_cache.values = (values_quant, values_scales, values_zeros)
         batch_cache.offset = mx.array(lengths)
@@ -219,7 +237,7 @@ class BatchQuantizedKVCache(_BaseCache):
                         lambda x: x[..., :prev, :], (self.keys, self.values)
                     )
                 self.keys, self.values = tree_map(expand_quant, (self.keys, self.values))
-                mx.eval(*self.keys, *self.values)
+                # NOTE: Do NOT call mx.eval() here - matches upstream QuantizedKVCache
             else:
                 self.keys = init_quant(k_head_dim)
                 self.values = init_quant(v_head_dim)
@@ -253,7 +271,7 @@ class BatchQuantizedKVCache(_BaseCache):
 
         self.keys = tuple(k[batch_indices] for k in self.keys)
         self.values = tuple(v[batch_indices] for v in self.values)
-        mx.eval(*self.keys, *self.values)
+        # NOTE: Do NOT call mx.eval() here - matches upstream BatchKVCache.filter()
 
         self.offset = self.offset[batch_indices]
         self.left_padding = self.left_padding[batch_indices]
@@ -322,7 +340,7 @@ class BatchQuantizedKVCache(_BaseCache):
 
         self.keys = tuple(mx.concatenate([sk, ok], axis=0) for sk, ok in zip(self_k, other_k))
         self.values = tuple(mx.concatenate([sv, ov], axis=0) for sv, ov in zip(self_v, other_v))
-        mx.eval(*self.keys, *self.values)
+        # NOTE: Do NOT call mx.eval() here - matches upstream BatchKVCache.extend()
 
         self.offset = mx.concatenate([self_off, other_off])
         self.left_padding = mx.concatenate([self_lp, other_lp])
@@ -377,8 +395,24 @@ class BatchQuantizedKVCache(_BaseCache):
         **kwargs: Any,
     ) -> Any | None:
         from mlx_lm.models.base import create_causal_mask
+        import mlx.core as mx
 
-        return create_causal_mask(N, offset=self._idx, left_padding=self.left_padding, **kwargs)
+        mask = create_causal_mask(N, offset=self._idx, left_padding=self.left_padding, **kwargs)
+        # CRITICAL: Do NOT expand mask to 5D.
+        #
+        # Background: MLX's quantized_scaled_dot_product_attention reshapes scores
+        # to 5D for GQA (B, n_kv_heads, n_repeats, L, seq) when n_kv_heads < n_q_heads.
+        # Original code always expanded 4D masks to 5D to match.
+        #
+        # Problem: Different model architectures handle GQA differently:
+        # - DeepSeek-V2: Uses MLA, pre-repeats KV heads → n_repeats=1 → 4D scores → 5D mask breaks
+        # - GPT-OSS: Uses standard GQA but attention expects 4D masks → 5D mask breaks
+        # - Others: May vary
+        #
+        # Solution: Keep mask as 4D (B, 1, N, seq). MLX's attention broadcasting
+        # handles both 4D and 5D score shapes correctly with 4D masks.
+        # Tested with: Gemma 3, DeepSeek, SmolLM - all work with 4D masks.
+        return mask
 
     # ------------------------------------------------------------------
     # empty / size / state / trim
@@ -537,12 +571,33 @@ def patch_make_cache_for_q4(group_size: int = 64, bits: int = 4):
             else:
                 n_layers = len(model.layers)
 
+            # Extract head counts for DeepSeek MLA fix
+            n_q_heads = None
+            n_kv_heads = None
+            if hasattr(model, "args"):
+                args = model.args
+                # Handle nested config (e.g., Gemma 3)
+                if hasattr(args, "text_config"):
+                    config = args.text_config
+                    n_q_heads = config.get("num_attention_heads")
+                    n_kv_heads = config.get("num_key_value_heads")
+                else:
+                    n_q_heads = getattr(args, "num_attention_heads", None)
+                    n_kv_heads = getattr(args, "num_key_value_heads", None)
+
             logger.info(
                 f"[Q4 _make_cache] Creating {n_layers} Q4 batch caches "
-                f"(gs={group_size}, bits={bits}, padding={left_padding})"
+                f"(gs={group_size}, bits={bits}, padding={left_padding}, "
+                f"n_q_heads={n_q_heads}, n_kv_heads={n_kv_heads})"
             )
             return [
-                BatchQuantizedKVCache(left_padding, group_size=group_size, bits=bits)
+                BatchQuantizedKVCache(
+                    left_padding,
+                    group_size=group_size,
+                    bits=bits,
+                    n_q_heads=n_q_heads,
+                    n_kv_heads=n_kv_heads,
+                )
                 for _ in range(n_layers)
             ]
 

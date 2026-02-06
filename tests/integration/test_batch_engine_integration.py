@@ -86,14 +86,12 @@ class TestBlockPoolBatchEngineIntegration:
         assert completion.token_count > 0, "Should have tokens"
         assert completion.blocks.total_tokens > 0, "Should have blocks"
 
-    @pytest.mark.skip(reason="Cache reconstruction needs KVCache objects (Sprint 4 TODO)")
+    @pytest.mark.skip(reason="Cache reconstruction needs KVCache objects from reconstructed tensors")
     def test_single_agent_with_cache_resume(self, engine, pool) -> None:
         """Should resume generation from cached state.
 
-        TODO (Sprint 4): Implement proper cache reconstruction
         Currently skipped because _reconstruct_cache() returns (K, V) tuples,
         but MLX BatchGenerator.insert() expects cache objects with .size() method.
-        Need to create KVCache objects from reconstructed tensors.
         """
         # First generation
         engine.submit(agent_id="test_agent", prompt="Hello", max_tokens=10)

@@ -2,7 +2,7 @@ site_name: Semantic — Multi-Agent LLM Inference Server
 site_description: Block-pool memory management for multi-agent LLM inference on Apple Silicon
 site_author: Semantic Research Team
 repo_url: https://github.com/yshk-mxim/rdic
-repo_name: yshk-mxim/rdic
+repo_name: semantic
 
 theme:
   name: material
@@ -87,6 +87,7 @@ nav:
       - Adapters: architecture/adapters.md
   - Development:
       - Developer Guide: developer-guide.md
+      - Code Quality Guide: code-quality-guide.md
       - Model Onboarding: model-onboarding.md
       - Testing: testing.md
   - API Reference:
@@ -99,7 +100,7 @@ nav:
 extra:
   social:
     - icon: fontawesome/brands/github
-      link: https://github.com/yshk-mxim/rdic
+      link: https://github.com/yshk-mxim/semantic
   version:
     provider: mike
 

@@ -1,4 +1,4 @@
-"""Stress test harness for managing concurrent load tests (Sprint 6 Day 3).
+"""Stress test harness for managing concurrent load tests.
 
 Provides StressTestHarness class for:
 - Concurrent request execution (100+ workers)

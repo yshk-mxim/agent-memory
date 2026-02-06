@@ -9,6 +9,7 @@ import pytest
 # Mock MLX modules before imports
 sys.modules["mlx"] = MagicMock()
 sys.modules["mlx.core"] = MagicMock()
+sys.modules["mlx.utils"] = MagicMock()
 sys.modules["mlx_lm"] = MagicMock()
 
 from semantic.application.batch_engine import BlockPoolBatchEngine
@@ -69,8 +70,8 @@ class TestBatchEngineDrain:
         )
 
         # Manually inject an active request to simulate in-flight work
-        # Format: (agent_id, generated_tokens, detokenizer, prompt_tokens)
-        engine._active_requests = {"uid_123": ("agent_1", [42, 43, 44], mock_tokenizer, [1, 2, 3])}
+        # Format: (agent_id, generated_tokens, detokenizer, prompt_tokens, prompt_text)
+        engine._active_requests = {"uid_123": ("agent_1", [42, 43, 44], mock_tokenizer, [1, 2, 3], "test prompt")}
 
         # Create a mock batch generator that finishes the request on second next() call
         mock_batch_gen = MagicMock()
@@ -120,11 +121,11 @@ class TestBatchEngineDrain:
             cache_adapter=mock_adapter,
         )
 
-        # Inject stuck requests (agent_id, generated_tokens, detokenizer, prompt_tokens)
+        # Inject stuck requests (agent_id, generated_tokens, detokenizer, prompt_tokens, prompt_text)
         engine._active_requests = {
-            "uid_1": ("agent_1", [], mock_tokenizer, []),
-            "uid_2": ("agent_2", [], mock_tokenizer, []),
-            "uid_3": ("agent_3", [], mock_tokenizer, []),
+            "uid_1": ("agent_1", [], mock_tokenizer, [], "prompt 1"),
+            "uid_2": ("agent_2", [], mock_tokenizer, [], "prompt 2"),
+            "uid_3": ("agent_3", [], mock_tokenizer, [], "prompt 3"),
         }
 
         # Mock batch generator that never completes
@@ -171,9 +172,9 @@ class TestBatchEngineShutdown:
             cache_adapter=mock_adapter,
         )
 
-        # Populate state (agent_id, generated_tokens, detokenizer, prompt_tokens)
+        # Populate state (agent_id, generated_tokens, detokenizer, prompt_tokens, prompt_text)
         engine._batch_gen = MagicMock()
-        engine._active_requests = {"uid_1": ("agent_1", [], None, [])}
+        engine._active_requests = {"uid_1": ("agent_1", [], None, [], "")}
         engine._agent_blocks = {"agent_1": MagicMock()}
 
         # Execute shutdown
@@ -205,10 +206,10 @@ class TestBatchEngineShutdown:
             cache_adapter=mock_adapter,
         )
 
-        # Add active requests (agent_id, generated_tokens, detokenizer, prompt_tokens)
+        # Add active requests (agent_id, generated_tokens, detokenizer, prompt_tokens, prompt_text)
         engine._active_requests = {
-            "uid_1": ("agent_1", [], None, []),
-            "uid_2": ("agent_2", [], None, []),
+            "uid_1": ("agent_1", [], None, [], ""),
+            "uid_2": ("agent_2", [], None, [], ""),
         }
 
         # Execute shutdown
@@ -272,8 +273,8 @@ class TestDrainShutdownIntegration:
             cache_adapter=mock_adapter,
         )
 
-        # Inject active request (agent_id, generated_tokens, detokenizer, prompt_tokens)
-        engine._active_requests = {"uid_1": ("agent_1", [42], mock_tokenizer, [1])}
+        # Inject active request (agent_id, generated_tokens, detokenizer, prompt_tokens, prompt_text)
+        engine._active_requests = {"uid_1": ("agent_1", [42], mock_tokenizer, [1], "test")}
 
         # Mock batch gen to finish request
         mock_batch_gen = MagicMock()

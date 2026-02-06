@@ -1,4 +1,4 @@
-"""Integration tests for request logging middleware (Sprint 7 Day 2).
+"""Integration tests for request logging middleware.
 
 Tests verify that request logging:
 - Logs all requests with timing information

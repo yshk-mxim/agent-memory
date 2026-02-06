@@ -1,4 +1,4 @@
-"""Cache resume performance benchmarks (Sprint 6 Day 6).
+"""Cache resume performance benchmarks.
 
 Measures cache save/load performance across different cache sizes:
 - Save time: 2K, 4K, 8K tokens

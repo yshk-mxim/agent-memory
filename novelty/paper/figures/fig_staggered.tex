@@ -1,0 +1,50 @@
+% Figure 3: Staggered Arrivals
+% pgfplots grouped bar chart: User A penalty vs User B benefit
+% Sequential vs Batched
+
+\begin{figure}[t]
+\centering
+\begin{tikzpicture}
+\begin{axis}[
+    width=0.85\linewidth,
+    height=5.5cm,
+    ybar,
+    bar width=0.6cm,
+    xlabel={Scenario},
+    ylabel={TTFT (seconds)},
+    symbolic x coords={User A, User B, Total},
+    xtick=data,
+    ymin=0, ymax=40,
+    enlarge x limits=0.25,
+    legend pos=north west,
+    legend style={font=\small},
+    grid=major,
+    grid style={line width=.1pt, draw=gray!20},
+]
+
+% Sequential serving - blue (colorblind-safe)
+\addplot[fill=blue!30, draw=blue!80!black, line width=1pt] coordinates {
+    (User A, 7.0)
+    (User B, 24.5)
+    (Total, 31.5)
+};
+\addlegendentry{Sequential}
+
+% Batched serving - orange (colorblind-safe)
+\addplot[fill=orange!40, draw=orange!90!black, line width=1pt] coordinates {
+    (User A, 7.3)
+    (User B, 9.6)
+    (Total, 16.9)
+};
+\addlegendentry{Batched}
+
+% Annotations - positioned above bars with better spacing, colorblind-safe colors
+\node[font=\footnotesize, text=violet!80!black] at (axis cs:User A,10.5) {4\% penalty};
+\node[font=\footnotesize, text=orange!90!black] at (axis cs:User B,27) {2.6$\times$ faster};
+\node[font=\footnotesize, text=orange!90!black] at (axis cs:Total,35) {1.86$\times$ total};
+
+\end{axis}
+\end{tikzpicture}
+\caption{Staggered request arrivals (both users 4K context). User A submits at t=0, User B at t=2s. Sequential serving forces User B to wait for User A's completion (24.5s TTFT). Batched serving provides 2.6$\times$ speedup for User B at minimal cost to User A (4\% penalty). Net total TTFT improves 1.86$\times$.}
+\label{fig:staggered}
+\end{figure}

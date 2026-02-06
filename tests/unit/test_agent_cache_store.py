@@ -1,7 +1,6 @@
-"""Unit tests for AgentCacheStore (Day 4 skeleton).
+"""Unit tests for AgentCacheStore.
 
 Tests ModelTag, CacheEntry, and AgentCacheStore interfaces.
-Full implementation tests added in Days 5-7.
 """
 
 import tempfile
@@ -16,7 +15,7 @@ from semantic.application.agent_cache_store import (
     CacheEntry,
     ModelTag,
 )
-from semantic.domain.entities import AgentBlocks
+from semantic.domain.entities import AgentBlocks, KVBlock
 from semantic.domain.errors import InvalidRequestError
 from semantic.domain.value_objects import ModelCacheSpec
 
@@ -383,7 +382,7 @@ class TestAgentCacheStoreEviction:
 
 
 class TestAgentCacheStorePrefixMatching:
-    """Tests for prefix matching (Day 6 implementation)."""
+    """Tests for prefix matching."""
 
     def test_find_prefix_returns_none_when_empty(self, model_tag: ModelTag) -> None:
         """find_prefix() should return None when no caches exist."""
@@ -399,9 +398,11 @@ class TestAgentCacheStorePrefixMatching:
             assert result is None
 
     def test_find_prefix_returns_longest_match(
-        self, agent_blocks: AgentBlocks, model_tag: ModelTag, mock_cache_adapter: MagicMock
+        self, model_tag: ModelTag, mock_cache_adapter: MagicMock
     ) -> None:
-        """find_prefix() should return cache with longest prefix."""
+        """find_prefix() should return cache with longest matching token prefix."""
+        from semantic.domain.entities import KVBlock
+
         with tempfile.TemporaryDirectory() as tmpdir:
             store = AgentCacheStore(
                 cache_dir=Path(tmpdir),
@@ -410,18 +411,263 @@ class TestAgentCacheStorePrefixMatching:
                 cache_adapter=mock_cache_adapter,
             )
 
-            # Save two agents with different cache sizes
-            # (In stub, just save empty blocks - real implementation would have tokens)
-            store.save("agent_1", agent_blocks)
-            store.save("agent_2", agent_blocks)
+            # Agent 1: tokens [1, 2, 3] — 3-token prefix match with query
+            block_a = KVBlock(block_id=0, layer_id=0, token_count=256, layer_data="fake")
+            blocks_a = AgentBlocks(
+                agent_id="agent_1",
+                blocks={0: [block_a]},
+                total_tokens=256,
+                token_sequence=[1, 2, 3],
+            )
 
-            # Manually set total_tokens for testing (bypassing validation)
-            store._hot_cache["agent_1"].blocks.total_tokens = 10  # type: ignore[union-attr]
-            store._hot_cache["agent_2"].blocks.total_tokens = 100  # type: ignore[union-attr]
+            # Agent 2: tokens [1, 2, 3, 4, 5] — 5-token prefix match with query
+            block_b = KVBlock(block_id=0, layer_id=0, token_count=256, layer_data="fake")
+            blocks_b = AgentBlocks(
+                agent_id="agent_2",
+                blocks={0: [block_b]},
+                total_tokens=256,
+                token_sequence=[1, 2, 3, 4, 5],
+            )
 
-            # Query should return longest match
+            store.save("agent_1", blocks_a)
+            store.save("agent_2", blocks_b)
+
+            # Query [1, 2, 3, 4, 5, 6] matches agent_2's prefix (5 tokens)
+            result = store.find_prefix([1, 2, 3, 4, 5, 6])
+
+            assert result is not None
+            assert result.agent_id == "agent_2"
+            assert result.token_sequence == [1, 2, 3, 4, 5]
+
+    def test_find_prefix_matches_tokens_not_just_count(
+        self, model_tag: ModelTag, mock_cache_adapter: MagicMock
+    ) -> None:
+        """find_prefix() must compare actual token values, not just count."""
+        from semantic.domain.entities import KVBlock
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = AgentCacheStore(
+                cache_dir=Path(tmpdir),
+                max_hot_agents=5,
+                model_tag=model_tag,
+                cache_adapter=mock_cache_adapter,
+            )
+
+            # Agent 1: more tokens but DIFFERENT prefix — no match
+            block_a = KVBlock(block_id=0, layer_id=0, token_count=256, layer_data="fake")
+            blocks_a = AgentBlocks(
+                agent_id="agent_1",
+                blocks={0: [block_a]},
+                total_tokens=256,
+                token_sequence=[99, 88, 77, 66, 55],
+            )
+
+            # Agent 2: fewer tokens but MATCHING prefix — should win
+            block_b = KVBlock(block_id=0, layer_id=0, token_count=256, layer_data="fake")
+            blocks_b = AgentBlocks(
+                agent_id="agent_2",
+                blocks={0: [block_b]},
+                total_tokens=256,
+                token_sequence=[1, 2, 3],
+            )
+
+            store.save("agent_1", blocks_a)
+            store.save("agent_2", blocks_b)
+
+            # Query [1, 2, 3, 4, 5] — agent_2 matches 3 tokens, agent_1 matches 0
             result = store.find_prefix([1, 2, 3, 4, 5])
 
-            # Simplified implementation returns agent with most tokens
             assert result is not None
-            assert result.total_tokens == 100  # agent_2 has longest cache
+            assert result.agent_id == "agent_2"
+
+    def test_find_prefix_returns_none_when_no_tokens_match(
+        self, model_tag: ModelTag, mock_cache_adapter: MagicMock
+    ) -> None:
+        """find_prefix() returns None when no cached agent shares any token prefix."""
+        from semantic.domain.entities import KVBlock
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = AgentCacheStore(
+                cache_dir=Path(tmpdir),
+                max_hot_agents=5,
+                model_tag=model_tag,
+                cache_adapter=mock_cache_adapter,
+            )
+
+            block = KVBlock(block_id=0, layer_id=0, token_count=256, layer_data="fake")
+            blocks = AgentBlocks(
+                agent_id="agent_1",
+                blocks={0: [block]},
+                total_tokens=256,
+                token_sequence=[99, 88, 77],
+            )
+            store.save("agent_1", blocks)
+
+            # Query tokens share no prefix with cached tokens
+            result = store.find_prefix([1, 2, 3])
+            assert result is None
+
+    def test_find_prefix_only_marks_winner_accessed(
+        self, model_tag: ModelTag, mock_cache_adapter: MagicMock
+    ) -> None:
+        """find_prefix() should only update LRU timestamp on the winning entry."""
+        from semantic.domain.entities import KVBlock
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = AgentCacheStore(
+                cache_dir=Path(tmpdir),
+                max_hot_agents=5,
+                model_tag=model_tag,
+                cache_adapter=mock_cache_adapter,
+            )
+
+            block = KVBlock(block_id=0, layer_id=0, token_count=256, layer_data="fake")
+            blocks_a = AgentBlocks(
+                agent_id="agent_1", blocks={0: [block]},
+                total_tokens=256, token_sequence=[1, 2],
+            )
+            blocks_b = AgentBlocks(
+                agent_id="agent_2", blocks={0: [block]},
+                total_tokens=256, token_sequence=[1, 2, 3, 4],
+            )
+
+            store.save("agent_1", blocks_a)
+            store.save("agent_2", blocks_b)
+
+            # Record access counts after save
+            a1_count = store._hot_cache["agent_1"].access_count
+            a2_count = store._hot_cache["agent_2"].access_count
+
+            store.find_prefix([1, 2, 3, 4, 5])
+
+            # Only winner (agent_2) should have incremented access count
+            assert store._hot_cache["agent_1"].access_count == a1_count
+            assert store._hot_cache["agent_2"].access_count == a2_count + 1
+
+
+class TestLRUEvictionWithNAgents:
+    """N-agent LRU eviction scenarios from plan Phase 3.6."""
+
+    def _make_block(self) -> KVBlock:
+        return KVBlock(block_id=0, layer_id=0, token_count=256, layer_data="fake")
+
+    def test_max3_add4_evicts_oldest(
+        self, model_tag: ModelTag, mock_cache_adapter: MagicMock
+    ) -> None:
+        """max_hot_agents=3, add A,B,C,D → A evicted (LRU)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = AgentCacheStore(
+                cache_dir=Path(tmpdir),
+                max_hot_agents=3,
+                model_tag=model_tag,
+                cache_adapter=mock_cache_adapter,
+            )
+
+            for name in ["A", "B", "C"]:
+                blocks = AgentBlocks(
+                    agent_id=name, blocks={0: [self._make_block()]},
+                    total_tokens=256,
+                )
+                store.save(name, blocks)
+                time.sleep(0.01)
+
+            assert len(store._hot_cache) == 3
+
+            # Add D — triggers eviction of A (oldest)
+            blocks_d = AgentBlocks(
+                agent_id="D", blocks={0: [self._make_block()]},
+                total_tokens=256,
+            )
+            store.save("D", blocks_d)
+
+            assert len(store._hot_cache) == 3
+            assert "A" not in store._hot_cache
+            assert all(name in store._hot_cache for name in ["B", "C", "D"])
+
+    def test_access_a_then_add_d_evicts_b(
+        self, model_tag: ModelTag, mock_cache_adapter: MagicMock
+    ) -> None:
+        """Access A to re-promote it, then add D → B evicted (A was re-promoted)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = AgentCacheStore(
+                cache_dir=Path(tmpdir),
+                max_hot_agents=3,
+                model_tag=model_tag,
+                cache_adapter=mock_cache_adapter,
+            )
+
+            for name in ["A", "B", "C"]:
+                blocks = AgentBlocks(
+                    agent_id=name, blocks={0: [self._make_block()]},
+                    total_tokens=256,
+                )
+                store.save(name, blocks)
+                time.sleep(0.01)
+
+            # Access A to promote it (update LRU timestamp)
+            loaded = store.load("A")
+            assert loaded is not None
+
+            time.sleep(0.01)
+
+            # Add D — should evict B (now the oldest, since A was re-promoted)
+            blocks_d = AgentBlocks(
+                agent_id="D", blocks={0: [self._make_block()]},
+                total_tokens=256,
+            )
+            store.save("D", blocks_d)
+
+            assert len(store._hot_cache) == 3
+            assert "B" not in store._hot_cache
+            assert all(name in store._hot_cache for name in ["A", "C", "D"])
+
+    def test_max2_add10_exactly_2_in_hot(
+        self, model_tag: ModelTag, mock_cache_adapter: MagicMock
+    ) -> None:
+        """max_hot_agents=2, add 10 agents → exactly 2 in hot, all 10 in warm."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = AgentCacheStore(
+                cache_dir=Path(tmpdir),
+                max_hot_agents=2,
+                model_tag=model_tag,
+                cache_adapter=mock_cache_adapter,
+            )
+
+            for i in range(10):
+                blocks = AgentBlocks(
+                    agent_id=f"agent_{i}", blocks={0: [self._make_block()]},
+                    total_tokens=256,
+                )
+                store.save(f"agent_{i}", blocks)
+                time.sleep(0.001)
+
+            assert len(store._hot_cache) == 2
+            # Write-behind: only evicted agents land in warm (8 of 10)
+            assert len(store._warm_cache) == 8
+
+    def test_evict_to_target_from_5_to_2(
+        self, model_tag: ModelTag, mock_cache_adapter: MagicMock
+    ) -> None:
+        """5 agents, evict to target_count=2 → 3 evicted."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = AgentCacheStore(
+                cache_dir=Path(tmpdir),
+                max_hot_agents=10,
+                model_tag=model_tag,
+                cache_adapter=mock_cache_adapter,
+            )
+
+            for i in range(5):
+                blocks = AgentBlocks(
+                    agent_id=f"agent_{i}", blocks={0: [self._make_block()]},
+                    total_tokens=256,
+                )
+                store.save(f"agent_{i}", blocks)
+                time.sleep(0.01)
+
+            assert len(store._hot_cache) == 5
+
+            evicted = store.evict_lru(target_count=2)
+
+            assert evicted == 3
+            assert len(store._hot_cache) == 2

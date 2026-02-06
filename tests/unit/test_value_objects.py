@@ -296,3 +296,237 @@ class TestModelCacheSpec:
 
         for layer_id in range(8, 32):
             assert spec.max_blocks_for_layer(spec.layer_types[layer_id]) == 4
+
+
+class TestMemoryBudgetFormulas:
+    """Verify memory formulas step-by-step against analytical computation."""
+
+    def test_fp16_formula_step_by_step(self) -> None:
+        """FP16: n_kv_heads * head_dim * block_tokens * 2(K+V) * 2(bytes)."""
+        n_kv_heads = 8
+        head_dim = 256
+        block_tokens = 256
+
+        spec = ModelCacheSpec(
+            n_layers=48,
+            n_kv_heads=n_kv_heads,
+            head_dim=head_dim,
+            block_tokens=block_tokens,
+            layer_types=["global"] * 48,
+            kv_bits=None,
+        )
+
+        elements_per_kv = n_kv_heads * head_dim * block_tokens  # 524,288
+        total_elements = elements_per_kv * 2  # K and V = 1,048,576
+        expected_bytes = total_elements * 2  # float16 = 2 bytes = 2,097,152
+
+        assert elements_per_kv == 524_288
+        assert total_elements == 1_048_576
+        assert expected_bytes == 2_097_152
+        assert spec.bytes_per_block_per_layer() == expected_bytes
+
+    def test_q4_formula_step_by_step(self) -> None:
+        """Q4: weight_bytes + scales_bytes + biases_bytes."""
+        n_kv_heads = 8
+        head_dim = 256
+        block_tokens = 256
+        kv_group_size = 64
+
+        spec = ModelCacheSpec(
+            n_layers=48,
+            n_kv_heads=n_kv_heads,
+            head_dim=head_dim,
+            block_tokens=block_tokens,
+            layer_types=["global"] * 48,
+            kv_bits=4,
+            kv_group_size=kv_group_size,
+        )
+
+        elements_per_kv = n_kv_heads * head_dim * block_tokens  # 524,288
+        total_elements = elements_per_kv * 2  # 1,048,576
+
+        weight_bytes = (total_elements * 4) // 8  # 4 bits per element = 524,288
+        groups_per_kv = (elements_per_kv + kv_group_size - 1) // kv_group_size  # 8,192
+        total_groups = groups_per_kv * 2  # K and V = 16,384
+        scales_bytes = total_groups * 2  # float16 = 32,768
+        biases_bytes = total_groups * 2  # float16 = 32,768
+        expected = weight_bytes + scales_bytes + biases_bytes  # 589,824
+
+        assert weight_bytes == 524_288
+        assert groups_per_kv == 8_192
+        assert total_groups == 16_384
+        assert scales_bytes == 32_768
+        assert biases_bytes == 32_768
+        assert expected == 589_824
+        assert spec.bytes_per_block_per_layer() == expected
+
+    def test_q8_formula_step_by_step(self) -> None:
+        """Q8: same structure as Q4 but 8 bits per element."""
+        n_kv_heads = 8
+        head_dim = 256
+        block_tokens = 256
+        kv_group_size = 64
+
+        spec = ModelCacheSpec(
+            n_layers=48,
+            n_kv_heads=n_kv_heads,
+            head_dim=head_dim,
+            block_tokens=block_tokens,
+            layer_types=["global"] * 48,
+            kv_bits=8,
+            kv_group_size=kv_group_size,
+        )
+
+        elements_per_kv = n_kv_heads * head_dim * block_tokens
+        total_elements = elements_per_kv * 2
+
+        weight_bytes = (total_elements * 8) // 8  # 8 bits = 1 byte each = 1,048,576
+        groups_per_kv = (elements_per_kv + kv_group_size - 1) // kv_group_size
+        total_groups = groups_per_kv * 2
+        scales_bytes = total_groups * 2
+        biases_bytes = total_groups * 2
+        expected = weight_bytes + scales_bytes + biases_bytes  # 1,114,112
+
+        assert weight_bytes == 1_048_576
+        assert expected == 1_114_112
+        assert spec.bytes_per_block_per_layer() == expected
+
+    def test_q4_is_roughly_28_percent_of_fp16(self) -> None:
+        """Q4 should be ~25-28% of FP16 memory per block."""
+        spec_fp16 = ModelCacheSpec(
+            n_layers=48,
+            n_kv_heads=8,
+            head_dim=256,
+            block_tokens=256,
+            layer_types=["global"] * 48,
+            kv_bits=None,
+        )
+        spec_q4 = ModelCacheSpec(
+            n_layers=48,
+            n_kv_heads=8,
+            head_dim=256,
+            block_tokens=256,
+            layer_types=["global"] * 48,
+            kv_bits=4,
+            kv_group_size=64,
+        )
+
+        fp16_bytes = spec_fp16.bytes_per_block_per_layer()
+        q4_bytes = spec_q4.bytes_per_block_per_layer()
+        ratio = q4_bytes / fp16_bytes
+
+        # Q4 should be ~28.1% of FP16
+        assert 0.25 <= ratio <= 0.30, f"Q4/FP16 ratio {ratio:.3f} outside 25-30% range"
+
+    def test_q8_is_roughly_53_percent_of_fp16(self) -> None:
+        """Q8 should be ~53% of FP16 memory."""
+        spec_fp16 = ModelCacheSpec(
+            n_layers=48,
+            n_kv_heads=8,
+            head_dim=256,
+            block_tokens=256,
+            layer_types=["global"] * 48,
+            kv_bits=None,
+        )
+        spec_q8 = ModelCacheSpec(
+            n_layers=48,
+            n_kv_heads=8,
+            head_dim=256,
+            block_tokens=256,
+            layer_types=["global"] * 48,
+            kv_bits=8,
+            kv_group_size=64,
+        )
+
+        fp16_bytes = spec_fp16.bytes_per_block_per_layer()
+        q8_bytes = spec_q8.bytes_per_block_per_layer()
+        ratio = q8_bytes / fp16_bytes
+
+        assert 0.50 <= ratio <= 0.55, f"Q8/FP16 ratio {ratio:.3f} outside 50-55% range"
+
+    def test_kv_bits_16_equals_none(self) -> None:
+        """kv_bits=16 should produce same result as kv_bits=None (both FP16)."""
+        spec_none = ModelCacheSpec(
+            n_layers=12,
+            n_kv_heads=4,
+            head_dim=64,
+            block_tokens=256,
+            layer_types=["global"] * 12,
+            kv_bits=None,
+        )
+        spec_16 = ModelCacheSpec(
+            n_layers=12,
+            n_kv_heads=4,
+            head_dim=64,
+            block_tokens=256,
+            layer_types=["global"] * 12,
+            kv_bits=16,
+        )
+
+        assert spec_none.bytes_per_block_per_layer() == spec_16.bytes_per_block_per_layer()
+
+
+class TestModelCacheSpecNewValidations:
+    """Test new validation rules added for positive values and power-of-2 group size."""
+
+    def test_reject_zero_n_layers(self) -> None:
+        with pytest.raises(ModelSpecValidationError, match="n_layers must be > 0"):
+            ModelCacheSpec(
+                n_layers=0, n_kv_heads=4, head_dim=64, block_tokens=256,
+                layer_types=[],
+            )
+
+    def test_reject_negative_n_layers(self) -> None:
+        with pytest.raises(ModelSpecValidationError, match="n_layers must be > 0"):
+            ModelCacheSpec(
+                n_layers=-1, n_kv_heads=4, head_dim=64, block_tokens=256,
+                layer_types=[],
+            )
+
+    def test_reject_zero_n_kv_heads(self) -> None:
+        with pytest.raises(ModelSpecValidationError, match="n_kv_heads must be > 0"):
+            ModelCacheSpec(
+                n_layers=12, n_kv_heads=0, head_dim=64, block_tokens=256,
+                layer_types=["global"] * 12,
+            )
+
+    def test_reject_zero_head_dim(self) -> None:
+        with pytest.raises(ModelSpecValidationError, match="head_dim must be > 0"):
+            ModelCacheSpec(
+                n_layers=12, n_kv_heads=4, head_dim=0, block_tokens=256,
+                layer_types=["global"] * 12,
+            )
+
+    def test_reject_zero_block_tokens(self) -> None:
+        with pytest.raises(ModelSpecValidationError, match="block_tokens must be > 0"):
+            ModelCacheSpec(
+                n_layers=12, n_kv_heads=4, head_dim=64, block_tokens=0,
+                layer_types=["global"] * 12,
+            )
+
+    def test_reject_non_power_of_2_group_size(self) -> None:
+        with pytest.raises(ModelSpecValidationError, match="power of 2"):
+            ModelCacheSpec(
+                n_layers=12, n_kv_heads=4, head_dim=64, block_tokens=256,
+                layer_types=["global"] * 12,
+                kv_bits=4,
+                kv_group_size=100,
+            )
+
+    def test_accept_power_of_2_group_sizes(self) -> None:
+        for gs in [1, 2, 4, 8, 16, 32, 64, 128]:
+            spec = ModelCacheSpec(
+                n_layers=12, n_kv_heads=4, head_dim=64, block_tokens=256,
+                layer_types=["global"] * 12,
+                kv_bits=4,
+                kv_group_size=gs,
+            )
+            assert spec.kv_group_size == gs
+
+    def test_reject_invalid_kv_bits(self) -> None:
+        with pytest.raises(ModelSpecValidationError, match="kv_bits must be one of"):
+            ModelCacheSpec(
+                n_layers=12, n_kv_heads=4, head_dim=64, block_tokens=256,
+                layer_types=["global"] * 12,
+                kv_bits=6,
+            )
