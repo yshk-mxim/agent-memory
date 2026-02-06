@@ -141,14 +141,14 @@ def apply_fused_attention_patch() -> bool:
         k_groups = k_dim // 64  # scale/bias groups per K row (group_size=64)
         v_groups = v_dim // 64
 
-        # Threadgroup memory budget check (32KB limit on Apple Silicon)
-        # shared_q[K_DIM] + tg_max[THREADS] + tg_sum[THREADS] + tg_out[THREADS*V_DIM]
-        tg_bytes = (k_dim + threads + threads + threads * v_dim) * 4
+        # Threadgroup memory: only shared_q[K_DIM] (e.g. 256*4 = 1KB)
+        # All cross-thread reduction uses SIMD shuffle (THREADS=32 = 1 SIMD group)
+        tg_bytes = k_dim * 4
         if tg_bytes > 32768:
             logger.warning(
                 "Fused decode kernel needs %d bytes threadgroup memory "
-                "(limit 32768) for k_dim=%d, v_dim=%d — skipping",
-                tg_bytes, k_dim, v_dim,
+                "(limit 32768) for k_dim=%d — skipping",
+                tg_bytes, k_dim,
             )
             _decode_kernel_cache[key] = None
             return None
@@ -197,13 +197,9 @@ inline float dequant4(
 
     uint kv_head = head_idx / N_REPEATS;
 
-    // Shared memory for Q vector and reduction
+    // Only shared_q needs threadgroup memory (~1KB for head_dim=256)
+    // All cross-thread reduction uses SIMD shuffle (THREADS=32 = 1 SIMD group)
     threadgroup float shared_q[K_DIM];
-    threadgroup float tg_max[THREADS];
-    threadgroup float tg_sum[THREADS];
-    // Per-thread V accumulator for cross-thread reduction
-    // Memory: THREADS * V_DIM * 4 bytes (e.g. 32*128*4 = 16KB)
-    threadgroup float tg_out[THREADS * V_DIM];
 
     // Load Q into shared memory
     int q_base = (batch_idx * N_Q_HEADS + head_idx) * K_DIM;
@@ -215,7 +211,7 @@ inline float dequant4(
     // KV base offsets for this head
     int kv_base = (batch_idx * N_KV_HEADS + kv_head) * N;
 
-    // Phase: Online softmax + V accumulation
+    // Phase 1: Online softmax + V accumulation (per-thread, strided over N)
     float my_max = -INFINITY;
     float my_sum = 0.0f;
     float my_out[V_DIM];  // in registers
@@ -247,43 +243,33 @@ inline float dequant4(
         my_max = m_new;
     }
 
-    // Store per-thread results in shared memory for cross-thread reduction
-    tg_max[tid] = my_max;
-    tg_sum[tid] = my_sum;
-    for (int d = 0; d < V_DIM; d++) {
-        tg_out[tid * V_DIM + d] = my_out[d];
-    }
-    threadgroup_barrier(mem_flags::mem_threadgroup);
+    // Phase 2: Cross-thread reduction via SIMD shuffle
+    // THREADS=32 = exactly one SIMD group, so simd_shuffle_down works
+    // across all threads without any threadgroup memory.
+    // 5 steps for 32 threads: offsets 16, 8, 4, 2, 1
+    for (ushort offset = THREADS / 2; offset > 0; offset /= 2) {
+        float other_max = simd_shuffle_down(my_max, offset);
+        float other_sum = simd_shuffle_down(my_sum, offset);
 
-    // Reduce: merge online softmax states across threads
-    // Thread 0 does the final reduction (simple for THREADS=32)
-    if (tid == 0) {
-        // Find global max
-        float global_max = tg_max[0];
-        for (int t = 1; t < THREADS && t < N; t++) {
-            global_max = max(global_max, tg_max[t]);
-        }
+        // Merge online softmax states
+        float m_new = max(my_max, other_max);
+        float corr_me = exp(my_max - m_new);
+        float corr_other = exp(other_max - m_new);
 
-        // Compute corrected sum and output
-        float global_sum = 0.0f;
-        float final_out[V_DIM];
-        for (int d = 0; d < V_DIM; d++) final_out[d] = 0.0f;
-
-        int active_threads = min(THREADS, N);
-        for (int t = 0; t < active_threads; t++) {
-            float corr = exp(tg_max[t] - global_max);
-            float w = corr * tg_sum[t];
-            global_sum += w;
-            for (int d = 0; d < V_DIM; d++) {
-                final_out[d] += corr * tg_out[t * V_DIM + d];
-            }
-        }
-
-        // Normalize and write output
-        int out_base = (batch_idx * N_Q_HEADS + head_idx) * V_DIM;
-        float inv_sum = 1.0f / global_sum;
         for (int d = 0; d < V_DIM; d++) {
-            output[out_base + d] = half(final_out[d] * inv_sum);
+            float other_out = simd_shuffle_down(my_out[d], offset);
+            my_out[d] = corr_me * my_out[d] + corr_other * other_out;
+        }
+        my_sum = corr_me * my_sum + corr_other * other_sum;
+        my_max = m_new;
+    }
+
+    // Thread 0 has the final merged result — normalize and write
+    if (tid == 0) {
+        int out_base = (batch_idx * N_Q_HEADS + head_idx) * V_DIM;
+        float inv_sum = 1.0f / my_sum;
+        for (int d = 0; d < V_DIM; d++) {
+            output[out_base + d] = half(my_out[d] * inv_sum);
         }
     }
 """
