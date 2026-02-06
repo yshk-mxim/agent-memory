@@ -82,9 +82,12 @@ async def generate_chat_completion(
     else:
         logger.info(f"Cache miss: {agent_id}")
 
-    # Invalidate hot cache if loading from disk
-    if cached_blocks is not None:
-        cache_store.invalidate_hot(agent_id)
+    # Note: We intentionally do NOT call cache_store.invalidate_hot() here.
+    # Premature invalidation would remove the hot entry between load() and save(),
+    # causing concurrent requests for the same agent to miss the hot cache and
+    # fall through to disk. save() at the end replaces the hot entry with
+    # updated blocks, and load()'s has_data check handles cleared layer_data
+    # by falling through to disk automatically.
 
     # Generate using scheduler (preferred) or direct engine
     if scheduler is not None:

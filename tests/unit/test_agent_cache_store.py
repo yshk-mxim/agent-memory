@@ -671,3 +671,36 @@ class TestLRUEvictionWithNAgents:
 
             assert evicted == 3
             assert len(store._hot_cache) == 2
+
+
+class TestConcurrentLoadDuringGeneration:
+    """Tests that hot entry remains accessible between load() and save()."""
+
+    def test_hot_entry_survives_after_load(
+        self, model_tag: ModelTag, mock_cache_adapter: MagicMock
+    ) -> None:
+        """After load(), the hot entry should remain accessible for concurrent requests."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store = AgentCacheStore(
+                cache_dir=Path(tmpdir),
+                max_hot_agents=5,
+                model_tag=model_tag,
+                cache_adapter=mock_cache_adapter,
+            )
+
+            block = KVBlock(block_id=0, layer_id=0, token_count=256, layer_data="fake")
+            blocks = AgentBlocks(
+                agent_id="agent_1",
+                blocks={0: [block]},
+                total_tokens=256,
+            )
+            store.save("agent_1", blocks)
+
+            # First load (simulating generation start)
+            loaded1 = store.load("agent_1")
+            assert loaded1 is not None
+
+            # Second concurrent load should still find the hot entry
+            loaded2 = store.load("agent_1")
+            assert loaded2 is not None
+            assert loaded2 is loaded1
