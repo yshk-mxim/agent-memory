@@ -973,6 +973,15 @@ class BlockPoolBatchEngine:
                                 stored_text[:80],
                                 prompt[:80],
                             )
+                        # Log divergence point for debugging
+                        if char_match > 0 and char_match < len(stored_text):
+                            ctx = 30
+                            logger.info(
+                                "[CACHE DIVERGE POINT] at char %d: stored='...%s' vs prompt='...%s'",
+                                char_match,
+                                stored_text[char_match:char_match+ctx].replace('\n', '\\n'),
+                                prompt[char_match:char_match+ctx].replace('\n', '\\n'),
+                            )
 
                     if char_match == len(stored_text) == len(prompt):
                         # EXACT MATCH: Reuse prompt portion of cache only.
@@ -1044,23 +1053,44 @@ class BlockPoolBatchEngine:
                         match_ratio = char_match / len(stored_text)
 
                         if match_ratio >= 0.5 and char_match > 100:
-                            # Partial reuse: re-tokenize matched prefix to find token boundary
-                            matched_tokens = self._tokenizer.encode(prompt[:char_match])
-                            usable_tokens = len(matched_tokens)
-                            logger.debug(
-                                "[CACHE DIVERGE PARTIAL] %d chars matched (%.0f%%), trimming to %d tokens",
+                            # FIX: Tokenize FULL prompt first, then find token boundary
+                            # This avoids BPE boundary issues from split tokenization
+                            full_tokens = self._tokenizer.encode(prompt)
+
+                            # Find token boundary: decode tokens until we exceed char_match
+                            # This gives us the exact token count for the matched prefix
+                            usable_tokens = 0
+                            decoded_len = 0
+                            for i, tok in enumerate(full_tokens):
+                                tok_text = self._tokenizer.decode([tok])
+                                decoded_len += len(tok_text)
+                                if decoded_len >= char_match:
+                                    usable_tokens = i  # Stop BEFORE exceeding char_match
+                                    break
+
+                            # If we couldn't find boundary, fall back to prefix tokenization
+                            if usable_tokens == 0:
+                                matched_tokens = self._tokenizer.encode(prompt[:char_match])
+                                usable_tokens = len(matched_tokens)
+                                remaining_tokens = self._tokenizer.encode(prompt[char_match:])
+                            else:
+                                # Use exact tokens from full tokenization
+                                remaining_tokens = full_tokens[usable_tokens:]
+
+                            logger.info(
+                                "[CACHE DIVERGE PARTIAL] chars=%d (%.0f%%), "
+                                "cache_tokens=%d, new_tokens=%d, full_tokens=%d",
                                 char_match,
                                 match_ratio * 100,
                                 usable_tokens,
+                                len(remaining_tokens),
+                                len(full_tokens),
                             )
                             self._slice_cache_to_length(kv_cache, usable_tokens)
                             import mlx.core as mx
 
                             gc.collect()
                             mx.clear_cache()
-
-                            remaining_text = prompt[char_match:]
-                            remaining_tokens = self._tokenizer.encode(remaining_text)
 
                             # Chunked prefill for long remaining portion
                             cp_enabled, cp_threshold, _, _ = self._get_chunked_prefill_settings()
