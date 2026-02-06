@@ -400,7 +400,10 @@ class BlockPoolBatchEngine:
                 chunk_tokens = tokens_array[:, pos:end]
                 y = self._model(chunk_tokens, cache=kv_caches)
                 mx.eval(y)
-            mx.clear_cache()
+            # Note: Do NOT call mx.clear_cache() here. Per-chunk clearing
+            # destroys the warmed Metal buffer pool, forcing expensive
+            # reallocation on every chunk. The intermediate y tensor is
+            # naturally freed when Python rebinds the variable next iteration.
 
             chunk_time = time.time() - chunk_start_time
             total_time += chunk_time

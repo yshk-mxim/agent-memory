@@ -98,7 +98,10 @@ class MLXPrefillAdapter:
             chunk_tokens = mx.array([tokens[start:end]])
             y = self._model(chunk_tokens, cache=kv_caches)
             mx.eval(y)
-        mx.clear_cache()
+        # Note: Do NOT call mx.clear_cache() here. Per-chunk clearing
+        # destroys the warmed Metal buffer pool, forcing expensive
+        # reallocation on every chunk. The intermediate y tensor is
+        # naturally freed when Python rebinds the variable next call.
 
         elapsed_ms = (time.time() - t0) * 1000
         logger.info(
