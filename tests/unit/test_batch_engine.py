@@ -685,3 +685,95 @@ class TestBlockPoolBatchEngineCacheExtraction:
         # Verify extraction logic exists and can be called
         # (actual extraction happens in step() after generation)
         assert hasattr(engine, "_extract_cache")
+
+
+class NeverFinishingBatchGenerator:
+    """Fake BatchGenerator that never finishes — for testing step() safety limit."""
+
+    def __init__(self, model=None, tokenizer=None, stop_tokens=None):
+        self._sequences = {}
+        self._next_uid = 0
+
+    def insert(self, prompts, max_tokens=None, caches=None, samplers=None):
+        uids = []
+        for _ in prompts:
+            uid = f"stall_uid_{self._next_uid}"
+            self._next_uid += 1
+            self._sequences[uid] = True
+            uids.append(uid)
+        return uids
+
+    def next(self):
+        """Always returns non-empty responses that never finish."""
+        responses = []
+        for uid in self._sequences:
+            responses.append(FakeResponse(
+                uid=uid,
+                token=999,
+                finish_reason=None,  # Never finishes
+                prompt_cache=None,
+            ))
+        return responses
+
+    def remove(self, uid):
+        if uid in self._sequences:
+            del self._sequences[uid]
+
+
+class TestStepSafetyLimit:
+    """Tests for step() max_iterations safety limit."""
+
+    @pytest.fixture
+    def engine(self, model, tokenizer, pool, spec, cache_adapter):
+        """Create engine with a never-finishing batch generator."""
+        return BlockPoolBatchEngine(
+            cache_adapter=cache_adapter,
+            model=model,
+            tokenizer=tokenizer,
+            pool=pool,
+            spec=spec,
+            batch_gen_factory=NeverFinishingBatchGenerator,
+        )
+
+    def test_step_max_iterations_safety(self, engine) -> None:
+        """step() should break after max_iterations even if BatchGenerator never finishes."""
+        uid = engine.submit(agent_id="stall_agent", prompt="Hello", max_tokens=50)
+
+        # With a small max_iterations, step() must return instead of looping forever
+        completions = list(engine.step(max_iterations=10))
+
+        # No completions because the generator never finishes
+        assert completions == []
+
+
+class TestDrainUsesStepOnce:
+    """Tests for drain() using step_once() instead of step()."""
+
+    @pytest.fixture
+    def engine(self, model, tokenizer, pool, spec, cache_adapter):
+        """Create engine for drain testing."""
+        return BlockPoolBatchEngine(
+            cache_adapter=cache_adapter,
+            model=model,
+            tokenizer=tokenizer,
+            pool=pool,
+            spec=spec,
+            batch_gen_factory=FakeBatchGenerator,
+        )
+
+    @pytest.mark.asyncio
+    async def test_drain_completes_within_timeout(self, engine) -> None:
+        """drain() should complete within timeout using step_once()."""
+        uid = engine.submit(agent_id="drain_test", prompt="Hello world", max_tokens=5)
+
+        drained = await engine.drain(timeout_seconds=5.0)
+
+        # FakeBatchGenerator finishes in max_tokens steps
+        assert drained >= 1
+        assert len(engine._active_requests) == 0
+
+    @pytest.mark.asyncio
+    async def test_drain_with_no_active_requests(self, engine) -> None:
+        """drain() should return immediately with no active requests."""
+        drained = await engine.drain(timeout_seconds=1.0)
+        assert drained == 0

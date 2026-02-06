@@ -1359,7 +1359,7 @@ class BlockPoolBatchEngine:
 
         return actual_uid
 
-    def step(self) -> Iterator[CompletedGeneration]:
+    def step(self, max_iterations: int = 100_000) -> Iterator[CompletedGeneration]:
         """Execute one batch decode step and yield completed generations.
 
         Yields:
@@ -1368,6 +1368,11 @@ class BlockPoolBatchEngine:
             - EOS token generated (finish_reason="stop")
             - max_tokens limit reached (finish_reason="length")
             - Error occurred (finish_reason="error")
+
+        Args:
+            max_iterations: Safety limit on loop iterations to prevent infinite loops.
+                If BatchGenerator stalls (no sequence reaches finish_reason), this
+                ensures step() eventually returns.
 
         Notes:
             - Call repeatedly until all in-flight requests complete
@@ -1396,7 +1401,12 @@ class BlockPoolBatchEngine:
         if self._batch_gen is None:
             return
 
+        iterations = 0
         while True:
+            if iterations >= max_iterations:
+                logger.error("step() exceeded %d iterations — breaking to prevent infinite loop", max_iterations)
+                break
+            iterations += 1
             try:
                 batch_response = self._batch_gen.next()  # type: ignore[no-untyped-call]
             except MemoryError as e:
@@ -2157,12 +2167,18 @@ class BlockPoolBatchEngine:
                 logger.error(error_msg)
                 raise GenerationError(error_msg)
 
-            # Process one step to let requests complete
-            for _completion in self.step():
-                drained_count += 1
+            # Use step_once() instead of step() to avoid blocking the event loop.
+            # step() runs a while-True loop that only exits when all sequences
+            # finish. step_once() processes exactly one batch_gen.next() call,
+            # allowing the timeout check and asyncio.sleep() to execute between
+            # iterations.
+            results = self.step_once()
+            for result in results:
+                if result.finish_reason is not None:
+                    drained_count += 1
 
-            # Brief sleep to avoid busy-waiting (async-friendly)
-            await asyncio.sleep(0.1)
+            # Yield to event loop frequently to keep timeout checks responsive
+            await asyncio.sleep(0.01)
 
         logger.info(f"Drain complete - {drained_count}/{initial_count} requests finished")
         return drained_count
