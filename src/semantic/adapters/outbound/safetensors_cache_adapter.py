@@ -84,6 +84,34 @@ class SafetensorsCacheAdapter:
         cache_path = self.cache_dir / f"{agent_id}.safetensors"
         tmp_path = self.cache_dir / f"{agent_id}.safetensors.tmp"
 
+        # CRITICAL: Validate blocks list is not corrupted before saving
+        # Detect race conditions where blocks accumulate from multiple generations
+        block_tokens = metadata.get("block_tokens", 256)
+        expected_max_blocks = (blocks.total_tokens + block_tokens - 1) // block_tokens
+
+        for layer_id, layer_blocks in blocks.blocks.items():
+            actual_blocks = len(layer_blocks)
+
+            # Sanity check: blocks list should not be wildly larger than expected
+            if actual_blocks > expected_max_blocks * 2:
+                logger.error(
+                    f"[CACHE CORRUPTION DETECTED] Agent {agent_id} layer {layer_id}: "
+                    f"{actual_blocks} blocks but only expected ~{expected_max_blocks} "
+                    f"for {blocks.total_tokens} tokens. Refusing to save corrupted cache."
+                )
+                raise CachePersistenceError(
+                    f"Cache corruption: layer {layer_id} has {actual_blocks} blocks "
+                    f"but expected ~{expected_max_blocks} for {blocks.total_tokens} tokens"
+                )
+
+            # Check for blocks with no data (shouldn't happen after get_agent_blocks filtering)
+            empty_blocks = sum(1 for b in layer_blocks if b.layer_data is None)
+            if empty_blocks > 0:
+                logger.warning(
+                    f"[CACHE SAVE] Agent {agent_id} layer {layer_id}: "
+                    f"{empty_blocks}/{actual_blocks} blocks have no layer_data (will skip)"
+                )
+
         # Estimate cache size before saving to avoid partial writes on disk full
         estimated_bytes = self._estimate_cache_size(blocks)
         free_bytes = self._get_free_disk_space()

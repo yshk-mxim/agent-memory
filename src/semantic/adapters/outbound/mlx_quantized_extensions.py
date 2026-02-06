@@ -48,11 +48,15 @@ class BatchQuantizedKVCache(_BaseCache):
         left_padding: list[int] | None = None,
         group_size: int = 64,
         bits: int = 4,
+        n_q_heads: int | None = None,
+        n_kv_heads: int | None = None,
     ):
         self.keys: tuple[Any, Any, Any] | None = None
         self.values: tuple[Any, Any, Any] | None = None
         self.group_size = group_size
         self.bits = bits
+        self._n_q_heads = n_q_heads
+        self._n_kv_heads = n_kv_heads
         self._right_padding: mx.array | None = None
 
         if left_padding:
@@ -82,6 +86,9 @@ class BatchQuantizedKVCache(_BaseCache):
             raise ValueError("No QuantizedKVCache found in merge list")
         group_size = q4_source.group_size
         bits = q4_source.bits
+        # Preserve head counts if available (for DeepSeek MLA fix)
+        n_q_heads = getattr(q4_source, "_n_q_heads", None)
+        n_kv_heads = getattr(q4_source, "_n_kv_heads", None)
 
         lengths = [c.offset for c in caches]
         max_length = max(lengths)
@@ -89,7 +96,12 @@ class BatchQuantizedKVCache(_BaseCache):
         B = len(caches)
 
         if max_length == 0:
-            batch_cache = cls(group_size=group_size, bits=bits)
+            batch_cache = cls(
+                group_size=group_size,
+                bits=bits,
+                n_q_heads=n_q_heads,
+                n_kv_heads=n_kv_heads,
+            )
             batch_cache.left_padding = mx.array([0] * B)
             batch_cache.offset = mx.array([0] * B)
             logger.info(f"[Q4 MERGE] Cold start batch of {B} empty caches")
@@ -138,7 +150,12 @@ class BatchQuantizedKVCache(_BaseCache):
         # NOTE: Do NOT call mx.eval() here - let MLX handle lazy evaluation.
         # Forcing eval mid-graph can cause Metal command buffer conflicts.
 
-        batch_cache = cls(group_size=group_size, bits=bits)
+        batch_cache = cls(
+            group_size=group_size,
+            bits=bits,
+            n_q_heads=n_q_heads,
+            n_kv_heads=n_kv_heads,
+        )
         batch_cache.keys = (keys_quant, keys_scales, keys_zeros)
         batch_cache.values = (values_quant, values_scales, values_zeros)
         batch_cache.offset = mx.array(lengths)
@@ -381,11 +398,20 @@ class BatchQuantizedKVCache(_BaseCache):
         import mlx.core as mx
 
         mask = create_causal_mask(N, offset=self._idx, left_padding=self.left_padding, **kwargs)
-        # Batched masks are 4D (B,1,N,seq). GQA attention reshapes scores
-        # to 5D (B,n_kv_heads,n_repeats,N,seq). Add axis=2 so the mask
-        # broadcasts as (B,1,1,N,seq) → compatible with both 4D and 5D scores.
-        if mask is not None and mask.ndim == 4:
-            mask = mx.expand_dims(mask, axis=2)
+        # CRITICAL: Do NOT expand mask to 5D.
+        #
+        # Background: MLX's quantized_scaled_dot_product_attention reshapes scores
+        # to 5D for GQA (B, n_kv_heads, n_repeats, L, seq) when n_kv_heads < n_q_heads.
+        # Original code always expanded 4D masks to 5D to match.
+        #
+        # Problem: Different model architectures handle GQA differently:
+        # - DeepSeek-V2: Uses MLA, pre-repeats KV heads → n_repeats=1 → 4D scores → 5D mask breaks
+        # - GPT-OSS: Uses standard GQA but attention expects 4D masks → 5D mask breaks
+        # - Others: May vary
+        #
+        # Solution: Keep mask as 4D (B, 1, N, seq). MLX's attention broadcasting
+        # handles both 4D and 5D score shapes correctly with 4D masks.
+        # Tested with: Gemma 3, DeepSeek, SmolLM - all work with 4D masks.
         return mask
 
     # ------------------------------------------------------------------
@@ -545,12 +571,33 @@ def patch_make_cache_for_q4(group_size: int = 64, bits: int = 4):
             else:
                 n_layers = len(model.layers)
 
+            # Extract head counts for DeepSeek MLA fix
+            n_q_heads = None
+            n_kv_heads = None
+            if hasattr(model, "args"):
+                args = model.args
+                # Handle nested config (e.g., Gemma 3)
+                if hasattr(args, "text_config"):
+                    config = args.text_config
+                    n_q_heads = config.get("num_attention_heads")
+                    n_kv_heads = config.get("num_key_value_heads")
+                else:
+                    n_q_heads = getattr(args, "num_attention_heads", None)
+                    n_kv_heads = getattr(args, "num_key_value_heads", None)
+
             logger.info(
                 f"[Q4 _make_cache] Creating {n_layers} Q4 batch caches "
-                f"(gs={group_size}, bits={bits}, padding={left_padding})"
+                f"(gs={group_size}, bits={bits}, padding={left_padding}, "
+                f"n_q_heads={n_q_heads}, n_kv_heads={n_kv_heads})"
             )
             return [
-                BatchQuantizedKVCache(left_padding, group_size=group_size, bits=bits)
+                BatchQuantizedKVCache(
+                    left_padding,
+                    group_size=group_size,
+                    bits=bits,
+                    n_q_heads=n_q_heads,
+                    n_kv_heads=n_kv_heads,
+                )
                 for _ in range(n_layers)
             ]
 

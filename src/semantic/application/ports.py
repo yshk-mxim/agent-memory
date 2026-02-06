@@ -19,10 +19,20 @@ class SpecExtractorPort(Protocol):
 class ChatTemplatePort(Protocol):
     """Port for model-specific chat template behavior.
 
-    Abstracts model-family detection (Llama, ChatML, GPT-OSS Harmony)
+    Abstracts model-family detection (Llama, ChatML, GPT-OSS Harmony, DeepSeek)
     away from the application layer so that template-specific logic
     lives in adapters.
     """
+
+    def is_deepseek(self, tokenizer: Any) -> bool:
+        """Whether the tokenizer belongs to a DeepSeek model.
+
+        DeepSeek models require special handling for coordination:
+        - Assistant-role priming on first turn
+        - T=0 (greedy) sampling for deterministic output
+        - English-only instructions
+        """
+        ...
 
     def needs_message_merging(self, tokenizer: Any) -> bool:
         """Whether consecutive same-role messages should be merged."""

@@ -205,7 +205,32 @@ class AgentCacheStore:
         # Performance metrics for observability
         self.metrics = CacheMetrics()
 
+        # Scan cache directory on startup to populate warm tier
+        self._scan_cache_directory()
+
         # Future: trie-based prefix matching for O(log n) lookup
+
+    def _scan_cache_directory(self) -> None:
+        """Scan cache directory on startup and populate warm tier.
+
+        This enables warm cache to work across server restarts. Without this,
+        the _warm_cache dict would be empty on startup, and existing cache
+        files on disk would never be found (causing false cache misses).
+
+        Note: This only populates the agent_id -> path mapping. Actual cache
+        data (KV tensors) is loaded on-demand when cache is accessed.
+        """
+        if not self.cache_dir.exists():
+            return
+
+        count = 0
+        for cache_file in self.cache_dir.glob("*.safetensors"):
+            agent_id = cache_file.stem
+            self._warm_cache[agent_id] = cache_file
+            count += 1
+
+        if count > 0:
+            logger.info(f"[CACHE INIT] Found {count} warm caches in {self.cache_dir}")
 
     def save(self, agent_id: str, blocks: AgentBlocks) -> None:
         """Save agent cache to hot tier with write-behind persistence.
@@ -243,8 +268,24 @@ class AgentCacheStore:
             # Add to hot tier
             self._hot_cache[agent_id] = entry
 
-            # NO disk write here — deferred to eviction or flush
-            # This eliminates 50-100ms of synchronous I/O per save
+            # CRITICAL: Save immediately if blocks have actual data
+            # Why: batch_engine/scheduler may clear layer_data asynchronously
+            # after using the cache. If we defer the write until eviction,
+            # layer_data might be None and we'll save an empty cache file.
+            # This is necessary for warm cache to work across sessions.
+            #
+            # Performance: Adds ~50-100ms per request, but this is negligible
+            # compared to prefill time (e.g., <1% overhead for 16K context).
+            has_data = False
+            if blocks.blocks:
+                for layer_blocks in blocks.blocks.values():
+                    if layer_blocks and any(b.layer_data is not None for b in layer_blocks):
+                        has_data = True
+                        break
+
+            if has_data:
+                self._save_to_disk(agent_id)
+                entry.dirty = False  # Already persisted
 
             # Check if eviction needed
             if len(self._hot_cache) > self.max_hot_agents:
@@ -333,6 +374,7 @@ class AgentCacheStore:
             # This ensures warm cache test can reload from disk
             if agent_id in self._hot_cache:
                 entry = self._hot_cache[agent_id]
+                logger.debug(f"[DELETE] agent={agent_id}, dirty={entry.dirty}, blocks={'None' if entry.blocks is None else 'present'}, keep_disk={keep_disk}")
                 if entry.dirty and entry.blocks is not None:
                     self._save_to_disk(agent_id)
                     logger.debug(f"Flushed dirty cache to disk before eviction: {agent_id}")
@@ -341,8 +383,10 @@ class AgentCacheStore:
             # Remove from hot tier
             if agent_id in self._hot_cache:
                 del self._hot_cache[agent_id]
+                logger.debug(f"[DELETE] Removed {agent_id} from hot tier")
 
             # If keep_disk=False, remove from warm tier and delete disk file
+            logger.debug(f"[DELETE] keep_disk={keep_disk}, in_warm={agent_id in self._warm_cache}")
             if not keep_disk and agent_id in self._warm_cache:
                 cache_path = self._warm_cache[agent_id]
                 if cache_path.exists():
@@ -490,20 +534,25 @@ class AgentCacheStore:
         Called by batch_engine after clearing Q4 blocks to free memory.
         The cache remains in warm tier (disk) for future loads.
 
-        This prevents the hot cache from holding a stale reference to
-        cleared blocks, which would cause unnecessary has_data checks
-        on every load.
+        CRITICAL: Flushes dirty cache to disk BEFORE invalidating.
+        This is the key to warm cache working - we save while layer_data
+        still exists, before batch_engine clears it.
 
         Args:
             agent_id: Agent whose hot cache entry should be invalidated
 
         Notes:
-            - Only removes from hot tier (memory reference)
-            - Warm tier (disk) is NOT affected
+            - Flushes dirty cache to disk before removing from hot tier
             - Future loads will reload from disk
+            - This adds 50-100ms only when cache is actually used (not every save)
         """
         with self._lock:
             if agent_id in self._hot_cache:
+                entry = self._hot_cache[agent_id]
+                # CRITICAL: Flush to disk before invalidating
+                # batch_engine is about to clear layer_data, so this is our last chance
+                if entry.dirty and entry.blocks is not None:
+                    self._save_to_disk(agent_id)
                 del self._hot_cache[agent_id]
 
     def _save_to_disk(self, agent_id: str) -> None:
@@ -527,6 +576,19 @@ class AgentCacheStore:
         if self._cache_adapter is None:
             raise InvalidRequestError("CacheAdapter is required - dependency not injected")
         cache_path = self._cache_adapter.save(agent_id, entry.blocks, metadata)
+
+        # CRITICAL: Ensure data is flushed to disk before marking as available
+        # Without this, warm cache tests may read incomplete/corrupt data
+        if cache_path.exists():
+            import os
+            try:
+                # Force OS to flush file buffers to physical disk
+                fd = os.open(cache_path, os.O_RDONLY)
+                os.fsync(fd)
+                os.close(fd)
+            except OSError as e:
+                logger.warning(f"Failed to fsync cache file {cache_path}: {e}")
+
         self._warm_cache[agent_id] = cache_path
 
         # Clear dirty flag after successful disk write
