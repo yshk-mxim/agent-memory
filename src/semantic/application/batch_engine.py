@@ -519,10 +519,9 @@ class BlockPoolBatchEngine:
 
                 generated.append(next_token)
 
-            # Periodic memory cleanup to prevent fragmentation
-            if i > 0 and i % 100 == 0:
-                mx.clear_cache()
-                logger.debug(f"[NATIVE GEN] Token {i + 1}, cleared cache")
+            # Note: Do NOT call mx.clear_cache() periodically during decode.
+            # Same reasoning as chunked prefill — it destroys the Metal
+            # buffer pool, forcing reallocation on subsequent tokens.
 
         # Final memory stats
         mem_after = mx.get_active_memory() / (1024**3)

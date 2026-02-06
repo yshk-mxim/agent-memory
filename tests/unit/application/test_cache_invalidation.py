@@ -9,7 +9,7 @@ sys.modules["mlx.core"] = MagicMock()
 sys.modules["mlx.utils"] = MagicMock()
 sys.modules["mlx_lm"] = MagicMock()
 
-from semantic.application.agent_cache_store import AgentCacheStore, ModelTag
+from semantic.application.agent_cache_store import AgentCacheStore, CacheEntry, ModelTag
 from semantic.domain.entities import AgentBlocks
 from semantic.domain.value_objects import ModelCacheSpec
 
@@ -464,8 +464,13 @@ class TestInvalidateHot:
         assert "agent_1" in store._warm_cache
         assert "agent_1" not in store._hot_cache
 
-        # Reload to hot tier, then invalidate
-        store._hot_cache["agent_1"] = store._warm_cache["agent_1"]
+        # Simulate reload to hot tier with a proper CacheEntry
+        store._hot_cache["agent_1"] = CacheEntry(
+            agent_id="agent_1",
+            blocks=blocks,
+            model_tag=tag,
+            dirty=False,
+        )
         store.invalidate_hot("agent_1")
 
         assert "agent_1" not in store._hot_cache

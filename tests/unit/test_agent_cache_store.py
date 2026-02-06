@@ -642,8 +642,8 @@ class TestLRUEvictionWithNAgents:
                 time.sleep(0.001)
 
             assert len(store._hot_cache) == 2
-            # Write-behind: only evicted agents land in warm (8 of 10)
-            assert len(store._warm_cache) == 8
+            # Eager save: all 10 agents saved to disk immediately on save()
+            assert len(store._warm_cache) == 10
 
     def test_evict_to_target_from_5_to_2(
         self, model_tag: ModelTag, mock_cache_adapter: MagicMock

@@ -259,7 +259,7 @@ class BatchQuantizedKVCache(_BaseCache):
         result = tree_map(lambda x: x[..., : self._idx, :], (self.keys, self.values))
 
         if expanded:
-            logger.info(f"[Q4 UPDATE] _idx: {prev}->{self._idx}, expanded={expanded}")
+            logger.debug(f"[Q4 UPDATE] _idx: {prev}->{self._idx}, expanded={expanded}")
         return result
 
     # ------------------------------------------------------------------
