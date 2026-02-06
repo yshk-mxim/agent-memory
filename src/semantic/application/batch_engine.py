@@ -658,8 +658,11 @@ class BlockPoolBatchEngine:
                             for layer_blocks in cache.blocks.values():
                                 tokens_seen = 0
                                 for block in layer_blocks:
+                                    block_start = tokens_seen  # Start position of this block
                                     tokens_seen += block.token_count
-                                    if tokens_seen > n_prompt and block.layer_data is not None:
+                                    # Only free blocks that START after the prompt
+                                    # (contain ONLY generated tokens, not prompt tokens)
+                                    if block_start >= n_prompt and block.layer_data is not None:
                                         block.layer_data = None
                                         freed_blocks += 1
                             if freed_blocks > 0:
@@ -678,6 +681,7 @@ class BlockPoolBatchEngine:
                     )
 
                     import time as _time
+
                     t_reconstruct_start = _time.perf_counter()
                     kv_cache = self._reconstruct_cache(cache, max_tokens=max_reconstruct)
                     t_reconstruct_end = _time.perf_counter()

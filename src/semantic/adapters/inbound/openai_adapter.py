@@ -632,7 +632,7 @@ async def create_chat_completion(  # noqa: C901, PLR0912, PLR0915
 
         tokenizer = batch_engine.tokenizer
         chat_dicts = openai_messages_to_chat_dicts(request_body.messages, tools_arg)
-        tokens = await asyncio.to_thread(
+        tokens, templated_prompt = await asyncio.to_thread(
             tokenize_with_chat_template,
             tokenizer,
             chat_dicts,
@@ -662,7 +662,7 @@ async def create_chat_completion(  # noqa: C901, PLR0912, PLR0915
                     tokens,
                     agent_id,
                     cached_blocks,
-                    prompt,
+                    templated_prompt,
                     scheduler=semantic_state.scheduler,
                 )
             )
@@ -682,7 +682,7 @@ async def create_chat_completion(  # noqa: C901, PLR0912, PLR0915
                 prompt_tokens=tokens,
                 cache=cached_blocks,
                 max_tokens=max_tokens,
-                prompt_text=prompt,
+                prompt_text=templated_prompt,
                 temperature=request_body.temperature,
                 top_p=request_body.top_p,
             )
@@ -695,7 +695,7 @@ async def create_chat_completion(  # noqa: C901, PLR0912, PLR0915
             uid = await asyncio.to_thread(
                 batch_engine.submit,
                 agent_id=agent_id,
-                prompt=prompt,
+                prompt=templated_prompt,
                 cache=cached_blocks,
                 max_tokens=max_tokens,
                 temperature=request_body.temperature,
