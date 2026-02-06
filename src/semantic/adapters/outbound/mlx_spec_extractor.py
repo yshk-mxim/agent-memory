@@ -65,7 +65,7 @@ class MLXModelSpecExtractor:
         attrs = self._extract_model_attributes(args)
         self._validate_model_attributes(attrs)
 
-        head_dim = self._extract_head_dim(model, attrs)
+        head_dim, v_head_dim = self._extract_head_dims(model, attrs)
         layer_types = self._detect_layer_types(model, args, attrs["n_layers"])
 
         return ModelCacheSpec(
@@ -75,6 +75,7 @@ class MLXModelSpecExtractor:
             block_tokens=BLOCK_SIZE_TOKENS,
             layer_types=layer_types,
             sliding_window_size=attrs["sliding_window"],
+            v_head_dim=v_head_dim,
         )
 
     def _extract_model_attributes(self, args: Any) -> dict[str, Any]:
@@ -110,14 +111,19 @@ class MLXModelSpecExtractor:
                 "Cannot compute head_dim: missing hidden_size or num_attention_heads"
             )
 
-    def _extract_head_dim(self, model: Any, attrs: dict[str, Any]) -> int:
-        """Extract head_dim from model, preferring actual attention layer value.
+    def _extract_head_dims(self, model: Any, attrs: dict[str, Any]) -> tuple[int, int | None]:
+        """Extract K and V head dimensions from the model.
 
-        Models like Gemma 3 have head_dim=256 but hidden_size=3840 and
-        num_attention_heads=16, so hidden_size//num_heads=240 is wrong.
-        The attention module's head_dim attribute is the ground truth.
+        Returns:
+            (k_head_dim, v_head_dim) where v_head_dim is None when K=V
+            (symmetric, the common case).
+
+        Handles three cases:
+        1. Standard models with attn.head_dim: K=V=head_dim → (head_dim, None)
+        2. DeepSeek V2 MLA with asymmetric K/V: K=qk_nope+qk_rope, V=v_head_dim
+           → (192, 128) for the Lite variant
+        3. Fallback: hidden_size // num_attention_heads → (computed, None)
         """
-        # Try reading head_dim from attention layers (most reliable)
         for path in [
             lambda m: m.language_model.model.layers,  # Gemma 3 (nested)
             lambda m: m.model.layers,                  # Standard models
@@ -125,15 +131,30 @@ class MLXModelSpecExtractor:
         ]:
             try:
                 layers = path(model)
-                if layers and len(layers) > 0:
-                    attn = getattr(layers[0], "self_attn", None)
-                    if attn and hasattr(attn, "head_dim"):
-                        return attn.head_dim
+                if not layers or len(layers) == 0:
+                    continue
+                attn = getattr(layers[0], "self_attn", None)
+                if attn is None:
+                    continue
+
+                # DeepSeek V2 MLA: K and V have different dimensions.
+                # K = concat(k_nope[qk_nope_head_dim], k_pe[qk_rope_head_dim])
+                # V = values[v_head_dim]
+                qk_nope = getattr(attn, "qk_nope_head_dim", None)
+                qk_rope = getattr(attn, "qk_rope_head_dim", None)
+                v_dim = getattr(attn, "v_head_dim", None)
+                if qk_nope is not None and qk_rope is not None and v_dim is not None:
+                    k_dim = qk_nope + qk_rope
+                    return (k_dim, v_dim if v_dim != k_dim else None)
+
+                # Standard models: symmetric K=V
+                if hasattr(attn, "head_dim"):
+                    return (attn.head_dim, None)
             except (AttributeError, TypeError):
                 continue
 
         # Fall back to computing from config
-        return attrs["hidden_size"] // attrs["num_attention_heads"]
+        return (attrs["hidden_size"] // attrs["num_attention_heads"], None)
 
     def _detect_layer_types(self, model: Any, args: Any, n_layers: int) -> list[str]:
         """Detect layer attention types using three-tier approach."""

@@ -25,12 +25,16 @@ class ModelCacheSpec:
     Attributes:
         n_layers: Total number of transformer layers.
         n_kv_heads: Number of key-value attention heads per layer.
-        head_dim: Dimension of each attention head.
+        head_dim: Dimension of each K attention head (also V when symmetric).
         block_tokens: Number of tokens per cache block.
         layer_types: Type of each layer ("global" or "sliding_window").
         sliding_window_size: Window size for sliding window layers.
         kv_bits: KV cache quantization bits (4 or 8, None = FP16).
         kv_group_size: Quantization group size.
+        v_head_dim: Dimension of each V attention head. None means same as
+            head_dim (symmetric K/V, the common case). Set explicitly for
+            architectures like DeepSeek V2 MLA where K and V have different
+            dimensions (e.g. K=192, V=128).
     """
 
     n_layers: int
@@ -41,6 +45,12 @@ class ModelCacheSpec:
     sliding_window_size: int | None = None
     kv_bits: int | None = 4
     kv_group_size: int = 64
+    v_head_dim: int | None = None
+
+    @property
+    def effective_v_head_dim(self) -> int:
+        """V head dimension, defaulting to head_dim when symmetric."""
+        return self.v_head_dim if self.v_head_dim is not None else self.head_dim
 
     def __post_init__(self) -> None:
         """Validate cache spec invariants."""
@@ -50,6 +60,8 @@ class ModelCacheSpec:
             raise ModelSpecValidationError(f"n_kv_heads must be > 0, got {self.n_kv_heads}")
         if self.head_dim <= 0:
             raise ModelSpecValidationError(f"head_dim must be > 0, got {self.head_dim}")
+        if self.v_head_dim is not None and self.v_head_dim <= 0:
+            raise ModelSpecValidationError(f"v_head_dim must be > 0, got {self.v_head_dim}")
         if self.block_tokens <= 0:
             raise ModelSpecValidationError(f"block_tokens must be > 0, got {self.block_tokens}")
 
@@ -83,9 +95,12 @@ class ModelCacheSpec:
         - Q4 (kv_bits=4): ~0.5625 bytes (0.5 + scales/group_size)
 
         Quantization adds scales+biases overhead of ~4 bytes per group (2 scales + 2 biases).
+
+        Supports asymmetric K/V dimensions (e.g. DeepSeek V2 MLA: K=192, V=128).
         """
-        elements_per_kv = self.n_kv_heads * self.head_dim * self.block_tokens
-        total_elements = elements_per_kv * 2  # K and V
+        k_elements = self.n_kv_heads * self.head_dim * self.block_tokens
+        v_elements = self.n_kv_heads * self.effective_v_head_dim * self.block_tokens
+        total_elements = k_elements + v_elements
 
         if self.kv_bits is None or self.kv_bits == 16:
             # FP16: 2 bytes per element
@@ -96,9 +111,9 @@ class ModelCacheSpec:
         weight_bytes = (total_elements * self.kv_bits) // 8
 
         # Scales and biases: 2 bytes each per group (float16)
-        # Number of groups = elements / group_size (per K and per V)
-        groups_per_kv = (elements_per_kv + self.kv_group_size - 1) // self.kv_group_size
-        total_groups = groups_per_kv * 2  # K and V
+        k_groups = (k_elements + self.kv_group_size - 1) // self.kv_group_size
+        v_groups = (v_elements + self.kv_group_size - 1) // self.kv_group_size
+        total_groups = k_groups + v_groups
         scales_bytes = total_groups * 2  # float16 scales
         biases_bytes = total_groups * 2  # float16 biases
 

@@ -486,11 +486,12 @@ class BlockPoolBatchEngine:
 
         if cache is not None:
             # CRITICAL: Check if cache is too large to reconstruct safely
-            # Calculate using actual model spec, not magic constants
-            # Q4: n_kv_heads * head_dim * 2 (K+V) * 0.5 bytes (4-bit) * n_layers
-            bytes_per_token_q4 = (
-                self._spec.n_kv_heads * self._spec.head_dim * 2 * 0.5 * self._spec.n_layers
+            # Q4: 0.5 bytes per element per layer, separate K and V dims
+            # (DeepSeek V2 MLA has K=192, V=128 — asymmetric)
+            kv_elements_per_token = (
+                self._spec.n_kv_heads * (self._spec.head_dim + self._spec.effective_v_head_dim)
             )
+            bytes_per_token_q4 = kv_elements_per_token * 0.5 * self._spec.n_layers
             max_safe_memory_mb = self.MAX_SAFE_CACHE_MEMORY_MB
             max_safe_cache_tokens = int((max_safe_memory_mb * 1024 * 1024) / bytes_per_token_q4)
 

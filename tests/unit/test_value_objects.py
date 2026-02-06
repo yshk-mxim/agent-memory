@@ -530,3 +530,75 @@ class TestModelCacheSpecNewValidations:
                 layer_types=["global"] * 12,
                 kv_bits=6,
             )
+
+    # --- MLA (asymmetric K/V) tests ---
+
+    def test_v_head_dim_defaults_to_head_dim(self) -> None:
+        """v_head_dim=None means symmetric K=V=head_dim."""
+        spec = ModelCacheSpec(
+            n_layers=27, n_kv_heads=16, head_dim=192,
+            block_tokens=128, layer_types=["global"] * 27,
+        )
+        assert spec.v_head_dim is None
+        assert spec.effective_v_head_dim == 192
+
+    def test_asymmetric_kv_dims(self) -> None:
+        """DeepSeek V2 MLA: K=192, V=128."""
+        spec = ModelCacheSpec(
+            n_layers=27, n_kv_heads=16, head_dim=192,
+            block_tokens=128, layer_types=["global"] * 27,
+            v_head_dim=128,
+        )
+        assert spec.head_dim == 192
+        assert spec.v_head_dim == 128
+        assert spec.effective_v_head_dim == 128
+
+    def test_bytes_per_block_asymmetric_fp16(self) -> None:
+        """Asymmetric K/V should compute correct FP16 memory."""
+        spec = ModelCacheSpec(
+            n_layers=27, n_kv_heads=16, head_dim=192,
+            block_tokens=128, layer_types=["global"] * 27,
+            kv_bits=None, v_head_dim=128,
+        )
+        # K: 16*192*128 = 393,216 elements
+        # V: 16*128*128 = 262,144 elements
+        # Total: 655,360 * 2 bytes = 1,310,720
+        assert spec.bytes_per_block_per_layer() == 1_310_720
+
+    def test_bytes_per_block_asymmetric_q4(self) -> None:
+        """Asymmetric K/V should compute correct Q4 memory."""
+        spec = ModelCacheSpec(
+            n_layers=27, n_kv_heads=16, head_dim=192,
+            block_tokens=128, layer_types=["global"] * 27,
+            kv_bits=4, kv_group_size=64, v_head_dim=128,
+        )
+        # K elements: 16*192*128 = 393,216
+        # V elements: 16*128*128 = 262,144
+        # Total elements: 655,360
+        # Weight bytes: 655,360 * 4 / 8 = 327,680
+        # K groups: 393,216/64 = 6,144 ; V groups: 262,144/64 = 4,096
+        # Scales: 10,240 * 2 = 20,480 ; Biases: 10,240 * 2 = 20,480
+        expected = 327_680 + 20_480 + 20_480
+        assert spec.bytes_per_block_per_layer() == expected
+
+    def test_bytes_per_block_symmetric_unchanged(self) -> None:
+        """Symmetric K=V should give same result as before (no v_head_dim)."""
+        spec_old = ModelCacheSpec(
+            n_layers=27, n_kv_heads=16, head_dim=128,
+            block_tokens=128, layer_types=["global"] * 27,
+            kv_bits=4, kv_group_size=64,
+        )
+        spec_explicit = ModelCacheSpec(
+            n_layers=27, n_kv_heads=16, head_dim=128,
+            block_tokens=128, layer_types=["global"] * 27,
+            kv_bits=4, kv_group_size=64, v_head_dim=128,
+        )
+        assert spec_old.bytes_per_block_per_layer() == spec_explicit.bytes_per_block_per_layer()
+
+    def test_reject_invalid_v_head_dim(self) -> None:
+        with pytest.raises(ModelSpecValidationError, match="v_head_dim must be > 0"):
+            ModelCacheSpec(
+                n_layers=12, n_kv_heads=4, head_dim=128,
+                block_tokens=128, layer_types=["global"] * 12,
+                v_head_dim=0,
+            )

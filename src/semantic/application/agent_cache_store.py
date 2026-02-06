@@ -51,8 +51,9 @@ class ModelTag:
         model_id: HuggingFace model ID or path
         n_layers: Number of transformer layers
         n_kv_heads: Number of key-value heads
-        head_dim: Dimension per head
+        head_dim: K head dimension (also V when symmetric)
         block_tokens: Tokens per cache block
+        v_head_dim: V head dimension when asymmetric (MLA), None = same as head_dim
 
     Example:
         >>> tag = ModelTag.from_spec("gemma-3-12b", spec)
@@ -65,6 +66,7 @@ class ModelTag:
     n_kv_heads: int
     head_dim: int
     block_tokens: int
+    v_head_dim: int | None = None
 
     @classmethod
     def from_spec(cls, model_id: str, spec: ModelCacheSpec) -> "ModelTag":
@@ -83,6 +85,7 @@ class ModelTag:
             n_kv_heads=spec.n_kv_heads,
             head_dim=spec.head_dim,
             block_tokens=spec.block_tokens,
+            v_head_dim=spec.v_head_dim,
         )
 
     def is_compatible(self, spec: ModelCacheSpec) -> bool:
@@ -105,6 +108,7 @@ class ModelTag:
             and self.n_kv_heads == spec.n_kv_heads
             and self.head_dim == spec.head_dim
             and self.block_tokens == spec.block_tokens
+            and self.v_head_dim == spec.v_head_dim
         )
 
 
@@ -572,6 +576,8 @@ class AgentCacheStore:
             "token_sequence": entry.blocks.token_sequence,
             "prompt_text": entry.blocks.prompt_text,
         }
+        if self.model_tag.v_head_dim is not None:
+            metadata["v_head_dim"] = self.model_tag.v_head_dim
 
         if self._cache_adapter is None:
             raise InvalidRequestError("CacheAdapter is required - dependency not injected")
@@ -647,12 +653,15 @@ class AgentCacheStore:
             logger.debug(f"Loaded cache from disk: {agent_id} ({cache_path})")
 
             # Validate model tag compatibility
+            saved_v_head_dim_raw = metadata.get("v_head_dim")
+            saved_v_head_dim = int(saved_v_head_dim_raw) if saved_v_head_dim_raw is not None else None
             saved_tag = ModelTag(
                 model_id=str(metadata.get("model_id", "")),
                 n_layers=int(metadata.get("n_layers", 0)),
                 n_kv_heads=int(metadata.get("n_kv_heads", 0)),
                 head_dim=int(metadata.get("head_dim", 0)),
                 block_tokens=int(metadata.get("block_tokens", 0)),
+                v_head_dim=saved_v_head_dim,
             )
 
             current_spec = ModelCacheSpec(
@@ -662,6 +671,7 @@ class AgentCacheStore:
                 block_tokens=self.model_tag.block_tokens,
                 layer_types=["global"] * self.model_tag.n_layers,
                 sliding_window_size=None,
+                v_head_dim=self.model_tag.v_head_dim,
             )
 
             if not saved_tag.is_compatible(current_spec):
