@@ -430,10 +430,23 @@ async def run_sweep(
                                 "error": str(e),
                             })
 
+    # Query server for model identity
+    model_id = "unknown"
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as c:
+            r = await c.get(f"{base_url}/v1/models")
+            if r.status_code == 200:
+                models = r.json().get("data", [])
+                if models:
+                    model_id = models[0].get("id", "unknown")
+    except Exception:
+        pass
+
     # Build output document
     output = {
         "benchmark": "streaming_comparison",
         "timestamp": timestamp,
+        "model_id": model_id,
         "git_sha": _git_sha(),
         "platform": platform.platform(),
         "machine": platform.machine(),

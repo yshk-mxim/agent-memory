@@ -27,8 +27,8 @@ class MLXSettings(BaseSettings):
 
     # Model configuration
     model_id: str = Field(
-        default="mlx-community/DeepSeek-Coder-V2-Lite-Instruct-4bit-mlx",
-        description="HuggingFace model ID or local path",
+        default="mlx-community/gemma-3-12b-it-4bit",
+        description="HuggingFace model ID or local path (override with SEMANTIC_MLX_MODEL_ID)",
     )
 
     max_context_length: int = Field(

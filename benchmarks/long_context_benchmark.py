@@ -297,6 +297,7 @@ def main():
 
     results = {
         "scenario": "multi_turn_4096_tokens",
+        "model_id": mlx_model,
         "note": "Real multi-turn execution from 500 to 4096 tokens"
     }
 

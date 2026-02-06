@@ -375,6 +375,17 @@ async def lifespan(app: FastAPI):
             scheduler_enabled=(scheduler is not None),
         )
 
+        # Validate Q4 pipeline patches applied correctly
+        from semantic.adapters.outbound.mlx_quantized_extensions import validate_q4_pipeline
+
+        if not validate_q4_pipeline():
+            logger.error(
+                "q4_validation_failed",
+                message="Q4 cache patches may not be applied correctly. "
+                "KV caches may fall back to FP16, causing higher memory usage. "
+                "Check mlx-lm version compatibility.",
+            )
+
         logger.info("server_ready")
 
         yield

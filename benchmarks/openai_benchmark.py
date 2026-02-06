@@ -401,6 +401,7 @@ class OpenAIBenchmarkSuite:
             sha = "unknown"
         return {
             "timestamp": datetime.now(timezone.utc).isoformat(),
+            "model_id": self.prompt._model,
             "server": self.server_label,
             "base_url": self.base_url,
             "context_mode": self.context_mode,
