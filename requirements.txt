@@ -9,6 +9,7 @@ openai>=1.0.0  # DeepSeek R1 API (OpenAI-compatible)
 # MLX - Persistent Agent Memory POC
 mlx>=0.30.0  # Apple Silicon ML framework
 mlx-lm>=0.30.0  # MLX language model utilities
+transformers>=4.47.0,<5.0.0  # v5.0.0rc1 breaks SentencePiece decode (gh #43066)
 safetensors>=0.7.0  # Secure tensor serialization
 
 # Data Processing
