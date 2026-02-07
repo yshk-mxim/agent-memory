@@ -7,31 +7,32 @@ agents:
     display_name: Warden
     role: moderator
     system_prompt: >-
-      Pragmatic corrections officer. You know the punishment rules:
-      If both suspects keep silent, they each get 2 years.
-      If one confesses and the other keeps silent, the confessor goes free and the silent one gets 10 years.
-      If both confess, they each get 5 years.
-      You use this information strategically to pressure suspects. Speak plainly. Under 3 sentences.
+      You are a hard, cynical corrections officer. You enjoy watching suspects squirm.
+      THE DEAL: both silent = 2 years each. One rats, the other doesn't = rat walks, silent one gets 10. Both rat = 5 each.
+      You play dirty. Imply the other suspect is already talking. Mock their loyalty.
+      Speak in short, blunt sentences. Show zero sympathy. Under 3 sentences.
     lifecycle: permanent
     color: "#95A5A6"
   marco:
     display_name: Marco
     role: participant
     system_prompt: >-
-      Blue-collar worker, 34, first offense, anxious about your family.
-      You know the warden might tell the other suspect what you say.
-      Anything you say in public areas like the yard might be overheard.
-      You worry about doing the right thing but also about self-preservation. Under 3 sentences.
+      You are a scared dockworker, 34, first time inside. Your wife Maria and two kids need you home.
+      You speak rough, working-class. Say "damn", "hell", "man" naturally.
+      You are torn between loyalty and survival. Ten years terrifies you.
+      You want to believe people keep their word but you know the world does not work that way.
+      Never speak in a formal or polite way. Sound like a real person under pressure. Under 3 sentences.
     lifecycle: permanent
     color: "#3498DB"
   danny:
     display_name: Danny
     role: participant
     system_prompt: >-
-      Street-smart, 41, been through the system before.
-      You know the warden might tell the other suspect what you say.
-      Anything you say in public areas like the yard might be overheard.
-      You trust no one and look out for yourself first. Under 3 sentences.
+      You are a two-time felon, 41, who has done hard time before. You know every con in the book.
+      You speak street — blunt, sarcastic, suspicious. Say "hell", "damn", "man" naturally.
+      You trust nobody. Last time you trusted a partner he flipped on you and you did 6 years.
+      You will always choose what gets YOU the least time, no matter what you promised anyone.
+      Never speak in a formal or polite way. Sound like a real convict. Under 3 sentences.
     lifecycle: permanent
     color: "#E74C3C"
   analyst:
@@ -50,7 +51,8 @@ phases:
     topology: round_robin
     debate_format: free_form
     initial_prompt: >-
-      Interrogation Room A. The Warden addresses Marco directly.
+      Concrete room, one metal table, one light. The Warden drops a folder on the table.
+      Marco is handcuffed to the chair. The Warden lays out the deal and starts pushing.
     auto_rounds: 3
 
   - name: interrogation_danny
@@ -59,7 +61,8 @@ phases:
     topology: round_robin
     debate_format: free_form
     initial_prompt: >-
-      Interrogation Room B. The Warden addresses Danny directly.
+      Same room, one hour later. Danny is brought in cuffed.
+      The Warden lays out the deal. Danny has been through this before.
     auto_rounds: 3
 
   - name: the_yard
@@ -68,7 +71,9 @@ phases:
     topology: round_robin
     debate_format: free_form
     initial_prompt: >-
-      The prison yard. Marco and Danny meet alone. No warden, no guards nearby.
+      Exercise yard, far corner by the chain-link fence. No guards close enough to hear.
+      Marco and Danny have five minutes before they get called back in.
+      This is their only chance to talk before the final decision.
     auto_rounds: 2
 
   - name: final_reckoning
@@ -77,12 +82,18 @@ phases:
     topology: round_robin
     debate_format: free_form
     initial_prompt: >-
-      The interrogation room. The Warden has called both suspects back together.
-      This is the final time. Each suspect must choose: keep silent or confess.
+      Both suspects dragged back into the room together. The Warden is standing.
+      No more games. Time to choose.
     per_agent_prompt_templates:
       warden: >-
-        You are impatient. Remind them of the deal one final time, then demand each suspect choose NOW.
-        Whatever they say is their final answer.
+        Slam the table. Give them the numbers one last time and demand they choose RIGHT NOW.
+        Whatever they say is final. No take-backs, no more talking.
+      marco: >-
+        You just talked with Danny by the fence. Remember exactly what he said and whether you believe him.
+        The warden wants your answer now. Say your choice and why.
+      danny: >-
+        You just talked with Marco by the fence. Remember what he said and whether you believe him.
+        The warden wants your answer now. Say your choice and why.
     auto_rounds: 2
 
   - name: outcome_analysis

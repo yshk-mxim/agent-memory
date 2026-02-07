@@ -612,10 +612,9 @@ class CoordinationService:
 
         # DeepSeek sampling: T=0 causes deterministic echo loops (commit 0acecd4).
         # T>=0.3 causes spacing corruption (concatenated words).
-        # T=0.1 is the sweet spot: enough randomness to avoid echo loops,
-        # low enough to select space-prefixed (Ġ) token variants consistently.
-        # A/B tested across 0.01–1.0 range; only 0.1 scored zero on both metrics.
-        temperature = 0.1
+        # T=0.2 balances variety vs coherence: less echo than 0.1, no spacing issues.
+        # (T=0.1 was original sweet spot but caused heavy echo in multi-turn dialogue.)
+        temperature = 0.3
         top_p = 0.95
         top_k = 64
 
@@ -745,7 +744,7 @@ class CoordinationService:
         accumulated_text = ""
 
         # Sampling: same for all models (see execute_turn for rationale)
-        temperature = 0.1
+        temperature = 0.3
         top_p = 0.95
         top_k = 64
 

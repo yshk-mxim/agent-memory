@@ -449,3 +449,17 @@ async def clear_all_caches(
             pool_cleared=0,
             message=f"Clear failed: {e!s}",
         )
+
+
+class SeedRequest(BaseModel):
+    """Request to set the random seed."""
+    seed: int = Field(..., description="Random seed value")
+
+
+@router.post("/seed")
+async def set_random_seed(body: SeedRequest) -> dict[str, Any]:
+    """Set the MLX random seed for reproducibility testing."""
+    import mlx.core as mx
+    mx.random.seed(body.seed)
+    logger.info(f"Random seed set to {body.seed}")
+    return {"status": "ok", "seed": body.seed}

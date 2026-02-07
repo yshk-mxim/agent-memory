@@ -671,7 +671,10 @@ def validate_q4_pipeline() -> bool:
             return False
 
         # 2. Verify merge is routed to BatchQuantizedKVCache
-        merged = QuantizedKVCache.merge([cache])
+        # Use a cache with offset=0 (empty) since merge requires keys=None
+        # when offset>0 to have actual tensor data for template shapes
+        empty_cache = QuantizedKVCache(group_size=64, bits=4)
+        merged = QuantizedKVCache.merge([empty_cache])
         if not isinstance(merged, BatchQuantizedKVCache):
             logger.error(
                 "[Q4 VALIDATE] QuantizedKVCache.merge() returned %s, "
