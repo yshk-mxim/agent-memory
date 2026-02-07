@@ -11,9 +11,6 @@ import struct
 from pathlib import Path
 from typing import Any
 
-import numpy as np
-from safetensors.numpy import load_file, save_file
-
 from semantic.domain.entities import AgentBlocks, KVBlock
 from semantic.domain.errors import AgentNotFoundError, CachePersistenceError
 
@@ -21,22 +18,6 @@ logger = logging.getLogger(__name__)
 
 # Pattern for valid agent IDs: alphanumeric, hyphens, underscores only
 _VALID_AGENT_ID_PATTERN = re.compile(r"^[a-zA-Z0-9_-]+$")
-
-
-def _mlx_to_numpy(arr: Any) -> "np.ndarray[Any, Any]":
-    """Convert MLX array to numpy, handling bfloat16 which numpy doesn't support.
-
-    MLX models may use bfloat16 internally (e.g., SmolLM2-135M). When quantizing
-    their KV cache, the scales and biases inherit bfloat16 dtype. Since numpy and
-    safetensors don't support bfloat16, we convert to float16 first. This is safe
-    because scales/biases are small values where bfloat16→float16 is lossless for
-    the precision needed.
-    """
-    import mlx.core as mx
-
-    if hasattr(arr, "dtype") and arr.dtype == mx.bfloat16:
-        arr = arr.astype(mx.float16)
-    return np.asarray(arr)
 
 
 class SafetensorsCacheAdapter:
@@ -51,6 +32,14 @@ class SafetensorsCacheAdapter:
             raise CachePersistenceError(
                 f"Failed to create cache directory {self.cache_dir}: {e}"
             ) from e
+
+        # Clean up orphan .tmp files from crashed saves (both old and new patterns)
+        for tmp_file in list(self.cache_dir.glob("*.tmp.safetensors")) + list(self.cache_dir.glob("*.safetensors.tmp")):
+            try:
+                tmp_file.unlink()
+                logger.info(f"Cleaned up orphan tmp file: {tmp_file.name}")
+            except OSError:
+                pass
 
     def _validate_agent_id(self, agent_id: str) -> None:
         """Validate agent_id to prevent path traversal attacks.
@@ -82,7 +71,10 @@ class SafetensorsCacheAdapter:
         """Save agent blocks to disk using safetensors format."""
         self._validate_agent_id(agent_id)
         cache_path = self.cache_dir / f"{agent_id}.safetensors"
-        tmp_path = self.cache_dir / f"{agent_id}.safetensors.tmp"
+        # mx.save_safetensors auto-appends ".safetensors" to the path,
+        # so we use stem-only paths for the save call
+        tmp_stem = self.cache_dir / f"{agent_id}.tmp"
+        tmp_path = self.cache_dir / f"{agent_id}.tmp.safetensors"  # actual file created
 
         # CRITICAL: Validate blocks list is not corrupted before saving
         # Detect race conditions where blocks accumulate from multiple generations
@@ -127,7 +119,9 @@ class SafetensorsCacheAdapter:
                 f"{required_mb:.1f}MB required for agent {agent_id}"
             )
 
-        tensors: dict[str, np.ndarray[Any, Any]] = {}
+        import mlx.core as mx
+
+        tensors: dict[str, mx.array] = {}
 
         for layer_id, layer_blocks in blocks.blocks.items():
             for block_idx, block in enumerate(layer_blocks):
@@ -148,25 +142,22 @@ class SafetensorsCacheAdapter:
                 # MLX's BatchGenerator returns float16 arrays (dequantized)
                 # We need to quantize them ourselves to save disk space and memory
                 try:
-                    import mlx.core as mx  # Import here to avoid circular deps
-
                     # Check if k_data is already quantized (tuple of 3 components)
                     if isinstance(k_data, tuple) and len(k_data) == 3:
                         # Already quantized format: (weights, scales, biases)
                         k_weights, k_scales, k_biases = k_data
                         v_weights, v_scales, v_biases = v_data
 
-                        # Save all quantized components separately
-                        # Uses _mlx_to_numpy to handle bfloat16→float16 conversion
-                        tensors[f"L{layer_id}_B{block_idx}_K_weights"] = _mlx_to_numpy(k_weights)
-                        tensors[f"L{layer_id}_B{block_idx}_K_scales"] = _mlx_to_numpy(k_scales)
+                        # Save all quantized components as native mx.array
+                        tensors[f"L{layer_id}_B{block_idx}_K_weights"] = k_weights
+                        tensors[f"L{layer_id}_B{block_idx}_K_scales"] = k_scales
                         if k_biases is not None:
-                            tensors[f"L{layer_id}_B{block_idx}_K_biases"] = _mlx_to_numpy(k_biases)
+                            tensors[f"L{layer_id}_B{block_idx}_K_biases"] = k_biases
 
-                        tensors[f"L{layer_id}_B{block_idx}_V_weights"] = _mlx_to_numpy(v_weights)
-                        tensors[f"L{layer_id}_B{block_idx}_V_scales"] = _mlx_to_numpy(v_scales)
+                        tensors[f"L{layer_id}_B{block_idx}_V_weights"] = v_weights
+                        tensors[f"L{layer_id}_B{block_idx}_V_scales"] = v_scales
                         if v_biases is not None:
-                            tensors[f"L{layer_id}_B{block_idx}_V_biases"] = _mlx_to_numpy(v_biases)
+                            tensors[f"L{layer_id}_B{block_idx}_V_biases"] = v_biases
 
                     else:
                         # Float16/float32 array - QUANTIZE it before saving
@@ -175,20 +166,21 @@ class SafetensorsCacheAdapter:
                             k_data = mx.array(k_data)
                             v_data = mx.array(v_data)
 
-                        # Quantize to 4-bit with group_size=64
+                        # TODO: group_size and bits should come from spec, not hardcoded
+                        # This fallback path is only hit for legacy unquantized data
                         k_weights, k_scales, k_biases = mx.quantize(k_data, group_size=64, bits=4)
                         v_weights, v_scales, v_biases = mx.quantize(v_data, group_size=64, bits=4)
 
-                        # Save quantized components
-                        tensors[f"L{layer_id}_B{block_idx}_K_weights"] = _mlx_to_numpy(k_weights)
-                        tensors[f"L{layer_id}_B{block_idx}_K_scales"] = _mlx_to_numpy(k_scales)
+                        # Save quantized components as native mx.array
+                        tensors[f"L{layer_id}_B{block_idx}_K_weights"] = k_weights
+                        tensors[f"L{layer_id}_B{block_idx}_K_scales"] = k_scales
                         if k_biases is not None:
-                            tensors[f"L{layer_id}_B{block_idx}_K_biases"] = _mlx_to_numpy(k_biases)
+                            tensors[f"L{layer_id}_B{block_idx}_K_biases"] = k_biases
 
-                        tensors[f"L{layer_id}_B{block_idx}_V_weights"] = _mlx_to_numpy(v_weights)
-                        tensors[f"L{layer_id}_B{block_idx}_V_scales"] = _mlx_to_numpy(v_scales)
+                        tensors[f"L{layer_id}_B{block_idx}_V_weights"] = v_weights
+                        tensors[f"L{layer_id}_B{block_idx}_V_scales"] = v_scales
                         if v_biases is not None:
-                            tensors[f"L{layer_id}_B{block_idx}_V_biases"] = _mlx_to_numpy(v_biases)
+                            tensors[f"L{layer_id}_B{block_idx}_V_biases"] = v_biases
 
                 except (TypeError, ValueError) as e:
                     # Expected errors from invalid tensor shapes/types - log and skip block
@@ -208,8 +200,9 @@ class SafetensorsCacheAdapter:
         str_metadata = {k: str(v) for k, v in metadata.items()}
 
         # Atomic write with proper cleanup on failure
+        # mx.save_safetensors auto-appends ".safetensors", so pass stem path
         try:
-            save_file(tensors, str(tmp_path), metadata=str_metadata)
+            mx.save_safetensors(str(tmp_stem), tensors, metadata=str_metadata)
             tmp_path.rename(cache_path)
         except OSError as e:
             # Clean up temp file on failure
@@ -253,9 +246,11 @@ class SafetensorsCacheAdapter:
 
         metadata = header.get("__metadata__", {})
 
-        # Load tensors
+        # Load tensors using native MLX I/O (handles all dtypes including bfloat16)
+        import mlx.core as mx
+
         try:
-            tensors_data = load_file(str(cache_path))
+            tensors_data = mx.load(str(cache_path))
         except Exception as e:
             raise CachePersistenceError(f"Failed to load tensors from {cache_path}: {e}") from e
 
@@ -276,27 +271,25 @@ class SafetensorsCacheAdapter:
                         continue
 
         # Second pass: reconstruct each block
-        import mlx.core as mx  # Import for quantized array reconstruction
-
         for layer_id, block_idx in sorted(processed_blocks):
             # Check for quantized format first (has _weights suffix)
             k_weights_key = f"L{layer_id}_B{block_idx}_K_weights"
             v_weights_key = f"L{layer_id}_B{block_idx}_V_weights"
 
             if k_weights_key in tensors_data and v_weights_key in tensors_data:
-                # QUANTIZED FORMAT: Reconstruct quantized tuple
-                k_weights = mx.array(tensors_data[k_weights_key])
-                k_scales = mx.array(tensors_data[f"L{layer_id}_B{block_idx}_K_scales"])
+                # QUANTIZED FORMAT: mx.load returns mx.array with correct dtypes
+                k_weights = tensors_data[k_weights_key]
+                k_scales = tensors_data[f"L{layer_id}_B{block_idx}_K_scales"]
                 k_biases_key = f"L{layer_id}_B{block_idx}_K_biases"
                 k_biases = (
-                    mx.array(tensors_data[k_biases_key]) if k_biases_key in tensors_data else None
+                    tensors_data[k_biases_key] if k_biases_key in tensors_data else None
                 )
 
-                v_weights = mx.array(tensors_data[v_weights_key])
-                v_scales = mx.array(tensors_data[f"L{layer_id}_B{block_idx}_V_scales"])
+                v_weights = tensors_data[v_weights_key]
+                v_scales = tensors_data[f"L{layer_id}_B{block_idx}_V_scales"]
                 v_biases_key = f"L{layer_id}_B{block_idx}_V_biases"
                 v_biases = (
-                    mx.array(tensors_data[v_biases_key]) if v_biases_key in tensors_data else None
+                    tensors_data[v_biases_key] if v_biases_key in tensors_data else None
                 )
 
                 # Store as quantized tuples (don't dequantize unless needed)
@@ -393,7 +386,7 @@ class SafetensorsCacheAdapter:
                     k_weights, k_scales, k_biases = k_data
                     v_weights, v_scales, v_biases = v_data
 
-                    # Use numpy or mlx array size calculation
+                    # Use array size calculation
                     for arr in [k_weights, k_scales, k_biases, v_weights, v_scales, v_biases]:
                         if arr is not None:
                             if hasattr(arr, "nbytes"):

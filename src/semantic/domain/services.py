@@ -392,6 +392,10 @@ class BlockPool:
         with self._lock:
             count = len(self.agent_allocations)
 
+            # Null layer_data to free tensor memory
+            for block in self.allocated_blocks.values():
+                block.layer_data = None
+
             # Reset free list
             self.free_list = list(range(self.total_blocks))
 

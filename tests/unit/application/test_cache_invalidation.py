@@ -209,7 +209,7 @@ class TestModelTagCompatibility:
 
     def test_identical_specs_are_compatible(self):
         """Identical specs are compatible."""
-        tag = ModelTag(model_id="model-a", n_layers=24, n_kv_heads=8, head_dim=128, block_tokens=16)
+        tag = ModelTag(model_id="model-a", n_layers=24, n_kv_heads=8, head_dim=128, block_tokens=16, kv_bits=4, kv_group_size=64)
         spec = ModelCacheSpec(
             n_layers=24, n_kv_heads=8, head_dim=128, block_tokens=16, layer_types=["global"] * 24
         )
@@ -218,7 +218,7 @@ class TestModelTagCompatibility:
 
     def test_different_n_layers_incompatible(self):
         """Different n_layers makes caches incompatible."""
-        tag = ModelTag(model_id="model-a", n_layers=24, n_kv_heads=8, head_dim=128, block_tokens=16)
+        tag = ModelTag(model_id="model-a", n_layers=24, n_kv_heads=8, head_dim=128, block_tokens=16, kv_bits=4, kv_group_size=64)
         spec = ModelCacheSpec(
             n_layers=32,  # Different
             n_kv_heads=8,
@@ -231,7 +231,7 @@ class TestModelTagCompatibility:
 
     def test_different_n_kv_heads_incompatible(self):
         """Different n_kv_heads makes caches incompatible."""
-        tag = ModelTag(model_id="model-a", n_layers=24, n_kv_heads=8, head_dim=128, block_tokens=16)
+        tag = ModelTag(model_id="model-a", n_layers=24, n_kv_heads=8, head_dim=128, block_tokens=16, kv_bits=4, kv_group_size=64)
         spec = ModelCacheSpec(
             n_layers=24,
             n_kv_heads=16,  # Different
@@ -244,7 +244,7 @@ class TestModelTagCompatibility:
 
     def test_different_head_dim_incompatible(self):
         """Different head_dim makes caches incompatible."""
-        tag = ModelTag(model_id="model-a", n_layers=24, n_kv_heads=8, head_dim=128, block_tokens=16)
+        tag = ModelTag(model_id="model-a", n_layers=24, n_kv_heads=8, head_dim=128, block_tokens=16, kv_bits=4, kv_group_size=64)
         spec = ModelCacheSpec(
             n_layers=24,
             n_kv_heads=8,
@@ -257,7 +257,7 @@ class TestModelTagCompatibility:
 
     def test_different_block_tokens_incompatible(self):
         """Different block_tokens makes caches incompatible."""
-        tag = ModelTag(model_id="model-a", n_layers=24, n_kv_heads=8, head_dim=128, block_tokens=16)
+        tag = ModelTag(model_id="model-a", n_layers=24, n_kv_heads=8, head_dim=128, block_tokens=16, kv_bits=4, kv_group_size=64)
         spec = ModelCacheSpec(
             n_layers=24,
             n_kv_heads=8,
@@ -271,7 +271,7 @@ class TestModelTagCompatibility:
     def test_model_id_difference_does_not_affect_compatibility(self):
         """Model ID difference doesn't affect compatibility (only spec matters)."""
         tag = ModelTag(
-            model_id="gemma-3-12b-v1", n_layers=24, n_kv_heads=8, head_dim=128, block_tokens=16
+            model_id="gemma-3-12b-v1", n_layers=24, n_kv_heads=8, head_dim=128, block_tokens=16, kv_bits=4, kv_group_size=64
         )
         spec = ModelCacheSpec(
             n_layers=24, n_kv_heads=8, head_dim=128, block_tokens=16, layer_types=["global"] * 24

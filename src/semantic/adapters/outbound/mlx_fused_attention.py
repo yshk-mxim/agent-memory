@@ -8,22 +8,33 @@ Apply via apply_fused_attention_patch() after model loading.
 """
 
 import logging
+import os
 from functools import partial
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
 _patched = False
+# Metal decode kernel is disabled by default — benchmarks show compiled SDPA is faster
+# because mx.quantized_matmul uses tiled GEMM while the custom kernel loops serially.
+# Set SEMANTIC_ENABLE_METAL_DECODE=1 to opt in (useful for further kernel development).
+_metal_decode_disabled = os.environ.get("SEMANTIC_ENABLE_METAL_DECODE", "") != "1"
 
 
 def apply_fused_attention_patch() -> bool:
     """Monkeypatch mlx_lm.models.base with fused Q4 attention.
 
     Safe to call multiple times (idempotent). Returns True if patch applied.
+    Set SEMANTIC_DISABLE_FUSED_ATTN=1 to skip patching entirely (baseline benchmark).
     """
     global _patched
     if _patched:
         return True
+
+    if os.environ.get("SEMANTIC_DISABLE_FUSED_ATTN", "") == "1":
+        logger.info("Fused attention patch DISABLED by SEMANTIC_DISABLE_FUSED_ATTN")
+        _patched = True  # prevent re-entry
+        return False
 
     try:
         import mlx.core as mx
@@ -302,6 +313,12 @@ inline float dequant4(
         if L != 1 or bits != 4 or group_size != 64:
             return None
 
+        # Metal kernel hardcodes float16 I/O; bfloat16 queries would be
+        # silently truncated (different exponent/mantissa layout).  Fall back
+        # to the compiled SDPA path which handles any dtype.
+        if queries.dtype == mx.bfloat16:
+            return None
+
         n_kv_heads = q_keys[0].shape[-3]
         N = q_keys[0].shape[-2]
         v_dim_packed = q_values[0].shape[-1]
@@ -358,12 +375,12 @@ inline float dequant4(
 
     def _patched_q4_sdpa(queries, q_keys, q_values, scale, mask, group_size=64, bits=4):
         """Fused Q4 SDPA: Metal kernel for decode, compiled for prefill."""
-        # Try Metal decode kernel for L=1 single-token decode
-        result = _try_metal_decode(
-            queries, q_keys, q_values, scale, mask, group_size, bits,
-        )
-        if result is not None:
-            return result
+        if not _metal_decode_disabled:
+            result = _try_metal_decode(
+                queries, q_keys, q_values, scale, mask, group_size, bits,
+            )
+            if result is not None:
+                return result
         return _fused_q4_sdpa(
             queries, q_keys, q_values, scale, mask, group_size, bits,
         )
@@ -371,5 +388,8 @@ inline float dequant4(
     # Apply the monkeypatch
     base_module.quantized_scaled_dot_product_attention = _patched_q4_sdpa
     _patched = True
-    logger.info("Applied fused Q4 attention monkeypatch (compile + Metal decode)")
+    if _metal_decode_disabled:
+        logger.info("Applied fused Q4 attention monkeypatch (compile only, Metal decode disabled)")
+    else:
+        logger.info("Applied fused Q4 attention monkeypatch (compile + Metal decode)")
     return True

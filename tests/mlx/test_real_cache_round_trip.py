@@ -260,6 +260,187 @@ class TestQ4FormatPreservation:
             )
 
 
+def _build_bfloat16_q4_blocks(
+    n_layers: int,
+    n_kv_heads: int,
+    head_dim: int,
+    seq_len: int,
+) -> AgentBlocks:
+    """Build AgentBlocks with Q4 quantized tensors from bfloat16 source data.
+
+    Simulates models like Gemma 3 that use bfloat16 internally, producing
+    bfloat16 scales/biases after mx.quantize().
+    """
+    blocks: dict[int, list[KVBlock]] = {}
+
+    for layer_id in range(n_layers):
+        # bfloat16 source data (as Gemma 3 would produce)
+        k_float = mx.random.normal((1, n_kv_heads, seq_len, head_dim)).astype(mx.bfloat16)
+        v_float = mx.random.normal((1, n_kv_heads, seq_len, head_dim)).astype(mx.bfloat16)
+        mx.eval(k_float, v_float)
+
+        k_quant = _quantize_tensor(k_float)
+        v_quant = _quantize_tensor(v_float)
+
+        block = KVBlock(
+            block_id=layer_id * 1_000_000,
+            layer_id=layer_id,
+            token_count=seq_len,
+            layer_data={"k": k_quant, "v": v_quant},
+        )
+        blocks[layer_id] = [block]
+
+    return AgentBlocks(
+        agent_id="bf16_test",
+        blocks=blocks,
+        total_tokens=seq_len,
+        token_sequence=list(range(1, seq_len + 1)),
+        prompt_text="bfloat16 test",
+    )
+
+
+class TestBfloat16Q4Preservation:
+    """Verify bfloat16 scales/biases survive save → load round-trip."""
+
+    def test_bfloat16_quantized_dtypes(self, cache_dir) -> None:
+        """Quantizing bfloat16 data produces bfloat16 scales/biases."""
+        data = mx.random.normal((1, 4, 32, 64)).astype(mx.bfloat16)
+        mx.eval(data)
+        w, s, b = _quantize_tensor(data)
+
+        assert w.dtype == mx.uint32, f"Weights should be uint32, got {w.dtype}"
+        assert s.dtype == mx.bfloat16, f"Scales should be bfloat16, got {s.dtype}"
+        assert b.dtype == mx.bfloat16, f"Biases should be bfloat16, got {b.dtype}"
+
+    def test_bfloat16_round_trip_through_safetensors(self, cache_dir) -> None:
+        """bfloat16 Q4 data saved to safetensors and loaded back must be bit-identical."""
+        adapter = SafetensorsCacheAdapter(cache_dir)
+
+        original = _build_bfloat16_q4_blocks(
+            n_layers=2, n_kv_heads=4, head_dim=64, seq_len=32,
+        )
+
+        # Capture original arrays (before save) via float32 for bfloat16 comparison
+        original_arrays: dict[str, np.ndarray] = {}
+        for layer_id, layer_blocks in original.blocks.items():
+            block = layer_blocks[0]
+            k_w, k_s, k_b = block.layer_data["k"]
+            v_w, v_s, v_b = block.layer_data["v"]
+
+            # Verify source scales/biases are bfloat16
+            assert k_s.dtype == mx.bfloat16, f"Source K scales should be bfloat16"
+            assert k_b.dtype == mx.bfloat16, f"Source K biases should be bfloat16"
+
+            original_arrays[f"L{layer_id}_K_w"] = np.array(k_w)
+            # Compare bfloat16 via float32 (numpy doesn't have native bfloat16)
+            original_arrays[f"L{layer_id}_K_s"] = np.array(k_s.astype(mx.float32))
+            original_arrays[f"L{layer_id}_K_b"] = np.array(k_b.astype(mx.float32))
+            original_arrays[f"L{layer_id}_V_w"] = np.array(v_w)
+            original_arrays[f"L{layer_id}_V_s"] = np.array(v_s.astype(mx.float32))
+            original_arrays[f"L{layer_id}_V_b"] = np.array(v_b.astype(mx.float32))
+
+        # Save to disk
+        metadata = {"model_id": "test-bf16-model", "n_layers": "2"}
+        path = adapter.save("bf16_test", original, metadata)
+        assert path.exists()
+
+        # Load from disk
+        loaded_blocks, _ = adapter.load(path)
+
+        for layer_id in range(2):
+            assert layer_id in loaded_blocks
+            block = loaded_blocks[layer_id][0]
+            k_data = block.layer_data["k"]
+            v_data = block.layer_data["v"]
+
+            assert isinstance(k_data, tuple) and len(k_data) == 3
+            assert isinstance(v_data, tuple) and len(v_data) == 3
+
+            k_w, k_s, k_b = k_data
+            v_w, v_s, v_b = v_data
+
+            # CRITICAL: scales/biases must come back as bfloat16, NOT float16
+            assert k_w.dtype == mx.uint32, f"L{layer_id} K weights: {k_w.dtype}"
+            assert k_s.dtype == mx.bfloat16, f"L{layer_id} K scales: {k_s.dtype} (want bfloat16)"
+            assert k_b.dtype == mx.bfloat16, f"L{layer_id} K biases: {k_b.dtype} (want bfloat16)"
+            assert v_w.dtype == mx.uint32, f"L{layer_id} V weights: {v_w.dtype}"
+            assert v_s.dtype == mx.bfloat16, f"L{layer_id} V scales: {v_s.dtype} (want bfloat16)"
+            assert v_b.dtype == mx.bfloat16, f"L{layer_id} V biases: {v_b.dtype} (want bfloat16)"
+
+            # Bit-identical comparison (via float32 for bfloat16 arrays)
+            loaded_k_w = np.array(k_w)
+            loaded_k_s = np.array(k_s.astype(mx.float32))
+            loaded_k_b = np.array(k_b.astype(mx.float32))
+            loaded_v_w = np.array(v_w)
+            loaded_v_s = np.array(v_s.astype(mx.float32))
+            loaded_v_b = np.array(v_b.astype(mx.float32))
+
+            np.testing.assert_array_equal(
+                original_arrays[f"L{layer_id}_K_w"], loaded_k_w,
+                err_msg=f"Layer {layer_id} K weights not bit-identical",
+            )
+            np.testing.assert_array_equal(
+                original_arrays[f"L{layer_id}_K_s"], loaded_k_s,
+                err_msg=f"Layer {layer_id} K scales not bit-identical",
+            )
+            np.testing.assert_array_equal(
+                original_arrays[f"L{layer_id}_K_b"], loaded_k_b,
+                err_msg=f"Layer {layer_id} K biases not bit-identical",
+            )
+            np.testing.assert_array_equal(
+                original_arrays[f"L{layer_id}_V_w"], loaded_v_w,
+                err_msg=f"Layer {layer_id} V weights not bit-identical",
+            )
+            np.testing.assert_array_equal(
+                original_arrays[f"L{layer_id}_V_s"], loaded_v_s,
+                err_msg=f"Layer {layer_id} V scales not bit-identical",
+            )
+            np.testing.assert_array_equal(
+                original_arrays[f"L{layer_id}_V_b"], loaded_v_b,
+                err_msg=f"Layer {layer_id} V biases not bit-identical",
+            )
+
+    def test_bfloat16_dequantized_values_match(self, cache_dir) -> None:
+        """Dequantized output from original vs loaded bfloat16 Q4 must be identical."""
+        adapter = SafetensorsCacheAdapter(cache_dir)
+
+        # Create bfloat16 source and quantize
+        original_float = mx.random.normal((1, 4, 16, 64)).astype(mx.bfloat16)
+        mx.eval(original_float)
+        w, s, b = _quantize_tensor(original_float)
+
+        # Dequantize original
+        original_dequant = mx.dequantize(w, s, b, group_size=KV_GROUP_SIZE, bits=KV_BITS)
+        mx.eval(original_dequant)
+        original_np = np.array(original_dequant.astype(mx.float32))
+
+        # Save → load
+        block = KVBlock(
+            block_id=0, layer_id=0, token_count=16,
+            layer_data={"k": (w, s, b), "v": (w, s, b)},
+        )
+        blocks = AgentBlocks(
+            agent_id="bf16_dequant", blocks={0: [block]}, total_tokens=16,
+            token_sequence=[1, 2, 3], prompt_text="test",
+        )
+        path = adapter.save("bf16_dequant", blocks, {"model_id": "test"})
+        loaded_blocks, _ = adapter.load(path)
+
+        # Dequantize loaded
+        k_loaded = loaded_blocks[0][0].layer_data["k"]
+        loaded_dequant = mx.dequantize(
+            k_loaded[0], k_loaded[1], k_loaded[2],
+            group_size=KV_GROUP_SIZE, bits=KV_BITS,
+        )
+        mx.eval(loaded_dequant)
+        loaded_np = np.array(loaded_dequant.astype(mx.float32))
+
+        np.testing.assert_array_equal(
+            original_np, loaded_np,
+            err_msg="bfloat16 dequantized values differ after round-trip",
+        )
+
+
 def _chat_prompt(tokenizer, user_message: str) -> str:
     """Format a user message with the model's chat template."""
     if hasattr(tokenizer, "apply_chat_template"):

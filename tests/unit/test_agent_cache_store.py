@@ -109,6 +109,71 @@ class TestModelTag:
 
         assert tag.is_compatible(different_spec) is False
 
+    def test_is_compatible_different_kv_bits(self, spec: ModelCacheSpec) -> None:
+        """Should return False if kv_bits differs."""
+        tag = ModelTag.from_spec("test-model", spec)
+
+        different_spec = ModelCacheSpec(
+            n_layers=12,
+            n_kv_heads=4,
+            head_dim=64,
+            block_tokens=256,
+            layer_types=["global"] * 12,
+            sliding_window_size=None,
+            kv_bits=8,  # Different from default 4
+        )
+
+        assert tag.is_compatible(different_spec) is False
+
+    def test_is_compatible_different_kv_group_size(self, spec: ModelCacheSpec) -> None:
+        """Should return False if kv_group_size differs."""
+        tag = ModelTag.from_spec("test-model", spec)
+
+        different_spec = ModelCacheSpec(
+            n_layers=12,
+            n_kv_heads=4,
+            head_dim=64,
+            block_tokens=256,
+            layer_types=["global"] * 12,
+            sliding_window_size=None,
+            kv_group_size=128,  # Different from default 64
+        )
+
+        assert tag.is_compatible(different_spec) is False
+
+    def test_is_compatible_none_kv_bits_matches_none(self) -> None:
+        """Old cache files without kv_bits (None) should match current None."""
+        tag = ModelTag("test", 12, 4, 64, 256, kv_bits=None, kv_group_size=None)
+
+        spec = ModelCacheSpec(
+            n_layers=12,
+            n_kv_heads=4,
+            head_dim=64,
+            block_tokens=256,
+            layer_types=["global"] * 12,
+            kv_bits=None,
+            kv_group_size=64,
+        )
+
+        # kv_group_size mismatch (None vs 64) should fail
+        assert tag.is_compatible(spec) is False
+
+    def test_from_spec_captures_kv_bits(self) -> None:
+        """from_spec should capture kv_bits and kv_group_size from spec."""
+        spec = ModelCacheSpec(
+            n_layers=12,
+            n_kv_heads=4,
+            head_dim=64,
+            block_tokens=256,
+            layer_types=["global"] * 12,
+            kv_bits=8,
+            kv_group_size=128,
+        )
+        tag = ModelTag.from_spec("test-model", spec)
+
+        assert tag.kv_bits == 8
+        assert tag.kv_group_size == 128
+
     def test_is_frozen(self) -> None:
         """ModelTag should be immutable (frozen dataclass)."""
         tag = ModelTag("test", 12, 4, 64, 256)

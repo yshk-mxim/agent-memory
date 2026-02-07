@@ -67,6 +67,8 @@ class ModelTag:
     head_dim: int
     block_tokens: int
     v_head_dim: int | None = None
+    kv_bits: int | None = None
+    kv_group_size: int | None = None
 
     @classmethod
     def from_spec(cls, model_id: str, spec: ModelCacheSpec) -> "ModelTag":
@@ -86,6 +88,8 @@ class ModelTag:
             head_dim=spec.head_dim,
             block_tokens=spec.block_tokens,
             v_head_dim=spec.v_head_dim,
+            kv_bits=spec.kv_bits,
+            kv_group_size=spec.kv_group_size,
         )
 
     def is_compatible(self, spec: ModelCacheSpec) -> bool:
@@ -109,6 +113,30 @@ class ModelTag:
             and self.head_dim == spec.head_dim
             and self.block_tokens == spec.block_tokens
             and self.v_head_dim == spec.v_head_dim
+            and self.kv_bits == spec.kv_bits
+            and self.kv_group_size == spec.kv_group_size
+        )
+
+    def is_tag_compatible(self, other: "ModelTag") -> bool:
+        """Check if this tag is compatible with another tag.
+
+        Compares structural fields directly (ignores model_id).
+        Used for disk load validation where both sides are ModelTag.
+
+        Args:
+            other: Another ModelTag to check against
+
+        Returns:
+            True if compatible (same cache geometry), False otherwise
+        """
+        return (
+            self.n_layers == other.n_layers
+            and self.n_kv_heads == other.n_kv_heads
+            and self.head_dim == other.head_dim
+            and self.block_tokens == other.block_tokens
+            and self.v_head_dim == other.v_head_dim
+            and self.kv_bits == other.kv_bits
+            and self.kv_group_size == other.kv_group_size
         )
 
 
@@ -578,6 +606,10 @@ class AgentCacheStore:
         }
         if self.model_tag.v_head_dim is not None:
             metadata["v_head_dim"] = self.model_tag.v_head_dim
+        if self.model_tag.kv_bits is not None:
+            metadata["kv_bits"] = self.model_tag.kv_bits
+        if self.model_tag.kv_group_size is not None:
+            metadata["kv_group_size"] = self.model_tag.kv_group_size
 
         if self._cache_adapter is None:
             raise InvalidRequestError("CacheAdapter is required - dependency not injected")
@@ -655,6 +687,10 @@ class AgentCacheStore:
             # Validate model tag compatibility
             saved_v_head_dim_raw = metadata.get("v_head_dim")
             saved_v_head_dim = int(saved_v_head_dim_raw) if saved_v_head_dim_raw is not None else None
+            saved_kv_bits_raw = metadata.get("kv_bits")
+            saved_kv_bits = int(saved_kv_bits_raw) if saved_kv_bits_raw is not None else None
+            saved_kv_group_size_raw = metadata.get("kv_group_size")
+            saved_kv_group_size = int(saved_kv_group_size_raw) if saved_kv_group_size_raw is not None else None
             saved_tag = ModelTag(
                 model_id=str(metadata.get("model_id", "")),
                 n_layers=int(metadata.get("n_layers", 0)),
@@ -662,19 +698,11 @@ class AgentCacheStore:
                 head_dim=int(metadata.get("head_dim", 0)),
                 block_tokens=int(metadata.get("block_tokens", 0)),
                 v_head_dim=saved_v_head_dim,
+                kv_bits=saved_kv_bits,
+                kv_group_size=saved_kv_group_size,
             )
 
-            current_spec = ModelCacheSpec(
-                n_layers=self.model_tag.n_layers,
-                n_kv_heads=self.model_tag.n_kv_heads,
-                head_dim=self.model_tag.head_dim,
-                block_tokens=self.model_tag.block_tokens,
-                layer_types=["global"] * self.model_tag.n_layers,
-                sliding_window_size=None,
-                v_head_dim=self.model_tag.v_head_dim,
-            )
-
-            if not saved_tag.is_compatible(current_spec):
+            if not saved_tag.is_tag_compatible(self.model_tag):
                 return None
 
             total_tokens = int(metadata.get("total_tokens", 0))
@@ -705,6 +733,10 @@ class AgentCacheStore:
             )
             entry.mark_accessed()
             self._hot_cache[agent_id] = entry
+
+            # Evict if hot tier exceeded capacity after promotion
+            if len(self._hot_cache) > self.max_hot_agents:
+                self._evict_lru()
 
             return blocks
 

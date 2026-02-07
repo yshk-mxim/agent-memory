@@ -1426,7 +1426,12 @@ class BlockPoolBatchEngine:
                 getattr(first, "offset", "N/A"),
             )
 
-        blocks = self._extract_cache(uid, cache, full_token_sequence, prompt_text=prompt_text)
+        try:
+            blocks = self._extract_cache(uid, cache, full_token_sequence, prompt_text=prompt_text)
+        except Exception:
+            # Clean up any partially allocated blocks from failed extraction
+            self._pool.free_agent_blocks(agent_id)
+            raise
 
         with self._lock:
             self._agent_blocks[agent_id] = blocks
@@ -1755,26 +1760,13 @@ class BlockPoolBatchEngine:
                         v_data, _, _ = v_data
                     # else: Production mode - keep quantized tuple as-is
 
-                # Convert numpy → mx.array if needed (handle quantized tuples)
+                # Ensure tensors are mx.array (mx.load returns mx.array natively)
                 if use_kv_cache and mx is not None:
                     if isinstance(k_data, tuple) and len(k_data) == 3:
-                        # Quantized tuple - convert components if needed
-                        k_weights, k_scales, k_biases = k_data
-                        v_weights, v_scales, v_biases = v_data
-
-                        if not isinstance(k_weights, mx.array):
-                            k_weights = mx.array(k_weights)
-                            k_scales = mx.array(k_scales)
-                            k_biases = mx.array(k_biases) if k_biases is not None else None
-                            k_data = (k_weights, k_scales, k_biases)
-
-                        if not isinstance(v_weights, mx.array):
-                            v_weights = mx.array(v_weights)
-                            v_scales = mx.array(v_scales)
-                            v_biases = mx.array(v_biases) if v_biases is not None else None
-                            v_data = (v_weights, v_scales, v_biases)
+                        # Quantized tuple - already mx.array from mx.load
+                        pass
                     else:
-                        # Float tensor - convert normally
+                        # Float tensor - convert if needed
                         if not isinstance(k_data, mx.array):
                             k_data = mx.array(k_data)
                         if not isinstance(v_data, mx.array):

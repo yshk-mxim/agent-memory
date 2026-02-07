@@ -687,6 +687,62 @@ class TestBlockPoolBatchEngineCacheExtraction:
         assert hasattr(engine, "_extract_cache")
 
 
+class TestFinalizeSequenceBlockLeakProtection:
+    """Tests that _finalize_sequence cleans up blocks on _extract_cache failure."""
+
+    @pytest.fixture
+    def engine(self, model, tokenizer, pool, spec, cache_adapter):
+        """Create engine for testing."""
+        return BlockPoolBatchEngine(
+            cache_adapter=cache_adapter,
+            model=model,
+            tokenizer=tokenizer,
+            pool=pool,
+            spec=spec,
+            batch_gen_factory=FakeBatchGenerator,
+        )
+
+    def test_extract_cache_failure_frees_blocks(self, engine, pool) -> None:
+        """If _extract_cache raises, pool blocks should be cleaned up (no leak)."""
+        initial_available = pool.available_blocks()
+
+        # Pre-allocate some blocks for the agent (simulating old blocks)
+        agent_id = "leak_test_agent"
+        pool.allocate(n_blocks=3, layer_id=0, agent_id=agent_id)
+
+        # Patch _extract_cache to raise an error
+        original_extract = engine._extract_cache
+
+        def failing_extract(*args, **kwargs):
+            # Allocate blocks (simulating partial extraction) then fail
+            pool.allocate(n_blocks=2, layer_id=0, agent_id=agent_id)
+            raise RuntimeError("Simulated extraction failure")
+
+        engine._extract_cache = failing_extract
+
+        # Create a fake response
+        response = FakeResponse(
+            uid="test_uid",
+            token=101,
+            finish_reason="length",
+            prompt_cache=[],
+        )
+
+        # _finalize_sequence should catch the error and clean up
+        with pytest.raises(RuntimeError, match="Simulated extraction failure"):
+            engine._finalize_sequence(
+                uid="test_uid",
+                response=response,
+                agent_id=agent_id,
+                tokens=[101],
+                prompt_tokens=[1, 2, 3],
+                prompt_text="Hello",
+            )
+
+        # After cleanup, the agent should have no blocks allocated
+        assert agent_id not in pool.agent_allocations
+
+
 class NeverFinishingBatchGenerator:
     """Fake BatchGenerator that never finishes — for testing step() safety limit."""
 

@@ -671,6 +671,42 @@ class TestBlockPoolMaxBatchSize:
         assert pool.max_batch_size(tokens_per_agent=64) == 3
 
 
+class TestBlockPoolForceClear:
+    """Test force_clear_all_allocations() nulls layer_data."""
+
+    def test_force_clear_nulls_layer_data(self, small_spec: ModelCacheSpec) -> None:
+        """force_clear_all_allocations should null layer_data on all blocks."""
+        pool = BlockPool(spec=small_spec, total_blocks=100)
+
+        # Allocate and set layer_data
+        blocks = pool.allocate(n_blocks=5, layer_id=0, agent_id="agent_1")
+        for b in blocks:
+            b.layer_data = {"k": "fake_tensor", "v": "fake_tensor"}
+
+        # Keep references to check after clear
+        block_refs = list(blocks)
+
+        pool.force_clear_all_allocations()
+
+        # All referenced blocks should have layer_data=None
+        for b in block_refs:
+            assert b.layer_data is None, f"Block {b.block_id} layer_data not nulled"
+
+    def test_force_clear_resets_pool(self, small_spec: ModelCacheSpec) -> None:
+        """force_clear_all_allocations should reset pool to full capacity."""
+        pool = BlockPool(spec=small_spec, total_blocks=100)
+
+        pool.allocate(n_blocks=30, layer_id=0, agent_id="agent_1")
+        pool.allocate(n_blocks=20, layer_id=0, agent_id="agent_2")
+
+        count = pool.force_clear_all_allocations()
+
+        assert count == 2  # 2 agents cleared
+        assert pool.available_blocks() == 100
+        assert len(pool.allocated_blocks) == 0
+        assert len(pool.agent_allocations) == 0
+
+
 class TestBlockPoolO1Timing:
     """Verify block pool allocation/deallocation is O(1), not O(n)."""
 
