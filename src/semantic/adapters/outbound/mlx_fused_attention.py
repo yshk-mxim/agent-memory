@@ -437,6 +437,16 @@ inline float dequant4(
     except (ImportError, AttributeError):
         logger.debug("gemma3_text not available, skipping clip_residual patch")
 
+    # Replace mx.async_eval with synchronous mx.eval globally.
+    # mlx_lm's BatchGenerator._next() calls mx.async_eval(batch.y) then
+    # immediately calls extract_cache() and filter(). Any mx.eval on tensors
+    # in the async pipeline triggers Metal assertion "Completed handler
+    # provided after commit call". Making eval synchronous ensures the
+    # command buffer is fully complete before extract/filter.
+    # Performance impact: <3% — we lose ~0.3ms Python/GPU overlap per token.
+    mx.async_eval = mx.eval
+    logger.info("Patched mx.async_eval → mx.eval (sync decode for batch compat)")
+
     _patched = True
     if _metal_decode_disabled:
         logger.info("Applied fused Q4 attention monkeypatch (compile only, Metal decode disabled)")
