@@ -614,47 +614,45 @@ The prefill adapter (`MLXPrefillAdapter.process_prefill_chunk()`) does acquire `
 
 **Mitigating factor**: When scheduler is enabled (the batch=2 mode), all MLX operations go through the scheduler-worker thread. This bug only manifests in the non-scheduler path.
 
-### BUG 2: `mx.synchronize()` comment is misleading [LOW]
+### BUG 2: `mx.synchronize()` comment is misleading [LOW — FIXED]
 
-**File**: `mlx_quantized_extensions.py:319-324`
+**File**: `mlx_quantized_extensions.py:319-327`
 
-The comment says "Synchronize ALL Metal streams" but `mx.synchronize()` only syncs the default stream (which is `generation_stream` inside the `mx.stream()` context). This currently works correctly in practice but would break if pending work existed on a different stream.
+The comment previously said "Synchronize ALL Metal streams" but `mx.synchronize()` only syncs the default stream (which is `generation_stream` inside the `mx.stream()` context).
 
-**Risk**: Low — no pending work on other streams at this point. But incorrect reasoning could lead to bugs in future changes.
+**Status**: FIXED in commit 30ae40b. Comment now correctly states: "This does NOT sync 'all streams' — only the current default."
 
-### BUG 3: Lazy tensor slices in `_extract_cache()` stored in `block.layer_data` [LOW-MEDIUM]
+### BUG 3: Lazy tensor slices in `_extract_cache()` stored in `block.layer_data` [LOW — VERIFIED SAFE]
 
 **File**: `batch_engine.py:2010-2017`
 
 `slice_cache_tensor()` returns lazy slices of the parent cache tensor. These are stored in `block.layer_data["k"]`/`["v"]`. When `save()` later reads them on a different thread, `mx.save_safetensors()` forces evaluation under `mlx_io_lock`.
 
-**Concern**: The parent tensor (from `response.prompt_cache` → `cache[layer].state`) could theoretically be freed before `save()` runs.
+**Verified safe (2026-02-08 review)**: For Q4 caches (our only production path), `extract()` calls `mx.contiguous()` + `mx.eval()`, making extracted tensors fully independent of the batch. The slicing in `_extract_cache()` operates on these materialized tensors, not the live batch cache. The lazy slices reference the function-local `state` return value, which persists through function scope into `block.layer_data`. Additionally, `mx.save_safetensors()` forces evaluation of any remaining lazy tensors under `mlx_io_lock`.
 
-**Mitigating factor**: For Q4 caches (our primary path), `extract()` calls `mx.contiguous()` + `mx.eval()`, making extracted tensors independent of the batch. The slicing in `_extract_cache()` is on these materialized tensors. The lazy slices reference the function-local `state` return value, which persists through the function scope and into `block.layer_data`.
+**Risk**: LOW — no code change needed.
 
-**Risk**: LOW for Q4 path (contiguous copies). MEDIUM for hypothetical float path.
-
-### BUG 4: `get_agent_blocks()` snapshot timing with `layer_data` references [LOW]
+### BUG 4: `get_agent_blocks()` snapshot timing with `layer_data` references [LOW — VERIFIED SAFE]
 
 **File**: `batch_engine.py:243-288`
 
-`get_agent_blocks()` creates a "deep copy" of blocks but uses `layer_data=block.layer_data` (reference copy). If `_finalize_sequence()` runs on the scheduler-worker and sets `block.layer_data = None` on ORIGINAL blocks, the COPY retains the old reference — this is correct, the snapshot preserves data.
+`get_agent_blocks()` creates a "deep copy" of blocks but uses `layer_data=block.layer_data` (reference copy). If `_finalize_sequence()` runs on the scheduler-worker and sets `block.layer_data = None` on ORIGINAL blocks, the COPY retains the old reference — this is correct by design, the snapshot preserves data.
 
-But if `layer_data` contains lazy tensor slices whose parent tensors are freed between snapshot and `save()`, the lazy eval could read freed memory.
+**Verified safe (2026-02-08 review)**: The temporal ordering is: extract → snapshot → save → finalize. In all three code paths (streaming via scheduler, direct streaming, non-streaming), `get_agent_blocks()` is called and `save()` completes BEFORE `_finalize_sequence()` nulls `layer_data` on the next request cycle. The scheduler is single-threaded, so finalization only happens after the current response is fully yielded. Same Q4 contiguous copy mitigation as BUG 3.
 
-**Mitigating factor**: Same as BUG 3 — Q4 path creates independent copies.
+**Risk**: LOW — no code change needed.
 
-### BUG 5: Non-scheduler direct path lacks concurrency protection [HIGH when applicable]
+### BUG 5: Non-scheduler direct path lacks concurrency protection [MEDIUM — PARTIALLY FIXED]
 
 **Files**: `openai_adapter.py:700-716`
 
-When `scheduler is None`, `submit()` and `run_step_for_uid()` are dispatched via `asyncio.to_thread()`. Multiple concurrent HTTP requests can trigger parallel calls, leading to:
-- Concurrent `_chunked_prefill()` without `mlx_io_lock`
-- Concurrent `batch_gen.insert()` + `batch_gen.next()`
+When `scheduler is None`, `submit()` and `run_step_for_uid()` are dispatched via `asyncio.to_thread()`. Multiple concurrent HTTP requests can trigger parallel calls.
 
-The code logs: "Using direct batch_engine path (no scheduler) -- concurrent requests unsafe."
+**Partially fixed (commit 30ae40b)**: `_chunked_prefill()` now acquires `mlx_io_lock` (matching `MLXPrefillAdapter.process_prefill_chunk()`), so concurrent prefills are serialized. `step_once()` already acquires `mlx_io_lock` around `batch_gen.next()`.
 
-**Risk**: HIGH if scheduler disabled + multiple concurrent requests. Not applicable in batch=2 mode (requires scheduler).
+**Remaining risk**: `batch_gen.insert()` (called from `submit()`) is still unprotected by `mlx_io_lock`. However, `insert()` primarily manipulates Python lists (no heavy MLX ops), and the batch=2 mode requires the scheduler anyway.
+
+**Risk**: MEDIUM if scheduler disabled + multiple concurrent requests. Not applicable in batch=2 mode.
 
 ### DESIGN CONSTRAINT: `_promote_waiting()` blocks promotion during active decodes [PERF]
 
@@ -709,16 +707,20 @@ The interleaved prefill path (`_process_one_chunk()` → `_promote_to_decode()`)
 5. **`mx.eval()` after merge/filter/extend/extract** materializes lazy tensors, preventing stale graph crashes.
 6. **`mx.synchronize()`** after filter syncs `generation_stream`, ensuring command buffers are committed before next decode.
 
-### What Needs Fixing
+### What Was Fixed (commit 30ae40b)
 
-1. **Misleading `mx.synchronize()` comment** — should say "syncs generation_stream (current default)" not "syncs ALL streams."
+1. **FIXED**: Misleading `mx.synchronize()` comment — now says "syncs generation_stream (current default)", not "all streams."
+2. **FIXED**: `_chunked_prefill()` now acquires `mlx_io_lock` for safety in the non-scheduler path.
+3. **FIXED**: `clear_all_agent_blocks()` added to engine + admin API sync to prevent double-free.
+4. **FIXED**: Defensive `BlockOperationError` catch in `_finalize_sequence()` for already-freed blocks.
+5. **FIXED**: Stale temperature comment in `coordination_service.py`.
 
-2. **`_chunked_prefill()` lacks `mlx_io_lock`** — safe under scheduler (single-threaded), unsafe without scheduler. Should either add the lock or document that the non-scheduler path is unsafe for concurrent requests.
+### What Was Verified Safe (2026-02-08 review)
 
-3. **The system reboot crash** needs root-cause analysis. Possible causes:
-   - Metal command buffer accumulation under lock contention
-   - Interaction between `generation_stream` context and lock held across thread boundaries
-   - Wired memory exhaustion from rapid server restart cycles (see Metal GPU Memory Wiring Issue in MEMORY.md)
+1. **BUG 3 (lazy slices in `_extract_cache()`)**: Safe — Q4 path materializes via `mx.contiguous()` + `mx.eval()` before slicing.
+2. **BUG 4 (`get_agent_blocks()` snapshot timing)**: Safe — temporal ordering ensures save() completes before finalize() nulls data.
+3. **No remaining TODO/FIXME items** related to batch processing or Metal threading.
+4. **No stale "all streams" comments** remain in the codebase.
 
 ### Architecture Assessment
 
@@ -728,15 +730,15 @@ The current architecture is **fundamentally sound** when the scheduler is enable
 - `mlx_io_lock` serializes the only cross-thread MLX operations (save/load)
 - Lazy tensors are materialized at all transition points (merge, filter, extend, extract)
 - The B=1 split strategy avoids `mx.compile` pitfalls
+- `mx.async_eval` → `mx.eval` patch eliminates async command buffer conflicts
 
-The remaining crash risk comes from:
-1. **Thread A (event loop) calling `mx.save_safetensors()` concurrent with Thread B (scheduler) calling `batch_gen.next()`** — both protected by `mlx_io_lock`, so they should not overlap. If crashes still occur, the lock may not be consistently acquired, or there's a code path that bypasses it.
-2. **Wired memory exhaustion** from crash cycles — not a code bug, but a Metal runtime limitation.
+The remaining crash risk is:
+1. **Wired memory exhaustion** from crash cycles — not a code bug, but a Metal runtime limitation. Only fix is a system reboot.
+2. **The system reboot crash (Pattern 3)** needs reproduction in a clean environment. Since the scheduler is single-threaded, `mlx_io_lock` around `batch_gen.next()` and `process_prefill_chunk()` should be sequential, not deadlocking. The crash may have been caused by accumulated wired memory from prior crash cycles rather than a code issue.
 
 ### Recommended Next Steps
 
-1. Fix the `mx.synchronize()` comment to be accurate.
-2. Add `mlx_io_lock` to `_chunked_prefill()` for correctness in the non-scheduler path.
-3. Carefully test the batch=2 path with extensive logging to confirm `mlx_io_lock` is actually held during all MLX operations across both threads.
-4. Monitor wired memory before testing — reboot if necessary to establish a clean baseline.
-5. Test incrementally: single-thread first (confirm batch=2 decode works), then add the save path.
+1. Reboot to establish clean wired memory baseline before testing batch=2.
+2. Test incrementally: single request first, then dual concurrent requests.
+3. Monitor Metal allocations and command buffer commits during testing.
+4. Run the COLM benchmark suite (`colm_full_benchmark.py`) for comprehensive validation.
