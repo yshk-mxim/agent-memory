@@ -92,13 +92,13 @@ class MLXSettings(BaseSettings):
     )
 
     reasoning_extra_tokens: int = Field(
-        default=300,
+        default=0,
         ge=0,
         le=1000,
         description=(
-            "Extra tokens for reasoning models (GPT-OSS, etc.) that generate "
-            "chain-of-thought before final response. Default 300 is safe for "
-            "all models - non-reasoning models simply have extra headroom."
+            "Extra tokens for reasoning models that generate "
+            "chain-of-thought before final response. Default 0 — only set "
+            "explicitly for models that support structured reasoning."
         ),
     )
 

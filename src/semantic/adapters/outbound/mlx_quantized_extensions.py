@@ -271,7 +271,6 @@ class BatchQuantizedKVCache(_BaseCache):
 
         self.keys = tuple(k[batch_indices] for k in self.keys)
         self.values = tuple(v[batch_indices] for v in self.values)
-        # NOTE: Do NOT call mx.eval() here - matches upstream BatchKVCache.filter()
 
         self.offset = self.offset[batch_indices]
         self.left_padding = self.left_padding[batch_indices]
@@ -377,10 +376,13 @@ class BatchQuantizedKVCache(_BaseCache):
                 mx.contiguous(v_scales[idx : idx + 1, :, pad:end, :]),
                 mx.contiguous(v_zeros[idx : idx + 1, :, pad:end, :]),
             )
-            # Force eval so extracted data is independent of batch tensors.
-            # Without this, lazy contiguous ops can reference batch cache
-            # tensors that get freed when active_batch = None in _next().
-            mx.eval(*cache.keys, *cache.values)
+            # DO NOT call mx.eval() here. mlx_lm's _next() calls
+            # mx.async_eval(batch.y) right before extract_cache(), creating
+            # a committed Metal command buffer. Any mx.eval on tensors in
+            # that pipeline triggers "Completed handler provided after commit
+            # call". The mx.contiguous() ops create lazy copies — Python
+            # refcounting keeps the source batch tensors alive until the
+            # copies are eventually evaluated in a later command buffer.
             cache.offset = end - pad
 
         return cache

@@ -366,6 +366,11 @@ async def _stream_via_scheduler(  # noqa: C901, PLR0912
                 "created": created,
                 "model": model,
                 "choices": [{"index": 0, "delta": {}, "finish_reason": finish_reason}],
+                "usage": {
+                    "prompt_tokens": len(tokens),
+                    "completion_tokens": token_count,
+                    "total_tokens": len(tokens) + token_count,
+                },
             }
         )
     }
@@ -547,7 +552,8 @@ async def stream_chat_completion(  # noqa: C901, PLR0912, PLR0915
         else:
             finish_reason = "length"
 
-        # Yield final chunk with finish_reason
+        # Yield final chunk with finish_reason and usage
+        comp_tokens = completion.token_count if completion else 0
         yield {
             "data": json.dumps(
                 {
@@ -562,6 +568,11 @@ async def stream_chat_completion(  # noqa: C901, PLR0912, PLR0915
                             "finish_reason": finish_reason,
                         }
                     ],
+                    "usage": {
+                        "prompt_tokens": len(_tokens),
+                        "completion_tokens": comp_tokens,
+                        "total_tokens": len(_tokens) + comp_tokens,
+                    },
                 }
             )
         }
@@ -570,7 +581,7 @@ async def stream_chat_completion(  # noqa: C901, PLR0912, PLR0915
         yield {"data": "[DONE]"}
 
         logger.info(
-            f"Streaming complete: {completion.token_count} tokens, finish_reason={finish_reason}"
+            f"Streaming complete: {comp_tokens} tokens, finish_reason={finish_reason}"
         )
 
     except asyncio.CancelledError:

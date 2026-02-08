@@ -66,13 +66,16 @@ class ConcurrentScheduler:
         prefill_adapter: Any,
         n_layers: int,
         interleave_threshold: int = INTERLEAVE_THRESHOLD_DEFAULT,
+        max_batch_size: int = 2,
     ) -> None:
         self._engine = engine
         self._prefill_adapter = prefill_adapter
         self._n_layers = n_layers
         self._interleave_threshold = interleave_threshold
+        self._max_batch_size = max_batch_size
 
         self._request_queue: queue.Queue[SchedulerRequest] = queue.Queue()
+        self._waiting_queue: deque[SchedulerRequest] = deque()
         self._prefill_queue: deque[tuple[PrefillState, SchedulerRequest]] = deque()
         self._uid_to_request: dict[str, SchedulerRequest] = {}
 
@@ -197,6 +200,10 @@ class ConcurrentScheduler:
     def active_decodes(self) -> int:
         return len(self._uid_to_request)
 
+    @property
+    def waiting_requests(self) -> int:
+        return len(self._waiting_queue)
+
     # ------------------------------------------------------------------
     # Scheduling loop (worker thread)
     # ------------------------------------------------------------------
@@ -222,44 +229,80 @@ class ConcurrentScheduler:
             if not did_work:
                 self._wait_for_request(timeout=0.05)
 
+    def _active_count(self) -> int:
+        """Total sequences in-flight: active decodes + prefilling."""
+        return len(self._uid_to_request) + len(self._prefill_queue)
+
     def _accept_requests(self) -> int:
-        """Drain request queue into prefill queue or direct-to-decode."""
+        """Drain request queue; submit up to max_batch_size, queue the rest."""
         count = 0
+
+        # First, drain incoming requests into the waiting queue
         while True:
             try:
                 req = self._request_queue.get_nowait()
             except queue.Empty:
                 break
-
+            self._waiting_queue.append(req)
             count += 1
-            n_tokens = len(req.prompt_tokens)
 
-            # Warm requests with cached state: always use direct path.
-            # engine.submit() handles character-level prefix matching and
-            # only processes new tokens. _enqueue_prefill() creates fresh
-            # caches, ignoring the stored KV state entirely.
-            if req.cache is not None:
-                # Warn if the delta between cached tokens and prompt tokens
-                # is large — direct path will block all decode streams during
-                # reconstruction + non-interleaved prefill of the delta.
-                cached_tokens = req.cache.total_tokens if req.cache else 0
-                delta_tokens = n_tokens - cached_tokens
-                if delta_tokens > self._interleave_threshold:
-                    logger.warning(
-                        "[SCHEDULER] Warm cache + large delta (%d tokens, "
-                        "cached=%d, prompt=%d) — direct path will block "
-                        "decode. Consider chunked warm prefill.",
-                        delta_tokens,
-                        cached_tokens,
-                        n_tokens,
-                    )
-                self._submit_direct(req)
-            elif n_tokens < self._interleave_threshold:
-                self._submit_direct(req)
-            else:
-                self._enqueue_prefill(req)
+        # Then, promote from waiting queue up to max_batch_size
+        submitted = self._promote_waiting()
 
-        return count
+        return count + submitted
+
+    def _promote_waiting(self) -> int:
+        """Submit waiting requests up to max_batch_size. Returns count submitted.
+
+        Only promotes when there are free batch slots AND no active decodes.
+        Mid-batch insertion (adding a new sequence while another is decoding)
+        corrupts the shared Q4 batch cache state in the engine.  We wait for
+        the current batch to drain completely before starting the next batch.
+        """
+        # Block promotion while any sequence is still decoding — the engine's
+        # Q4 batch caches are shared tensors that can't be extended mid-decode.
+        if self._uid_to_request:
+            return 0
+
+        submitted = 0
+        while self._waiting_queue and self._active_count() < self._max_batch_size:
+            req = self._waiting_queue.popleft()
+            self._dispatch_request(req)
+            submitted += 1
+        if self._waiting_queue:
+            logger.debug(
+                "[SCHEDULER] %d requests waiting (batch full: %d/%d active)",
+                len(self._waiting_queue),
+                self._active_count(),
+                self._max_batch_size,
+            )
+        return submitted
+
+    def _dispatch_request(self, req: SchedulerRequest) -> None:
+        """Route a single request to direct submit or chunked prefill."""
+        n_tokens = len(req.prompt_tokens)
+
+        # Warm requests with cached state: always use direct path.
+        # engine.submit() handles character-level prefix matching and
+        # only processes new tokens. _enqueue_prefill() creates fresh
+        # caches, ignoring the stored KV state entirely.
+        if req.cache is not None:
+            cached_tokens = req.cache.total_tokens if req.cache else 0
+            delta_tokens = n_tokens - cached_tokens
+            if delta_tokens > self._interleave_threshold:
+                logger.warning(
+                    "[SCHEDULER] Warm cache + large delta (%d tokens, "
+                    "cached=%d, prompt=%d) — direct path will block "
+                    "decode. Consider chunked warm prefill.",
+                    delta_tokens,
+                    cached_tokens,
+                    n_tokens,
+                )
+            self._submit_direct(req)
+        elif n_tokens < self._interleave_threshold:
+            self._submit_direct(req)
+        else:
+            self._enqueue_prefill(req)
 
     def _submit_direct(self, req: SchedulerRequest) -> None:
         """Short prompt — submit directly to BatchGenerator."""
@@ -310,8 +353,12 @@ class ConcurrentScheduler:
         """
         try:
             results = self._engine.step_once()
-        except Exception:
+        except Exception as exc:
             logger.exception("[SCHEDULER] Decode step failed")
+            # Reject all in-flight requests to avoid infinite loop
+            for uid, req in list(self._uid_to_request.items()):
+                self._reject_request(req, exc)
+            self._uid_to_request.clear()
             return
 
         for result in results:
@@ -320,7 +367,7 @@ class ConcurrentScheduler:
                 continue
 
             if result.finish_reason is not None:
-                # Sequence complete
+                # Sequence complete — free a batch slot
                 self._uid_to_request.pop(result.uid, None)
 
                 if req.token_queue is not None:

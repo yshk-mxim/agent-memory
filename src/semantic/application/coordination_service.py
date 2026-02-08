@@ -60,7 +60,7 @@ class CoordinationService:
         scheduler,
         cache_store,
         engine,
-        reasoning_extra_tokens: int = 300,
+        reasoning_extra_tokens: int = 0,
         chat_template: ChatTemplatePort | None = None,
     ) -> None:
         self._scheduler = scheduler

@@ -45,29 +45,34 @@ def apply_fused_attention_patch() -> bool:
 
     _original_q4_sdpa = base_module.quantized_scaled_dot_product_attention
 
-    # --- Compiled Q4 SDPA (general case) ---
-    # mx.compile fuses element-wise ops (scale multiply, mask add, softmax)
-    # reducing kernel launches from ~5 to ~3 per layer. shapeless=True avoids
-    # recompilation when sequence length changes between prefill chunks.
-    # We create separate compiled functions per n_repeats value since
-    # mx.compile can't trace through data-dependent control flow.
+    # --- Compiled Q4 SDPA (per-sequence, B=1) ---
+    # mx.compile fuses element-wise ops (scale multiply, mask add, softmax).
+    # We always call the compiled function with B=1 by splitting the batch,
+    # so mx.compile never sees batch dimension changes (which crash natively).
     _compiled_cache: dict[int, Any] = {}
 
     def _get_compiled_sdpa(n_repeats: int):
-        """Get or create compiled SDPA for this GQA repeat count."""
+        """Get or create compiled SDPA for this GQA repeat count.
+
+        Always called with B=1 inputs — batch is split before calling.
+        GQA uses shapeless=False because the reshape reads queries.shape
+        (shapeless=True would bake L from the first trace).
+        B=1 is constant so retraces only happen on L changes — safe.
+        Non-GQA has no reshape so shapeless=True is fine.
+        """
         if n_repeats in _compiled_cache:
             return _compiled_cache[n_repeats]
 
         if n_repeats > 1:
-            # shapeless=False for GQA: the reshape depends on input shape (L),
-            # which shapeless=True would bake from the first trace. Recompiles
-            # per unique (B, L) but decode (L=1) caches after first call.
             @partial(mx.compile, shapeless=False)
             def _inner(queries, k0, k1, k2, v0, v1, v2, scale_arr, mask):
-                B, n_q_heads, L, D = queries.shape
+                # B is always 1 here — batch was split by caller
+                n_q_heads = queries.shape[1]
+                L = queries.shape[2]
+                D = queries.shape[3]
                 n_kv_heads = n_q_heads // n_repeats
                 queries = queries * scale_arr
-                queries = mx.reshape(queries, (B, n_kv_heads, n_repeats, L, D))
+                queries = mx.reshape(queries, (1, n_kv_heads, n_repeats, L, D))
                 k0_ = mx.expand_dims(k0, axis=-3)
                 k1_ = mx.expand_dims(k1, axis=-3)
                 k2_ = mx.expand_dims(k2, axis=-3)
@@ -86,7 +91,7 @@ def apply_fused_attention_patch() -> bool:
                 out = mx.quantized_matmul(
                     scores, v0_, v1_, v2_, transpose=False, group_size=64, bits=4,
                 )
-                return mx.reshape(out, (B, n_q_heads, L, -1))
+                return mx.reshape(out, (1, n_q_heads, L, -1))
         else:
             @partial(mx.compile, shapeless=True)
             def _inner(queries, k0, k1, k2, v0, v1, v2, scale_arr, mask):
@@ -108,7 +113,12 @@ def apply_fused_attention_patch() -> bool:
         return _inner
 
     def _fused_q4_sdpa(queries, q_keys, q_values, scale, mask, group_size=64, bits=4):
-        """Drop-in replacement for quantized_scaled_dot_product_attention."""
+        """Drop-in replacement for quantized_scaled_dot_product_attention.
+
+        Splits batch into individual sequences so the compiled function
+        always sees B=1. This avoids mx.compile crashes when batch size
+        changes mid-decode (e.g. B=2→B=1 after batch.filter()).
+        """
         n_kv_heads = q_keys[0].shape[-3]
         n_q_heads = queries.shape[1]
         n_repeats = n_q_heads // n_kv_heads
@@ -129,13 +139,30 @@ def apply_fused_attention_patch() -> bool:
                 group_size=group_size, bits=bits,
             )
 
-        # Unpack tuples for mx.compile tracing
-        k0, k1, k2 = q_keys
-        v0, v1, v2 = q_values
-        scale_arr = mx.array(scale, dtype=queries.dtype)
-
+        B = queries.shape[0]
         compiled_fn = _get_compiled_sdpa(n_repeats)
-        return compiled_fn(queries, k0, k1, k2, v0, v1, v2, scale_arr, mask)
+
+        if B == 1:
+            # Single sequence — call compiled function directly
+            k0, k1, k2 = q_keys
+            v0, v1, v2 = q_values
+            scale_arr = mx.array(scale, dtype=queries.dtype)
+            return compiled_fn(queries, k0, k1, k2, v0, v1, v2, scale_arr, mask)
+
+        # Batch>1: split into per-sequence calls, then stack.
+        # Each compiled call sees B=1 — no batch dim changes ever.
+        scale_arr = mx.array(scale, dtype=queries.dtype)
+        parts = []
+        for i in range(B):
+            q_i = queries[i:i+1]
+            k_i = tuple(k[i:i+1] for k in q_keys)
+            v_i = tuple(v[i:i+1] for v in q_values)
+            m_i = mask[i:i+1] if mask is not None else None
+            parts.append(compiled_fn(
+                q_i, k_i[0], k_i[1], k_i[2],
+                v_i[0], v_i[1], v_i[2], scale_arr, m_i,
+            ))
+        return mx.concatenate(parts, axis=0)
 
     # --- Metal kernel for L=1 decode ---
     _decode_kernel_cache: dict[tuple, Any] = {}
@@ -385,8 +412,31 @@ inline float dequant4(
             queries, q_keys, q_values, scale, mask, group_size, bits,
         )
 
-    # Apply the monkeypatch
+    # Apply the SDPA monkeypatch
     base_module.quantized_scaled_dot_product_attention = _patched_q4_sdpa
+
+    # Patch clip_residual in Gemma3 to remove mx.compile.
+    # clip_residual is @partial(mx.compile, shapeless=True) and called 52 times
+    # per forward pass (2x per layer, 26 layers). When batch.filter() changes
+    # B from 2→1 mid-decode, the compiled Metal kernel crashes accessing the
+    # nonexistent batch slot. For bfloat16 (Gemma3 Q4), clip_residual is just
+    # x + y — compilation has no benefit. For float16, it's a simple clip+cast.
+    try:
+        import mlx_lm.models.gemma3_text as gemma3_text_module
+
+        def _uncompiled_clip_residual(x, y):
+            if x.dtype != mx.float16:
+                return x + y
+            bound = mx.finfo(mx.float16).max
+            return mx.clip(
+                x.astype(mx.float32) + y.astype(mx.float32), -bound, bound,
+            ).astype(mx.float16)
+
+        gemma3_text_module.clip_residual = _uncompiled_clip_residual
+        logger.info("Patched gemma3_text.clip_residual (removed mx.compile for batch compat)")
+    except (ImportError, AttributeError):
+        logger.debug("gemma3_text not available, skipping clip_residual patch")
+
     _patched = True
     if _metal_decode_disabled:
         logger.info("Applied fused Q4 attention monkeypatch (compile only, Metal decode disabled)")

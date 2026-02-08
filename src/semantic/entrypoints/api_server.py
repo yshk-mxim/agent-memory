@@ -286,6 +286,11 @@ async def lifespan(app: FastAPI):
         from semantic.adapters.outbound.mlx_fused_attention import apply_fused_attention_patch
         apply_fused_attention_patch()
 
+        # Let MLX keep its default buffer cache — disabling it with
+        # set_cache_limit(0) forces the Metal allocator to handle every
+        # alloc/free, which can lead to OOM under memory pressure.
+        # The shutdown path below handles cleanup on graceful exit.
+
         # Load model and extract spec
         model, tokenizer, model_spec = _load_model_and_extract_spec(settings)
 
@@ -351,6 +356,7 @@ async def lifespan(app: FastAPI):
                     prefill_adapter=prefill_adapter,
                     n_layers=model_spec.n_layers,
                     interleave_threshold=settings.mlx.scheduler_interleave_threshold,
+                    max_batch_size=settings.mlx.max_batch_size,
                 )
                 scheduler.start()
                 app.state.semantic.scheduler = scheduler
@@ -403,6 +409,48 @@ async def lifespan(app: FastAPI):
             logger.info("scheduler_stopped")
 
         await _drain_and_persist(batch_engine, cache_store)
+
+        # Explicitly release model and GPU memory to prevent wired memory
+        # accumulation across server restarts.  Without this, killed processes
+        # can leave Metal allocations that the OS is slow to reclaim.
+        logger.info("releasing_gpu_memory")
+        try:
+            import gc
+            import mlx.core as mx
+
+            # 1. Shut down batch engine (clears internal model/tokenizer refs)
+            if batch_engine is not None:
+                batch_engine.shutdown()
+
+            # 2. Unload model from registry (dels model, tokenizer, gc.collects)
+            if model_registry is not None:
+                model_registry.unload_model()
+
+            # 3. Clear block pool tensors
+            if block_pool is not None:
+                block_pool.force_clear_all_allocations()
+
+            # 4. Clear all app.state references
+            if hasattr(app.state, 'semantic'):
+                for attr in list(vars(app.state.semantic).keys()):
+                    setattr(app.state.semantic, attr, None)
+
+            # 5. Delete local variables holding references
+            del model, tokenizer, batch_engine, block_pool, cache_store
+            del model_registry, model_swap_orchestrator, coordination_service
+
+            # 6. Force garbage collection + clear Metal cache
+            gc.collect()
+            gc.collect()  # Second pass for ref cycles
+            mx.clear_cache()
+            logger.info(
+                "gpu_memory_released",
+                active_mb=round(mx.get_active_memory() / 1024**2),
+                cache_mb=round(mx.get_cache_memory() / 1024**2),
+            )
+        except Exception as e:
+            logger.warning("gpu_memory_release_error", error=str(e))
+
         logger.info("server_shutdown_complete")
     except Exception as e:
         logger.error("lifespan_error", error=str(e), exc_info=True)
