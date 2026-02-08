@@ -282,6 +282,15 @@ class BatchQuantizedKVCache(_BaseCache):
             self._idx -= min_pad
             self.left_padding = self.left_padding - min_pad
 
+        # Force evaluation of lazy indexed tensors.  Without this, the
+        # lazy ops still reference the old B=N parent tensors.  When the
+        # next _step() builds a new computation graph with B=N-1 inputs,
+        # Metal crashes trying to resolve stale parent references.
+        # Safe because mx.async_eval has been replaced with mx.eval
+        # (commit 04c814d), so the previous command buffer is fully
+        # committed before filter() runs.
+        mx.eval(*self.keys, *self.values)
+
     # ------------------------------------------------------------------
     # extend: merge another batch cache into this one (staggered arrival)
     # ------------------------------------------------------------------
@@ -376,13 +385,12 @@ class BatchQuantizedKVCache(_BaseCache):
                 mx.contiguous(v_scales[idx : idx + 1, :, pad:end, :]),
                 mx.contiguous(v_zeros[idx : idx + 1, :, pad:end, :]),
             )
-            # DO NOT call mx.eval() here. mlx_lm's _next() calls
-            # mx.async_eval(batch.y) right before extract_cache(), creating
-            # a committed Metal command buffer. Any mx.eval on tensors in
-            # that pipeline triggers "Completed handler provided after commit
-            # call". The mx.contiguous() ops create lazy copies — Python
-            # refcounting keeps the source batch tensors alive until the
-            # copies are eventually evaluated in a later command buffer.
+            # Materialize lazy contiguous copies so the extracted cache
+            # is fully independent of the batch tensors.  Safe because
+            # mx.async_eval has been replaced with mx.eval (commit 04c814d),
+            # so the previous command buffer is fully committed before
+            # extract() runs — no "Completed handler after commit" risk.
+            mx.eval(*cache.keys, *cache.values)
             cache.offset = end - pad
 
         return cache
