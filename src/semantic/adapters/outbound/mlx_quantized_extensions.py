@@ -147,8 +147,18 @@ class BatchQuantizedKVCache(_BaseCache):
             values_scales[i : i + 1, :, p:dest_end, :] = v_s[..., :actual_offset, :]
             values_zeros[i : i + 1, :, p:dest_end, :] = v_z[..., :actual_offset, :]
 
-        # NOTE: Do NOT call mx.eval() here - let MLX handle lazy evaluation.
-        # Forcing eval mid-graph can cause Metal command buffer conflicts.
+        # Materialize the merged cache tensors.  The slice assignments
+        # above create lazy indexed tensors backed by the parent buffers.
+        # If not materialized, the lazy graph survives through decode →
+        # extract → filter, and when the next forward pass runs with a
+        # different batch size (B=2→B=1), Metal crashes resolving stale
+        # parent references.  This happens for BOTH symmetric and
+        # asymmetric merges — the slice assignment pattern itself creates
+        # the problematic lazy chain regardless of padding.
+        mx.eval(
+            keys_quant, keys_scales, keys_zeros,
+            values_quant, values_scales, values_zeros,
+        )
 
         batch_cache = cls(
             group_size=group_size,
@@ -282,14 +292,13 @@ class BatchQuantizedKVCache(_BaseCache):
             self._idx -= min_pad
             self.left_padding = self.left_padding - min_pad
 
-        # Force evaluation of lazy indexed tensors.  Without this, the
-        # lazy ops still reference the old B=N parent tensors.  When the
-        # next _step() builds a new computation graph with B=N-1 inputs,
-        # Metal crashes trying to resolve stale parent references.
-        # Safe because mx.async_eval has been replaced with mx.eval
-        # (commit 04c814d), so the previous command buffer is fully
-        # committed before filter() runs.
-        mx.eval(*self.keys, *self.values)
+        # Synchronize ALL Metal streams before the next decode step.
+        # mx.eval on individual tensors isn't sufficient — there can be
+        # pending operations on other streams (generation_stream vs default)
+        # that cause "uncommitted encoder" assertions when the next forward
+        # pass submits new work.  mx.synchronize() ensures all command
+        # buffers across all streams are committed and complete.
+        mx.synchronize()
 
     # ------------------------------------------------------------------
     # extend: merge another batch cache into this one (staggered arrival)
@@ -348,7 +357,8 @@ class BatchQuantizedKVCache(_BaseCache):
 
         self.keys = tuple(mx.concatenate([sk, ok], axis=0) for sk, ok in zip(self_k, other_k))
         self.values = tuple(mx.concatenate([sv, ov], axis=0) for sv, ov in zip(self_v, other_v))
-        # NOTE: Do NOT call mx.eval() here - matches upstream BatchKVCache.extend()
+        # Materialize concatenated tensors — same rationale as merge().
+        mx.eval(*self.keys, *self.values)
 
         self.offset = mx.concatenate([self_off, other_off])
         self.left_padding = mx.concatenate([self_lp, other_lp])
