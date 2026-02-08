@@ -10,6 +10,12 @@ but has no identity - there is only one pool per server instance.
 
 import threading
 
+# Global lock for MLX I/O operations (save/load safetensors, mx.eval on disk data).
+# MLX is NOT thread-safe (upstream issue #2067). Without this lock, concurrent
+# mx.save_safetensors (request handler thread) and mx.eval (scheduler thread)
+# cause SIGSEGV.
+mlx_io_lock = threading.Lock()
+
 from semantic.domain.entities import KVBlock
 from semantic.domain.errors import (
     BlockOperationError,

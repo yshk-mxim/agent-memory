@@ -15,6 +15,8 @@ import mlx.core as mx
 from mlx_lm.generate import generation_stream
 from mlx_lm.models.cache import QuantizedKVCache
 
+from semantic.domain.services import mlx_io_lock
+
 logger = logging.getLogger(__name__)
 
 MIN_CHUNK_DEFAULT = 512
@@ -94,7 +96,7 @@ class MLXPrefillAdapter:
         """
         t0 = time.time()
 
-        with mx.stream(generation_stream):
+        with mlx_io_lock, mx.stream(generation_stream):
             chunk_tokens = mx.array([tokens[start:end]])
             y = self._model(chunk_tokens, cache=kv_caches)
             mx.eval(y)

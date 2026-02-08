@@ -266,6 +266,14 @@ class BatchQuantizedKVCache(_BaseCache):
             self.keys[i][..., prev : prev + n_tokens, :] = q_keys[i][..., :n_tokens, :]
             self.values[i][..., prev : prev + n_tokens, :] = q_values[i][..., :n_tokens, :]
 
+        # Materialize in-place scatter operations after filter() transitions.
+        # Without this, the second decode step after B=2→B=1 filter crashes
+        # with a silent Metal abort — the scatter-on-scatter chain on
+        # post-filter tensors produces an invalid Metal command buffer.
+        if getattr(self, "_post_filter_evals", 0) > 0:
+            mx.eval(*self.keys, *self.values)
+            self._post_filter_evals -= 1
+
         result = tree_map(lambda x: x[..., : self._idx, :], (self.keys, self.values))
 
         if expanded:
@@ -279,6 +287,7 @@ class BatchQuantizedKVCache(_BaseCache):
         if self.keys is None:
             return
 
+        old_b = self.keys[0].shape[0]
         self.keys = tuple(k[batch_indices] for k in self.keys)
         self.values = tuple(v[batch_indices] for v in self.values)
 
@@ -292,13 +301,36 @@ class BatchQuantizedKVCache(_BaseCache):
             self._idx -= min_pad
             self.left_padding = self.left_padding - min_pad
 
-        # Synchronize ALL Metal streams before the next decode step.
+        # Materialize filtered tensors. The indexing/slicing above creates
+        # lazy views referencing the old B=2 tensors. Without eval, the
+        # next forward pass (now B=1) crashes resolving stale parent
+        # references — same pattern as merge() and extend().
+        mx.eval(*self.keys, *self.values)
+
+        new_b = self.keys[0].shape[0]
+        logger.info(
+            "[Q4 FILTER] B=%d->%d, _idx=%d, offset=%s, lp=%s, min_pad=%d, "
+            "k_shape=%s",
+            old_b, new_b, self._idx,
+            self.offset.tolist(), self.left_padding.tolist(),
+            min_pad, self.keys[0].shape,
+        )
+
+        # Synchronize the generation_stream before the next decode step.
         # mx.eval on individual tensors isn't sufficient — there can be
-        # pending operations on other streams (generation_stream vs default)
-        # that cause "uncommitted encoder" assertions when the next forward
-        # pass submits new work.  mx.synchronize() ensures all command
-        # buffers across all streams are committed and complete.
+        # pending operations on the generation_stream (where batch_gen.next()
+        # runs inside mx.stream(generation_stream)) that cause "uncommitted
+        # encoder" assertions when the next forward pass submits new work.
+        # mx.synchronize() without args syncs the current default stream,
+        # which inside the generation_stream context IS generation_stream.
+        # NOTE: This does NOT sync "all streams" — only the current default.
         mx.synchronize()
+
+        # Signal update_and_fetch() to mx.eval after scatter for the
+        # next few decode steps.  The second decode step after filter
+        # crashes with a silent Metal abort if scatters remain lazy
+        # on post-filter tensors.  3 steps provides safety margin.
+        self._post_filter_evals = 3
 
     # ------------------------------------------------------------------
     # extend: merge another batch cache into this one (staggered arrival)

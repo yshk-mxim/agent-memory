@@ -14,12 +14,13 @@ if TYPE_CHECKING:
 
 from semantic.domain.entities import AgentBlocks, KVBlock
 from semantic.domain.errors import (
+    BlockOperationError,
     GenerationError,
     InvalidRequestError,
     ModelNotFoundError,
     PoolExhaustedError,
 )
-from semantic.domain.services import BlockPool
+from semantic.domain.services import BlockPool, mlx_io_lock
 from semantic.domain.value_objects import CompletedGeneration, ModelCacheSpec, StepOneResult
 
 logger = logging.getLogger(__name__)
@@ -316,6 +317,21 @@ class BlockPoolBatchEngine:
                 return True
             return False
 
+    def clear_all_agent_blocks(self) -> int:
+        """Clear all agent block tracking (thread-safe).
+
+        Called after force_clear_all_allocations() to keep engine in sync
+        with pool state. Without this, stale _agent_blocks entries cause
+        double-free errors on subsequent requests.
+
+        Returns:
+            Number of agent entries cleared.
+        """
+        with self._lock:
+            count = len(self._agent_blocks)
+            self._agent_blocks.clear()
+            return count
+
     # --- End public accessors ---
 
     def _chunked_prefill(
@@ -396,7 +412,13 @@ class BlockPoolBatchEngine:
 
             # Run model forward pass on generation_stream — the same stream
             # BatchGenerator uses — to prevent Metal command buffer conflicts.
-            with mx.stream(generation_stream):
+            # Acquire mlx_io_lock to prevent concurrent MLX operations from
+            # the cache-save thread (event loop).  When called from the
+            # scheduler-worker thread this is technically redundant (single-
+            # threaded), but when called from asyncio.to_thread() (no
+            # scheduler) multiple submits can overlap.  Matches the lock
+            # pattern in MLXPrefillAdapter.process_prefill_chunk().
+            with mlx_io_lock, mx.stream(generation_stream):
                 chunk_tokens = tokens_array[:, pos:end]
                 y = self._model(chunk_tokens, cache=kv_caches)
                 mx.eval(y)
@@ -1410,7 +1432,14 @@ class BlockPoolBatchEngine:
                 for layer_blocks in old_blocks.blocks.values():
                     for block in layer_blocks:
                         block.layer_data = None
-                    self._pool.free(layer_blocks, agent_id)
+                    try:
+                        self._pool.free(layer_blocks, agent_id)
+                    except BlockOperationError:
+                        # Blocks may have been force-cleared by admin API
+                        logger.debug(
+                            "[FINALIZE] Stale blocks for agent=%s (pool was reset)",
+                            agent_id,
+                        )
                 del self._agent_blocks[agent_id]
 
         full_token_sequence = list(prompt_tokens)
@@ -1522,7 +1551,15 @@ class BlockPoolBatchEngine:
             return results
 
         try:
-            batch_response = self._batch_gen.next()
+            n_active = len(self._active_requests)
+            logger.debug("[STEP_ONCE] calling _next(), active_requests=%d", n_active)
+            # Acquire mlx_io_lock during inference to prevent concurrent MLX
+            # operations from the cache-save thread.  MLX is NOT thread-safe
+            # (upstream issue #2067): mx.save_safetensors on the request handler
+            # thread + model forward pass here → SIGSEGV.
+            with mlx_io_lock:
+                batch_response = self._batch_gen.next()
+            logger.debug("[STEP_ONCE] _next() returned %d responses", len(batch_response) if batch_response else 0)
         except MemoryError as e:
             logger.error(f"OOM during batch generation step: {e}")
             self._batch_gen = None
@@ -1810,8 +1847,11 @@ class BlockPoolBatchEngine:
                 cache.append((k_full, v_full))
 
         # Single batched GPU sync for ALL layers (was ~54 separate mx.eval calls)
+        # Acquire mlx_io_lock to prevent concurrent MLX operations with
+        # safetensors_cache_adapter.save() on the request handler thread.
         if use_kv_cache and deferred_eval:
-            mx.eval(*deferred_eval)
+            with mlx_io_lock:
+                mx.eval(*deferred_eval)
             logger.info(
                 f"[RECONSTRUCT] Evaluated {len(deferred_eval)} tensors across "
                 f"{len(cache)} layers in single batch"

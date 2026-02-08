@@ -431,6 +431,11 @@ async def clear_all_caches(
             pool_cleared = block_pool.force_clear_all_allocations()
             logger.info(f"Cleared {pool_cleared} pool allocations")
 
+        # Sync engine's _agent_blocks with the now-empty pool
+        engine = semantic.batch_engine
+        if engine and hasattr(engine, "clear_all_agent_blocks"):
+            engine.clear_all_agent_blocks()
+
         total = hot_cleared + disk_cleared + pool_cleared
         return ClearCachesResponse(
             status="success",

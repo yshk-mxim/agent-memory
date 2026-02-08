@@ -610,10 +610,9 @@ class CoordinationService:
             else False
         )
 
-        # DeepSeek sampling: T=0 causes deterministic echo loops (commit 0acecd4).
-        # T>=0.3 causes spacing corruption (concatenated words).
-        # T=0.2 balances variety vs coherence: less echo than 0.1, no spacing issues.
-        # (T=0.1 was original sweet spot but caused heavy echo in multi-turn dialogue.)
+        # DeepSeek sampling: T=0 causes deterministic echo loops in multi-turn.
+        # Spacing corruption was a transformers v5 tokenizer bug (fixed by pinning
+        # <5.0.0), NOT temperature. T=0.3 works fine post-tokenizer-fix.
         temperature = 0.3
         top_p = 0.95
         top_k = 64

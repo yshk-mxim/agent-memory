@@ -13,6 +13,7 @@ from typing import Any
 
 from semantic.domain.entities import AgentBlocks, KVBlock
 from semantic.domain.errors import AgentNotFoundError, CachePersistenceError
+from semantic.domain.services import mlx_io_lock
 
 logger = logging.getLogger(__name__)
 
@@ -201,8 +202,11 @@ class SafetensorsCacheAdapter:
 
         # Atomic write with proper cleanup on failure
         # mx.save_safetensors auto-appends ".safetensors", so pass stem path
+        # Acquire mlx_io_lock to prevent concurrent MLX operations with
+        # _reconstruct_cache() on the scheduler thread (MLX issue #2067).
         try:
-            mx.save_safetensors(str(tmp_stem), tensors, metadata=str_metadata)
+            with mlx_io_lock:
+                mx.save_safetensors(str(tmp_stem), tensors, metadata=str_metadata)
             tmp_path.rename(cache_path)
         except OSError as e:
             # Clean up temp file on failure
@@ -250,7 +254,8 @@ class SafetensorsCacheAdapter:
         import mlx.core as mx
 
         try:
-            tensors_data = mx.load(str(cache_path))
+            with mlx_io_lock:
+                tensors_data = mx.load(str(cache_path))
         except Exception as e:
             raise CachePersistenceError(f"Failed to load tensors from {cache_path}: {e}") from e
 

@@ -5,10 +5,14 @@ Usage:
     python -m semantic.entrypoints.cli serve --host 0.0.0.0 --port 8080
 """
 
+import faulthandler
 import logging
 import signal
 import sys
 from typing import Any
+
+# Print Python traceback on SIGSEGV/SIGABRT/SIGBUS (Metal crashes).
+faulthandler.enable()
 
 import typer
 import uvicorn
