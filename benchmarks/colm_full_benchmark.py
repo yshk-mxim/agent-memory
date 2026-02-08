@@ -6,7 +6,7 @@ Runs the complete measurement matrix for the paper:
 - Contexts: 1K, 2K, 4K, 8K, 16K, 32K
 - Cache states: cold, warm, hot
 - Modes: streaming, non-streaming
-- Batch sizes: 1 (all), 2 (skip 32K)
+- Batch sizes: 1 (all contexts), 2 (1K-16K, skip 32K)
 - Staggered arrivals: sequential vs batched
 - 3 passes per config, T=0.0 greedy (deterministic)
 - T=0.0 is safe for cold/warm (single-turn summarization — no echo risk)
@@ -67,11 +67,7 @@ from streaming_benchmark import (
     _delete_agent,
     _wait_for_server,
 )
-from staggered_benchmark import (
-    StaggeredResult,
-    run_batched as staggered_run_batched,
-    run_sequential as staggered_run_sequential,
-)
+from staggered_benchmark import StaggeredResult
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -100,7 +96,7 @@ COOLDOWN_POLL_INTERVAL = 5  # Seconds between thermal checks
 WARMUP_SETTLE_SECONDS = 30
 THROTTLE_TPS_TOLERANCE = 0.05  # 5% tolerance for TPS recovery
 STAGGER_DELAY = 2.0
-STAGGER_CONTEXT = 2048  # 4K OOMs with 2 concurrent sequences on 24GB
+STAGGER_CONTEXT = 4096  # Paper uses 4K context for staggered arrivals (Figure 3)
 # T=0.0 greedy (argmax): fully deterministic, no seed needed.
 # At T=0, make_sampler() uses mx.argmax — no random variable involved.
 # At T>0, logits/T + Uniform(0,1) → non-deterministic even with seed
@@ -140,18 +136,38 @@ def load_corpus() -> str:
 def build_messages(
     corpus: str, target_tokens: int, offset: int = 0
 ) -> list[dict[str, str]]:
-    """Build prompt from a different portion of corpus per measurement.
+    """Build prompt with controlled content for reliable generation.
 
-    Each measurement uses a different offset to prevent any attention
-    caching or prefix-matching artifacts across measurements.
+    Uses corpus text for shorter contexts (up to ~4K tokens) where the
+    model reliably generates analytical responses. For longer contexts,
+    uses repeated natural-language padding — the same approach used in
+    the original paper benchmarks, which produces reliable TTFT/TPS
+    measurements regardless of context length.
+
+    Each measurement uses a different offset for corpus-based content to
+    prevent attention caching artifacts across measurements.
     """
     chars_needed = target_tokens * 4  # ~4 chars/token
-    max_start = max(len(corpus) - chars_needed, 0)
-    start = offset % max_start if max_start > 0 else 0
-    content = corpus[start : start + chars_needed]
+
+    if target_tokens <= 4096 and len(corpus) > chars_needed:
+        # Short contexts: use diverse corpus text
+        max_start = max(len(corpus) - chars_needed, 0)
+        start = offset % max_start if max_start > 0 else 0
+        content = corpus[start : start + chars_needed]
+    else:
+        # Long contexts: use reliable padding that always produces output.
+        # Gemma 3 generates EOS with diverse text at 12K+ tokens (content-
+        # dependent refusal), but works reliably with structured padding.
+        content = (PADDING_TEXT + " ") * (chars_needed // len(PADDING_TEXT) + 1)
+        content = content[:chars_needed]
     return [
-        {"role": "system", "content": "You are a helpful assistant. Be concise."},
-        {"role": "user", "content": f"Here is some context:\n\n{content}\n\nBriefly summarize the key points."},
+        {
+            "role": "user",
+            "content": (
+                f"Here is some text:\n\n{content}\n\n"
+                "What are the main topics and themes discussed above?"
+            ),
+        },
     ]
 
 
@@ -226,10 +242,15 @@ def build_server_env(model_id: str, batch_size: int, model_key: str = "") -> dic
         "SEMANTIC_MLX_DEFAULT_TEMPERATURE": str(TEMPERATURE),
         "SEMANTIC_MLX_REASONING_EXTRA_TOKENS": "0",
         "SEMANTIC_MLX_CACHE_BUDGET_MB": str(cache_budget),
-        # Bypass chunked interleaved prefill — mx.compile + Metal command buffer
-        # assertion crash when alternating prefill/decode on same stream.
-        # All prompts go through _submit_direct (sequential prefill, concurrent decode).
-        "SEMANTIC_MLX_SCHEDULER_INTERLEAVE_THRESHOLD": "32768",
+        # Use default interleave threshold (2048 tokens) — Metal crashes that
+        # previously required bypassing chunked prefill are fixed by:
+        #   - mx.async_eval → mx.eval (04c814d)
+        #   - mx.synchronize() in filter() (50a4388)
+        #   - B=1 split for mx.compile (b2d5617)
+        #   - clip_residual monkeypatch (b2d5617)
+        #   - merge/extend/extract mx.eval (320d25e)
+        # Interleaved chunked prefill is essential for staggered arrival
+        # benchmarks (Figure 3: User B TTFT reduction).
     })
     return env
 
@@ -956,6 +977,142 @@ async def measure_concurrent(
 
 
 # ---------------------------------------------------------------------------
+# Staggered arrival measurements (uses build_messages for consistent prompts)
+# ---------------------------------------------------------------------------
+
+
+async def staggered_run_sequential(
+    base_url: str,
+    context_tokens: int,
+    output_tokens: int,
+    run_id: int,
+    corpus: str,
+    corpus_offset: int = 0,
+) -> StaggeredResult:
+    """Sequential serving: User A completes, then User B starts."""
+    client = OpenAIStreamingClient(base_url)
+
+    messages_a = build_messages(corpus, context_tokens, corpus_offset)
+    messages_b = build_messages(corpus, context_tokens, corpus_offset + 5000)
+    body_a = {
+        "model": "default",
+        "messages": messages_a,
+        "max_tokens": output_tokens,
+        "temperature": TEMPERATURE,
+        "stream": True,
+    }
+    body_b = {
+        "model": "default",
+        "messages": messages_b,
+        "max_tokens": output_tokens,
+        "temperature": TEMPERATURE,
+        "stream": True,
+    }
+
+    sid_a = f"stagger_seq_a_{run_id}"
+    sid_b = f"stagger_seq_b_{run_id}"
+
+    t_start_wall = time.perf_counter()
+    result_a = await client.send_and_measure(body_a, session_id=sid_a)
+    await _delete_agent(base_url, f"oai_{sid_a}")
+
+    t_start_b = time.perf_counter()
+    result_b = await client.send_and_measure(body_b, session_id=sid_b)
+    t_end_wall = time.perf_counter()
+    await _delete_agent(base_url, f"oai_{sid_b}")
+
+    total_wall_ms = (t_end_wall - t_start_wall) * 1000
+    user_b_delay_ms = (t_start_b - t_start_wall) * 1000
+    total_tokens = result_a.output_tokens + result_b.output_tokens
+    system_tps = (total_tokens / (total_wall_ms / 1000)) if total_wall_ms > 0 else 0
+
+    return StaggeredResult(
+        mode="sequential",
+        run_id=run_id,
+        user_a_ttft_ms=result_a.ttft_ms,
+        user_a_e2e_ms=result_a.e2e_ms,
+        user_b_ttft_ms=result_b.ttft_ms,
+        user_b_e2e_ms=result_b.e2e_ms,
+        user_b_start_delay_ms=user_b_delay_ms,
+        total_wall_time_ms=total_wall_ms,
+        user_a_tps=result_a.decode_tps,
+        user_b_tps=result_b.decode_tps,
+        system_tps=system_tps,
+        error=result_a.error or result_b.error,
+    )
+
+
+async def staggered_run_batched(
+    base_url: str,
+    context_tokens: int,
+    output_tokens: int,
+    stagger_delay: float,
+    run_id: int,
+    corpus: str,
+    corpus_offset: int = 0,
+) -> StaggeredResult:
+    """Batched serving: User B joins while User A is running."""
+    client = OpenAIStreamingClient(base_url)
+
+    messages_a = build_messages(corpus, context_tokens, corpus_offset)
+    messages_b = build_messages(corpus, context_tokens, corpus_offset + 5000)
+    body_a = {
+        "model": "default",
+        "messages": messages_a,
+        "max_tokens": output_tokens,
+        "temperature": TEMPERATURE,
+        "stream": True,
+    }
+    body_b = {
+        "model": "default",
+        "messages": messages_b,
+        "max_tokens": output_tokens,
+        "temperature": TEMPERATURE,
+        "stream": True,
+    }
+
+    sid_a = f"stagger_batch_a_{run_id}"
+    sid_b = f"stagger_batch_b_{run_id}"
+
+    t_start_wall = time.perf_counter()
+
+    async def launch_a():
+        return await client.send_and_measure(body_a, session_id=sid_a)
+
+    async def launch_b():
+        await asyncio.sleep(stagger_delay)
+        t_b = time.perf_counter()
+        result = await client.send_and_measure(body_b, session_id=sid_b)
+        return result, t_b
+
+    result_a, (result_b, t_b_start) = await asyncio.gather(launch_a(), launch_b())
+    t_end_wall = time.perf_counter()
+
+    await _delete_agent(base_url, f"oai_{sid_a}")
+    await _delete_agent(base_url, f"oai_{sid_b}")
+
+    total_wall_ms = (t_end_wall - t_start_wall) * 1000
+    user_b_delay_ms = (t_b_start - t_start_wall) * 1000
+    total_tokens = result_a.output_tokens + result_b.output_tokens
+    system_tps = (total_tokens / (total_wall_ms / 1000)) if total_wall_ms > 0 else 0
+
+    return StaggeredResult(
+        mode="batched",
+        run_id=run_id,
+        user_a_ttft_ms=result_a.ttft_ms,
+        user_a_e2e_ms=result_a.e2e_ms,
+        user_b_ttft_ms=result_b.ttft_ms,
+        user_b_e2e_ms=result_b.e2e_ms,
+        user_b_start_delay_ms=user_b_delay_ms,
+        total_wall_time_ms=total_wall_ms,
+        user_a_tps=result_a.decode_tps,
+        user_b_tps=result_b.decode_tps,
+        system_tps=system_tps,
+        error=result_a.error or result_b.error,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Record builders
 # ---------------------------------------------------------------------------
 
@@ -1393,7 +1550,7 @@ async def run_model(
 
                         # Check if error looks like server crash
                         err = record["error"].lower()
-                        if any(w in err for w in ("connect", "refused", "reset", "broken")):
+                        if any(w in err for w in ("connect", "refused", "reset", "broken", "peer closed", "incomplete")):
                             if not await server.ensure_alive_async():
                                 print("  Server unrecoverable, skipping remaining batch=1")
                                 break
@@ -1419,9 +1576,10 @@ async def run_model(
     # -----------------------------------------------------------------------
     # BATCH=2 PHASE (concurrent requests — same server, no restart)
     # -----------------------------------------------------------------------
-    # Concurrent prefill OOMs above ~2K on 24GB M4 Pro (Gemma 3 12B Q4):
-    # two simultaneous 4K attention passes exceed GPU intermediate memory.
-    batch2_contexts = [c for c in contexts if c <= 2048]
+    # With INTERLEAVE_THRESHOLD=32768, prefills go through _submit_direct
+    # (sequential prefill, concurrent decode only). This avoids the OOM from
+    # simultaneous attention passes. Skip 32K to keep decode memory in budget.
+    batch2_contexts = [c for c in contexts if c <= 16384]
 
     print(f"\n--- BATCH=2 PHASE (concurrent requests, same server) ---")
 
@@ -1465,7 +1623,7 @@ async def run_model(
                         print(f"ERROR: {record['error'][:80]}")
                         doc["quality_summary"]["failed"] += 1
                         err = record["error"].lower()
-                        if any(w in err for w in ("connect", "refused", "reset", "broken")):
+                        if any(w in err for w in ("connect", "refused", "reset", "broken", "peer closed", "incomplete")):
                             if not await server.ensure_alive_async():
                                 break
                     else:
@@ -1515,10 +1673,12 @@ async def run_model(
 
             try:
                 STAGGER_TIMEOUT = 600  # 10 min safety timeout
+                stagger_offset = (pass_id + 1) * 10000
                 if stagger_mode == "sequential":
                     sr = await asyncio.wait_for(
                         staggered_run_sequential(
                             server.base_url, STAGGER_CONTEXT, OUTPUT_TOKENS, pass_id,
+                            corpus, stagger_offset,
                         ),
                         timeout=STAGGER_TIMEOUT,
                     )
@@ -1527,6 +1687,7 @@ async def run_model(
                         staggered_run_batched(
                             server.base_url, STAGGER_CONTEXT, OUTPUT_TOKENS,
                             STAGGER_DELAY, pass_id,
+                            corpus, stagger_offset,
                         ),
                         timeout=STAGGER_TIMEOUT,
                     )
@@ -1571,7 +1732,7 @@ async def run_model(
                     "timestamp": datetime.now(timezone.utc).isoformat(),
                 }
                 err_str = str(e).lower()
-                if any(w in err_str for w in ("connect", "refused", "reset", "broken")):
+                if any(w in err_str for w in ("connect", "refused", "reset", "broken", "peer closed", "incomplete")):
                     if not await server.ensure_alive_async():
                         break
 

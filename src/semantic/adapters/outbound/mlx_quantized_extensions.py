@@ -554,6 +554,35 @@ def add_quantized_merge_method():
         QuantizedKVCache.merge = merge
         logger.info("[Q4 EXT] Overrode QuantizedKVCache.merge()")
 
+        # Fix QuantizedKVCache.make_mask to handle window_size for models
+        # with sliding window attention (e.g., Gemma 3).
+        #
+        # BUG: The original make_mask delegates to cache.create_attention_mask
+        # which returns the string "causal" for N > 1 when return_array=False,
+        # IGNORING window_size. This means sliding window layers get full
+        # causal attention during chunked prefill, corrupting KV cache entries
+        # for positions > window_size. The corrupt cache produces garbage output.
+        #
+        # BatchQuantizedKVCache.make_mask doesn't have this bug because it
+        # always calls create_causal_mask directly (passing window_size through).
+        def patched_make_mask(self, N=1, return_array=False, window_size=None, **kwargs):
+            from mlx_lm.models.base import create_causal_mask
+
+            if window_size is not None:
+                if N == 1 and self.offset <= window_size:
+                    return None
+                return create_causal_mask(
+                    N, offset=self.offset, window_size=window_size, **kwargs
+                )
+            if N == 1:
+                return None
+            if return_array:
+                return create_causal_mask(N, offset=self.offset, **kwargs)
+            return "causal"
+
+        QuantizedKVCache.make_mask = patched_make_mask
+        logger.info("[Q4 EXT] Patched QuantizedKVCache.make_mask() for windowed attention")
+
         test_cache = QuantizedKVCache()
         test_cache.offset = 100
         if test_cache.size() == 0:
@@ -753,6 +782,19 @@ def validate_q4_pipeline() -> bool:
                     )
         except ImportError:
             pass  # _make_cache not available in this mlx-lm version
+
+        # 4. Verify make_mask handles window_size (sliding window attention fix)
+        test_cache = QuantizedKVCache(group_size=64, bits=4)
+        test_cache.offset = 1000
+        mask = test_cache.make_mask(N=512, window_size=256)
+        if mask is None or (isinstance(mask, str) and mask == "causal"):
+            logger.error(
+                "[Q4 VALIDATE] QuantizedKVCache.make_mask(N=512, window_size=256) "
+                "returned %s instead of explicit mask array. "
+                "Sliding window attention will be broken during chunked prefill.",
+                repr(mask),
+            )
+            return False
 
         logger.info("[Q4 VALIDATE] All Q4 pipeline checks passed")
         return True
