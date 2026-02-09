@@ -273,8 +273,10 @@ def check_structural(
         issues.append("empty_output")
     if output_tokens < 5:
         issues.append("too_few_tokens")
-    # Early EOS: model stopped before max_tokens
-    if 0 < output_tokens < expected_tokens:
+    # Early EOS: model stopped well before max_tokens.
+    # Only flag when output is less than half expected — the model legitimately
+    # finishing a coherent response (e.g. 45/64 tokens) is not a quality issue.
+    if 0 < output_tokens < expected_tokens // 2:
         issues.append(f"early_eos_{output_tokens}_of_{expected_tokens}")
     # 4-gram repetition loop
     words = raw_output.split()
@@ -1038,6 +1040,7 @@ async def staggered_run_sequential(
         user_b_ttft_ms=result_b.ttft_ms,
         user_b_e2e_ms=result_b.e2e_ms,
         user_b_start_delay_ms=user_b_delay_ms,
+        user_b_wait_ms=user_b_delay_ms + result_b.ttft_ms,
         total_wall_time_ms=total_wall_ms,
         user_a_tps=result_a.decode_tps,
         user_b_tps=result_b.decode_tps,
@@ -1108,6 +1111,7 @@ async def staggered_run_batched(
         user_b_ttft_ms=result_b.ttft_ms,
         user_b_e2e_ms=result_b.e2e_ms,
         user_b_start_delay_ms=user_b_delay_ms,
+        user_b_wait_ms=user_b_delay_ms + result_b.ttft_ms,
         total_wall_time_ms=total_wall_ms,
         user_a_tps=result_a.decode_tps,
         user_b_tps=result_b.decode_tps,
@@ -1424,7 +1428,14 @@ def print_table2(measurements: list[dict], model_id: str) -> None:
 
 
 def print_figure3(staggered: list[dict], model_id: str) -> None:
-    """Print Figure 3: Staggered arrivals."""
+    """Print Figure 3: Staggered arrivals.
+
+    Uses wall-start-relative wait time for User B (``user_b_wait_ms``) to
+    provide an apples-to-apples comparison.  In the sequential scenario User B
+    cannot start until User A finishes, so its real wait from the scenario
+    start is ``A_e2e + B_ttft``.  In batched mode User B arrives after a short
+    stagger delay and overlaps with A, so its wait is ``delay + B_ttft``.
+    """
     print(f"\n{'='*70}")
     print(f"Figure 3: Staggered arrivals — 4K context — {model_id}")
     print(f"{'='*70}")
@@ -1432,27 +1443,50 @@ def print_figure3(staggered: list[dict], model_id: str) -> None:
     seq = [s for s in staggered if s.get("stagger_mode") == "sequential" and not s.get("error")]
     bat = [s for s in staggered if s.get("stagger_mode") == "batched" and not s.get("error")]
 
+    # Derive user_b_wait_ms from existing fields if not present (backwards compat)
+    for group in (seq, bat):
+        for s in group:
+            if "user_b_wait_ms" not in s:
+                delay = s.get("user_b_start_delay_ms", 0)
+                ttft = s.get("user_b_ttft_ms", 0)
+                s["user_b_wait_ms"] = delay + ttft
+
     if not seq or not bat:
         print("  (insufficient data)")
         return
 
-    print(f"{'Metric':<24} {'Sequential':>12} {'Batched':>12}")
-    print("-" * 50)
+    print(f"{'Metric':<30} {'Sequential':>12} {'Batched':>12} {'Speedup':>10}")
+    print("-" * 66)
 
     for label, key in [
         ("User A TTFT", "user_a_ttft_ms"),
         ("User A E2E", "user_a_e2e_ms"),
-        ("User B TTFT", "user_b_ttft_ms"),
+        ("User B TTFT (own clock)", "user_b_ttft_ms"),
+        ("User B wait (wall start)", "user_b_wait_ms"),
         ("User B E2E", "user_b_e2e_ms"),
         ("Total wall", "total_wall_time_ms"),
     ]:
-        seq_med = statistics.median([s[key] for s in seq])
-        bat_med = statistics.median([s[key] for s in bat])
-        print(f"{label:<24} {seq_med/1000:>11.1f}s {bat_med/1000:>11.1f}s")
+        seq_vals = [s.get(key, 0) for s in seq]
+        bat_vals = [s.get(key, 0) for s in bat]
+        if not any(seq_vals) and not any(bat_vals):
+            # Backwards compat: skip if field missing from old data
+            continue
+        seq_med = statistics.median(seq_vals)
+        bat_med = statistics.median(bat_vals)
+        speedup = seq_med / bat_med if bat_med > 0 else 0
+        sp_str = f"{speedup:.2f}x" if speedup > 0 else ""
+        print(f"{label:<30} {seq_med/1000:>11.1f}s {bat_med/1000:>11.1f}s {sp_str:>10}")
 
     seq_sys = statistics.median([s["system_tps"] for s in seq])
     bat_sys = statistics.median([s["system_tps"] for s in bat])
-    print(f"{'System TPS':<24} {seq_sys:>11.1f} {bat_sys:>11.1f}")
+    speedup = bat_sys / seq_sys if seq_sys > 0 else 0
+    sp_str = f"{speedup:.2f}x" if speedup > 0 else ""
+    print(f"{'System TPS':<30} {seq_sys:>11.1f} {bat_sys:>11.1f} {sp_str:>10}")
+
+    print()
+    print("Note: 'User B wait (wall start)' = delay + B_TTFT — the fair comparison.")
+    print("      Sequential: B must wait for A to finish before starting.")
+    print("      Batched: B starts after stagger delay, overlaps with A.")
 
 
 # ---------------------------------------------------------------------------
@@ -1716,6 +1750,7 @@ async def run_model(
                     "user_b_ttft_ms": round(sr.user_b_ttft_ms, 1),
                     "user_b_e2e_ms": round(sr.user_b_e2e_ms, 1),
                     "user_b_start_delay_ms": round(sr.user_b_start_delay_ms, 1),
+                    "user_b_wait_ms": round(sr.user_b_wait_ms, 1),
                     "total_wall_time_ms": round(sr.total_wall_time_ms, 1),
                     "user_a_tps": round(sr.user_a_tps, 1),
                     "user_b_tps": round(sr.user_b_tps, 1),

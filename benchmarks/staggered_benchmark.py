@@ -97,6 +97,7 @@ class StaggeredResult:
     user_b_ttft_ms: float
     user_b_e2e_ms: float
     user_b_start_delay_ms: float  # Actual delay between A and B starts
+    user_b_wait_ms: float  # B's wait from scenario start (delay + ttft)
     total_wall_time_ms: float  # Total time from A start to B completion
     user_a_tps: float
     user_b_tps: float
@@ -151,6 +152,7 @@ async def run_sequential(
         user_b_ttft_ms=result_b.ttft_ms,
         user_b_e2e_ms=result_b.e2e_ms,
         user_b_start_delay_ms=user_b_delay_ms,
+        user_b_wait_ms=user_b_delay_ms + result_b.ttft_ms,
         total_wall_time_ms=total_wall_ms,
         user_a_tps=result_a.decode_tps,
         user_b_tps=result_b.decode_tps,
@@ -217,6 +219,7 @@ async def run_batched(
         user_b_ttft_ms=result_b.ttft_ms,
         user_b_e2e_ms=result_b.e2e_ms,
         user_b_start_delay_ms=user_b_delay_ms,
+        user_b_wait_ms=user_b_delay_ms + result_b.ttft_ms,
         total_wall_time_ms=total_wall_ms,
         user_a_tps=result_a.decode_tps,
         user_b_tps=result_b.decode_tps,
