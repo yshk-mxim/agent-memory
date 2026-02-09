@@ -8,15 +8,18 @@ Runs the complete measurement matrix for the paper:
 - Modes: streaming, non-streaming
 - Batch sizes: 1 (all contexts), 2 (1K-16K, skip 32K)
 - Staggered arrivals: sequential vs batched
-- 3 passes per config, T=0.0 greedy (deterministic)
-- T=0.0 is safe for cold/warm (single-turn summarization — no echo risk)
-- Hot (multi-turn) uses T=0.0 too but output is monitored for repetition loops
-- If echo loops detected, measurement is flagged and excluded from aggregation
+- 3 passes per config, T=0.0 greedy (deterministic, via request body)
 
 Server lifecycle:
-- ONE server per model (scheduler on, batch_size=2) — stays running for all phases
+- ONE server per model (scheduler=on, batch_size=2) — stays running for all phases
+- Single requests route through the scheduler without measurable overhead
 - Between measurements: caches flushed via admin API + filesystem cleanup (no restart)
 - Between models: graceful stop (offloads model + GPU memory), then start next model
+
+Temperature: T=0.0 is set per-request in the JSON body. The env var
+SEMANTIC_MLX_DEFAULT_TEMPERATURE is intentionally NOT set because it has
+no effect: the OpenAI adapter uses request_body.temperature directly, and
+the coordination service hardcodes T=0.3 (ignoring the env var).
 
 Usage:
     python benchmarks/colm_full_benchmark.py              # Full run (~35 hours)
@@ -94,7 +97,7 @@ MAX_COOLDOWN_SECONDS = 240  # Safety cap
 MIN_COOLDOWN_SECONDS = 10   # Minimum to let caches flush
 COOLDOWN_POLL_INTERVAL = 5  # Seconds between thermal checks
 WARMUP_SETTLE_SECONDS = 30
-THROTTLE_TPS_TOLERANCE = 0.05  # 5% tolerance for TPS recovery
+THROTTLE_TPS_TOLERANCE = 0.20  # 20% tolerance for TPS recovery (sustained inference drops ~15% from peak)
 STAGGER_DELAY = 2.0
 STAGGER_CONTEXT = 4096  # Paper uses 4K context for staggered arrivals (Figure 3)
 # T=0.0 greedy (argmax): fully deterministic, no seed needed.
@@ -136,28 +139,29 @@ def load_corpus() -> str:
 def build_messages(
     corpus: str, target_tokens: int, offset: int = 0
 ) -> list[dict[str, str]]:
-    """Build prompt with controlled content for reliable generation.
+    """Build prompt from diverse corpus text at the target token count.
 
-    Uses corpus text for shorter contexts (up to ~4K tokens) where the
-    model reliably generates analytical responses. For longer contexts,
-    uses repeated natural-language padding — the same approach used in
-    the original paper benchmarks, which produces reliable TTFT/TPS
-    measurements regardless of context length.
+    Each measurement uses a different offset into the corpus to prevent
+    attention caching or prefix-matching artifacts across measurements.
+    If the corpus is too small (or missing), falls back to PADDING_TEXT.
 
-    Each measurement uses a different offset for corpus-based content to
-    prevent attention caching artifacts across measurements.
+    Previously, >4K contexts used repeated PADDING_TEXT because Gemma 3
+    generated early EOS with diverse text at long contexts.  This was
+    caused by the chunked prefill sliding window mask bug (ee24513) —
+    QuantizedKVCache.make_mask() ignored window_size, corrupting KV
+    entries for Gemma 3's 41/46 sliding window layers.  With that fix,
+    diverse corpus produces correct output at all context lengths up to
+    16K+ tokens (validated on both Gemma 3 and DeepSeek).
     """
     chars_needed = target_tokens * 4  # ~4 chars/token
 
-    if target_tokens <= 4096 and len(corpus) > chars_needed:
-        # Short contexts: use diverse corpus text
-        max_start = max(len(corpus) - chars_needed, 0)
+    if len(corpus) >= chars_needed + 1000:
+        # Diverse corpus: slice from offset, wrap around if needed
+        max_start = len(corpus) - chars_needed
         start = offset % max_start if max_start > 0 else 0
         content = corpus[start : start + chars_needed]
     else:
-        # Long contexts: use reliable padding that always produces output.
-        # Gemma 3 generates EOS with diverse text at 12K+ tokens (content-
-        # dependent refusal), but works reliably with structured padding.
+        # Fallback: repeat PADDING_TEXT (only if corpus file is missing/tiny)
         content = (PADDING_TEXT + " ") * (chars_needed // len(PADDING_TEXT) + 1)
         content = content[:chars_needed]
     return [
@@ -230,27 +234,27 @@ def check_memory_pressure(min_free_pct: int = 20, max_wait: int = 300) -> bool:
 # ---------------------------------------------------------------------------
 
 
-def build_server_env(model_id: str, batch_size: int, model_key: str = "") -> dict[str, str]:
-    """Build env dict for server startup."""
+def build_server_env(model_id: str, model_key: str = "") -> dict[str, str]:
+    """Build env dict for server startup.
+
+    Always starts with scheduler=on, batch_size=2.  Single requests route
+    through the scheduler without measurable overhead, and this avoids a
+    server restart between batch=1 and batch=2 phases.
+
+    Temperature is set per-request in the JSON body (T=0.0 greedy).
+    SEMANTIC_MLX_DEFAULT_TEMPERATURE is NOT set here because:
+      - The OpenAI adapter uses request_body.temperature directly
+      - The coordination service hardcodes T=0.3 and ignores the env var
+    reasoning_extra_tokens defaults to 0 in settings.py — no override needed.
+    """
     env = dict(OPENAI_BENCH_ENV)
     cache_budget = MODEL_CACHE_BUDGET.get(model_key, 8192)
     env.update({
         "SEMANTIC_MLX_MODEL_ID": model_id,
-        "SEMANTIC_MLX_MAX_BATCH_SIZE": str(batch_size),
-        "SEMANTIC_MLX_SCHEDULER_ENABLED": "true" if batch_size > 1 else "false",
+        "SEMANTIC_MLX_MAX_BATCH_SIZE": "2",
+        "SEMANTIC_MLX_SCHEDULER_ENABLED": "true",
         "SEMANTIC_ADMIN_KEY": ADMIN_KEY,
-        "SEMANTIC_MLX_DEFAULT_TEMPERATURE": str(TEMPERATURE),
-        "SEMANTIC_MLX_REASONING_EXTRA_TOKENS": "0",
         "SEMANTIC_MLX_CACHE_BUDGET_MB": str(cache_budget),
-        # Use default interleave threshold (2048 tokens) — Metal crashes that
-        # previously required bypassing chunked prefill are fixed by:
-        #   - mx.async_eval → mx.eval (04c814d)
-        #   - mx.synchronize() in filter() (50a4388)
-        #   - B=1 split for mx.compile (b2d5617)
-        #   - clip_residual monkeypatch (b2d5617)
-        #   - merge/extend/extract mx.eval (320d25e)
-        # Interleaved chunked prefill is essential for staggered arrival
-        # benchmarks (Figure 3: User B TTFT reduction).
     })
     return env
 
@@ -1131,7 +1135,12 @@ def _build_record(
     struct_issues = check_structural(raw, out_tok)
     sem_check = check_semantic(raw, prompt_text)
 
-    decode_ms = r.e2e_ms - r.ttft_ms if r.ttft_ms > 0 else r.e2e_ms
+    # For streaming: ttft_ms is true time-to-first-token (= prefill time).
+    # For non-streaming: OpenAIRequestClient sets ttft_ms = e2e_ms (no
+    # streaming granularity), so prefill_ms is only meaningful for streaming.
+    is_streaming = mode == "streaming"
+    ttft = r.ttft_ms if is_streaming else 0.0
+    decode_ms = (r.e2e_ms - ttft) if ttft > 0 else r.e2e_ms
     tpot = (decode_ms / max(out_tok - 1, 1)) if out_tok > 0 else 0
 
     return {
@@ -1141,14 +1150,14 @@ def _build_record(
         "cache_state": cache_state,
         "mode": mode,
         "pass_id": run_id,
-        "ttft_ms": round(r.ttft_ms, 1),
+        "ttft_ms": round(ttft, 1),
         "e2e_ms": round(r.e2e_ms, 1),
         "decode_tps": round(r.decode_tps, 1),
         "avg_tps": round(out_tok / (r.e2e_ms / 1000), 1) if r.e2e_ms > 0 else 0,
         "tpot_ms": round(tpot, 1),
         "input_tokens": r.input_tokens,
         "output_tokens": out_tok,
-        "prefill_ms": round(r.ttft_ms, 1),
+        "prefill_ms": round(ttft, 1),  # Only meaningful for streaming
         "peak_memory_mb": round(r.peak_memory_mb, 1),
         "raw_output": raw[:500],
         "quality_ok": len(struct_issues) == 0,
@@ -1372,9 +1381,15 @@ def print_table1(measurements: list[dict], model_id: str) -> None:
 
 
 def print_table2(measurements: list[dict], model_id: str) -> None:
-    """Print Table 2: Batch throughput — 1K context."""
+    """Print Table 2: Single request vs concurrent pair — 1K context.
+
+    Both run on the SAME server (scheduler=on, batch_size=2).  "Single"
+    means one request at a time; "Concurrent" means two simultaneous
+    requests.  This measures the batching benefit without confounding
+    server configuration differences.
+    """
     print(f"\n{'='*70}")
-    print(f"Table 2: Batch throughput — 1K context — {model_id}")
+    print(f"Table 2: Single vs concurrent — 1K cold — {model_id}")
     print(f"{'='*70}")
 
     b1 = [
@@ -1399,13 +1414,13 @@ def print_table2(measurements: list[dict], model_id: str) -> None:
     b1_e2e = statistics.median([m["e2e_ms"] for m in b1]) if b1 else 0
     b2_wall = statistics.median([m["wall_ms"] for m in b2]) if b2 else 0
 
-    print(f"{'Metric':<24} {'Sequential':>12} {'Batched (2)':>12}")
-    print("-" * 50)
-    print(f"{'Per-agent TPS':<24} {b1_tps:>12.1f} {b2_per_tps:>12.1f}")
-    print(f"{'System TPS':<24} {b1_tps:>12.1f} {b2_sys_tps:>12.1f}")
-    print(f"{'Total time':<24} {b1_e2e/1000:>11.2f}s {b2_wall/1000:>11.2f}s")
+    print(f"{'Metric':<24} {'Single (1)':>12} {'Concurrent (2)':>14}")
+    print("-" * 52)
+    print(f"{'Per-agent TPS':<24} {b1_tps:>12.1f} {b2_per_tps:>14.1f}")
+    print(f"{'System TPS':<24} {b1_tps:>12.1f} {b2_sys_tps:>14.1f}")
+    print(f"{'Total time':<24} {b1_e2e/1000:>11.2f}s {b2_wall/1000:>13.2f}s")
     speedup = b1_e2e / b2_wall if b2_wall > 0 else 0
-    print(f"{'Speedup':<24} {'1.0x':>12} {speedup:>11.2f}x")
+    print(f"{'Speedup':<24} {'1.0x':>12} {speedup:>13.2f}x")
 
 
 def print_figure3(staggered: list[dict], model_id: str) -> None:
@@ -1476,12 +1491,10 @@ async def run_model(
     # -----------------------------------------------------------------------
     # Start ONE server for the entire model benchmark
     # -----------------------------------------------------------------------
-    # scheduler=on, batch_size=2: supports both single and concurrent requests.
-    # Single requests route through the scheduler without overhead.
-    env = build_server_env(model_id, batch_size=2, model_key=model_key)
+    env = build_server_env(model_id, model_key=model_key)
     doc = make_result_doc(model_id, env)
 
-    print(f"\n--- Starting server (scheduler on, batch=2) ---")
+    print(f"\n--- Starting server (scheduler=on, max_batch=2) ---")
     server = ManagedServer(port, env)
     server.start()
 
@@ -1499,9 +1512,10 @@ async def run_model(
     }
 
     # -----------------------------------------------------------------------
-    # BATCH=1 PHASE (single requests — server stays running)
+    # BATCH=1 PHASE — single requests on the shared scheduler-enabled server.
+    # The scheduler handles one request at a time with no measurable overhead.
     # -----------------------------------------------------------------------
-    print(f"\n--- BATCH=1 PHASE (single requests) ---")
+    print(f"\n--- BATCH=1 PHASE (single requests, same server) ---")
 
     for cache_state in CACHE_STATES:
         for mode in MODES:
@@ -1576,9 +1590,10 @@ async def run_model(
     # -----------------------------------------------------------------------
     # BATCH=2 PHASE (concurrent requests — same server, no restart)
     # -----------------------------------------------------------------------
-    # With INTERLEAVE_THRESHOLD=32768, prefills go through _submit_direct
-    # (sequential prefill, concurrent decode only). This avoids the OOM from
-    # simultaneous attention passes. Skip 32K to keep decode memory in budget.
+    # Skip 32K for batch=2: two simultaneous 32K decode KV caches exceed
+    # the memory budget on 24GB M4 Pro.  Chunked interleaved prefill
+    # (threshold 2048, default) handles all contexts correctly — Metal
+    # crashes fixed by commits 04c814d, 50a4388, b2d5617, 320d25e.
     batch2_contexts = [c for c in contexts if c <= 16384]
 
     print(f"\n--- BATCH=2 PHASE (concurrent requests, same server) ---")
