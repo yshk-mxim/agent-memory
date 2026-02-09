@@ -249,15 +249,15 @@ class BatchQuantizedKVCache(_BaseCache):
                         lambda x: x[..., :prev, :], (self.keys, self.values)
                     )
                 self.keys, self.values = tree_map(expand_quant, (self.keys, self.values))
-                # Materialize after non-step-aligned expansion.  When merge()
-                # sets _idx to an arbitrary offset (e.g. 1023 for 1K cached
-                # sequences), the trim-then-concat creates a lazy chain.  The
-                # subsequent scatter write (position _idx) on this unmaterialized
-                # chain can evaluate incorrectly in Metal, corrupting the cached
-                # K/V data and causing immediate EOS.  Cold-start paths never
-                # hit this because their buffers grow step-aligned (0→256→512…).
-                if prev % self.step != 0:
-                    mx.eval(*self.keys, *self.values)
+                # ALWAYS materialize after expansion.  The concat creates a
+                # lazy chain that Metal can evaluate incorrectly for Q4
+                # packed tensors — this corrupts the cached K/V data and
+                # causes immediate EOS.  Originally conditional on non-step-
+                # aligned _idx, but intermittent failures at step-aligned
+                # offsets proved the issue affects ALL expansion paths
+                # (trim→concat and plain concat alike).  The ~0.5ms cost
+                # per expansion is negligible (once per merge, not per step).
+                mx.eval(*self.keys, *self.values)
             else:
                 self.keys = init_quant(k_head_dim)
                 self.values = init_quant(v_head_dim)
@@ -276,13 +276,16 @@ class BatchQuantizedKVCache(_BaseCache):
             self.keys[i][..., prev : prev + n_tokens, :] = q_keys[i][..., :n_tokens, :]
             self.values[i][..., prev : prev + n_tokens, :] = q_values[i][..., :n_tokens, :]
 
-        # Materialize in-place scatter operations after filter() transitions.
-        # Without this, the second decode step after B=2→B=1 filter crashes
-        # with a silent Metal abort — the scatter-on-scatter chain on
-        # post-filter tensors produces an invalid Metal command buffer.
-        if getattr(self, "_post_filter_evals", 0) > 0:
+        # Materialize scatter writes on the first decode step after merge()
+        # or after filter() transitions.  Without this, the SliceUpdate
+        # lazy chain (especially on freshly-expanded Q4 buffers) can corrupt
+        # Metal evaluation.  After the first few steps the scatter targets
+        # already-materialized buffers and the eval is a cheap no-op.
+        needs_eval = expanded or getattr(self, "_post_filter_evals", 0) > 0
+        if needs_eval:
             mx.eval(*self.keys, *self.values)
-            self._post_filter_evals -= 1
+            if getattr(self, "_post_filter_evals", 0) > 0:
+                self._post_filter_evals -= 1
 
         result = tree_map(lambda x: x[..., : self._idx, :], (self.keys, self.values))
 
@@ -290,7 +293,7 @@ class BatchQuantizedKVCache(_BaseCache):
             aligned = prev % self.step == 0
             logger.debug(
                 f"[Q4 UPDATE] _idx: {prev}->{self._idx}, expanded={expanded}, "
-                f"step_aligned={aligned}, materialized={not aligned}"
+                f"step_aligned={aligned}, materialized=True"
             )
         return result
 

@@ -821,7 +821,13 @@ class BlockPoolBatchEngine:
                         kv_group_size=self._spec.kv_group_size,
                     )
 
-        # Insert into batch
+        # Insert into batch — acquire mlx_io_lock to prevent concurrent MLX
+        # operations with _save_to_disk on the event loop thread.  The scheduler
+        # thread calls submit() → _reconstruct_cache / _slice_cache_to_length
+        # which do mx.eval; meanwhile the event loop thread may be saving caches
+        # via safetensors (also mx operations).  Without this lock both threads
+        # race on MLX's non-thread-safe internals → SIGSEGV.
+        mlx_io_lock.acquire()
         try:
             # Create sampler via adapter if using real MLX (not fake for testing)
             samplers = None
@@ -1133,6 +1139,8 @@ class BlockPoolBatchEngine:
                 del kv_cache
                 gc.collect()
             raise InvalidRequestError(f"Failed to insert into batch: {e}") from e
+        finally:
+            mlx_io_lock.release()
 
         actual_uid: str = uids[0]
 

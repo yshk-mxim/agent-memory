@@ -13,8 +13,9 @@ import threading
 # Global lock for MLX I/O operations (save/load safetensors, mx.eval on disk data).
 # MLX is NOT thread-safe (upstream issue #2067). Without this lock, concurrent
 # mx.save_safetensors (request handler thread) and mx.eval (scheduler thread)
-# cause SIGSEGV.
-mlx_io_lock = threading.Lock()
+# cause SIGSEGV.  RLock (reentrant) because submit() acquires it and then
+# calls _chunked_prefill() which also acquires it on the same thread.
+mlx_io_lock = threading.RLock()
 
 from semantic.domain.entities import KVBlock
 from semantic.domain.errors import (

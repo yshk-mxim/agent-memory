@@ -240,39 +240,57 @@ accumulated quantization error pushes the logit for EOS above all other tokens.
 
 ---
 
-## Verification Results (2026-02-08)
+## Verification Results
 
-**Fix applied**: `mx.eval(*self.keys, *self.values)` after non-step-aligned expansion
-in `update_and_fetch()` (commit 90f0baf).
+### Attempt 1 (2026-02-08): H1 partial fix — INSUFFICIENT
 
-**Test**: `python benchmarks/verify_bug1.py --port 8000`
+**Fix**: `mx.eval(*self.keys, *self.values)` after non-step-aligned expansion in
+`update_and_fetch()` (commit 90f0baf).
+
+Initial verify_bug1.py passed 5/5, but the full benchmark showed intermittent
+failures (2/3 passes fail). The bug was not the lazy tensor chain itself but a
+**concurrent MLX access race condition** between threads.
+
+### Root Cause: Thread Safety Violation (2026-02-09)
+
+**Segfault traceback** revealed two threads accessing MLX simultaneously:
+
+1. **Scheduler thread**: `_run_loop` → `_promote_waiting` → `_submit_direct` →
+   `batch_engine.submit()` → `_slice_cache_to_length()` → `mx.eval()`
+2. **Event loop thread**: `_stream_via_scheduler` → `cache_store.save()` →
+   `_save_to_disk()` → `safetensors_cache_adapter.save()` → reads MLX tensors
+
+`submit()` used only `self._lock` (engine internal lock), NOT `mlx_io_lock`.
+Meanwhile `_save_to_disk` acquired `mlx_io_lock`. Different locks → no mutual
+exclusion → concurrent MLX access → SIGSEGV.
+
+### Fix (2026-02-09)
+
+1. `mlx_io_lock` changed from `threading.Lock()` to `threading.RLock()` (reentrant,
+   needed because `submit()` → `_chunked_prefill()` also acquires it)
+2. `batch_engine.submit()` now acquires `mlx_io_lock` around the MLX-intensive
+   section (reconstruction, slicing, insert) via acquire/try/finally/release
+3. `update_and_fetch()` mx.eval made UNCONDITIONAL after expansion (belt & suspenders)
+
+**Test**: `python benchmarks/verify_bug1.py --port 8000` (2 runs, 10/10)
 
 ```
-[CONTROL] cold_streaming_1024 ......... PASS — tokens=128 (64+64), wall=11295ms
-[CONTROL] warm_streaming_2048 ......... PASS — tokens=128 (64+64), wall=6040ms
-[    BUG] warm_streaming_1024 ......... PASS (FIXED!) — tokens=128 (64+64), wall=5647ms
-[    BUG] warm_non-streaming_1024 ..... PASS (FIXED!) — tokens=128 (64+64), wall=5665ms
-[    BUG] hot_streaming_1024 .......... PASS (FIXED!) — tokens=128 (64+64), wall=5720ms
-[    BUG] hot_non-streaming_1024 ...... PASS (FIXED!) — tokens=128 (64+64), wall=5604ms
-[    BUG] hot_non-streaming_2048 ...... PASS (FIXED!) — tokens=128 (64+64), wall=4431ms
+[CONTROL] cold_streaming_1024 ......... PASS — tokens=128 (64+64), wall=12786ms
+[CONTROL] warm_streaming_2048 ......... PASS — tokens=128 (64+64), wall=6382ms
+[    BUG] warm_streaming_1024 ......... PASS (FIXED!) — tokens=128 (64+64), wall=5761ms
+[    BUG] warm_non-streaming_1024 ..... PASS (FIXED!) — tokens=128 (64+64), wall=5726ms
+[    BUG] hot_streaming_1024 .......... PASS (FIXED!) — tokens=128 (64+64), wall=5697ms
+[    BUG] hot_non-streaming_1024 ...... PASS (FIXED!) — tokens=128 (64+64), wall=5708ms
+[    BUG] hot_non-streaming_2048 ...... PASS (FIXED!) — tokens=128 (64+64), wall=6002ms
 
-Controls: 2/2 passed | Bug cases: 5/5 fixed
+Controls: 2/2 passed | Bug cases: 5/5 fixed (deterministic, 2 runs)
 ```
 
-**Conclusion**: H1 confirmed as the sole root cause for ALL 15 benchmark failures.
-H2 (invalidate_hot timing) and H3 (Q4 group boundary) were NOT contributing factors.
+### Why the Initial H1 Fix Appeared to Work
 
-### Why H1 Was the Root Cause
-
-After `merge()` sets `_idx` to a non-step-aligned offset (e.g., 1023 for 1K), the
-first `update_and_fetch()` call creates a lazy chain: trim existing buffer → concat
-zeros → scatter write new token. Metal evaluates this chain incorrectly for the Q4
-packed format, corrupting positions 0 through `_idx-1`. The corrupted attention scores
-cause EOS to win on the first decode token.
-
-The fix materializes the expanded buffer (`mx.eval`) before the scatter write,
-breaking the lazy chain. This adds ~0.5ms per non-step-aligned expansion (only on
-the first decode step after merge, once per batch).
+verify_bug1.py ran each test sequentially with 5s sleeps, giving the event loop
+time to finish `_save_to_disk` before the next test. The full benchmark's concurrent
+pattern (shorter cooldowns, overlapping cache saves) exposed the race consistently.
 
 ---
 

@@ -1262,21 +1262,35 @@ def save_results(doc: dict[str, Any], path: Path) -> None:
         json.dump(doc, f, indent=2, default=str)
 
 
-def load_resume(path: Path) -> set[str]:
-    """Load already-completed measurement keys for resume support."""
-    completed = set()
-    if not path.exists():
-        return completed
-    with open(path) as f:
-        doc = json.load(f)
-    for m in doc.get("measurements", []):
-        key = _measurement_key(m)
-        if key and not m.get("error"):
+def load_resume(paths: list[Path]) -> set[str]:
+    """Load already-completed measurement keys from one or more result files.
+
+    Measurements with ``quality_ok=false`` are excluded so they get re-run
+    (e.g. BUG 1 empty-output failures that are now fixed).
+    """
+    completed: set[str] = set()
+    for path in paths:
+        if not path.exists():
+            print(f"  Resume file not found (skipped): {path}")
+            continue
+        with open(path) as f:
+            doc = json.load(f)
+        n_skip_quality = 0
+        for m in doc.get("measurements", []):
+            key = _measurement_key(m)
+            if not key or m.get("error"):
+                continue
+            if not m.get("quality_ok", True):
+                n_skip_quality += 1
+                continue
             completed.add(key)
-    for s in doc.get("staggered", []):
-        key = f"staggered_{s.get('stagger_mode', '')}_{s.get('pass_id', '')}"
-        if not s.get("error"):
-            completed.add(key)
+        for s in doc.get("staggered", []):
+            key = f"staggered_{s.get('stagger_mode', '')}_{s.get('pass_id', '')}"
+            if not s.get("error"):
+                completed.add(key)
+        n_total = len(doc.get("measurements", [])) + len(doc.get("staggered", []))
+        print(f"  Loaded {path.name}: {n_total} records, "
+              f"{n_skip_quality} quality failures will be re-run")
     return completed
 
 
@@ -1286,6 +1300,71 @@ def _measurement_key(m: dict) -> str:
         f"{m.get('cache_state', '')}_{m.get('context_tokens', '')}_"
         f"{m.get('mode', '')}_{m.get('batch_size', '')}_{m.get('pass_id', '')}"
     )
+
+
+def merge_result_files(paths: list[Path], output: Path) -> None:
+    """Merge multiple result JSON files into one, keeping best per key.
+
+    When duplicate keys exist, prefers quality_ok=true over quality_ok=false.
+    For staggered, prefers entries without errors.
+    """
+    all_measurements: dict[str, dict] = {}  # key -> best record
+    all_staggered: dict[str, dict] = {}
+    metadata = None
+
+    for path in paths:
+        if not path.exists():
+            print(f"  SKIP (not found): {path}")
+            continue
+        with open(path) as f:
+            doc = json.load(f)
+        if metadata is None:
+            metadata = doc.get("metadata", {})
+
+        for m in doc.get("measurements", []):
+            key = _measurement_key(m)
+            if not key:
+                continue
+            existing = all_measurements.get(key)
+            if existing is None:
+                all_measurements[key] = m
+            else:
+                # Prefer quality_ok=true over false, and no-error over error
+                new_ok = m.get("quality_ok", False) and not m.get("error")
+                old_ok = existing.get("quality_ok", False) and not existing.get("error")
+                if new_ok and not old_ok:
+                    all_measurements[key] = m
+
+        for s in doc.get("staggered", []):
+            key = f"staggered_{s.get('stagger_mode', '')}_{s.get('pass_id', '')}"
+            existing = all_staggered.get(key)
+            if existing is None:
+                all_staggered[key] = s
+            elif not s.get("error") and existing.get("error"):
+                all_staggered[key] = s
+
+    merged = {
+        "metadata": metadata or {},
+        "measurements": list(all_measurements.values()),
+        "staggered": list(all_staggered.values()),
+        "quality_summary": {
+            "total": len(all_measurements) + len(all_staggered),
+            "passed": sum(1 for m in all_measurements.values()
+                         if m.get("quality_ok") and not m.get("error")),
+            "failed": sum(1 for m in all_measurements.values()
+                         if not m.get("quality_ok") or m.get("error")),
+        },
+    }
+
+    output.parent.mkdir(parents=True, exist_ok=True)
+    with open(output, "w") as f:
+        json.dump(merged, f, indent=2, default=str)
+
+    n_meas = len(merged["measurements"])
+    n_stag = len(merged["staggered"])
+    n_ok = merged["quality_summary"]["passed"]
+    print(f"  Merged {len(paths)} files -> {output.name}: "
+          f"{n_meas} measurements + {n_stag} staggered ({n_ok} quality_ok)")
 
 
 # ---------------------------------------------------------------------------
@@ -1839,7 +1918,7 @@ async def main() -> int:
     )
     parser.add_argument(
         "--resume", type=str, default=None,
-        help="Resume from checkpoint JSON file",
+        help="Resume from checkpoint JSON file(s), comma-separated",
     )
     parser.add_argument(
         "--port", type=int, default=DEFAULT_PORT,
@@ -1857,7 +1936,25 @@ async def main() -> int:
         "--contexts", type=int, nargs="+", default=None,
         help="Override context sizes (e.g., --contexts 4096)",
     )
+    parser.add_argument(
+        "--merge", type=str, default=None,
+        help="Merge result files (comma-separated) into one. "
+             "Use with --output to set destination path.",
+    )
+    parser.add_argument(
+        "--output", type=str, default=None,
+        help="Output path for --merge",
+    )
     args = parser.parse_args()
+
+    # Handle --merge mode (no server needed)
+    if args.merge:
+        merge_paths = [Path(p.strip()) for p in args.merge.split(",")]
+        out = Path(args.output) if args.output else RESULTS_DIR / "colm_full_merged.json"
+        print(f"Merging {len(merge_paths)} result files...")
+        merge_result_files(merge_paths, out)
+        print(f"Output: {out}")
+        return 0
 
     # Apply overrides
     if args.cooldown is not None:
@@ -1876,11 +1973,11 @@ async def main() -> int:
     else:
         model_list = [(args.models, MODELS[args.models])]
 
-    # Load resume state
+    # Load resume state (accepts comma-separated paths)
     resume_keys: set[str] = set()
     if args.resume:
-        resume_path = Path(args.resume)
-        resume_keys = load_resume(resume_path)
+        resume_paths = [Path(p.strip()) for p in args.resume.split(",")]
+        resume_keys = load_resume(resume_paths)
         print(f"Resuming: {len(resume_keys)} measurements already completed")
 
     # Load corpus
