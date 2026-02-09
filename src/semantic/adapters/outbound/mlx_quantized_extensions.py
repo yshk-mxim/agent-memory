@@ -172,9 +172,11 @@ class BatchQuantizedKVCache(_BaseCache):
         batch_cache.left_padding = mx.array(lp)
         batch_cache._idx = max_length
 
+        step_aligned = max_length % batch_cache.step == 0
         logger.info(
             f"[Q4 MERGE] Merged {B} caches: lengths={lengths}, "
-            f"padding={lp}, gs={group_size}, bits={bits}"
+            f"padding={lp}, _idx={max_length}, step_aligned={step_aligned}, "
+            f"gs={group_size}, bits={bits}"
         )
         return batch_cache
 
@@ -247,7 +249,15 @@ class BatchQuantizedKVCache(_BaseCache):
                         lambda x: x[..., :prev, :], (self.keys, self.values)
                     )
                 self.keys, self.values = tree_map(expand_quant, (self.keys, self.values))
-                # NOTE: Do NOT call mx.eval() here - matches upstream QuantizedKVCache
+                # Materialize after non-step-aligned expansion.  When merge()
+                # sets _idx to an arbitrary offset (e.g. 1023 for 1K cached
+                # sequences), the trim-then-concat creates a lazy chain.  The
+                # subsequent scatter write (position _idx) on this unmaterialized
+                # chain can evaluate incorrectly in Metal, corrupting the cached
+                # K/V data and causing immediate EOS.  Cold-start paths never
+                # hit this because their buffers grow step-aligned (0→256→512…).
+                if prev % self.step != 0:
+                    mx.eval(*self.keys, *self.values)
             else:
                 self.keys = init_quant(k_head_dim)
                 self.values = init_quant(v_head_dim)
@@ -277,7 +287,11 @@ class BatchQuantizedKVCache(_BaseCache):
         result = tree_map(lambda x: x[..., : self._idx, :], (self.keys, self.values))
 
         if expanded:
-            logger.debug(f"[Q4 UPDATE] _idx: {prev}->{self._idx}, expanded={expanded}")
+            aligned = prev % self.step == 0
+            logger.debug(
+                f"[Q4 UPDATE] _idx: {prev}->{self._idx}, expanded={expanded}, "
+                f"step_aligned={aligned}, materialized={not aligned}"
+            )
         return result
 
     # ------------------------------------------------------------------
