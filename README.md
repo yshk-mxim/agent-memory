@@ -99,6 +99,23 @@ SEMANTIC_MLX_CACHE_BUDGET_MB=4096 \
 python -m agent_memory.entrypoints.cli serve --port 8000
 ```
 
+## Quick start (server + demo)
+
+One script launches the inference server with Gemma 3 12B (recommended settings) and opens the Streamlit demo:
+
+```bash
+scripts/launch.sh
+```
+
+This starts the server on port 8000 (scheduler on, batch=2, 8 GB cache budget, T=0.3) and the demo UI on port 8501. Press Ctrl+C to stop both. Override ports with `SEMANTIC_SERVER_PORT` and `STREAMLIT_PORT`.
+
+For first-time setup (venv, dependencies, HuggingFace login, model download):
+
+```bash
+scripts/setup.sh    # guided setup
+scripts/launch.sh   # start everything
+```
+
 ## Demos
 
 Two Streamlit demos in `demo/`:
@@ -106,8 +123,14 @@ Two Streamlit demos in `demo/`:
 1. **Prisoner's Dilemma** -- Two LLM agents play iterated prisoner's dilemma with persistent memory across rounds
 2. **Agent Memory** -- Wikipedia routing demo showing cache persistence across server restarts
 
+To run the demo manually (two terminals):
+
 ```bash
-pip install streamlit
+# Terminal 1: server
+python -m agent_memory.entrypoints.cli serve --port 8000
+
+# Terminal 2: demo UI
+pip install -r demo/requirements.txt
 streamlit run demo/app.py
 ```
 
