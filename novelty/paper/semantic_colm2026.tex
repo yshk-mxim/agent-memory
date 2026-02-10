@@ -193,7 +193,7 @@ Both models use the same block pool, Q4 pipeline, and BatchQuantizedKVCache. The
 
 \textbf{Models.} Gemma~3 12B Instruct (48 attention layers, 8 KV heads, head dim 256, GQA with 16 query heads). DeepSeek-Coder-V2-Lite 16B Instruct (27 layers, 16 KV heads, K=192/V=128, MLA). Both at Q4 weights with Q4 KV cache.
 
-\textbf{Methodology.} Each configuration is measured 3 times; we report medians. Temperature 0.0 (greedy decoding, deterministic output). Output length fixed at 64 tokens. 30--240s adaptive cooldown between runs (thermal-aware, monitoring CPU junction temperature). TTFT: wall-clock time from request submission to first streamed token. System TPS (SysTPS): total tokens generated across all concurrent agents divided by wall-clock seconds; for batch=2, SysTPS counts both agents' tokens. Per-agent TPS = SysTPS / batch size. The full matrix covers 6 context lengths $\times$ 3 cache states $\times$ 2 batch sizes $\times$ 2 streaming modes = 72 unique configurations per model, each measured 3 times = 216 individual measurements, with 198 passing quality checks.
+\textbf{Methodology.} Each configuration is measured 3 times; we report medians. Temperature 0.0 (greedy decoding, deterministic output). Output length fixed at 64 tokens. 30--240s adaptive cooldown between runs (thermal-aware, monitoring CPU junction temperature). TTFT: wall-clock time from request submission to first streamed token. System TPS (SysTPS): total tokens generated across all concurrent agents divided by wall-clock seconds; for batch=2, SysTPS counts both agents' tokens. Per-agent TPS = SysTPS / batch size. The full matrix targets 6 context lengths $\times$ 3 cache states $\times$ 2 batch sizes $\times$ 2 streaming modes per model. Of these, 66 unique configurations completed (32K batch=2 excluded due to memory constraints), each measured 3 times = 198 individual measurements passing quality checks.
 
 \subsection{TTFT Scaling}
 
@@ -357,7 +357,7 @@ Hot/cold speedup & \multicolumn{2}{c}{23.8$\times$} & \multicolumn{2}{c}{12.1$\t
 \end{tabular}
 \end{table}
 
-Table~\ref{tab:wiki} shows measured results. Cold priming averages 20.5\,s (Gemma) and 5.1\,s (DeepSeek) per expert at ${\sim}$4K token context. After priming, warm-cache queries drop to 847\,ms (Gemma, 24.2$\times$ faster) and 396\,ms (DeepSeek, 13.0$\times$). Per-expert breakdown: the largest cold TTFT is 31\,s (Gemma, Monte Carlo at 3K words), reduced to 761\,ms warm. Quality passes range from 80\% (Gemma Phase~2) to 30\% (DeepSeek Phase~1); these scores measure structural quality (keyword overlap, minimum length), not factual accuracy. A routing diagram appears in Appendix~\ref{app:figures}.
+Table~\ref{tab:wiki} shows measured results. Cold priming averages 20.5\,s (Gemma) and 5.1\,s (DeepSeek) per expert at ${\sim}$4K token context. After priming, warm-cache queries drop to 847\,ms (Gemma, 24.2$\times$ faster) and 396\,ms (DeepSeek, 13.0$\times$). Per-expert breakdown: the largest cold TTFT is 28\,s (Gemma, 3K-word article), reduced to 761\,ms warm. Quality passes range from 80\% (Gemma Phase~2) to 30\% (DeepSeek Phase~1); these scores measure structural quality (keyword overlap, minimum length), not factual accuracy. A routing diagram appears in Appendix~\ref{app:figures}.
 
 \section{Discussion}
 \label{sec:discussion}
@@ -615,7 +615,7 @@ Real multi-agent workflows have staggered request arrivals. We simulate: User~A 
 
 In sequential mode, User~B waits for User~A to complete before starting. In batched mode, User~B joins User~A's batch and begins prefill immediately.
 
-For Gemma, total wall time is similar (38.8\,s sequential vs 38.6\,s batched). For DeepSeek, also similar (9.5\,s vs 9.4\,s). The benefit of batching appears in User~B's perceived latency: DeepSeek batched User~B waits 6.4\,s vs 8.7\,s sequential (1.36$\times$ faster). The effect is smaller for Gemma because its prefill is long enough to dominate. With warm or hot caches, the staggered benefit would be larger since prefill overhead vanishes and decode interleaving matters more.
+For Gemma, total wall time is similar (38.8\,s sequential vs 38.6\,s batched). For DeepSeek, also similar (9.5\,s vs 9.4\,s). The benefit of batching appears in User~B's time-to-completion: DeepSeek batched User~B finishes in 6.4\,s vs 8.7\,s sequential from experiment start (includes both queuing and processing time). The effect is smaller for Gemma because its prefill is long enough to dominate. With warm or hot caches, the staggered benefit would be larger since prefill overhead vanishes and decode interleaving matters more.
 
 \section{Hardware Landscape}
 \label{app:hardware}

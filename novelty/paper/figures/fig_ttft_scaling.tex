@@ -72,6 +72,6 @@
 
 \end{axis}
 \end{tikzpicture}
-\caption{TTFT scaling across cache states for both models. Cold prefill scales linearly with context length. Hot and warm caches reduce TTFT by 40--130$\times$ at 32K tokens, with sub-second reload regardless of context length. DeepSeek's smaller layer count (27 vs 46) yields faster cold prefill but both models converge at similar warm/hot latencies relative to their cold baselines.}
+\caption{TTFT scaling across cache states for both models. Cold prefill scales linearly with context length. Hot and warm caches reduce TTFT by 40--130$\times$ at 32K tokens, with sub-second reload regardless of context length. DeepSeek's smaller layer count (27 vs 48) yields faster cold prefill but both models converge at similar warm/hot latencies relative to their cold baselines.}
 \label{fig:ttft}
 \end{figure}
