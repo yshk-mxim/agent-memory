@@ -268,18 +268,18 @@ Initial release with production-quality multi-agent LLM inference server.
 
 #### Components
 
-**Domain Layer** (`src/semantic/domain/`):
+**Domain Layer** (`src/agent_memory/domain/`):
 - `AgentID`: Unique agent identifier value object
 - `Message`, `MessageBlock`, `TokenSequence`: Core data models
 - `BlockPool`: Memory management with allocation, deallocation, defragmentation
 - `KVCache`: Key-value cache abstraction for transformer inference
 
-**Application Layer** (`src/semantic/application/`):
+**Application Layer** (`src/agent_memory/application/`):
 - `BatchEngine`: Continuous batching orchestrator for multi-agent inference
 - `AgentCacheStore`: Agent lifecycle management (create, save, load, evict)
 - `use_agent_inference`: Application use case for agent inference requests
 
-**Adapters** (`src/semantic/adapters/`):
+**Adapters** (`src/agent_memory/adapters/`):
 - **Inbound** (FastAPI):
   - `/v1/messages`: Anthropic Messages API endpoint
   - Authentication middleware (API key validation)
