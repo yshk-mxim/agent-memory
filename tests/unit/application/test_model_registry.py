@@ -11,9 +11,9 @@ sys.modules["mlx.core"] = MagicMock()
 sys.modules["mlx.utils"] = MagicMock()
 sys.modules["mlx_lm"] = MagicMock()
 
-from semantic.application.model_registry import ModelRegistry
-from semantic.domain.errors import ModelNotFoundError
-from semantic.domain.value_objects import ModelCacheSpec
+from agent_memory.application.model_registry import ModelRegistry
+from agent_memory.domain.errors import ModelNotFoundError
+from agent_memory.domain.value_objects import ModelCacheSpec
 
 
 @pytest.fixture

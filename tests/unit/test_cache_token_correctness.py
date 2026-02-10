@@ -7,7 +7,7 @@ Character-level matching exists to solve BPE tokenization boundary mismatches.
 
 import pytest
 
-from semantic.domain.entities import AgentBlocks
+from agent_memory.domain.entities import AgentBlocks
 
 pytestmark = pytest.mark.unit
 

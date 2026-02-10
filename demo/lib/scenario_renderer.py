@@ -55,7 +55,7 @@ from demo.lib.template_resolver import (
     has_template_refs,
     resolve_template,
 )
-from semantic.domain.scenario import PhaseSpec, ScenarioSpec
+from agent_memory.domain.scenario import PhaseSpec, ScenarioSpec
 
 logger = logging.getLogger(__name__)
 

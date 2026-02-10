@@ -18,7 +18,7 @@ try:
 except ModuleNotFoundError:
     import tomli as tomllib  # type: ignore[no-redef]
 
-from semantic.domain.value_objects import ModelCacheSpec
+from agent_memory.domain.value_objects import ModelCacheSpec
 
 pytestmark = pytest.mark.unit
 

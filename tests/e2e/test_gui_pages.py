@@ -176,12 +176,12 @@ class TestPageImports:
         assert callable(ScenarioRenderer)
 
     def test_import_scenario_loader(self) -> None:
-        from semantic.adapters.config.scenario_loader import load_scenario
+        from agent_memory.adapters.config.scenario_loader import load_scenario
 
         assert callable(load_scenario)
 
     def test_import_scenario_domain(self) -> None:
-        from semantic.domain.scenario import (
+        from agent_memory.domain.scenario import (
             AgentSpec,
             PhaseSpec,
             ScenarioSpec,
@@ -203,7 +203,7 @@ class TestScenarioYAMLLoading:
     """Test that all scenario YAML files parse and validate correctly."""
 
     def test_load_gossip_scenario(self) -> None:
-        from semantic.adapters.config.scenario_loader import load_scenario
+        from agent_memory.adapters.config.scenario_loader import load_scenario
 
         spec = load_scenario(Path("demo/scenarios/gossip.yaml"))
         assert spec.id == "gossip"
@@ -220,7 +220,7 @@ class TestScenarioYAMLLoading:
         assert spec.ui.show_memory_panel is True
 
     def test_load_prisoners_dilemma_scenario(self) -> None:
-        from semantic.adapters.config.scenario_loader import load_scenario
+        from agent_memory.adapters.config.scenario_loader import load_scenario
 
         spec = load_scenario(Path("demo/scenarios/prisoners_dilemma.yaml"))
         assert spec.id == "prisoners-dilemma"
@@ -236,21 +236,21 @@ class TestScenarioYAMLLoading:
         assert spec.payoff is not None
 
     def test_load_coordination_scenario(self) -> None:
-        from semantic.adapters.config.scenario_loader import load_scenario
+        from agent_memory.adapters.config.scenario_loader import load_scenario
 
         spec = load_scenario(Path("demo/scenarios/coordination.yaml"))
         assert spec.id == "coordination"
         assert spec.ui.layout == "single"
 
     def test_gossip_agents_have_system_prompts(self) -> None:
-        from semantic.adapters.config.scenario_loader import load_scenario
+        from agent_memory.adapters.config.scenario_loader import load_scenario
 
         spec = load_scenario(Path("demo/scenarios/gossip.yaml"))
         for agent in spec.agents.values():
             assert len(agent.system_prompt) > 0, f"{agent.key} has empty system_prompt"
 
     def test_gossip_phase_agents_reference_valid_keys(self) -> None:
-        from semantic.adapters.config.scenario_loader import load_scenario
+        from agent_memory.adapters.config.scenario_loader import load_scenario
 
         spec = load_scenario(Path("demo/scenarios/gossip.yaml"))
         for phase in spec.phases:
@@ -260,7 +260,7 @@ class TestScenarioYAMLLoading:
                 )
 
     def test_pd_phase_agents_reference_valid_keys(self) -> None:
-        from semantic.adapters.config.scenario_loader import load_scenario
+        from agent_memory.adapters.config.scenario_loader import load_scenario
 
         spec = load_scenario(Path("demo/scenarios/prisoners_dilemma.yaml"))
         for phase in spec.phases:
@@ -272,7 +272,7 @@ class TestScenarioYAMLLoading:
     def test_gossip_reunion_has_template(self) -> None:
         from demo.lib.template_resolver import extract_phase_refs, has_template_refs
 
-        from semantic.adapters.config.scenario_loader import load_scenario
+        from agent_memory.adapters.config.scenario_loader import load_scenario
 
         spec = load_scenario(Path("demo/scenarios/gossip.yaml"))
         reunion = spec.phases[2]
@@ -284,7 +284,7 @@ class TestScenarioYAMLLoading:
     def test_pd_interrogation_danny_has_template(self) -> None:
         from demo.lib.template_resolver import has_template_refs
 
-        from semantic.adapters.config.scenario_loader import load_scenario
+        from agent_memory.adapters.config.scenario_loader import load_scenario
 
         spec = load_scenario(Path("demo/scenarios/prisoners_dilemma.yaml"))
         danny_phase = spec.phases[1]
@@ -359,7 +359,7 @@ class TestBuildAgentColors:
     def test_colors_from_agent_specs(self) -> None:
         from demo.lib.message_timeline import build_agent_colors
 
-        from semantic.adapters.config.scenario_loader import load_scenario
+        from agent_memory.adapters.config.scenario_loader import load_scenario
 
         spec = load_scenario(Path("demo/scenarios/gossip.yaml"))
         colors = build_agent_colors(spec.agents)

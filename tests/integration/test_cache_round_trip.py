@@ -18,9 +18,9 @@ import numpy as np
 import pytest
 from safetensors.numpy import load_file, save_file
 
-from semantic.application.agent_cache_store import AgentCacheStore, ModelTag
-from semantic.domain.entities import AgentBlocks, KVBlock
-from semantic.domain.value_objects import ModelCacheSpec
+from agent_memory.application.agent_cache_store import AgentCacheStore, ModelTag
+from agent_memory.domain.entities import AgentBlocks, KVBlock
+from agent_memory.domain.value_objects import ModelCacheSpec
 
 pytestmark = pytest.mark.integration
 

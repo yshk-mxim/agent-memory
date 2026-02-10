@@ -928,7 +928,7 @@ def main() -> None:
     print(f"Checking server at {base_url}...")
     if not _check_server_ready(base_url):
         print("ERROR: Server is not ready. Start with:")
-        print(f"  python -m semantic.entrypoints.cli serve --port 8000")
+        print(f"  python -m agent_memory.entrypoints.cli serve --port 8000")
         sys.exit(1)
 
     model_id = _detect_model(base_url)

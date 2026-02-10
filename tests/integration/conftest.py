@@ -239,19 +239,19 @@ def _patch_for_integration(monkeypatch):
     monkeypatch.setenv("SEMANTIC_AGENT_CACHE_DIR", test_cache_dir)
 
     # Reset settings singleton so each test gets a fresh config load
-    from semantic.adapters.config import settings as settings_module
+    from agent_memory.adapters.config import settings as settings_module
 
     monkeypatch.setattr(settings_module, "_settings", None)
 
     # Reset spec extractor singleton
-    from semantic.adapters.outbound import mlx_spec_extractor
+    from agent_memory.adapters.outbound import mlx_spec_extractor
 
     monkeypatch.setattr(mlx_spec_extractor, "_extractor", None)
 
     # Patch _extract_cache to skip MLX tensor operations
-    from semantic.application.batch_engine import BlockPoolBatchEngine
-    from semantic.domain.entities import AgentBlocks
-    from semantic.domain.errors import GenerationError
+    from agent_memory.application.batch_engine import BlockPoolBatchEngine
+    from agent_memory.domain.entities import AgentBlocks
+    from agent_memory.domain.errors import GenerationError
 
     def _fake_extract_cache(self, uid, cache=None, token_sequence=None, prompt_text=""):
         if uid not in self._active_requests:
@@ -280,7 +280,7 @@ def _patch_for_integration(monkeypatch):
 
     # Patch SafetensorsCacheAdapter.save/load — fake blocks have opaque layer_data
     # that safetensors can't serialize. Mock the adapter to store in memory instead.
-    from semantic.adapters.outbound.safetensors_cache_adapter import SafetensorsCacheAdapter
+    from agent_memory.adapters.outbound.safetensors_cache_adapter import SafetensorsCacheAdapter
 
     _disk_cache: dict[str, tuple] = {}
 

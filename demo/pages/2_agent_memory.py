@@ -78,7 +78,7 @@ def render_sidebar() -> tuple[str | None, str | None]:
                 st.metric("Pool", f"{stats['pool_utilization_pct']:.1f}%")
             st.metric("Cache Size", f"{stats['total_cache_size_mb']:.1f} MB")
         else:
-            st.error("Server not reachable. Start with: `semantic serve`")
+            st.error("Server not reachable. Start with: `agent-memory serve`")
 
         st.divider()
 

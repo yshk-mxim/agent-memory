@@ -88,7 +88,7 @@ python -c "import mlx.core as mx; print(f'MLX version: {mx.__version__}')"
 ### Check Semantic Installation
 
 ```bash
-python -c "from semantic.domain.services import BlockPool; print('✓ Semantic installed')"
+python -c "from agent_memory.domain.services import BlockPool; print('✓ Semantic installed')"
 # Should print success message
 ```
 

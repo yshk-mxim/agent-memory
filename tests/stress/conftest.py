@@ -1,4 +1,4 @@
-"""Stress test fixtures for semantic caching server.
+"""Stress test fixtures for agent-memory server.
 
 Provides fixtures for:
 - Async HTTP client (aiohttp)
@@ -212,7 +212,7 @@ async def cleanup_after_stress():
     yield
 
     # Cleanup test cache directory
-    test_cache_dir = Path.home() / ".cache" / "semantic" / "test"
+    test_cache_dir = Path.home() / ".cache" / "agent_memory" / "test"
     if test_cache_dir.exists():
         import shutil
 

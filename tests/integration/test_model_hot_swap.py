@@ -7,13 +7,13 @@ import pytest
 from fastapi.testclient import TestClient
 
 # MLX modules are mocked in conftest.py — do not override here
-from semantic.adapters.inbound.admin_api import get_old_engine, get_orchestrator, router
-from semantic.application.agent_cache_store import AgentCacheStore, ModelTag
-from semantic.application.batch_engine import BlockPoolBatchEngine
-from semantic.application.model_registry import ModelRegistry
-from semantic.application.model_swap_orchestrator import ModelSwapOrchestrator
-from semantic.domain.services import BlockPool
-from semantic.domain.value_objects import ModelCacheSpec
+from agent_memory.adapters.inbound.admin_api import get_old_engine, get_orchestrator, router
+from agent_memory.application.agent_cache_store import AgentCacheStore, ModelTag
+from agent_memory.application.batch_engine import BlockPoolBatchEngine
+from agent_memory.application.model_registry import ModelRegistry
+from agent_memory.application.model_swap_orchestrator import ModelSwapOrchestrator
+from agent_memory.domain.services import BlockPool
+from agent_memory.domain.value_objects import ModelCacheSpec
 
 
 @pytest.fixture
@@ -26,9 +26,9 @@ def test_app():
     app = FastAPI()
     app.include_router(router)
 
-    # Initialize app.state.semantic (required for admin API CR-1 fix)
-    app.state.semantic = SimpleNamespace()
-    app.state.semantic.batch_engine = None
+    # Initialize app.state.agent_memory (required for admin API CR-1 fix)
+    app.state.agent_memory = SimpleNamespace()
+    app.state.agent_memory.batch_engine = None
 
     return app
 
@@ -90,7 +90,7 @@ class TestFullHotSwapFlow:
         )
 
         # Add some caches before swap
-        from semantic.domain.entities import AgentBlocks
+        from agent_memory.domain.entities import AgentBlocks
 
         for i in range(3):
             blocks = AgentBlocks(agent_id=f"agent_{i}", blocks={}, total_tokens=0)
@@ -243,7 +243,7 @@ class TestCachePreservationAcrossSwap:
         )
 
         # Add caches
-        from semantic.domain.entities import AgentBlocks
+        from agent_memory.domain.entities import AgentBlocks
 
         for i in range(3):
             blocks = AgentBlocks(agent_id=f"agent_{i}", blocks={}, total_tokens=0)

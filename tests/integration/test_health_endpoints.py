@@ -9,10 +9,10 @@ Tests verify Kubernetes-compatible health endpoints:
 import pytest
 from fastapi.testclient import TestClient
 
-from semantic.application.batch_engine import BlockPoolBatchEngine
-from semantic.domain.services import BlockPool
-from semantic.domain.value_objects import ModelCacheSpec
-from semantic.entrypoints.api_server import create_app
+from agent_memory.application.batch_engine import BlockPoolBatchEngine
+from agent_memory.domain.services import BlockPool
+from agent_memory.domain.value_objects import ModelCacheSpec
+from agent_memory.entrypoints.api_server import create_app
 
 
 @pytest.fixture
@@ -24,7 +24,7 @@ def test_app():
     class MockAppState:
         def __init__(self):
             self.shutting_down = False
-            self.semantic = type(
+            self.agent_memory = type(
                 "obj",
                 (object,),
                 {
@@ -60,7 +60,7 @@ def test_health_live_always_200(test_app):
     assert response.json() == {"status": "alive"}
 
     # Even without pool
-    test_app.state.semantic.block_pool = None
+    test_app.state.agent_memory.block_pool = None
     response = client.get("/health/live")
     assert response.status_code == 200
     assert response.json() == {"status": "alive"}
@@ -83,7 +83,7 @@ def test_health_ready_503_when_pool_exhausted(test_app):
         sliding_window_size=0,
     )
     pool = BlockPool(spec=spec, total_blocks=10)
-    test_app.state.semantic.block_pool = pool
+    test_app.state.agent_memory.block_pool = pool
 
     # Pool mostly empty - should be ready
     response = client.get("/health/ready")
@@ -130,7 +130,7 @@ def test_health_ready_503_when_shutting_down(test_app):
         sliding_window_size=0,
     )
     pool = BlockPool(spec=spec, total_blocks=100)
-    test_app.state.semantic.block_pool = pool
+    test_app.state.agent_memory.block_pool = pool
 
     # Normal operation - should be ready
     test_app.state.shutting_down = False
@@ -155,7 +155,7 @@ def test_health_startup_503_until_model_loaded(test_app):
     client = TestClient(test_app)
 
     # No batch engine - still starting
-    test_app.state.semantic.batch_engine = None
+    test_app.state.agent_memory.batch_engine = None
     response = client.get("/health/startup")
     assert response.status_code == 503
     data = response.json()
@@ -199,7 +199,7 @@ def test_health_startup_503_until_model_loaded(test_app):
         batch_gen_factory=fake_batch_gen_factory,
     )
 
-    test_app.state.semantic.batch_engine = batch_engine
+    test_app.state.agent_memory.batch_engine = batch_engine
 
     # Batch engine exists - started
     response = client.get("/health/startup")

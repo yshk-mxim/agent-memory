@@ -10,14 +10,14 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from semantic.application.agent_cache_store import (
+from agent_memory.application.agent_cache_store import (
     AgentCacheStore,
     CacheEntry,
     ModelTag,
 )
-from semantic.domain.entities import AgentBlocks, KVBlock
-from semantic.domain.errors import InvalidRequestError
-from semantic.domain.value_objects import ModelCacheSpec
+from agent_memory.domain.entities import AgentBlocks, KVBlock
+from agent_memory.domain.errors import InvalidRequestError
+from agent_memory.domain.value_objects import ModelCacheSpec
 
 
 @pytest.fixture
@@ -42,7 +42,7 @@ def model_tag(spec: ModelCacheSpec) -> ModelTag:
 @pytest.fixture
 def agent_blocks() -> AgentBlocks:
     """Create test agent blocks with non-empty layer data."""
-    from semantic.domain.entities import KVBlock
+    from agent_memory.domain.entities import KVBlock
 
     block = KVBlock(block_id=0, layer_id=0, token_count=256, layer_data="fake_kv")
     return AgentBlocks(
@@ -466,7 +466,7 @@ class TestAgentCacheStorePrefixMatching:
         self, model_tag: ModelTag, mock_cache_adapter: MagicMock
     ) -> None:
         """find_prefix() should return cache with longest matching token prefix."""
-        from semantic.domain.entities import KVBlock
+        from agent_memory.domain.entities import KVBlock
 
         with tempfile.TemporaryDirectory() as tmpdir:
             store = AgentCacheStore(
@@ -508,7 +508,7 @@ class TestAgentCacheStorePrefixMatching:
         self, model_tag: ModelTag, mock_cache_adapter: MagicMock
     ) -> None:
         """find_prefix() must compare actual token values, not just count."""
-        from semantic.domain.entities import KVBlock
+        from agent_memory.domain.entities import KVBlock
 
         with tempfile.TemporaryDirectory() as tmpdir:
             store = AgentCacheStore(
@@ -549,7 +549,7 @@ class TestAgentCacheStorePrefixMatching:
         self, model_tag: ModelTag, mock_cache_adapter: MagicMock
     ) -> None:
         """find_prefix() returns None when no cached agent shares any token prefix."""
-        from semantic.domain.entities import KVBlock
+        from agent_memory.domain.entities import KVBlock
 
         with tempfile.TemporaryDirectory() as tmpdir:
             store = AgentCacheStore(
@@ -576,7 +576,7 @@ class TestAgentCacheStorePrefixMatching:
         self, model_tag: ModelTag, mock_cache_adapter: MagicMock
     ) -> None:
         """find_prefix() should only update LRU timestamp on the winning entry."""
-        from semantic.domain.entities import KVBlock
+        from agent_memory.domain.entities import KVBlock
 
         with tempfile.TemporaryDirectory() as tmpdir:
             store = AgentCacheStore(

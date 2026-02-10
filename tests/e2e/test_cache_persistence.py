@@ -26,7 +26,7 @@ def test_cache_persists_across_server_restart(cleanup_caches):
     # Note: This test manually manages server lifecycle instead of using live_server
     # because it needs to stop and restart the server
 
-    cache_dir = Path.home() / ".cache" / "semantic" / "test"
+    cache_dir = Path.home() / ".cache" / "agent_memory" / "test"
 
     # TODO: Implement full server restart test
     # This requires more complex server management than the live_server fixture provides
@@ -138,7 +138,7 @@ def test_model_tag_compatibility_validation(test_client: httpx.Client, cleanup_c
     assert response.status_code in [200, 400, 501]
 
     # Cache should be created with model tag
-    cache_dir = Path.home() / ".cache" / "semantic" / "test"
+    cache_dir = Path.home() / ".cache" / "agent_memory" / "test"
 
     # If cache directory exists, caches should have model metadata
     if cache_dir.exists():

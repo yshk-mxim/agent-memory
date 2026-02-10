@@ -32,7 +32,7 @@ def cleanup_caches() -> Iterator[None]:
 
     Ensures test isolation by removing cached data.
     """
-    test_cache_dir = Path.home() / ".cache" / "semantic" / "test"
+    test_cache_dir = Path.home() / ".cache" / "agent_memory" / "test"
 
     # Cleanup before test
     if test_cache_dir.exists():
@@ -70,7 +70,7 @@ def live_server(cleanup_caches) -> Iterator[str]:
 
     # Set test environment variables
     env = os.environ.copy()
-    env["SEMANTIC_CACHE_DIR"] = str(Path.home() / ".cache" / "semantic" / "test")
+    env["SEMANTIC_CACHE_DIR"] = str(Path.home() / ".cache" / "agent_memory" / "test")
     env["SEMANTIC_LOG_LEVEL"] = "WARNING"  # Reduce noise in tests
     # Support all test API keys (comma-separated for multiple agents)
     test_keys = [
@@ -100,7 +100,7 @@ def live_server(cleanup_caches) -> Iterator[str]:
             "python",
             "-m",
             "uvicorn",
-            "semantic.entrypoints.api_server:create_app",
+            "agent_memory.entrypoints.api_server:create_app",
             "--host",
             "127.0.0.1",
             "--port",

@@ -10,36 +10,36 @@ This reference documents all public APIs in the Semantic codebase. Documentation
 
 ### Entities
 
-::: semantic.domain.entities.KVBlock
+::: agent_memory.domain.entities.KVBlock
     options:
       show_root_heading: true
       show_source: true
 
-::: semantic.domain.entities.AgentBlocks
+::: agent_memory.domain.entities.AgentBlocks
     options:
       show_root_heading: true
       show_source: true
 
 ### Value Objects
 
-::: semantic.domain.value_objects.ModelCacheSpec
+::: agent_memory.domain.value_objects.ModelCacheSpec
     options:
       show_root_heading: true
       show_source: true
 
-::: semantic.domain.value_objects.CacheKey
+::: agent_memory.domain.value_objects.CacheKey
     options:
       show_root_heading: true
       show_source: true
 
-::: semantic.domain.value_objects.GenerationResult
+::: agent_memory.domain.value_objects.GenerationResult
     options:
       show_root_heading: true
       show_source: true
 
 ### Services
 
-::: semantic.domain.services.BlockPool
+::: agent_memory.domain.services.BlockPool
     options:
       show_root_heading: true
       show_source: true
@@ -52,8 +52,8 @@ This reference documents all public APIs in the Semantic codebase. Documentation
 **Core Service**: Block-pool memory management.
 
 ```python
-from semantic.domain.services import BlockPool
-from semantic.domain.value_objects import ModelCacheSpec
+from agent_memory.domain.services import BlockPool
+from agent_memory.domain.value_objects import ModelCacheSpec
 
 # Create spec
 spec = ModelCacheSpec(
@@ -89,7 +89,7 @@ pool.reconfigure(new_spec)
 **Value Object**: Model-specific cache configuration.
 
 ```python
-from semantic.domain.value_objects import ModelCacheSpec
+from agent_memory.domain.value_objects import ModelCacheSpec
 
 # Extract from MLX model
 spec = ModelCacheSpec.from_model(model)
@@ -113,7 +113,7 @@ spec = ModelCacheSpec(
 **Entity**: Single memory block (256 tokens).
 
 ```python
-from semantic.domain.entities import KVBlock
+from agent_memory.domain.entities import KVBlock
 
 block = KVBlock(
     block_id=42,
@@ -135,7 +135,7 @@ if block.is_empty():
 **Entity**: Agent's allocated blocks across layers.
 
 ```python
-from semantic.domain.entities import AgentBlocks, KVBlock
+from agent_memory.domain.entities import AgentBlocks, KVBlock
 
 agent = AgentBlocks(
     agent_id="agent_1",

@@ -7,7 +7,7 @@ from typing import Any
 
 import pytest
 
-from semantic.application.scheduler import (
+from agent_memory.application.scheduler import (
     ConcurrentScheduler,
 )
 
@@ -94,7 +94,7 @@ class FakeBatchEngine:
 
     def step_once(self) -> list[Any]:
         """Per-token decode step matching scheduler's expected interface."""
-        from semantic.domain.value_objects import StepOneResult
+        from agent_memory.domain.value_objects import StepOneResult
 
         results = []
         completed_uids = []

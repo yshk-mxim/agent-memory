@@ -11,10 +11,10 @@ sys.modules["mlx.core"] = MagicMock()
 sys.modules["mlx.utils"] = MagicMock()
 sys.modules["mlx_lm"] = MagicMock()
 
-from semantic.application.batch_engine import BlockPoolBatchEngine
-from semantic.application.model_swap_orchestrator import ModelSwapOrchestrator
-from semantic.domain.errors import ModelNotFoundError, PoolConfigurationError
-from semantic.domain.value_objects import ModelCacheSpec
+from agent_memory.application.batch_engine import BlockPoolBatchEngine
+from agent_memory.application.model_swap_orchestrator import ModelSwapOrchestrator
+from agent_memory.domain.errors import ModelNotFoundError, PoolConfigurationError
+from agent_memory.domain.value_objects import ModelCacheSpec
 
 
 class TestSwapRollback:

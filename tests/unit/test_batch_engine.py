@@ -18,10 +18,10 @@ sys.modules["mlx_lm"] = MagicMock()
 sys.modules["mlx_lm.models"] = MagicMock()
 sys.modules["mlx_lm.models.cache"] = MagicMock()
 
-from semantic.application.batch_engine import BlockPoolBatchEngine
-from semantic.domain.errors import InvalidRequestError, ModelNotFoundError
-from semantic.domain.services import BlockPool
-from semantic.domain.value_objects import ModelCacheSpec
+from agent_memory.application.batch_engine import BlockPoolBatchEngine
+from agent_memory.domain.errors import InvalidRequestError, ModelNotFoundError
+from agent_memory.domain.services import BlockPool
+from agent_memory.domain.value_objects import ModelCacheSpec
 
 
 class FakeTensor:
@@ -500,7 +500,7 @@ class TestBlockPoolBatchEngineSubmit:
 
     def test_submit_with_cache_reconstructs(self, engine, pool) -> None:
         """Should reconstruct cache from blocks when cache provided."""
-        from semantic.domain.entities import AgentBlocks
+        from agent_memory.domain.entities import AgentBlocks
 
         # Create fake agent blocks (simulating existing cache)
         allocated_block = pool.allocate(n_blocks=1, layer_id=0, agent_id="test")[0]
@@ -604,7 +604,7 @@ class TestBlockPoolBatchEngineCacheReconstruction:
 
     def test_reconstruct_cache_from_single_block(self, engine, pool) -> None:
         """Should reconstruct cache from single block."""
-        from semantic.domain.entities import AgentBlocks
+        from agent_memory.domain.entities import AgentBlocks
 
         # Create agent blocks with single block per layer
         blocks = {}
@@ -631,7 +631,7 @@ class TestBlockPoolBatchEngineCacheReconstruction:
 
     def test_reconstruct_cache_from_multiple_blocks(self, engine, pool) -> None:
         """Should reconstruct cache from multiple blocks."""
-        from semantic.domain.entities import AgentBlocks
+        from agent_memory.domain.entities import AgentBlocks
 
         # Create agent blocks with multiple blocks per layer
         blocks = {}

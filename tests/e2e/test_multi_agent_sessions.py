@@ -133,7 +133,7 @@ def test_no_cache_leakage_between_agents(test_client: httpx.Client, cleanup_cach
     assert response_b.status_code in [200, 400, 501]
 
     # Check cache directory structure
-    cache_dir = Path.home() / ".cache" / "semantic" / "test"
+    cache_dir = Path.home() / ".cache" / "agent_memory" / "test"
     if cache_dir.exists():
         # If caches were saved, they should be in separate files
         cache_files = list(cache_dir.glob("*.safetensors"))

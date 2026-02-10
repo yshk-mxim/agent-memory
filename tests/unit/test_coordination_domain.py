@@ -7,7 +7,7 @@ dependencies.
 
 import pytest
 
-from semantic.domain.coordination import (
+from agent_memory.domain.coordination import (
     AgentRole,
     Channel,
     ChannelMessage,

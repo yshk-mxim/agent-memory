@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from semantic.application.chat_completion_service import generate_chat_completion
+from agent_memory.application.chat_completion_service import generate_chat_completion
 
 
 @pytest.fixture

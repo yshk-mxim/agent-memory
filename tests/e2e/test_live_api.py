@@ -573,7 +573,7 @@ class TestScenarioSessionFlow:
     ) -> None:
         from pathlib import Path
 
-        from semantic.adapters.config.scenario_loader import load_scenario
+        from agent_memory.adapters.config.scenario_loader import load_scenario
 
         spec = load_scenario(Path("demo/scenarios/gossip.yaml"))
         phase = spec.phases[0]  # alice_bob
@@ -630,7 +630,7 @@ class TestScenarioSessionFlow:
     ) -> None:
         from pathlib import Path
 
-        from semantic.adapters.config.scenario_loader import load_scenario
+        from agent_memory.adapters.config.scenario_loader import load_scenario
 
         spec = load_scenario(Path("demo/scenarios/prisoners_dilemma.yaml"))
         phase = spec.phases[0]  # interrogation_marco
@@ -692,7 +692,7 @@ class TestScenarioSessionFlow:
             resolve_template,
         )
 
-        from semantic.adapters.config.scenario_loader import load_scenario
+        from agent_memory.adapters.config.scenario_loader import load_scenario
 
         spec = load_scenario(Path("demo/scenarios/gossip.yaml"))
 

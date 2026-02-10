@@ -11,8 +11,8 @@ Per production_plan.md: 95%+ coverage, mypy --strict compliant.
 
 import pytest
 
-from semantic.domain.entities import AgentBlocks, KVBlock
-from semantic.domain.errors import AgentBlocksValidationError, BlockValidationError
+from agent_memory.domain.entities import AgentBlocks, KVBlock
+from agent_memory.domain.errors import AgentBlocksValidationError, BlockValidationError
 
 pytestmark = pytest.mark.unit
 

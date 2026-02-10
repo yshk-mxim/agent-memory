@@ -19,7 +19,7 @@ Execution order on request:
 import pytest
 from fastapi.testclient import TestClient
 
-from semantic.entrypoints.api_server import create_app
+from agent_memory.entrypoints.api_server import create_app
 
 pytestmark = pytest.mark.integration
 
@@ -32,7 +32,7 @@ def test_app():
     class MockAppState:
         def __init__(self):
             self.shutting_down = False
-            self.semantic = type(
+            self.agent_memory = type(
                 "obj",
                 (object,),
                 {

@@ -14,14 +14,14 @@ sys.modules["mlx.core"] = MagicMock()
 sys.modules["mlx.utils"] = MagicMock()
 sys.modules["mlx_lm"] = MagicMock()
 
-from semantic.adapters.inbound.admin_api import (
+from agent_memory.adapters.inbound.admin_api import (
     get_old_engine,
     get_orchestrator,
     get_registry,
     router,
     verify_admin_key,
 )
-from semantic.domain.value_objects import ModelCacheSpec
+from agent_memory.domain.value_objects import ModelCacheSpec
 
 
 @pytest.fixture
@@ -30,11 +30,11 @@ def app():
     app = FastAPI()
     app.include_router(router)
 
-    # Initialize app.state.semantic (required for admin API)
+    # Initialize app.state.agent_memory (required for admin API)
     from types import SimpleNamespace
 
-    app.state.semantic = SimpleNamespace()
-    app.state.semantic.batch_engine = None  # Will be updated by swap
+    app.state.agent_memory = SimpleNamespace()
+    app.state.agent_memory.batch_engine = None  # Will be updated by swap
 
     return app
 
@@ -114,7 +114,7 @@ class TestSwapModelEndpoint:
         app.dependency_overrides[get_old_engine] = lambda: Mock()  # old_engine
 
         # Verify initial state
-        assert app.state.semantic.batch_engine is None
+        assert app.state.agent_memory.batch_engine is None
 
         # Execute request
         response = client.post(
@@ -135,7 +135,7 @@ class TestSwapModelEndpoint:
         mock_orchestrator.swap_model.assert_called_once()
 
         # CRITICAL: Verify app.state updated (CR-1 fix verification)
-        assert app.state.semantic.batch_engine is mock_new_engine
+        assert app.state.agent_memory.batch_engine is mock_new_engine
 
     @patch.dict(os.environ, {"SEMANTIC_ADMIN_KEY": "admin123"})
     def test_swap_model_missing_auth(self, client, app):
@@ -210,7 +210,7 @@ class TestSwapModelEndpoint:
         """Verify global swap lock exists for thread safety (CR-2)."""
         import asyncio
 
-        from semantic.adapters.inbound.admin_api import _swap_lock
+        from agent_memory.adapters.inbound.admin_api import _swap_lock
 
         # Verify lock exists and is an asyncio.Lock
         assert isinstance(_swap_lock, asyncio.Lock)

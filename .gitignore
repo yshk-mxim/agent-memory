@@ -85,6 +85,7 @@ logs/
 .coverage
 htmlcov/
 .tox/
+pytest-of-*/
 
 # MyPy
 .mypy_cache/
@@ -104,8 +105,8 @@ site/
 benchmarks/results/capability_*.json
 
 # Agent caches (semantic-specific)
-.semantic/
-~/.semantic/
+.agent_memory/
+~/.agent_memory/
 
 # Removed from release - internal project management
 project/

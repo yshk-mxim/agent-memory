@@ -18,8 +18,8 @@ from demo.lib.template_resolver import (
     resolve_template,
 )
 
-from semantic.adapters.config.scenario_loader import discover_scenarios, load_scenario
-from semantic.domain.scenario import PhaseSpec, ScenarioSpec
+from agent_memory.adapters.config.scenario_loader import discover_scenarios, load_scenario
+from agent_memory.domain.scenario import PhaseSpec, ScenarioSpec
 
 pytestmark = pytest.mark.integration
 

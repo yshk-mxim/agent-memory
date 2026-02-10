@@ -2,7 +2,7 @@
 
 import pytest
 
-from semantic.application.adaptive_config import (
+from agent_memory.application.adaptive_config import (
     DEFAULT_HIGH_BATCH_THRESHOLD,
     DEFAULT_MEMORY_PRESSURE_MB,
     EMA_ALPHA,

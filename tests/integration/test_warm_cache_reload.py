@@ -9,9 +9,9 @@ import pytest
 import time
 from pathlib import Path
 
-from semantic.application.agent_cache_store import AgentCacheStore
-from semantic.domain.entities import AgentBlocks, KVBlock
-from semantic.domain.value_objects import ModelCacheSpec, ModelTag
+from agent_memory.application.agent_cache_store import AgentCacheStore
+from agent_memory.domain.entities import AgentBlocks, KVBlock
+from agent_memory.domain.value_objects import ModelCacheSpec, ModelTag
 
 
 @pytest.fixture

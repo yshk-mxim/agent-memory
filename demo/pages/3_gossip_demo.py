@@ -18,7 +18,7 @@ import logging
 import streamlit as st
 from demo.lib.scenario_renderer import ScenarioRenderer
 
-from semantic.adapters.config.scenario_loader import load_scenario
+from agent_memory.adapters.config.scenario_loader import load_scenario
 
 logger = logging.getLogger(__name__)
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from semantic.adapters.config.scenario_models import (
+from agent_memory.adapters.config.scenario_models import (
     AgentSpecModel,
     InteractionEdgeModel,
     OutcomeRuleModel,
@@ -12,7 +12,7 @@ from semantic.adapters.config.scenario_models import (
     ScenarioSpecModel,
     UIHintsModel,
 )
-from semantic.domain.scenario import (
+from agent_memory.domain.scenario import (
     AgentSpec,
     InteractionEdge,
     OutcomeRule,

@@ -6,7 +6,7 @@ Tests FastAPI application creation, health endpoints, and middleware.
 import pytest
 from fastapi.testclient import TestClient
 
-from semantic.entrypoints.api_server import create_app
+from agent_memory.entrypoints.api_server import create_app
 
 
 @pytest.mark.integration
@@ -107,10 +107,10 @@ class TestServerLifecycle:
             assert response.status_code == 200
 
             # Verify app state is populated
-            assert hasattr(app.state, "semantic")
-            assert hasattr(app.state.semantic, "block_pool")
-            assert hasattr(app.state.semantic, "batch_engine")
-            assert hasattr(app.state.semantic, "cache_store")
+            assert hasattr(app.state, "agent_memory")
+            assert hasattr(app.state.agent_memory, "block_pool")
+            assert hasattr(app.state.agent_memory, "batch_engine")
+            assert hasattr(app.state.agent_memory, "cache_store")
 
         # After context exit, shutdown should have completed
         # (no assertions needed - test passes if no exceptions)

@@ -196,8 +196,8 @@ pytest tests/unit/ --cov=src/semantic/domain --cov-report=html
 
 ```python
 import pytest
-from semantic.domain.services import BlockPool
-from semantic.domain.value_objects import ModelCacheSpec
+from agent_memory.domain.services import BlockPool
+from agent_memory.domain.value_objects import ModelCacheSpec
 
 @pytest.mark.unit
 class TestBlockPool:
@@ -297,7 +297,7 @@ def test_mlx_cache_roundtrip(tmp_path):
 
 ```python
 import pytest
-from semantic.domain.value_objects import ModelCacheSpec
+from agent_memory.domain.value_objects import ModelCacheSpec
 
 @pytest.fixture
 def small_spec() -> ModelCacheSpec:

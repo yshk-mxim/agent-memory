@@ -17,7 +17,7 @@ from pathlib import Path
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from src.semantic.adapters.outbound.mlx_model_loader import MLXModelLoader
+from agent_memory.adapters.outbound.mlx_model_loader import MLXModelLoader
 
 
 def test_tokenizer_max_length():

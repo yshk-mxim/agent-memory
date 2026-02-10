@@ -1,7 +1,7 @@
 """Unit tests for SharedPrefixCache."""
 
 
-from semantic.application.shared_prefix_cache import SharedPrefixCache
+from agent_memory.application.shared_prefix_cache import SharedPrefixCache
 
 
 class TestSharedPrefixCacheBasic:

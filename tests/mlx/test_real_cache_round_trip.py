@@ -12,8 +12,8 @@ import pytest
 
 import mlx.core as mx
 
-from semantic.adapters.outbound.safetensors_cache_adapter import SafetensorsCacheAdapter
-from semantic.domain.entities import AgentBlocks, KVBlock
+from agent_memory.adapters.outbound.safetensors_cache_adapter import SafetensorsCacheAdapter
+from agent_memory.domain.entities import AgentBlocks, KVBlock
 
 pytestmark = pytest.mark.integration
 
@@ -492,9 +492,9 @@ class TestRealBatchEngineEndToEnd:
         self, real_model_and_tokenizer, real_spec
     ) -> None:
         """Full engine pipeline: submit → step → completion with real tokens."""
-        from semantic.adapters.outbound.mlx_cache_adapter import MLXCacheAdapter
-        from semantic.application.batch_engine import BlockPoolBatchEngine
-        from semantic.domain.services import BlockPool
+        from agent_memory.adapters.outbound.mlx_cache_adapter import MLXCacheAdapter
+        from agent_memory.application.batch_engine import BlockPoolBatchEngine
+        from agent_memory.domain.services import BlockPool
 
         model, tokenizer = real_model_and_tokenizer
         pool = BlockPool(spec=real_spec, total_blocks=200)
@@ -525,9 +525,9 @@ class TestRealBatchEngineEndToEnd:
         self, real_model_and_tokenizer, real_spec
     ) -> None:
         """Cache extracted after real inference should be Q4 quantized."""
-        from semantic.adapters.outbound.mlx_cache_adapter import MLXCacheAdapter
-        from semantic.application.batch_engine import BlockPoolBatchEngine
-        from semantic.domain.services import BlockPool
+        from agent_memory.adapters.outbound.mlx_cache_adapter import MLXCacheAdapter
+        from agent_memory.application.batch_engine import BlockPoolBatchEngine
+        from agent_memory.domain.services import BlockPool
 
         model, tokenizer = real_model_and_tokenizer
 
@@ -586,10 +586,10 @@ class TestRealBatchEngineEndToEnd:
         self, real_model_and_tokenizer, real_spec, cache_dir
     ) -> None:
         """Full pipeline: infer → extract Q4 → save to disk → load → verify."""
-        from semantic.adapters.outbound.mlx_cache_adapter import MLXCacheAdapter
-        from semantic.adapters.outbound.safetensors_cache_adapter import SafetensorsCacheAdapter
-        from semantic.application.batch_engine import BlockPoolBatchEngine
-        from semantic.domain.services import BlockPool
+        from agent_memory.adapters.outbound.mlx_cache_adapter import MLXCacheAdapter
+        from agent_memory.adapters.outbound.safetensors_cache_adapter import SafetensorsCacheAdapter
+        from agent_memory.application.batch_engine import BlockPoolBatchEngine
+        from agent_memory.domain.services import BlockPool
 
         model, tokenizer = real_model_and_tokenizer
         pool = BlockPool(spec=real_spec, total_blocks=200)

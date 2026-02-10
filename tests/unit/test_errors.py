@@ -6,7 +6,7 @@ all custom exceptions are properly defined and can be raised/caught.
 
 import pytest
 
-from semantic.domain.errors import (
+from agent_memory.domain.errors import (
     AgentNotFoundError,
     CacheCorruptionError,
     CachePersistenceError,

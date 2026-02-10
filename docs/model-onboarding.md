@@ -112,7 +112,7 @@ print(f"Config: {model.config}")
 The system automatically extracts `ModelCacheSpec` from the model config:
 
 ```python
-from semantic.domain.model_cache_spec import ModelCacheSpec
+from agent_memory.domain.model_cache_spec import ModelCacheSpec
 
 # Automatic extraction
 spec = ModelCacheSpec.from_model(model, block_size=256)
@@ -273,7 +273,7 @@ Create model-specific unit tests:
 """Unit tests for NewModel support."""
 
 import pytest
-from semantic.domain.model_cache_spec import ModelCacheSpec
+from agent_memory.domain.model_cache_spec import ModelCacheSpec
 
 
 @pytest.mark.unit
@@ -307,7 +307,7 @@ Create integration tests for all API endpoints:
 import pytest
 from fastapi.testclient import TestClient
 
-from semantic.entrypoints.api_server import create_app
+from agent_memory.entrypoints.api_server import create_app
 
 
 @pytest.mark.integration

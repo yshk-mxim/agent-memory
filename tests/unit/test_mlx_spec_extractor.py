@@ -4,13 +4,13 @@ from unittest.mock import Mock
 
 import pytest
 
-from semantic.adapters.outbound.mlx_spec_extractor import (
+from agent_memory.adapters.outbound.mlx_spec_extractor import (
     Gemma3DetectionStrategy,
     MLXModelSpecExtractor,
     UniformAttentionDetectionStrategy,
     get_extractor,
 )
-from semantic.domain.errors import ModelSpecValidationError
+from agent_memory.domain.errors import ModelSpecValidationError
 
 pytestmark = pytest.mark.unit
 

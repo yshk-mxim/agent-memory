@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import pytest
 
-from semantic.domain.scenario import (
+from agent_memory.domain.scenario import (
     AgentSpec,
     InteractionEdge,
     OutcomeRule,

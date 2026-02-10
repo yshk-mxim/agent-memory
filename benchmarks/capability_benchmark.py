@@ -299,7 +299,7 @@ class ServerManager:
 
         self.proc = subprocess.Popen(
             [
-                sys.executable, "-m", "semantic.entrypoints.cli", "serve",
+                sys.executable, "-m", "agent_memory.entrypoints.cli", "serve",
                 "--port", str(self.port),
                 "--log-level", "WARNING",
             ],

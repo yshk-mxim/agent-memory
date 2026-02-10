@@ -1,7 +1,7 @@
 """Unit tests for PrefillState."""
 
 
-from semantic.application.prefill_state import PrefillState
+from agent_memory.application.prefill_state import PrefillState
 
 
 class TestPrefillStateBasic:

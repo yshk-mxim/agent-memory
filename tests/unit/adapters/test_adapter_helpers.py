@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 import pytest
 from fastapi import HTTPException
 
-from semantic.adapters.inbound.adapter_helpers import (
+from agent_memory.adapters.inbound.adapter_helpers import (
     STEP_TIMEOUT_SECONDS,
     get_semantic_state,
     run_step_for_uid,
@@ -18,7 +18,7 @@ class TestGetSemanticState:
     def test_returns_state_when_present(self) -> None:
         mock_state = SimpleNamespace(batch_engine=MagicMock())
         mock_request = MagicMock()
-        mock_request.app.state.semantic = mock_state
+        mock_request.app.state.agent_memory = mock_state
         result = get_semantic_state(mock_request)
         assert result is mock_state
 
@@ -31,7 +31,7 @@ class TestGetSemanticState:
 
     def test_raises_503_when_none(self) -> None:
         mock_request = MagicMock()
-        mock_request.app.state.semantic = None
+        mock_request.app.state.agent_memory = None
         with pytest.raises(HTTPException) as exc_info:
             get_semantic_state(mock_request)
         assert exc_info.value.status_code == 503

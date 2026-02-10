@@ -11,9 +11,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from semantic.domain.entities import AgentBlocks, KVBlock
-from semantic.domain.services import BlockPool
-from semantic.domain.value_objects import ModelCacheSpec
+from agent_memory.domain.entities import AgentBlocks, KVBlock
+from agent_memory.domain.services import BlockPool
+from agent_memory.domain.value_objects import ModelCacheSpec
 
 
 def _make_spec(n_layers: int = 4, n_kv_heads: int = 4, head_dim: int = 64) -> ModelCacheSpec:
@@ -164,8 +164,8 @@ class TestAgentCacheStoreMemoryLeaks:
 
     def test_hot_cache_bounded_by_max(self) -> None:
         """Hot cache must not exceed max_hot_agents."""
-        from semantic.application.agent_cache_store import AgentCacheStore
-        from semantic.application.agent_cache_store import ModelTag
+        from agent_memory.application.agent_cache_store import AgentCacheStore
+        from agent_memory.application.agent_cache_store import ModelTag
 
         tag = ModelTag(model_id="test", n_layers=2, n_kv_heads=4, head_dim=64, block_tokens=256)
         store = AgentCacheStore(
@@ -184,8 +184,8 @@ class TestAgentCacheStoreMemoryLeaks:
 
     def test_delete_removes_from_hot_cache(self) -> None:
         """Deleting an agent should remove it from hot cache."""
-        from semantic.application.agent_cache_store import AgentCacheStore
-        from semantic.application.agent_cache_store import ModelTag
+        from agent_memory.application.agent_cache_store import AgentCacheStore
+        from agent_memory.application.agent_cache_store import ModelTag
 
         tag = ModelTag(model_id="test", n_layers=2, n_kv_heads=4, head_dim=64, block_tokens=256)
         store = AgentCacheStore(
@@ -207,8 +207,8 @@ class TestAgentCacheStoreMemoryLeaks:
 
     def test_evict_all_drains_hot_cache(self) -> None:
         """evict_all_to_disk should leave hot cache empty."""
-        from semantic.application.agent_cache_store import AgentCacheStore
-        from semantic.application.agent_cache_store import ModelTag
+        from agent_memory.application.agent_cache_store import AgentCacheStore
+        from agent_memory.application.agent_cache_store import ModelTag
 
         tag = ModelTag(model_id="test", n_layers=2, n_kv_heads=4, head_dim=64, block_tokens=256)
         mock_adapter = MagicMock()

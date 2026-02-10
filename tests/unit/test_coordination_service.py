@@ -8,15 +8,15 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from semantic.application.coordination_service import CoordinationService
-from semantic.domain.coordination import (
+from agent_memory.application.coordination_service import CoordinationService
+from agent_memory.domain.coordination import (
     AgentRole,
     DebateFormat,
     DecisionMode,
     Topology,
     Vote,
 )
-from semantic.domain.errors import InvalidTurnError, SessionNotFoundError
+from agent_memory.domain.errors import InvalidTurnError, SessionNotFoundError
 
 pytestmark = pytest.mark.unit
 
@@ -326,7 +326,7 @@ class TestFilterVisibleMessages:
     """Tests for _filter_visible_messages()."""
 
     def test_public_messages_visible_to_all(self, service: CoordinationService) -> None:
-        from semantic.domain.coordination import ChannelMessage
+        from agent_memory.domain.coordination import ChannelMessage
 
         messages = [
             ChannelMessage(
@@ -344,7 +344,7 @@ class TestFilterVisibleMessages:
         assert len(visible) == 1
 
     def test_private_messages_filtered(self, service: CoordinationService) -> None:
-        from semantic.domain.coordination import ChannelMessage
+        from agent_memory.domain.coordination import ChannelMessage
 
         messages = [
             ChannelMessage(
@@ -445,7 +445,7 @@ class TestStreamCleanedDelta:
 
     def test_stream_delta_cleaned_is_replacement(self) -> None:
         """StreamDelta with finish_reason='cleaned' should be treated as replacement text."""
-        from semantic.domain.value_objects import StreamDelta
+        from agent_memory.domain.value_objects import StreamDelta
 
         # Simulate the stream protocol: raw deltas followed by cleaned
         raw_deltas = [
@@ -472,7 +472,7 @@ class TestStreamCleanedDelta:
 
     def test_stream_no_duplicate_text(self) -> None:
         """Summing only non-cleaned deltas gives raw text; cleaned is separate."""
-        from semantic.domain.value_objects import StreamDelta
+        from agent_memory.domain.value_objects import StreamDelta
 
         deltas = [
             StreamDelta(text="A", token_count=1, finish_reason=None),

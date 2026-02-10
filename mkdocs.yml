@@ -1,8 +1,8 @@
-site_name: Semantic — Multi-Agent LLM Inference Server
+site_name: agent-memory — Persistent KV Cache for Multi-Agent LLM Systems
 site_description: Block-pool memory management for multi-agent LLM inference on Apple Silicon
-site_author: Semantic Research Team
-repo_url: https://github.com/yshk-mxim/rdic
-repo_name: semantic
+site_author: Yakov Shkolnikov
+repo_url: https://github.com/yshk-mxim/agent-memory
+repo_name: agent-memory
 
 theme:
   name: material
@@ -100,8 +100,8 @@ nav:
 extra:
   social:
     - icon: fontawesome/brands/github
-      link: https://github.com/yshk-mxim/semantic
+      link: https://github.com/yshk-mxim/agent-memory
   version:
     provider: mike
 
-copyright: Copyright &copy; 2026 Semantic Research Team
+copyright: Copyright &copy; 2026 Yakov Shkolnikov

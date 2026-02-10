@@ -450,7 +450,7 @@ pytest tests/ --cov=src/semantic --cov-fail-under=85
 
 import pytest
 
-from semantic.domain.my_component import MyComponent
+from agent_memory.domain.my_component import MyComponent
 
 
 @pytest.mark.unit
@@ -478,7 +478,7 @@ class TestMyComponent:
 import pytest
 from fastapi.testclient import TestClient
 
-from semantic.entrypoints.api_server import create_app
+from agent_memory.entrypoints.api_server import create_app
 
 
 @pytest.mark.integration

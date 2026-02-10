@@ -23,7 +23,7 @@ pip install -e .
 
 ```bash
 # Check that all imports work
-python -c "from semantic.domain.services import BlockPool; print('✓ Semantic installed successfully')"
+python -c "from agent_memory.domain.services import BlockPool; print('✓ Semantic installed successfully')"
 ```
 
 ## Run Tests

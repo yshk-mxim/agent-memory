@@ -6,9 +6,9 @@ Requires Apple Silicon (M1/M2/M3/M4) and mlx/mlx_lm installed.
 
 import pytest
 
-from semantic.application.batch_engine import BlockPoolBatchEngine
-from semantic.domain.errors import InvalidRequestError, PoolExhaustedError
-from semantic.domain.services import BlockPool
+from agent_memory.application.batch_engine import BlockPoolBatchEngine
+from agent_memory.domain.errors import InvalidRequestError, PoolExhaustedError
+from agent_memory.domain.services import BlockPool
 
 # MLX tests will run - models will be downloaded on first run
 
@@ -29,7 +29,7 @@ def model_and_tokenizer():
 @pytest.fixture
 def spec(model_and_tokenizer):
     """Extract ModelCacheSpec from loaded model."""
-    from semantic.adapters.outbound.mlx_spec_extractor import get_extractor
+    from agent_memory.adapters.outbound.mlx_spec_extractor import get_extractor
 
     model, _ = model_and_tokenizer
     return get_extractor().extract_spec(model)
@@ -44,7 +44,7 @@ def pool(spec):
 @pytest.fixture
 def engine(model_and_tokenizer, pool, spec):
     """Create BlockPoolBatchEngine for testing."""
-    from semantic.adapters.outbound.mlx_cache_adapter import MLXCacheAdapter
+    from agent_memory.adapters.outbound.mlx_cache_adapter import MLXCacheAdapter
 
     model, tokenizer = model_and_tokenizer
     cache_adapter = MLXCacheAdapter()

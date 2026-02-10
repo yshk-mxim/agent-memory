@@ -10,13 +10,13 @@ from hypothesis import assume, given, settings
 from hypothesis import strategies as st
 from pydantic import ValidationError
 
-from semantic.adapters.config.scenario_models import (
+from agent_memory.adapters.config.scenario_models import (
     AgentSpecModel,
     InteractionEdgeModel,
     PhaseSpecModel,
     ScenarioSpecModel,
 )
-from semantic.domain.scenario import (
+from agent_memory.domain.scenario import (
     AgentSpec,
     InteractionEdge,
     PhaseSpec,

@@ -68,7 +68,7 @@ def test_cache_directory_created(live_server: str, cleanup_caches):
     - Directory is in expected location
     """
     # Cache dir should be created by server startup
-    cache_dir = Path.home() / ".cache" / "semantic" / "test"
+    cache_dir = Path.home() / ".cache" / "agent_memory" / "test"
 
     # Directory may or may not exist depending on whether any caches were saved
     # This test just verifies the server started without errors

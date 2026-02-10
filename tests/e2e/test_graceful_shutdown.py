@@ -92,10 +92,10 @@ def test_drain_prevents_new_requests():
     - BatchEngine.submit() raises PoolExhaustedError when draining
     - Error message indicates server is shutting down
     """
-    from semantic.application.batch_engine import BlockPoolBatchEngine
-    from semantic.domain.errors import PoolExhaustedError
-    from semantic.domain.services import BlockPool
-    from semantic.domain.value_objects import ModelCacheSpec
+    from agent_memory.application.batch_engine import BlockPoolBatchEngine
+    from agent_memory.domain.errors import PoolExhaustedError
+    from agent_memory.domain.services import BlockPool
+    from agent_memory.domain.value_objects import ModelCacheSpec
 
     # Create a mock batch engine
     spec = ModelCacheSpec(

@@ -10,7 +10,7 @@ Tests agent CRUD operations:
 import pytest
 from fastapi.testclient import TestClient
 
-from semantic.entrypoints.api_server import create_app
+from agent_memory.entrypoints.api_server import create_app
 
 
 @pytest.mark.integration

@@ -23,9 +23,9 @@ import pytest
 
 import mlx.core as mx
 
-from semantic.adapters.outbound.mlx_spec_extractor import get_extractor
-from semantic.adapters.outbound.safetensors_cache_adapter import SafetensorsCacheAdapter
-from semantic.domain.entities import AgentBlocks, KVBlock
+from agent_memory.adapters.outbound.mlx_spec_extractor import get_extractor
+from agent_memory.adapters.outbound.safetensors_cache_adapter import SafetensorsCacheAdapter
+from agent_memory.domain.entities import AgentBlocks, KVBlock
 
 pytestmark = pytest.mark.integration
 

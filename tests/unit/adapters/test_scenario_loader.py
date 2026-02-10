@@ -6,8 +6,8 @@ import pytest
 import yaml
 from pydantic import ValidationError
 
-from semantic.adapters.config.scenario_loader import discover_scenarios, load_scenario
-from semantic.domain.scenario import (
+from agent_memory.adapters.config.scenario_loader import discover_scenarios, load_scenario
+from agent_memory.domain.scenario import (
     AgentSpec,
     OutcomeRule,
     PayoffMatrix,

@@ -2,8 +2,8 @@
 
 import pytest
 
-from semantic.domain.errors import ModelSpecValidationError
-from semantic.domain.value_objects import (
+from agent_memory.domain.errors import ModelSpecValidationError
+from agent_memory.domain.value_objects import (
     CacheKey,
     GenerationResult,
     ModelCacheSpec,

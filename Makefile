@@ -23,7 +23,7 @@ format:  ## Format code with ruff
 	ruff check --fix src tests
 
 typecheck:  ## Run mypy type checker
-	mypy --explicit-package-bases src/semantic tests/unit tests/conftest.py
+	mypy --explicit-package-bases src/agent_memory tests/unit tests/conftest.py
 
 security:  ## Run security scans (ruff S rules + semgrep)
 	@echo "==> Running ruff security rules (bandit equivalent)..."

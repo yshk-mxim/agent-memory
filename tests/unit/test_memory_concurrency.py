@@ -8,8 +8,8 @@ import threading
 
 import pytest
 
-from semantic.domain.services import BlockPool
-from semantic.domain.value_objects import ModelCacheSpec
+from agent_memory.domain.services import BlockPool
+from agent_memory.domain.value_objects import ModelCacheSpec
 
 
 @pytest.fixture

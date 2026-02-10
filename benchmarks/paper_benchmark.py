@@ -271,7 +271,7 @@ def get_memory_usage() -> float:
 
 def get_cache_size() -> float:
     """Get total size of cache files in MB."""
-    cache_dir = Path.home() / ".semantic" / "caches"
+    cache_dir = Path.home() / ".agent_memory" / "caches"
     if not cache_dir.exists():
         return 0.0
     total_bytes = sum(f.stat().st_size for f in cache_dir.glob("*.safetensors"))
@@ -281,7 +281,7 @@ def get_cache_size() -> float:
 def kill_all_servers():
     """Kill any running semantic servers."""
     try:
-        subprocess.run(["pkill", "-9", "-f", "semantic serve"],
+        subprocess.run(["pkill", "-9", "-f", "agent-memory serve"],
                       capture_output=True, timeout=5)
     except Exception:
         pass
@@ -301,7 +301,7 @@ def start_server() -> subprocess.Popen:
     print(f"Starting semantic server with {MODEL_ID}...")
 
     # Clear cache directory
-    cache_dir = Path.home() / ".semantic" / "caches"
+    cache_dir = Path.home() / ".agent_memory" / "caches"
     if cache_dir.exists():
         for f in cache_dir.glob("*.safetensors"):
             try:
@@ -312,7 +312,7 @@ def start_server() -> subprocess.Popen:
 
     log_file = open("/tmp/claude/semantic_benchmark.log", "w")
     proc = subprocess.Popen(
-        ["semantic", "serve", "--model", MODEL_ID, "--port", str(SERVER_PORT)],
+        ["agent-memory", "serve", "--model", MODEL_ID, "--port", str(SERVER_PORT)],
         stdout=log_file,
         stderr=subprocess.STDOUT,
         start_new_session=True,

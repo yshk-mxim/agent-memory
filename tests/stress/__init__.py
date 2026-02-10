@@ -1,4 +1,4 @@
-"""Stress testing framework for semantic caching server.
+"""Stress testing framework for agent-memory server.
 
 This package provides infrastructure for stress testing including:
 - Pool exhaustion tests

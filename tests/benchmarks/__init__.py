@@ -1,4 +1,4 @@
-"""Benchmark suite for semantic caching server.
+"""Benchmark suite for agent-memory server.
 
 This package provides performance benchmarks for:
 - Batching throughput (sequential vs batched)

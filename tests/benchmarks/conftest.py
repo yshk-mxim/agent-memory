@@ -1,4 +1,4 @@
-"""Benchmark fixtures for semantic caching server.
+"""Benchmark fixtures for agent-memory server.
 
 Provides fixtures for:
 - Benchmark server (module-scoped for performance)
@@ -106,7 +106,7 @@ def benchmark_server() -> Iterator[str]:
 
     # Setup environment
     env = os.environ.copy()
-    env["SEMANTIC_CACHE_DIR"] = str(Path.home() / ".cache" / "semantic" / "benchmark")
+    env["SEMANTIC_CACHE_DIR"] = str(Path.home() / ".cache" / "agent_memory" / "benchmark")
     env["SEMANTIC_LOG_LEVEL"] = "WARNING"
     env["ANTHROPIC_API_KEY"] = "test-key-benchmark"
 
@@ -115,7 +115,7 @@ def benchmark_server() -> Iterator[str]:
         [
             "python",
             "-m",
-            "semantic.entrypoints.cli",
+            "agent_memory.entrypoints.cli",
             "serve",
             "--host",
             "127.0.0.1",
@@ -215,7 +215,7 @@ def cleanup_benchmark_caches():
     Yields:
         None
     """
-    benchmark_cache_dir = Path.home() / ".cache" / "semantic" / "benchmark"
+    benchmark_cache_dir = Path.home() / ".cache" / "agent_memory" / "benchmark"
 
     # Cleanup before
     if benchmark_cache_dir.exists():

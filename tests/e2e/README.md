@@ -106,10 +106,10 @@ pytest tests/e2e/test_foo.py -v -s
 ### Cache Issues
 ```bash
 # Inspect cache directory
-ls -la ~/.cache/semantic/test/
+ls -la ~/.cache/agent_memory/test/
 
 # Clean up manually if needed
-rm -rf ~/.cache/semantic/test/
+rm -rf ~/.cache/agent_memory/test/
 ```
 
 ### MLX Errors

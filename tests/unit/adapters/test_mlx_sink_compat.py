@@ -19,7 +19,7 @@ pytestmark = pytest.mark.unit
 class TestPatchModuleState:
     def test_patched_flag_set_after_import(self) -> None:
         """Module sets _patched=True after successful patch application."""
-        import semantic.adapters.outbound.mlx_sink_compat as compat_module
+        import agent_memory.adapters.outbound.mlx_sink_compat as compat_module
 
         # Module already ran _apply_patch() at import time
         # In test environment it should have attempted patching
@@ -28,7 +28,7 @@ class TestPatchModuleState:
 
     def test_double_apply_is_noop(self) -> None:
         """Calling _apply_patch when already patched does nothing."""
-        import semantic.adapters.outbound.mlx_sink_compat as compat_module
+        import agent_memory.adapters.outbound.mlx_sink_compat as compat_module
 
         compat_module._patched = True
         # Should return early without error
@@ -37,7 +37,7 @@ class TestPatchModuleState:
 
     def test_apply_patch_skips_when_mlx_unavailable(self) -> None:
         """When mlx_lm is not importable, patch is skipped gracefully."""
-        import semantic.adapters.outbound.mlx_sink_compat as compat_module
+        import agent_memory.adapters.outbound.mlx_sink_compat as compat_module
 
         compat_module._patched = False
 

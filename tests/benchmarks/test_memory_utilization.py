@@ -38,7 +38,7 @@ def test_memory_per_agent_1_5_10_agents(
     for proc in psutil.process_iter(["pid", "name", "cmdline"]):
         try:
             cmdline = proc.info.get("cmdline", [])
-            if cmdline and "semantic.entrypoints.cli" in " ".join(cmdline):
+            if cmdline and "agent_memory.entrypoints.cli" in " ".join(cmdline):
                 server_process = psutil.Process(proc.info["pid"])
                 break
         except (psutil.NoSuchProcess, psutil.AccessDenied):
@@ -192,7 +192,7 @@ def test_cache_vs_model_memory_ratio(
     for proc in psutil.process_iter(["pid", "name", "cmdline"]):
         try:
             cmdline = proc.info.get("cmdline", [])
-            if cmdline and "semantic.entrypoints.cli" in " ".join(cmdline):
+            if cmdline and "agent_memory.entrypoints.cli" in " ".join(cmdline):
                 server_process = psutil.Process(proc.info["pid"])
                 break
         except (psutil.NoSuchProcess, psutil.AccessDenied):
@@ -267,7 +267,7 @@ def test_actual_vs_theoretical_memory(
     for proc in psutil.process_iter(["pid", "name", "cmdline"]):
         try:
             cmdline = proc.info.get("cmdline", [])
-            if cmdline and "semantic.entrypoints.cli" in " ".join(cmdline):
+            if cmdline and "agent_memory.entrypoints.cli" in " ".join(cmdline):
                 server_process = psutil.Process(proc.info["pid"])
                 break
         except (psutil.NoSuchProcess, psutil.AccessDenied):

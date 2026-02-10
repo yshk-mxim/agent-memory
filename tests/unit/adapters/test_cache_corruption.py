@@ -18,7 +18,7 @@ import pytest
 sys.modules.setdefault("mlx", MagicMock())
 sys.modules.setdefault("mlx.core", MagicMock())
 
-from semantic.domain.errors import AgentNotFoundError, CachePersistenceError
+from agent_memory.domain.errors import AgentNotFoundError, CachePersistenceError
 
 pytestmark = pytest.mark.unit
 
@@ -34,7 +34,7 @@ def cache_dir(tmp_path: Path) -> Path:
 @pytest.fixture
 def adapter(cache_dir: Path):
     """Create adapter instance."""
-    from semantic.adapters.outbound.safetensors_cache_adapter import SafetensorsCacheAdapter
+    from agent_memory.adapters.outbound.safetensors_cache_adapter import SafetensorsCacheAdapter
 
     return SafetensorsCacheAdapter(cache_dir)
 

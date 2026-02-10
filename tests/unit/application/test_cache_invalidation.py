@@ -9,9 +9,9 @@ sys.modules["mlx.core"] = MagicMock()
 sys.modules["mlx.utils"] = MagicMock()
 sys.modules["mlx_lm"] = MagicMock()
 
-from semantic.application.agent_cache_store import AgentCacheStore, CacheEntry, ModelTag
-from semantic.domain.entities import AgentBlocks
-from semantic.domain.value_objects import ModelCacheSpec
+from agent_memory.application.agent_cache_store import AgentCacheStore, CacheEntry, ModelTag
+from agent_memory.domain.entities import AgentBlocks
+from agent_memory.domain.value_objects import ModelCacheSpec
 
 
 class TestEvictAllToDisk:
@@ -286,7 +286,7 @@ class TestDiskLoadRejectsIncompatible:
 
     def _make_store_with_cache(self, tmp_path, tag, adapter=None):
         """Helper to create a store with one saved cache entry."""
-        from semantic.domain.entities import KVBlock
+        from agent_memory.domain.entities import KVBlock
 
         if adapter is None:
             adapter = Mock()

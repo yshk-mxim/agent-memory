@@ -11,10 +11,10 @@ import time
 
 import pytest
 
-from semantic.domain.entities import KVBlock
-from semantic.domain.errors import PoolExhaustedError
-from semantic.domain.services import BlockPool
-from semantic.domain.value_objects import ModelCacheSpec
+from agent_memory.domain.entities import KVBlock
+from agent_memory.domain.errors import PoolExhaustedError
+from agent_memory.domain.services import BlockPool
+from agent_memory.domain.value_objects import ModelCacheSpec
 
 
 @pytest.fixture
@@ -215,7 +215,7 @@ class TestConcurrentBlockPool:
 
     def test_reconfigure_blocks_thread_safety(self, pool: BlockPool, spec: ModelCacheSpec) -> None:
         """Reconfigure should safely fail if allocations exist."""
-        from semantic.domain.errors import PoolConfigurationError
+        from agent_memory.domain.errors import PoolConfigurationError
 
         # Allocate blocks
         blocks = pool.allocate(n_blocks=10, layer_id=0, agent_id="test_agent")

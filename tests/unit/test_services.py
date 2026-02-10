@@ -20,15 +20,15 @@ import pytest
 from hypothesis import assume, given
 from hypothesis import strategies as st
 
-from semantic.domain.entities import KVBlock
-from semantic.domain.errors import (
+from agent_memory.domain.entities import KVBlock
+from agent_memory.domain.errors import (
     BlockOperationError,
     ModelSpecValidationError,
     PoolConfigurationError,
     PoolExhaustedError,
 )
-from semantic.domain.services import BlockPool
-from semantic.domain.value_objects import ModelCacheSpec
+from agent_memory.domain.services import BlockPool
+from agent_memory.domain.value_objects import ModelCacheSpec
 
 pytestmark = pytest.mark.unit
 

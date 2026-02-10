@@ -10,7 +10,7 @@ Tests validation, serialization, and parsing for:
 import pytest
 from pydantic import ValidationError
 
-from semantic.adapters.inbound.request_models import (
+from agent_memory.adapters.inbound.request_models import (
     ChatCompletionsRequest,
     ContentBlockDeltaEvent,
     CountTokensRequest,

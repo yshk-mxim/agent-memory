@@ -14,8 +14,8 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Any
 
-from semantic.application.scheduler import ConcurrentScheduler
-from semantic.application.shared_prefix_cache import SharedPrefixCache
+from agent_memory.application.scheduler import ConcurrentScheduler
+from agent_memory.application.shared_prefix_cache import SharedPrefixCache
 
 # -------------------------------------------------------------------
 # Fakes (self-contained — no MLX dependency)

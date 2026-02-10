@@ -17,9 +17,9 @@ pytestmark = pytest.mark.integration
 
 def _make_engine(model, tokenizer, spec, total_blocks=400):
     """Build a real BlockPoolBatchEngine."""
-    from semantic.adapters.outbound.mlx_cache_adapter import MLXCacheAdapter
-    from semantic.application.batch_engine import BlockPoolBatchEngine
-    from semantic.domain.services import BlockPool
+    from agent_memory.adapters.outbound.mlx_cache_adapter import MLXCacheAdapter
+    from agent_memory.application.batch_engine import BlockPoolBatchEngine
+    from agent_memory.domain.services import BlockPool
 
     pool = BlockPool(spec=spec, total_blocks=total_blocks)
     cache_adapter = MLXCacheAdapter()
@@ -98,7 +98,7 @@ class TestCacheLifecycle:
         self, real_model_and_tokenizer, real_spec, cache_dir
     ) -> None:
         """Generate, save cache, reload, and generate again with cached context."""
-        from semantic.adapters.outbound.safetensors_cache_adapter import (
+        from agent_memory.adapters.outbound.safetensors_cache_adapter import (
             SafetensorsCacheAdapter,
         )
 
@@ -136,7 +136,7 @@ class TestCacheLifecycle:
         self, real_model_and_tokenizer, real_spec, cache_dir
     ) -> None:
         """Two agents generate, save, and reload independently."""
-        from semantic.adapters.outbound.safetensors_cache_adapter import (
+        from agent_memory.adapters.outbound.safetensors_cache_adapter import (
             SafetensorsCacheAdapter,
         )
 
@@ -202,8 +202,8 @@ class TestCoordinationWithRealEngine:
     @staticmethod
     def _make_service(engine, cache_dir):
         """Build CoordinationService with real engine, no scheduler."""
-        from semantic.application.agent_cache_store import AgentCacheStore
-        from semantic.application.coordination_service import CoordinationService
+        from agent_memory.application.agent_cache_store import AgentCacheStore
+        from agent_memory.application.coordination_service import CoordinationService
 
         cache_store = AgentCacheStore(
             cache_dir=cache_dir,
@@ -220,7 +220,7 @@ class TestCoordinationWithRealEngine:
     @staticmethod
     def _make_agents(pairs):
         """Build AgentRole list from (id, name, prompt) tuples."""
-        from semantic.domain.coordination import AgentRole
+        from agent_memory.domain.coordination import AgentRole
 
         return [
             AgentRole(
@@ -233,7 +233,7 @@ class TestCoordinationWithRealEngine:
         self, real_model_and_tokenizer, real_spec, cache_dir
     ) -> None:
         """Create session, execute 2 turns, verify responses are non-empty."""
-        from semantic.domain.coordination import (
+        from agent_memory.domain.coordination import (
             DebateFormat,
             DecisionMode,
             Topology,
@@ -277,7 +277,7 @@ class TestCoordinationWithRealEngine:
         self, real_model_and_tokenizer, real_spec, cache_dir
     ) -> None:
         """Agents in coordination should not impersonate each other."""
-        from semantic.domain.coordination import (
+        from agent_memory.domain.coordination import (
             DebateFormat,
             DecisionMode,
             Topology,

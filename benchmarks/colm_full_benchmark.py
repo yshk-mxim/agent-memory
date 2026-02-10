@@ -369,7 +369,7 @@ async def check_server_health(base_url: str) -> bool:
 
 def clean_cache_files() -> None:
     """Belt-and-suspenders filesystem cleanup."""
-    cache_dir = Path.home() / ".semantic" / "caches"
+    cache_dir = Path.home() / ".agent_memory" / "caches"
     if cache_dir.exists():
         for f in cache_dir.glob("*.safetensors"):
             try:
@@ -413,12 +413,12 @@ def kill_all_servers() -> None:
 
     # 1. Graceful SIGTERM — lets the server run its shutdown path
     #    (release model tensors, clear Metal cache, gc.collect)
-    for pattern in ["semantic.*serve", "semantic.*cli", "streamlit"]:
+    for pattern in ["agent-memory.*serve", "agent-memory.*cli", "streamlit"]:
         _kill_by_pattern(pattern)
     time.sleep(10)  # Give server time to release GPU memory
 
     # 2. Force kill stragglers (SIGKILL)
-    for pattern in ["semantic.*serve", "semantic.*cli", "streamlit"]:
+    for pattern in ["agent-memory.*serve", "agent-memory.*cli", "streamlit"]:
         _kill_by_pattern(pattern, signal="-9")
 
     # 3. Kill by port — catch anything still listening

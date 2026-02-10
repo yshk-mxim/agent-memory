@@ -10,9 +10,9 @@ Tests verify that metrics are:
 import pytest
 from fastapi.testclient import TestClient
 
-from semantic.domain.services import BlockPool
-from semantic.domain.value_objects import ModelCacheSpec
-from semantic.entrypoints.api_server import create_app
+from agent_memory.domain.services import BlockPool
+from agent_memory.domain.value_objects import ModelCacheSpec
+from agent_memory.entrypoints.api_server import create_app
 
 
 @pytest.fixture
@@ -24,7 +24,7 @@ def test_app():
     class MockAppState:
         def __init__(self):
             self.shutting_down = False
-            self.semantic = type(
+            self.agent_memory = type(
                 "obj",
                 (object,),
                 {
@@ -169,7 +169,7 @@ def test_pool_utilization_metric(test_app):
         sliding_window_size=0,
     )
     pool = BlockPool(spec=spec, total_blocks=10)
-    test_app.state.semantic.block_pool = pool
+    test_app.state.agent_memory.block_pool = pool
 
     # Trigger health check (updates metric)
     response = client.get("/health/ready")

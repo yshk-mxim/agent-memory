@@ -28,7 +28,7 @@ def real_model_and_tokenizer():
 @pytest.fixture(scope="session")
 def real_spec(real_model_and_tokenizer):
     """Extract real ModelCacheSpec from loaded model."""
-    from semantic.adapters.outbound.mlx_spec_extractor import get_extractor
+    from agent_memory.adapters.outbound.mlx_spec_extractor import get_extractor
 
     model, _ = real_model_and_tokenizer
     return get_extractor().extract_spec(model)

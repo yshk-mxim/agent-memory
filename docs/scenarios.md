@@ -138,7 +138,7 @@ from pathlib import Path
 
 import streamlit as st
 from demo.lib.scenario_renderer import ScenarioRenderer
-from semantic.adapters.config.scenario_loader import load_scenario
+from agent_memory.adapters.config.scenario_loader import load_scenario
 
 BASE_URL = "http://localhost:8000"
 SCENARIO_PATH = Path(__file__).resolve().parent.parent / "scenarios" / "my_scenario.yaml"

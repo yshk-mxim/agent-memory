@@ -157,7 +157,7 @@ async def test_cache_isolation_under_load(live_server, cleanup_after_stress):
     requests_per_agent = 10
 
     # Track cache directories created
-    cache_base = Path.home() / ".cache" / "semantic" / "test"
+    cache_base = Path.home() / ".cache" / "agent_memory" / "test"
 
     harness = StressTestHarness(base_url=base_url, num_workers=num_agents, timeout=60.0)
 

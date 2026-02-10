@@ -4,7 +4,7 @@
 import pytest
 import structlog
 
-from semantic.adapters.config.logging import configure_logging, get_logger
+from agent_memory.adapters.config.logging import configure_logging, get_logger
 
 pytestmark = pytest.mark.unit
 

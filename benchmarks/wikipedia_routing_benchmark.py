@@ -1019,7 +1019,7 @@ async def run_benchmark(args: argparse.Namespace) -> None:
     if not await check_server_ready(base_url, timeout=15.0):
         print(f"ERROR: Server not ready at {base_url}")
         print("Start the server first:")
-        print(f"  python -m semantic.entrypoints.cli serve --port {args.port}")
+        print(f"  python -m agent_memory.entrypoints.cli serve --port {args.port}")
         sys.exit(1)
     print("Server is ready.")
 

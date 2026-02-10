@@ -6,7 +6,7 @@ and defaults with proper precedence and validation.
 
 import pytest
 
-from semantic.adapters.config.settings import (
+from agent_memory.adapters.config.settings import (
     AgentSettings,
     MLXSettings,
     ServerSettings,
@@ -189,7 +189,7 @@ class TestAgentSettings:
         settings = AgentSettings()
 
         assert settings.max_agents_in_memory == 12
-        assert settings.cache_dir == "~/.semantic/caches"
+        assert settings.cache_dir == "~/.agent_memory/caches"
         assert settings.batch_window_ms == 10
         assert settings.lru_eviction_enabled is True
         assert settings.evict_to_disk is True
