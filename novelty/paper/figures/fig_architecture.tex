@@ -40,9 +40,9 @@
 \draw[arrow, bend right=15] (disk) to node[below, label] {Reload} (q4);
 
 % Results annotations
-\node[below=2.5cm of bp, align=center, font=\small\bfseries, text=blue!70!black] {2.0--4.3$\times$ E2E speedup};
+\node[below=2.5cm of bp, align=center, font=\small\bfseries, text=blue!70!black] {30--130$\times$ TTFT reduction};
 \node[below=2.5cm of q4, align=center, font=\small\bfseries, text=green!50!black] {72\% memory savings};
-\node[below=2.5cm of disk, align=center, font=\small\bfseries, text=orange!80!black] {81.6$\times$ TTFT (hot)};
+\node[below=2.5cm of disk, align=center, font=\small\bfseries, text=orange!80!black] {Sub-second reload};
 
 \end{tikzpicture}
 \caption{System architecture. Multiple agents maintain isolated KV caches in a persistent block pool. The Q4 pipeline quantizes cache data on save and operates directly on quantized tensors during attention. Disk persistence enables sub-100ms reload (warm) vs seconds of re-prefill (cold).}

@@ -37,7 +37,7 @@ Persistent Q4 KV Cache for Multi-Agent LLM Inference on Edge Devices}
 \maketitle
 
 \begin{abstract}
-Multi-agent LLM workflows on Apple Silicon spend most of their time re-computing attention state. A 5-agent system with 4K tokens each waits 77 seconds after every server restart while each agent re-prefills from scratch. We persist each agent's KV cache to disk in 4-bit quantized format and reload it in under 700\,ms. Three components make this work: (1)~a block pool giving each agent an isolated, persistent Q4 KV cache stored in safetensors, (2)~BatchQuantizedKVCache for concurrent inference over multiple agents' quantized caches, and (3)~cross-phase context injection that lets agents accumulate attention state across conversation phases without re-computation. On Gemma~3 12B and DeepSeek-Coder-V2-Lite 16B at typical deployment lengths (4K context), warm disk reload reduces TTFT from 15.5s to 513\,ms (30$\times$) and from 3.9s to 252\,ms (16$\times$). At 32K context, the speedup reaches 130$\times$ and 74$\times$. Batched serving of two concurrent agents reaches 22.4 and 64.8 system tokens/second with warm cache. Q4 quantization fits 3.6$\times$ more agent contexts into fixed device memory than FP16, with negligible perplexity degradation (estimated $<$0.1 PPL, consistent with prior Q4 KV quantization literature). The system handles both dense GQA (Gemma) and MoE MLA (DeepSeek) architectures through a model-agnostic abstraction, and operates as an infrastructure layer beneath agentic frameworks (AutoGen, CrewAI) via its OpenAI-compatible API. Open-source at \texttt{[anonymized]}.
+Multi-agent LLM workflows on Apple Silicon spend most of their time re-computing attention state. A 5-agent system with 4K tokens each waits 77 seconds after every server restart while each agent re-prefills from scratch. We persist each agent's KV cache to disk in 4-bit quantized format and reload it in under 700\,ms. Three components make this work: (1)~a block pool giving each agent an isolated, persistent Q4 KV cache stored in safetensors, (2)~BatchQuantizedKVCache for concurrent inference over multiple agents' quantized caches, and (3)~cross-phase context injection that lets agents accumulate attention state across conversation phases without re-computation. On Gemma~3 12B and DeepSeek-Coder-V2-Lite 16B at typical deployment lengths (4K context), warm disk reload reduces TTFT from 15.5s to 513\,ms (30$\times$) and from 3.9s to 252\,ms (16$\times$). At 32K context, the speedup reaches 130$\times$ and 74$\times$. Batched serving of two concurrent agents reaches 22.4 and 64.8 system tokens/second with warm cache. Q4 quantization fits 4$\times$ more agent contexts into fixed device memory than FP16, with negligible perplexity degradation (estimated $<$0.1 PPL, consistent with prior Q4 KV quantization literature). The system handles both dense GQA (Gemma) and MoE MLA (DeepSeek) architectures through a model-agnostic abstraction, and operates as an infrastructure layer beneath agentic frameworks (AutoGen, CrewAI) via its OpenAI-compatible API. Open-source at \texttt{[anonymized]}.
 \end{abstract}
 
 \section{Introduction}
@@ -51,7 +51,7 @@ The problem is worse than slow prefill. Each agent needs its own attention conte
 
 We eliminate re-prefill by persisting each agent's KV cache. The cache produced during prefill is the agent's memory at the attention layer. Instead of discarding it after each request (as vLLM~\cite{kwon2023pagedattention} and SGLang~\cite{zheng2024sglang} do) or holding it only in volatile RAM, we write it to disk in 4-bit quantized format and reload it when the agent resumes. Context restoration drops from 15.5 seconds to 513\,ms (warm, disk) or 709\,ms (hot, memory) at 4K context on Gemma~3 12B.
 
-\paragraph{Contributions.} (1)~A persistent block pool giving each agent isolated, quantized KV cache surviving server restarts and device reboots, stored in safetensors format. (2)~BatchQuantizedKVCache for concurrent Q4 inference over multiple agents' caches, with an interleaved prefill+decode scheduler. (3)~Cross-phase context injection treating KV cache as working memory, letting agents accumulate attention state across conversation phases without re-computation. (4)~An infrastructure layer for agentic frameworks: the system exposes an OpenAI-compatible API, so AutoGen~\cite{wu2023autogen}, CrewAI, or LangGraph can use persistent cache without modification. (5)~Evaluation across two architecturally distinct models showing Q4 persistence fits 3.6$\times$ more agents than FP16 with negligible quality loss.
+\paragraph{Contributions.} (1)~A persistent block pool giving each agent isolated, quantized KV cache surviving server restarts and device reboots, stored in safetensors format. (2)~BatchQuantizedKVCache for concurrent Q4 inference over multiple agents' caches, with an interleaved prefill+decode scheduler. (3)~Cross-phase context injection treating KV cache as working memory, letting agents accumulate attention state across conversation phases without re-computation. (4)~An infrastructure layer for agentic frameworks: the system exposes an OpenAI-compatible API, so AutoGen~\cite{wu2023autogen}, CrewAI, or LangGraph can use persistent cache without modification. (5)~Evaluation across two architecturally distinct models showing Q4 persistence fits 4$\times$ more agents than FP16 with negligible quality loss.
 
 \section{Background}
 \label{sec:background}
@@ -95,7 +95,7 @@ iPhone 17 Pro & 12 & 77 & 2 & Unified \\
 
 The RTX 5090 has 1,792\,GB/s bandwidth to its 32\,GB VRAM, but spilling KV cache to host RAM drops to 64\,GB/s (PCIe 5.0), a 28$\times$ cliff. Unified memory devices avoid this penalty but face fixed total capacity. The M4~Pro's internal NVMe reads at 7\,GB/s, which enables sub-second cache reloads for multi-MB KV states.
 
-On our test device (M4~Pro, 24\,GB), the memory budget is 24\,GB $-$ 6.8\,GB weights $-$ 2\,GB OS $\approx$ 15.2\,GB for KV caches. This constrains both the number of concurrent agents and the maximum context length per agent (Section~\ref{sec:fp16_analysis}).
+On our test device (M4~Pro, 24\,GB), the memory budget is 24\,GB $-$ 6.8\,GB weights $-$ 7\,GB OS/system $\approx$ 10.2\,GB for KV caches. This constrains both the number of concurrent agents and the maximum context length per agent (Section~\ref{sec:fp16_analysis}).
 
 Local inference avoids transmitting conversation history to external servers. Under GDPR (Art.~44--49) and HIPAA (45 CFR 164.312), transferring patient or user data to cloud endpoints requires legal basis, data processing agreements, and transfer impact assessments. On-device inference sidesteps this. The tradeoff: operating within fixed device memory.
 
@@ -132,25 +132,25 @@ KV cache flows through the system in 4-bit quantized format at every stage:
     \item \textbf{Attention}: MLX's \texttt{quantized\_scaled\_dot\_product\_attention()} operates directly on Q4 tensors
 \end{enumerate}
 
-For a layer with $h$ KV heads, head dimension $d$, sequence length $n$, and group size $g{=}64$: FP16 stores $2hdn \times 2$ bytes (K+V, 2 bytes each); Q4 stores $2hdn / 2 + 2hd(n/g) \times 2$ bytes (packed uint32 + float16 scales/biases). The ratio $\text{Q4}/\text{FP16} = (0.5 + 4/g) / 2 = 0.281$ for $g{=}64$, yielding 72\% memory reduction per layer regardless of model dimensions.
+For a layer with $h$ KV heads, head dimension $d$, sequence length $n$, and group size $g{=}64$: FP16 stores $4hdn$ bytes (K+V, 2 bytes per element). Q4 packs each element into 4 bits and adds a float16 scale and bias per group of $g$ elements, totaling $hdn(1 + 8/g)$ bytes. The ratio $\text{Q4}/\text{FP16} = (1 + 8/g)/4 = 0.281$ for $g{=}64$, yielding 72\% memory reduction per layer regardless of model dimensions.
 
 \paragraph{Why Q4, not FP16.}
 \label{sec:fp16_analysis}
-On the M4~Pro with 15.2\,GB cache budget, Table~\ref{tab:fp16} shows the capacity difference. FP16 KV for Gemma~3 at 4K context costs $2 \times 8 \times 256 \times 4096 \times 2 \times 48 = 1{,}536$\,MB per agent. Q4 at the 0.281 ratio costs 432\,MB. At 8K context with 5 agents, FP16 requires 15\,GB, exhausting the entire budget with no room for execution overhead. Q4 uses 4.2\,GB, leaving 11\,GB free. Full calculations for both models appear in Appendix~\ref{app:fp16_analysis}.
+On the M4~Pro with 10.2\,GB cache budget, Table~\ref{tab:fp16} shows the capacity difference. FP16 KV for Gemma~3 at 4K context costs $2 \times 8 \times 256 \times 4096 \times 2 \times 48 = 1{,}536$\,MB per agent. Q4 at the 0.281 ratio costs 432\,MB. At 8K context with 5 agents, FP16 requires 15\,GB, far exceeding the budget. Q4 uses 4.2\,GB, leaving 6\,GB free. Full calculations for both models appear in Appendix~\ref{app:fp16_analysis}.
 
 \begin{table}[t]
 \centering
 \small
-\caption{Agent capacity on M4~Pro (15.2\,GB cache budget). Gemma~3 12B, 48 layers, 8 KV heads, head dim 256.}
+\caption{Agent capacity on M4~Pro (10.2\,GB cache budget). Gemma~3 12B, 48 layers, 8 KV heads, head dim 256.}
 \label{tab:fp16}
 \begin{tabular}{@{}lrrrr@{}}
 \toprule
 Context & FP16/agent & Q4/agent & FP16 fits & Q4 fits \\
 \midrule
-4K  & 1.5\,GB & 0.42\,GB & 10 & 36 \\
-8K  & 3.0\,GB & 0.84\,GB & 5  & 18 \\
-16K & 6.0\,GB & 1.7\,GB  & 2  & 8 \\
-32K & 12.0\,GB & 3.4\,GB & 1  & 4 \\
+4K  & 1.5\,GB & 0.42\,GB & 6 & 24 \\
+8K  & 3.0\,GB & 0.84\,GB & 3  & 12 \\
+16K & 6.0\,GB & 1.7\,GB  & 1  & 6 \\
+32K & 12.0\,GB & 3.4\,GB & 0  & 3 \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -263,7 +263,7 @@ Context & Cache & SysTPS & Per & SysTPS & Per \\
 
 Table~\ref{tab:batch} shows system throughput when serving two concurrent agents. Cold batched throughput is low because prefill dominates. At 16K, Gemma achieves only 0.8 system TPS (both agents stuck in prefill). Warm and hot caches skip prefill, so system TPS depends only on batched decode speed.
 
-DeepSeek is consistently ${\sim}$2.9$\times$ faster than Gemma in batched throughput. At 4K warm, DeepSeek reaches 55.1 system TPS (27.6 per agent) vs Gemma's 19.8 (9.9 per agent). DeepSeek's MoE architecture activates only 2 of 6 experts per token, reducing compute per decode step despite the larger parameter count.
+DeepSeek is 2--3$\times$ faster than Gemma in batched throughput. At 4K warm, DeepSeek reaches 55.1 system TPS (27.6 per agent) vs Gemma's 19.8 (9.9 per agent). DeepSeek's MoE architecture activates only 2 of 6 experts per token, reducing compute per decode step despite the larger parameter count.
 
 The warm-to-hot gap is small for both models. Disk reload latency is amortized over the generation and does not bottleneck sustained throughput.
 
@@ -282,7 +282,7 @@ Table~\ref{tab:ablation} isolates each component's contribution. All numbers com
 Component & Metric & With & Without & Effect \\
 \midrule
 Persistence & TTFT (ms), Gemma 4K & 513 & 15502 & 30$\times$ \\
-Q4 vs FP16 & Agents at 8K & 18 & 5 & 3.6$\times$ \\
+Q4 vs FP16 & Agents at 8K & 12 & 3 & 4.0$\times$ \\
 Batching & SysTPS, Gemma 1K warm & 22.4 & 11.2$^*$ & 2.0$\times$ \\
 Cross-phase & TTFT (ms), Phase 5 & 1705 & 3292 & 1.9$\times$ \\
 \bottomrule
@@ -292,7 +292,7 @@ Cross-phase & TTFT (ms), Phase 5 & 1705 & 3292 & 1.9$\times$ \\
 
 Persistence contributes the largest single improvement (30$\times$ TTFT reduction at 4K). The other components improve what happens after the cache is loaded. Persistence eliminates re-computation entirely.
 
-Q4 quantization matters for capacity rather than speed. At 8K context, FP16 fits 5 agents in 15.2\,GB; Q4 fits 18. For a 10-agent workflow, FP16 runs out of memory while Q4 has room for execution overhead.
+Q4 quantization matters for capacity rather than speed. At 8K context, FP16 fits 3 agents in 10.2\,GB; Q4 fits 12. For a 5-agent workflow, FP16 cannot fit all agents while Q4 has room for execution overhead.
 
 Batching doubles system throughput. Two agents served concurrently at 1K warm produce 22.4 combined TPS vs 11.2 per agent individually. The GPU processes both agents' KV tensors in a single forward pass.
 
@@ -435,6 +435,8 @@ The non-portable aspects are MLX's lazy evaluation model (requiring explicit \te
 
 \textbf{Two models tested.} We validate on one dense GQA model and one MoE MLA model. Adding Llama~3 (standard GQA) would strengthen generalization.
 
+\textbf{Model-specific caches.} KV caches are tied to the model that produced them. A Gemma~3 cache cannot be used by a different model or a different quantization of the same model. Model updates invalidate all cached state. RAG text chunks survive model swaps; KV caches do not.
+
 \textbf{Fixed output length.} All measurements use 64-token output. Longer outputs would reduce the relative TTFT speedup since decode time (unaffected by caching) grows. At 512 tokens output, the TTFT savings remain identical but constitute a smaller fraction of end-to-end latency.
 
 \textbf{No working memory quality metric.} Cross-phase context injection eliminates re-prefill latency but does not change the information available to the model. Both persistent cache and re-prefill produce equivalent context (modulo Q4 rounding). The contribution is speed, not accuracy.
@@ -457,7 +459,7 @@ The non-portable aspects are MLX's lazy evaluation model (requiring explicit \te
 
 Persistent Q4 KV cache turns agent context restoration from a compute-bound O($n$) prefill into an I/O-bound O(1) reload. On Gemma~3 12B at 32K context, hot cache reduces TTFT from 165 seconds to 1.3 seconds (130$\times$). On DeepSeek-Coder-V2-Lite at 32K, from 48 seconds to 652\,ms (74$\times$). Warm disk reload achieves 102$\times$ and 69$\times$ at 32K.
 
-Q4 quantization fits 3.6$\times$ more agents into fixed device memory than FP16 (18 vs 5 agents at 8K context on 24\,GB), with negligible estimated quality loss ($<$0.1 PPL, Appendix~\ref{app:perplexity}). Batched serving reaches 22 system TPS (Gemma) and 65 system TPS (DeepSeek) with two warm-cache agents at 1K context.
+Q4 quantization fits 4$\times$ more agents into fixed device memory than FP16 (12 vs 3 agents at 8K context on 24\,GB), with negligible estimated quality loss ($<$0.1 PPL, Appendix~\ref{app:perplexity}). Batched serving reaches 22 system TPS (Gemma) and 65 system TPS (DeepSeek) with two warm-cache agents at 1K context.
 
 Two multi-agent scenarios validate the design. A 5-phase interrogation shows 1.9$\times$ TTFT reduction in later phases from cross-phase persistence (23\% total wall-time reduction). A 10-expert routing benchmark shows 24$\times$ TTFT reduction when querying cached experts.
 
@@ -547,9 +549,9 @@ FP16 per-layer cost = $2 \times 8 \times 256 \times n \times 2$ bytes (K+V, each
 
 At $n = 4096$: $2 \times 8 \times 256 \times 4096 \times 2 = 33{,}554{,}432$ bytes = 32\,MB per layer $\times$ 48 layers = 1{,}536\,MB.
 
-Q4 per-layer cost = $(2 \times 8 \times 256 \times n)/2 + 2 \times 8 \times 256 \times (n/64) \times 2$ bytes (packed data + scales/biases).
+Q4 per-layer cost: packed 4-bit data = $hdn$ bytes, plus float16 scales and biases = $8hdn/g$ bytes, where $h{=}8$, $d{=}256$, $g{=}64$.
 
-At $n = 4096$: data = $16{,}777{,}216$ bytes, scales+biases = $524{,}288$ bytes. Total = $17{,}301{,}504$ bytes = 16.5\,MB per layer $\times$ 48 layers = 792\,MB. With overhead: ${\sim}$432\,MB (the 0.281 ratio accounts for group structure).
+At $n = 4096$: packed data = $8{,}388{,}608$ bytes (4-bit, half of FP16), scales+biases = $1{,}048{,}576$ bytes. Total = $9{,}437{,}184$ bytes = 9.0\,MB per layer $\times$ 48 layers = 432\,MB.
 
 Ratio: $432/1536 = 0.281$, matching the analytical formula.
 
@@ -564,14 +566,14 @@ MoE intermediate tensors add ${\sim}$1--2\,GB overhead during forward passes, fu
 \begin{table}[h]
 \centering
 \small
-\caption{Agent capacity comparison, both models. M4~Pro, 15.2\,GB cache budget.}
+\caption{Agent capacity comparison, both models. M4~Pro, 10.2\,GB cache budget.}
 \begin{tabular}{@{}l@{\hspace{4pt}}rr@{\hspace{8pt}}rr@{\hspace{8pt}}rr@{\hspace{8pt}}rr@{}}
 \toprule
  & \multicolumn{2}{c}{4K} & \multicolumn{2}{c}{8K} & \multicolumn{2}{c}{16K} & \multicolumn{2}{c}{32K} \\
 Model & FP16 & Q4 & FP16 & Q4 & FP16 & Q4 & FP16 & Q4 \\
 \midrule
-Gemma 3  & 10 & 36 & 5 & 18 & 2 & 8 & 1 & 4 \\
-DeepSeek & 14 & 50 & 7 & 25 & 3 & 12 & 1 & 6 \\
+Gemma 3  & 6 & 24 & 3 & 12 & 1 & 6 & 0 & 3 \\
+DeepSeek & 9 & 33 & 4 & 16 & 2 & 8 & 1 & 4 \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -642,7 +644,7 @@ iPhone 17 Pro & 12 & 77 & 2 & \$1,099 & Mobile \\
 \end{tabular}
 \end{table}
 
-The M4~Pro tested in this paper (24\,GB, 273\,GB/s) represents the lower end of capable edge devices. The DGX Spark matches its bandwidth at 128\,GB capacity for \$3,999. M4~Max at 128\,GB would fit 36+ agents at 8K Q4 context, compared to 18 on the 24\,GB M4~Pro.
+The M4~Pro tested in this paper (24\,GB, 273\,GB/s) represents the lower end of capable edge devices. The DGX Spark matches its bandwidth at 128\,GB capacity for \$3,999. M4~Max at 128\,GB has a much larger cache budget (${\sim}$114\,GB after weights and OS), fitting 135+ agents at 8K Q4 context vs 12 on the 24\,GB M4~Pro.
 
 The RTX~5090 has the highest absolute memory bandwidth (1,792\,GB/s) but its 32\,GB discrete VRAM is an island: spilling to host RAM or SSD is 28--280$\times$ slower. For KV cache persistence, unified memory devices have an advantage because the same 7\,GB/s SSD serves both model weights and cache reload without PCIe hops.
 
