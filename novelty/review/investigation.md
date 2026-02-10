@@ -1,494 +1,347 @@
-# Forensic Analysis: Bugs Found During Development of the Semantic Caching System
+# Forensic Investigation: Methodology Analysis of semantic_colm2026.tex
 
 **Date**: 2026-02-09
-**Scope**: Four critical bugs discovered during development and hardening of the MLX-based semantic caching server on Apple Silicon (M4 Pro, 24 GB unified memory).
-**Period**: 2026-02-06 through 2026-02-09
+**Scope**: Critical examination of experimental methodology, analytical claims, hardware specifications, and theoretical framing in the COLM 2026 submission "Agent Memory Below the Prompt."
+**Verdict**: The paper presents a working system with real benchmark data, but several methodological choices create gaps between what is claimed and what is demonstrated. The most serious issue is the perplexity evaluation, which does not measure what the paper says it measures.
 
 ---
 
 ## Table of Contents
 
-1. [BUG 1: Thread Safety Race Condition (Batch=2 Cached Empty Output)](#bug-1-thread-safety-race-condition)
-2. [BUG 2: Sliding Window Mask Corruption (Chunked Prefill)](#bug-2-sliding-window-mask-corruption)
-3. [BUG 3: GQA Mask Shape Mismatch + mx.compile Crash](#bug-3-gqa-mask-shape-mismatch)
-4. [BUG 4: Temperature / Tokenizer Interaction (Misattributed Root Cause)](#bug-4-temperature-tokenizer-interaction)
-5. [Cross-Cutting Lessons](#cross-cutting-lessons)
+1. [Area 1: Perplexity Methodology](#area-1-perplexity-methodology)
+2. [Area 2: Sliding Window Evaluation](#area-2-sliding-window-evaluation)
+3. [Area 3: Ablation Validity](#area-3-ablation-validity)
+4. [Area 4: Hardware Table Accuracy](#area-4-hardware-table-accuracy)
+5. [Area 5: Nielsen Response Time Thresholds](#area-5-nielsen-response-time-thresholds)
+6. [Summary of Findings](#summary-of-findings)
 
 ---
 
-## BUG 1: Thread Safety Race Condition
+## Area 1: Perplexity Methodology
 
-**Severity**: Critical (SIGSEGV, data corruption)
-**Affected configuration**: batch=2 + warm/hot cache + 1K-2K token context
-**Commits**: `371aaa0`, `90f0baf`, `30ae40b`
-**Files**: `batch_engine.py`, `safetensors_cache_adapter.py`, `domain/services.py`
+### What the Paper Claims
 
-### Symptom
+The paper claims "<0.1 perplexity degradation" from Q4 KV cache quantization (Abstract, Section 5.5 Limitations, Section 6 Conclusion, Appendix C). The abstract states: "Q4 quantization fits 3.6x more agent contexts into fixed device memory than FP16, with <0.1 perplexity degradation." This is the central quality claim that justifies the entire Q4 pipeline.
 
-When running with batch size 2 and the concurrent scheduler enabled, requests that hit warm or hot cache with context lengths between 1K and 2K tokens produced zero output tokens. The model emitted EOS on the very first decode token, returning an empty response. In more severe cases, the server crashed with SIGSEGV during `update_and_fetch()` or `mx.save_safetensors()`.
+### What Was Actually Done
 
-The failure was intermittent: the same prompt and cache state could succeed or fail depending on timing. Cold-start requests (no cached context) were unaffected. Single-request mode (batch=1) was unaffected.
+The perplexity evaluation code (`/Users/dev_user/semantic/benchmarks/perplexity_benchmark.py`) reveals that the "<0.1 perplexity degradation" claim is **not based on actual Q4 KV cache inference**. The methodology is:
 
-### Investigation Timeline
+1. Run the model forward pass with standard FP16 KV cache (the default `mlx-lm` path).
+2. Obtain the final logits tensor.
+3. Quantize the **logits** to Q4 (4-bit, group size 64) using `mx.quantize()`.
+4. Dequantize back to the original dtype.
+5. Compute perplexity from the round-tripped logits.
+6. Compare against the unperturbed FP16 logits.
 
-#### Phase 1: Initial Observation (2026-02-09, morning)
+The code explicitly documents this in comments (lines 92-103 of `perplexity_benchmark.py`):
 
-During the COLM benchmark suite (`colm_full_benchmark.py`), staggered concurrent requests to Gemma 3 12B Q4 produced empty completions. The benchmark recorded `early_eos=True` for affected requests. Both models (Gemma 3 and DeepSeek-Coder-V2-Lite) exhibited the same pattern, but only when:
+```python
+"""
+Strategy: Run the model normally (FP16 KV internally), then quantize
+and dequantize the logits to simulate the noise floor of Q4 KV cache.
 
-- Batch size = 2 (two concurrent sequences in the decode loop)
-- The incoming request had a warm or hot cache hit (previously computed KV data)
-- Context length was in the 1K-2K token range
-
-#### Phase 2: Wrong Hypothesis H1 -- Lazy Tensor Chain (2026-02-09, 14:01-14:45)
-
-The first hypothesis was that lazy tensor chains were not being materialized after cache reconstruction. The reasoning went:
-
-1. `_reconstruct_cache()` loads cached KV blocks and concatenates them with `mx.concatenate()`, producing lazy tensors.
-2. These lazy tensors are inserted into the batch via `batch_gen.insert()`.
-3. If the batch cache buffer needs expansion during `update_and_fetch()` (i.e., the reconstructed cache length is not aligned to the 256-token `step` boundary), the `expand_quant` path creates new lazy concatenated buffers.
-4. Subsequent in-place scatter writes (`self.keys[i][..., prev:n, :] = q_keys[i]`) create `SliceUpdate` graph nodes referencing the lazy expansion buffers.
-5. If these are not materialized before the first decode token is sampled, the model sees garbage values and immediately produces EOS.
-
-This hypothesis led to commit `90f0baf` ("Materialize lazy tensors after non-step-aligned expansion in Q4 batch cache"), which added an unconditional `mx.eval()` call after any expansion in `update_and_fetch()`.
-
-A verification script (`verify_bug1.py`) was run against 5 previously failing test cases, and all 5 passed. The hypothesis appeared confirmed.
-
-**Why H1 was wrong**: The verification script ran requests sequentially, not concurrently. Sequential execution naturally serializes MLX operations onto a single thread, eliminating the actual race condition. The `mx.eval()` call in the fix did help (belt-and-suspenders), but it was not addressing the true root cause. The real trigger required two threads performing MLX operations simultaneously.
-
-#### Phase 3: True Root Cause Discovery (2026-02-09, 15:00-15:38)
-
-Re-examination of the faulthandler stack traces from earlier SIGSEGV crashes revealed the real pattern. Two distinct crash traces showed:
-
-**Crash Pattern A**:
-- Thread 1 (scheduler-worker): inside `update_and_fetch()` at `mlx_quantized_extensions.py:274`, performing the model forward pass via `batch_gen.next()`.
-- Thread 2 (event loop): inside `mx.save_safetensors()` at `safetensors_cache_adapter.py:209`, called from `_save_to_disk()` during cache eviction or dirty flush.
-
-**Crash Pattern B**:
-- Thread 1 (scheduler-worker): inside `_reconstruct_cache()` at `batch_engine.py:1840`, calling `mx.eval()` on concatenated cache tensors.
-- Thread 2 (event loop): inside `mx.save_safetensors()` at `safetensors_cache_adapter.py:209`.
-
-Both crashes had the same structure: **two threads calling MLX operations concurrently**. MLX is explicitly not thread-safe, as confirmed by the framework maintainer (Awni Hannun) in upstream issues #2067, #2133, and #3078:
-
-> "MLX is in general not thread safe. There isn't an easy fix for this." -- Issue #2067
-
-The internal `get_command_encoder()` accesses a static `std::unordered_map` without synchronization. Two threads calling `mx.eval()` concurrently corrupt this map, leading to SIGSEGV, data corruption, or (in the empty-output case) silently corrupted attention computations that cause immediate EOS.
-
-### Root Cause
-
-The system has two threads performing MLX operations:
-
-1. **Scheduler-worker thread**: runs the single-threaded inference loop. Calls `batch_gen.next()` (model forward pass, cache operations) and `submit()` (cache reconstruction, chunked prefill, batch insertion).
-
-2. **Event loop thread (asyncio main thread)**: handles HTTP requests. After a streaming response completes, calls `cache_store.save()` which calls `_save_to_disk()` which calls `safetensors_cache_adapter.save()` which calls `mx.save_safetensors()`.
-
-The `mlx_io_lock` had been introduced in commit `30ae40b` (2026-02-08) to protect `_reconstruct_cache()` and `safetensors_cache_adapter.save()/load()`. However, **the model forward pass inside `batch_gen.next()` was not protected by the lock**. This left a window where:
-
-```
-Scheduler thread:  batch_gen.next() -> model forward pass -> update_and_fetch()
-Event loop thread:                     _save_to_disk() -> mx.save_safetensors()
+This is an upper bound on Q4 KV degradation because:
+- Q4 noise in KV cache propagates through subsequent attention layers
+- Quantizing final logits applies noise only once
+- Actual Q4 KV cache error is distributed across layers
+"""
 ```
 
-Both threads execute MLX operations concurrently. The Metal command buffer encoding is not thread-safe. The result is either SIGSEGV (hard crash) or silent data corruption (garbage attention weights leading to immediate EOS).
+### Why This Is Problematic
 
-Additionally, `submit()` performs MLX-intensive operations (cache reconstruction, chunked prefill, batch insertion) and was also unprotected.
+**The simulation does not measure Q4 KV cache quality.** Logit quantization and KV cache quantization are fundamentally different operations:
 
-### Fix
+1. **Error propagation**: In actual Q4 KV cache inference, quantization error is introduced at every attention layer. For a 48-layer model (Gemma 3), Q4 rounding error in the KV cache at layer 1 alters the attention output, which feeds into layer 2's KV computation, compounding the error through the entire network. The final logits reflect the accumulated error from all 48 layers.
 
-Commit `371aaa0` ("Thread safety -- mlx_io_lock in submit(), RLock, unconditional eval"):
+2. **What logit quantization measures**: Quantizing the final logits applies a single round of Q4 noise to the output distribution. This measures the sensitivity of the softmax probability distribution to uniform Q4 perturbation at the output level. It does not capture the layer-by-layer error accumulation that characterizes actual KV cache quantization.
 
-1. **`mlx_io_lock` wraps `batch_gen.next()` in `step_once()`** (`batch_engine.py:1568`):
-   ```python
-   with mlx_io_lock:
-       batch_response = self._batch_gen.next()
-   ```
-   This ensures the entire model forward pass (including all cache operations triggered by filter/extend/extract inside `_next()`) is serialized against disk I/O.
+3. **Direction of the bound is wrong**: The code comments claim this is "an upper bound" (worst-case estimate). The reasoning given is that Q4 noise in KV cache "propagates through subsequent attention layers" while logit quantization "applies noise only once." This reasoning is backwards. The single-point logit perturbation is almost certainly a **lower bound** on actual degradation, because:
+   - Actual KV cache quantization applies error at 48 (Gemma) or 27 (DeepSeek) injection points.
+   - Each injection point introduces error that compounds through residual connections.
+   - Attention softmax is highly sensitive to small perturbations in key vectors (which determine attention routing), more so than to perturbations in output logits.
+   - Research from KVTuner (2025) shows that "attention distribution shifts at the token level in specific sensitive heads can degrade final accuracy," demonstrating that intermediate attention errors do not translate linearly to output logit errors -- they can be amplified.
 
-2. **`mlx_io_lock` wraps the MLX-intensive section of `submit()`** (`batch_engine.py:830-1143`):
-   ```python
-   mlx_io_lock.acquire()
-   try:
-       # sampler creation, cache reconstruction, chunked prefill,
-       # batch_gen.insert(), all mx.eval() calls
-       ...
-   finally:
-       mlx_io_lock.release()
-   ```
+4. **Prior work comparison is misleading**: The paper cites KIVI, KVQuant, QuantSpec, RotateKV, and XQuant for their "<0.1 PPL degradation" findings. Those studies all measure perplexity with **actual quantized KV caches during inference**, not via logit perturbation. The paper's methodology is not comparable to those studies, yet the citation framing implies equivalence.
 
-3. **`mlx_io_lock` changed from `threading.Lock` to `threading.RLock`** (`domain/services.py:18`):
-   ```python
-   mlx_io_lock = threading.RLock()
-   ```
-   This is necessary because `submit()` acquires the lock and then calls `_chunked_prefill()`, which also acquires it (reentrant acquisition on the same thread).
+### The Perplexity Table Is Empty
 
-4. **Unconditional `mx.eval()` after non-step-aligned expansion** (retained from the H1 fix in `90f0baf`):
-   As belt-and-suspenders, the materialization call remains even though it was not the true root cause. It prevents lazy tensor chain buildup that could compound with future timing-sensitive bugs.
+Appendix C (Table 7, `\label{tab:perplexity}`) contains placeholder dashes:
 
-### Validation
+```
+Gemma 3 12B         --- --- ---
+DeepSeek-V2-Lite    --- --- ---
+```
 
-- Gemma 3 12B Q4: 15/15 benchmark runs passed (cold + warm cache, varied prompts, max_tokens). 198/198 quality_ok.
-- DeepSeek-Coder-V2-Lite 4-bit: 11/11 benchmark runs passed. 198/198 quality_ok.
-- Re-ran all 5 original failing test cases from H1 verification -- all passed.
-- No SIGSEGV crashes observed across the full benchmark suite.
+The paper states: "[Results to be filled after running benchmarks/perplexity_benchmark.py.]" This means the claimed "<0.1 perplexity degradation" has never been measured, even with the flawed simulation. The claim in the abstract and conclusion is entirely based on extrapolation from prior work on different models with different quantization implementations.
 
-### Key Lesson
+### What Would Strengthen the Claim
 
-**Sequential verification scripts can mask concurrency bugs.** The H1 verification appeared to confirm a wrong hypothesis because it eliminated the race condition by running requests one at a time. Concurrency bugs require concurrent test harnesses. The faulthandler stack traces (showing two threads in MLX code simultaneously) were the critical evidence.
+1. **Gold standard**: Implement a Q4 KV cache forward pass where each layer's KV tensors are quantized to Q4 after computation and dequantized before the next attention operation. This is what KIVI, KVQuant, and other cited works do. The system already has `QuantizedKVCache` and `BatchQuantizedKVCache` implementations that operate in Q4; these could be used for perplexity evaluation.
+
+2. **Practical alternative**: Run the full inference pipeline (cold prefill with Q4 KV cache, then decode) on a standard benchmark (WikiText-2, C4, or MMLU) and compare outputs against FP16 inference. This would measure end-to-end quality including the actual Q4 quantization path.
+
+3. **Minimum fix**: Fill in the perplexity table with actual measurements from the simulation, but add a clear caveat: "These values represent logit-level Q4 round-trip noise, not actual KV cache quantization degradation. Actual degradation may differ due to error accumulation across layers."
+
+4. **Task-based evaluation**: Measure downstream task accuracy (e.g., MMLU, HumanEval, or even the paper's own keyword-based quality metric) under FP16 vs Q4 KV cache conditions. This would directly demonstrate whether Q4 caching preserves practical output quality.
+
+### Severity
+
+**High.** The "<0.1 perplexity degradation" claim appears in the abstract, is repeated in the conclusion, and is used to justify the entire Q4 pipeline design. It is based on a methodology that does not measure what it purports to measure, and the actual measurements have never been run. A reviewer who examines `perplexity_benchmark.py` or notices the empty table will flag this as a significant credibility issue.
 
 ---
 
-## BUG 2: Sliding Window Mask Corruption
+## Area 2: Sliding Window Evaluation
 
-**Severity**: High (silent data corruption, garbage output)
-**Affected configuration**: Gemma 3 with chunked prefill enabled (prompts > 2048 tokens)
-**Commit**: `ee24513`
-**File**: `mlx_quantized_extensions.py`
+### What the Paper Claims
 
-### Symptom
+Appendix C describes the perplexity evaluation methodology: "We process the text in 512-token sliding windows and compute per-token log-likelihood." The code uses `WINDOW_SIZE = 512` and `STRIDE = 256`.
 
-When chunked prefill was enabled for Gemma 3 12B Q4, prompts longer than 2048 tokens produced corrupted output. The generated text was incoherent -- not simply wrong answers, but garbled token sequences that bore no relationship to the prompt. Shorter prompts (below the chunking threshold) worked correctly. DeepSeek-Coder-V2-Lite was unaffected.
+### What This Means
 
-### Investigation Timeline
+Each evaluation window contains 512 tokens. The stride of 256 means consecutive windows overlap by 256 tokens. For each window, the model processes all 512 tokens in a single forward pass (no KV cache carryover between windows). Only the non-overlapping tokens (the last 256 in each window after the first) contribute to the perplexity calculation.
 
-#### Phase 1: Isolating the Trigger (2026-02-08, morning)
+### Limitations
 
-The corruption was first noticed during benchmark runs with long context prompts. Systematic testing narrowed the trigger:
+1. **Maximum context is 512 tokens**: Each evaluation window is independent. The model never sees more than 512 tokens of context when computing the log-likelihood of any token. This is a severe limitation for evaluating a system that claims to handle contexts of 1K-32K tokens. The entire paper's value proposition is about persisting and reusing long KV caches. Evaluating quality with 512-token windows says nothing about whether Q4 quantization degrades quality at 4K, 8K, 16K, or 32K context lengths.
 
-- Prompts under 2048 tokens (below the interleave threshold): correct output.
-- Prompts over 2048 tokens (chunked prefill activated): corrupted output.
-- Gemma 3: affected. DeepSeek: unaffected.
+2. **No long-range dependency evaluation**: Recent research ("What is Wrong with Perplexity for Long-context Language Modeling?", 2024; "Rethinking Perplexity: Revealing the Impact of Input Length on Perplexity Evaluation in LLMs", 2025) demonstrates that sliding-window perplexity systematically undervalues long-context modeling ability. Window size has a significant effect on reported perplexity: increasing the window from 16 to 1024 tokens reduces perplexity by 57-62% in some models. At 512 tokens, the evaluation captures only local coherence.
 
-The difference between the two models pointed toward Gemma 3's hybrid attention architecture. Gemma 3 12B uses a mix of two attention types across its 46 transformer layers:
+3. **No error accumulation measurement**: In a real multi-turn conversation, the KV cache grows incrementally. Q4 quantization error from turn 1 persists in the cache when turn 2 is processed, and so on. Over a 5-phase, 25-turn conversation (the paper's prisoner's dilemma scenario), quantization errors could accumulate. The sliding window evaluation is stateless between windows and cannot detect this.
 
-- **6 global attention layers** (layers 0-5 and periodic thereafter): full causal attention over the entire context.
-- **40 sliding window layers**: attention limited to a window of 4096 tokens. Tokens outside the window are masked out.
+4. **Gemma 3's sliding window architecture**: Gemma 3 12B uses a 1024-token sliding window for 40 of its 48 attention layers. Evaluating with a 512-token window means the sliding window mechanism is never tested at capacity. At 512 tokens, all layers (both global and sliding window) see the full context, so the hybrid attention architecture is never exercised in its distinctive mode.
 
-DeepSeek uses uniform global attention across all layers, which is why it was unaffected.
+5. **Memory-driven sizing**: The code comments explain the choice: "Memory-aware sizing... We evaluate ~8K tokens total to stay well within budget." The window size and total evaluation size are chosen for device memory constraints, not for methodological soundness. This is an engineering constraint, not a scientific design.
 
-#### Phase 2: Tracing the Mask Path (2026-02-08, midday)
+### What Would Strengthen the Claim
 
-Chunked prefill processes a long prompt in 256-token chunks rather than all at once. Each chunk runs a model forward pass with a prefix cache already populated from previous chunks. The attention mask for each chunk must correctly represent the causal structure, including the sliding window constraint for windowed layers.
+1. **Evaluate at target context lengths**: Run perplexity evaluation at 4K, 8K, and 16K context windows -- the same lengths used in the TTFT benchmarks. This would show whether Q4 quality holds at the context lengths the paper actually claims to support.
 
-The code path for mask creation during chunked prefill:
+2. **Multi-turn accumulation test**: Process a long document incrementally (simulating multi-turn conversation), quantizing the KV cache to Q4 at each turn, and compare final perplexity against a single-pass FP16 evaluation. This would capture error accumulation.
 
-1. `_chunked_prefill()` calls `self._model(chunk_tokens, cache=kv_caches)`.
-2. Inside the model, each attention layer calls `cache.make_mask(N=chunk_size)`.
-3. For `QuantizedKVCache` (the single-sequence cache used during chunked prefill), `make_mask()` delegates to `cache.create_attention_mask()`.
+3. **Use the system's own Q4 cache**: Run the full system pipeline (cold prefill -> Q4 cache save -> warm reload -> generate) and compare output quality against a non-cached baseline. The system exists and works; use it for evaluation.
 
-**The bug**: `QuantizedKVCache.make_mask()` in upstream `mlx-lm` calls `self.create_attention_mask(h, cache=self)`, which returns the **string** `"causal"` when `N > 1` and `return_array=False`. This string is a shortcut that tells the model "use standard causal masking." However, it **completely ignores the `window_size` parameter**. Sliding window layers that should restrict attention to a 4096-token window instead receive full causal attention over the entire cached context.
+4. **Downstream task evaluation at scale**: Instead of perplexity on WikiText-2, evaluate on a task that requires long-context understanding (e.g., multi-document QA, long-form summarization) with and without Q4 caching.
 
-This means that during chunked prefill, sliding window layers compute attention over positions they should never see. The resulting KV cache entries are computed with wrong attention patterns. When subsequent decode steps use these corrupted cache entries, every generated token is garbage.
+### Severity
 
-#### Phase 3: Why BatchQuantizedKVCache Was Not Affected
-
-Our custom `BatchQuantizedKVCache.make_mask()` (used during batch decode, not chunked prefill) was already correct:
-
-```python
-def make_mask(self, N=1, return_array=False, **kwargs):
-    from mlx_lm.models.base import create_causal_mask
-    mask = create_causal_mask(N, offset=self._idx,
-                              left_padding=self.left_padding, **kwargs)
-    return mask
-```
-
-It calls `create_causal_mask()` directly, passing `**kwargs` which includes `window_size`. The function `create_causal_mask()` correctly handles window_size by creating an explicit mask array that zeros out positions outside the window.
-
-The bug was only in the upstream `QuantizedKVCache.make_mask()`, which is used for single-sequence operations like chunked prefill.
-
-### Root Cause
-
-`QuantizedKVCache.make_mask()` in `mlx-lm` v0.30.4 returns the string `"causal"` for multi-token chunks (`N > 1`), ignoring the `window_size` parameter entirely. For models with uniform global attention (like DeepSeek), this is harmless because "causal" is the correct mask. For models with hybrid attention (like Gemma 3, which has 40 out of 46 layers using sliding window attention), this produces incorrect attention patterns during chunked prefill.
-
-The corruption is silent: no error is raised, no warning is logged. The model simply computes attention over the wrong set of positions, producing KV cache entries that are mathematically valid but semantically wrong.
-
-### Fix
-
-Commit `ee24513` ("Patch QuantizedKVCache.make_mask for sliding window attention in chunked prefill"):
-
-A monkeypatch applied during Q4 extension initialization replaces `QuantizedKVCache.make_mask` with a corrected version:
-
-```python
-def patched_make_mask(self, N=1, return_array=False, window_size=None, **kwargs):
-    from mlx_lm.models.base import create_causal_mask
-
-    if window_size is not None:
-        if N == 1 and self.offset <= window_size:
-            return None  # Single-token decode within window: no mask needed
-        return create_causal_mask(
-            N, offset=self.offset, window_size=window_size, **kwargs
-        )
-    if N == 1:
-        return None
-    if return_array:
-        return create_causal_mask(N, offset=self.offset, **kwargs)
-    return "causal"
-```
-
-When `window_size` is specified (as it is for Gemma 3's 40 sliding window layers), the function creates an explicit mask array via `create_causal_mask()` instead of returning the string shortcut. When `window_size` is `None` (global attention layers), the original behavior is preserved.
-
-A runtime validation check was also added to `validate_q4_pipeline()`:
-
-```python
-test_cache = QuantizedKVCache(group_size=64, bits=4)
-test_cache.offset = 1000
-mask = test_cache.make_mask(N=512, window_size=256)
-if mask is None or (isinstance(mask, str) and mask == "causal"):
-    logger.error("[Q4 VALIDATE] QuantizedKVCache.make_mask returned %s "
-                 "instead of explicit mask array.", repr(mask))
-    return False
-```
-
-This catches regression if a future `mlx-lm` update overrides the patch.
-
-### Validation
-
-- 10/10 prompts with context lengths between 1018 and 2482 tokens produced correct output with chunked prefill enabled on Gemma 3.
-- The same prompts without the patch produced garbled output (confirmed regression test).
-- DeepSeek continued to work correctly (no sliding window layers, so the patch has no effect).
-
-### Key Lesson
-
-**String sentinel returns in APIs are dangerous.** The `make_mask()` method returns either an array or the string `"causal"` -- a polymorphic return type that silently drops parameters. Any caller passing `window_size` to a code path that returns `"causal"` gets incorrect behavior with no indication of failure. The fix was not to change the API contract but to ensure the windowed code path always produces an explicit array.
+**Medium.** The 512-token window is a reasonable starting point for a memory-constrained device, and prior work confirms that 4-bit KV cache quantization generally has low impact on quality. But the evaluation does not support claims about long-context quality, and the paper's main contribution is a long-context system. There is a disconnect between what is evaluated and what is claimed.
 
 ---
 
-## BUG 3: GQA Mask Shape Mismatch + mx.compile Crash
+## Area 3: Ablation Validity
 
-**Severity**: Critical (hard crash, SIGSEGV)
-**Affected configuration**: batch > 1 with GQA models (Gemma 3)
-**Commits**: `b2d5617`, `04c814d`, `320d25e`, `50a4388`, `12461c1`
-**File**: `mlx_fused_attention.py`, `mlx_quantized_extensions.py`
+### What the Paper Claims
 
-### Symptom
+Table 5 (Section 4.4) presents an "ablation analysis" claiming to "isolate each component's contribution." Four components are ablated: persistence (30x TTFT reduction), Q4 vs FP16 (3.6x capacity), batching (2.0x SysTPS), and cross-phase injection (1.9x TTFT reduction).
 
-When batch size exceeded 1, the fused Q4 attention path crashed with a dimension mismatch error during attention computation. Gemma 3 (which uses Grouped Query Attention with `n_repeats = n_q_heads / n_kv_heads > 1`) was affected. DeepSeek-Coder-V2-Lite (which uses Multi-Latent Attention with `n_repeats = 1`) was not affected.
+The paper states: "All numbers come from existing benchmark data (Tables 3-6) or analytical calculations (Table 3)."
 
-In more extreme cases, even after fixing the shape mismatch, `mx.compile` crashed with SIGSEGV when the batch dimension changed from B=2 to B=1 mid-decode (after one sequence in the batch completed and was filtered out).
+### What Was Actually Done
 
-### Investigation Timeline
+These are not ablations in the standard machine learning sense. A proper ablation removes one component at a time from the system and measures the impact. What the paper presents is:
 
-This bug was actually a cluster of three interrelated failures that were discovered and fixed incrementally over 2026-02-07.
+1. **Persistence**: Compares warm TTFT (513 ms) against cold TTFT (15,502 ms). This is a comparison of two operational modes, not an ablation. It does not answer "what happens if we remove persistence from the system?" because the cold path IS the system without persistence. This is valid as a comparison but should not be labeled an ablation.
 
-#### Sub-bug 3a: GQA 5D Reshape vs 4D Mask (2026-02-07, commit `12461c1`)
+2. **Q4 vs FP16**: The "without" value (5 agents at 8K) comes from the analytical formula in Table 3. No FP16 system was built, benchmarked, or run. The number is derived from the calculation: `15.2 GB / (3.0 GB per agent at FP16 8K) = 5 agents`. This is a mathematical calculation, not a measurement. The implicit claim is that the system could not serve more than 5 agents with FP16 caches, but this was never empirically tested.
 
-The fused Q4 attention function for GQA models reshapes queries from 4D to 5D to align query heads with their corresponding KV head groups:
+3. **Batching**: Compares SysTPS (22.4 for batch=2) against per-agent TPS (11.2, which is SysTPS/2). The footnote acknowledges that "Per-agent TPS = SysTPS/2, representing single-agent throughput." This is not an ablation of the batching component. It is a comparison of batch=2 throughput against half of batch=2 throughput. A proper ablation would compare batch=2 SysTPS against batch=1 SysTPS measured on the same workload. The batch=1 data exists in the paper's measurements but is not used here.
 
-```python
-# Q shape: (B, n_q_heads, L, D)  ->  (B, n_kv_heads, n_repeats, L, D)
-queries = mx.reshape(queries, (B, n_kv_heads, n_repeats, L, D))
-```
+4. **Cross-phase**: Compares persistent Phase 5 TTFT (1,705 ms) against cold Phase 5 TTFT (3,292 ms). This is the same operational mode comparison as #1, applied to a later phase. It is a valid comparison but is not an ablation of the cross-phase injection mechanism.
 
-The attention mask from the model is 4D: `(B, 1, L, S)`. For B=1, broadcasting works because the batch dimension is trivially 1. For B>1, the 4D mask cannot broadcast against the 5D query-key score tensor `(B, n_kv_heads, n_repeats, L, S)` -- the ranks differ, and NumPy-style broadcasting cannot reconcile them.
+### Why This Matters
 
-**Initial fix attempt**: Add `mx.expand_dims(mask, axis=2)` to make the mask 5D: `(B, 1, 1, L, S)`. This allows broadcasting along both the `n_kv_heads` and `n_repeats` dimensions.
+Calling these "ablations" implies a level of experimental rigor that is not present. Ablation studies are a specific methodology where you remove one component and re-run the full system to measure its individual contribution. The paper instead presents:
+- Two mode comparisons (persistence, cross-phase): valid but not ablations
+- One analytical calculation (Q4 capacity): valid but not empirical
+- One arithmetic identity (batching): SysTPS vs SysTPS/2 is not informative
 
-However, this only works when B=1 because the mask is expanded inside the compiled function which had already traced with a specific batch dimension.
+### What Would Strengthen the Claim
 
-#### Sub-bug 3b: mx.compile Batch Dimension Change (2026-02-07, commits `b2d5617`, `04c814d`)
+1. **Real ablation for persistence**: Build a variant of the system that does NOT persist caches (always cold-starts). Measure TTFT across the same configuration matrix. Compare against the full system. This is essentially what the cold/warm comparison does, so relabeling it as "comparison" rather than "ablation" would be sufficient.
 
-`mx.compile` traces the computation graph on the first call and caches the compiled representation. When called with `shapeless=False` (the default), any input shape change triggers recompilation. When called with `shapeless=True`, the compiled graph is reused regardless of shape changes.
+2. **Real ablation for Q4 vs FP16**: Implement FP16 KV cache storage (the system architecture supports it -- just skip quantization). Run the same benchmark suite with FP16 caches. Measure actual agent capacity (how many agents can be loaded simultaneously before OOM), actual TTFT (FP16 disk I/O is slower because files are 3.6x larger), and actual throughput (FP16 attention may be faster per token because no dequantization is needed). The tradeoff is more nuanced than "3.6x more agents."
 
-The problem: for GQA, `shapeless=True` is unsafe because the reshape operation `mx.reshape(queries, (B, n_kv_heads, n_repeats, L, D))` reads `queries.shape` to compute dimensions. With `shapeless=True`, the trace bakes in the shapes from the first call. If the first call had B=2 and a subsequent call has B=1, the reshape uses stale dimensions, producing incorrect tensor shapes that crash Metal.
+3. **Real ablation for batching**: Compare batch=1 warm SysTPS against batch=2 warm SysTPS for the same workload. The batch=1 data appears to exist in the measurements (the per-agent TPS column). If batch=1 warm SysTPS is close to 11.2 (matching per-agent TPS), that confirms linear scaling. If it differs, that reveals the overhead of batching.
 
-With `shapeless=False`, B=2 to B=1 transitions trigger recompilation. But recompilation during a batch dimension change (in the middle of `batch_gen.next()`, after `filter()` removes a completed sequence) caused SIGSEGV. The compiled function's cached state was being invalidated while Metal command buffers still referenced it.
+4. **Real ablation for cross-phase**: Run the 5-phase scenario with persistence enabled but cross-phase cache extension disabled (each phase loads the Phase 1 cache only, not the accumulated cache). This would isolate the contribution of cache accumulation from the contribution of basic persistence.
 
-**The B=1 split solution**: Instead of compiling for variable batch sizes, the batch is always split into individual sequences before calling the compiled function:
+5. **Relabel the table**: If empirical ablations are infeasible, rename the section from "Ablation Analysis" to "Component Contribution Analysis" and clearly state that the numbers are derived from operational comparisons and analytical calculations, not from controlled ablation experiments.
 
-```python
-if B == 1:
-    return compiled_fn(queries, k0, k1, k2, v0, v1, v2, scale_arr, mask)
+### Severity
 
-# Batch>1: split into per-sequence calls, then stack
-parts = []
-for i in range(B):
-    q_i = queries[i:i+1]
-    k_i = tuple(k[i:i+1] for k in q_keys)
-    v_i = tuple(v[i:i+1] for v in q_values)
-    m_i = mask[i:i+1] if mask is not None else None
-    parts.append(compiled_fn(q_i, k_i[0], k_i[1], k_i[2],
-                             v_i[0], v_i[1], v_i[2], scale_arr, m_i))
-return mx.concatenate(parts, axis=0)
-```
-
-The compiled function always sees B=1. Batch dimension never changes. Recompilation only happens on sequence length (L) changes, which is benign.
-
-For GQA (`n_repeats > 1`), `shapeless=False` is used because the reshape reads `queries.shape`. Since B is always 1, the only shape variation is L, which triggers safe recompilation.
-
-For non-GQA (`n_repeats = 1`), `shapeless=True` is safe because there is no reshape operation.
-
-#### Sub-bug 3c: Cascading Metal Assertion Failures (2026-02-07, commits `04c814d`, `50a4388`)
-
-Even after the B=1 split, batch decode produced Metal assertion failures:
-
-1. **"Completed handler after commit call"**: Caused by `mx.async_eval()` scheduling GPU work while the previous command buffer's completion handler was still running. Fixed by replacing all `mx.async_eval()` calls with synchronous `mx.eval()` (commit `04c814d`). This eliminates the CPU/GPU overlap pipeline from upstream `mlx-lm` but prevents the assertion.
-
-2. **"commit command buffer with uncommitted encoder"**: Caused by `filter()` in the batch KV cache. After filtering, the `generation_stream` might have uncommitted command encoders from the forward pass. The next decode step's `mx.eval()` only syncs the default stream (which inside `mx.stream(generation_stream)` IS the generation stream), but the encoder state was not fully committed. Fixed by adding `mx.synchronize()` after `mx.eval()` in `filter()` (commit `50a4388`):
-
-   ```python
-   # In BatchQuantizedKVCache.filter():
-   mx.eval(*self.keys, *self.values)
-   mx.synchronize()  # Sync generation_stream -- ensures encoder committed
-   ```
-
-#### Sub-bug 3d: Lazy Tensor Materialization at Transitions (2026-02-07, commits `320d25e`, `b2d5617`)
-
-The `filter()`, `extend()`, `merge()`, and `extract()` operations on `BatchQuantizedKVCache` all produce lazy tensors (via indexing, concatenation, `mx.contiguous()`). If these are not materialized before the next operation that changes the batch dimension, Metal tries to resolve lazy graph nodes with stale shape assumptions.
-
-Each transition point was audited and `mx.eval()` calls were added or restored:
-
-- `filter()`: `mx.eval()` on all keys/values after indexing (line 308)
-- `extend()`: `mx.eval()` on all keys/values after concatenation (line 391)
-- `merge()`: `mx.eval()` on all keys/values after slice assignments (line 158)
-- `extract()`: `mx.eval()` on all keys/values after `mx.contiguous()` (line 433)
-
-Additionally, `clip_residual` (a function called 52 times per forward pass in Gemma 3) was wrapped with `mx.compile` by upstream `mlx-lm`, which interacted badly with the batch decode path. The monkeypatch removes `mx.compile` from `clip_residual` (commit `b2d5617`).
-
-### Root Cause (Composite)
-
-Four interacting failures:
-
-1. **Shape mismatch**: GQA 5D reshape produces tensors incompatible with 4D masks when B > 1.
-2. **mx.compile shape tracing**: Compiled functions cache shapes and fail on batch dimension changes.
-3. **Async command buffer conflicts**: `mx.async_eval()` races with completion handlers.
-4. **Lazy tensor chains**: Unmaterialized tensors at batch dimension transitions crash Metal's graph resolver.
-
-### Fix (Composite)
-
-1. **B=1 split strategy**: Always decompose batch into individual sequences before calling compiled attention. Eliminates shape tracing issues entirely.
-2. **`mx.async_eval` replaced with `mx.eval`**: Eliminates async command buffer race conditions.
-3. **`mx.synchronize()` after `filter()`**: Ensures Metal command encoders are committed before the next decode step.
-4. **`mx.eval()` at all cache transition points**: Materializes lazy tensors before batch dimension changes.
-5. **`clip_residual` decompiled**: Removes nested `mx.compile` interaction in the hot path.
-
-### Validation
-
-- 25/25 rounds across 5 separate invocations passed (cold start, warm cache, varied prompts, varied max_tokens).
-- Both GQA (Gemma 3, `n_repeats = 4`) and non-GQA (DeepSeek, `n_repeats = 1`) paths validated.
-- No Metal assertions observed across the full validation suite.
-
-### Key Lesson
-
-**Compiled GPU kernels and dynamic batch sizes are fundamentally incompatible.** The B=1 split strategy trades a small amount of overhead (loop + concatenation) for complete elimination of an entire class of shape-dependent bugs. When `mx.compile` traces a function, it creates a contract about input shapes; violating that contract can corrupt Metal state in ways that manifest as crashes in unrelated code. The only safe approach is to guarantee the compiled function always sees identical shapes.
+**Medium.** The individual numbers are not wrong -- the comparisons are drawn from real measurements (except Q4 capacity, which is analytical). The issue is framing: calling them "ablations" implies a methodology that was not followed. A reviewer familiar with ablation study conventions will notice this.
 
 ---
 
-## BUG 4: Temperature / Tokenizer Interaction (Misattributed Root Cause)
+## Area 4: Hardware Table Accuracy
 
-**Severity**: High (all spaces removed from generated text)
-**Affected configuration**: DeepSeek-Coder-V2-Lite with `transformers==5.0.0rc1`
-**Commit**: `af08cfb`
-**Files**: `requirements.txt`, `pyproject.toml`
+### What the Paper Claims
 
-### Symptom
+Table 1 and Appendix F (Table 8) list memory capacity, memory bandwidth, and SSD/PCIe bandwidth for six devices: M4 Pro, M4 Max, DGX Spark, RTX 5090, RTX 4090, and iPhone 17 Pro.
 
-Generated text from DeepSeek-Coder-V2-Lite had all spaces removed. A prompt asking for a code explanation would produce output like:
+### Verification of Each Specification
 
-```
-Thefunctiontakesalistofintegersandreturnsthesumofalleven...
-```
+#### M4 Pro (Mac Mini)
+| Spec | Paper | Verified | Status |
+|------|-------|----------|--------|
+| Memory | 24 GB | 24 GB (configurable 24-48 GB) | Correct |
+| Bandwidth | 273 GB/s | 273 GB/s (Apple spec) | Correct |
+| SSD | 7 GB/s | ~7 GB/s (Apple internal SSD) | Correct |
+| Type | Unified | Unified LPDDR5X | Correct |
 
-instead of:
+**Verdict**: All specifications are correct for the base M4 Pro configuration (24 GB).
 
-```
-The function takes a list of integers and returns the sum of all even...
-```
+#### M4 Max (MacBook)
+| Spec | Paper | Verified | Status |
+|------|-------|----------|--------|
+| Memory | 128 GB | 36-128 GB (configurable) | Partially correct |
+| Bandwidth | 546 GB/s | 546 GB/s (40-core GPU variant) | Correct with caveat |
+| SSD | 7 GB/s | ~7 GB/s | Correct |
+| Type | Unified | Unified LPDDR5X | Correct |
 
-The output was semantically correct -- the model was producing the right tokens -- but every space character was missing from the decoded text.
+**Caveat**: The 546 GB/s bandwidth applies only to the 40-core GPU variant of M4 Max. The 32-core GPU variant has 410 GB/s. The paper lists the highest configuration without noting the variant. The 128 GB memory also applies only to the highest configuration. The extended table (Appendix F) shows "36-128" for memory, which is accurate, but the main Table 1 shows only 128. This is misleading but not incorrect.
 
-### Investigation Timeline
+#### DGX Spark
+| Spec | Paper | Verified | Status |
+|------|-------|----------|--------|
+| Memory | 128 GB | 128 GB LPDDR5X | Correct |
+| Bandwidth | 273 GB/s | 273 GB/s | Correct |
+| SSD | 11 GB/s | ~11.4 GiB/s (sequential read, 1M block, 16 threads) | Correct |
+| Type | Unified | Unified (Grace Blackwell GB10) | Correct |
 
-#### Phase 1: Blaming Temperature (2026-02-06, initial hypothesis)
+**Verdict**: All specifications are correct. The SSD bandwidth of 11 GB/s is confirmed by StorageReview benchmarks (11.4 GiB/s peak sequential read).
 
-The spacing corruption was first observed during multi-turn dialogue testing with T=0. The initial hypothesis was that T=0 (deterministic greedy decoding) caused some kind of echo loop or degenerate sampling that suppressed space tokens.
+#### RTX 5090
+| Spec | Paper | Verified | Status |
+|------|-------|----------|--------|
+| Memory | 32 GB | 32 GB GDDR7 | Correct |
+| Bandwidth | 1,792 GB/s | 1,792 GB/s (512-bit, 28 Gbps GDDR7) | Correct |
+| SSD (PCIe) | 64 GB/s | 64 GB/s (PCIe 5.0 x16 unidirectional) | Correct |
+| Type | Discrete | Discrete VRAM | Correct |
 
-Evidence that appeared to support this:
-- Switching from T=0 to T=0.1 seemed to improve (but not fully fix) the output.
-- T=0 is known to cause deterministic repetition loops in some models.
-- The DeepSeek model's `generation_config.json` specifies T=0.3.
+**Verdict**: All specifications are correct. The "SSD" column for discrete GPUs represents PCIe host-device bandwidth, which is noted in the table footnote. PCIe 5.0 x16 provides 64 GB/s unidirectional bandwidth.
 
-The team changed `coordination_service.py` to hardcode T=0.3 (bypassing the environment variable `SEMANTIC_MLX_DEFAULT_TEMPERATURE`) and moved on, believing the issue was resolved.
+#### RTX 4090
+| Spec | Paper | Verified | Status |
+|------|-------|----------|--------|
+| Memory | 24 GB | 24 GB GDDR6X | Correct |
+| Bandwidth | 1,008 GB/s | 1,008 GB/s (384-bit, 21 Gbps GDDR6X) | Correct |
+| SSD (PCIe) | 32 GB/s | 32 GB/s (PCIe 4.0 x16 unidirectional) | Correct |
+| Type | Discrete | Discrete VRAM | Correct |
 
-#### Phase 2: Spacing Corruption Returns (2026-02-06, later)
+**Verdict**: All specifications are correct. PCIe 4.0 x16 provides approximately 32 GB/s unidirectional bandwidth, matching the table.
 
-After hardcoding T=0.3, the spacing corruption persisted in new test runs. This ruled out temperature as the root cause. If T=0 were the problem, T=0.3 should have fixed it completely.
+#### iPhone 17 Pro
+| Spec | Paper | Verified | Status |
+|------|-------|----------|--------|
+| Memory | 12 GB | 12 GB LPDDR5X | Correct |
+| Bandwidth | 77 GB/s | 76.8 GB/s (LPDDR5X 9600 MT/s) | Correct (rounded) |
+| SSD | 2 GB/s | ~2 GB/s (NAND flash) | Plausible |
+| Type | Unified | Unified | Correct |
 
-#### Phase 3: Bisecting Dependencies (2026-02-06, evening)
+**Verdict**: Memory and bandwidth are correct (77 GB/s is a reasonable rounding of 76.8 GB/s). The 2 GB/s SSD bandwidth is plausible for NAND flash on a mobile device, though Apple does not publish exact NVMe sequential read speeds for iPhone. This is an estimate.
 
-A dependency audit revealed that `mlx-lm==0.30.4` had pulled in `transformers==5.0.0rc1` as a transitive dependency. The `transformers` library had undergone a major version bump from 4.x to 5.0.0rc1.
+### Extended Table (Appendix F) Additional Entries
 
-Testing with `transformers==4.57.6` (pinned manually) eliminated the spacing corruption entirely. Testing with `transformers==5.0.0rc1` reproduced it 100% of the time. Temperature was irrelevant.
+The extended table adds M4 (MacBook Air), M4 Ultra (Studio), and prices. The M4 bandwidth of 120 GB/s, M4 Ultra bandwidth of 819 GB/s, and price points all match published Apple specifications and retail prices.
 
-#### Phase 4: Root Cause in Transformers v5 (2026-02-06)
+### Overall Assessment
 
-The `transformers` v5.0.0rc1 release changed how tokenizers are initialized. From the maintainers:
+**The hardware specifications are accurate.** All verifiable numbers match published specifications from the respective manufacturers. The RTX PCIe bandwidth numbers correctly distinguish between VRAM bandwidth and host-device transfer bandwidth, and the footnote makes this clear. The one minor issue is that Table 1 presents the highest M4 Max configuration (128 GB, 546 GB/s) without noting that lower configurations exist, but the extended table in the appendix corrects this.
 
-> "v5 changed to 'manually generate tokenizers' instead of trusting saved config files."
+### Severity
 
-For SentencePiece-based tokenizers (used by DeepSeek and many other models), this change broke the handling of the `\u2581` (lower one eighth block, used as the space marker in SentencePiece vocabulary). The space marker was stripped from token pieces during tokenizer construction, meaning that `tokenizer.decode()` produced text without spaces.
-
-This was not model-specific: any SentencePiece model running under `transformers==5.0.0rc1` would exhibit the same bug. It was filed upstream as [huggingface/transformers#43066](https://github.com/huggingface/transformers/issues/43066), with a fix in [PR #42894](https://github.com/huggingface/transformers/pull/42894).
-
-### Root Cause
-
-`transformers==5.0.0rc1` breaks SentencePiece decode by stripping the `\u2581` space marker from token pieces during tokenizer construction. Round-trip encode/decode loses all spaces. This is a library bug, not a model bug or a temperature bug.
-
-The initial temperature hypothesis was a classic case of **confounding variables**: T=0 did cause observable repetition issues (a real but separate problem), and the spacing bug was present at all temperatures. Switching to T=0.3 improved the repetition issue, making the output seem more correct, but the spacing corruption was still there -- it was just less obvious in shorter outputs at T=0.3 where the model naturally produced fewer space-sensitive constructions.
-
-### Fix
-
-Commit `af08cfb` ("Pin transformers<5.0.0 -- v5.0.0rc1 breaks SentencePiece decode"):
-
-```
-# requirements.txt
-transformers>=4.47.0,<5.0.0  # v5.0.0rc1 breaks SentencePiece decode (gh #43066)
-
-# pyproject.toml
-"transformers>=4.47.0,<5.0.0",  # v5.0.0rc1 breaks SentencePiece decode (gh #43066)
-```
-
-Note: `mlx-lm==0.30.4` declares `transformers==5.0.0rc1` as a dependency. pip warns about the conflict but respects our explicit pin. The system works correctly with `transformers==4.57.6`.
-
-The T=0.3 hardcode in `coordination_service.py` was retained because it matches DeepSeek's official generation config and avoids the separate (real) T=0 repetition loop issue. A stale comment on line 614 that blamed temperature for the spacing corruption was corrected to explain the true cause.
-
-### Validation
-
-- DeepSeek-Coder-V2-Lite: all generated text has correct spacing with `transformers<5.0.0`.
-- Gemma 3: also uses SentencePiece, was silently affected, now correct.
-- T=0.3 works correctly for both models post-fix.
-
-### Key Lesson
-
-**Correlation is not causation, especially with multiple simultaneous bugs.** The spacing corruption and the T=0 repetition loop were two independent bugs that happened to be observed at the same time. Fixing one (T=0 to T=0.3) appeared to fix the other because it changed the output distribution enough to mask the remaining problem. Only systematic dependency bisection revealed the true root cause. Always bisect when a fix "mostly works."
+**Low.** The hardware table is factually accurate. No corrections needed.
 
 ---
 
-## Cross-Cutting Lessons
+## Area 5: Nielsen Response Time Thresholds
 
-### 1. MLX Threading is the Fundamental Constraint
+### What the Paper Claims
 
-Three of the four bugs (BUG 1, BUG 3, and partially BUG 2 via its interaction with chunked prefill) trace back to MLX's lack of thread safety and the challenges of lazy evaluation on GPU. The MLX framework provides no thread-safe API surface whatsoever. The framework maintainers have stated that true thread safety "will take some time."
+Section 2.3 states: "Nielsen's thresholds [nielsen1993] identify 100 ms as instantaneous, 1 s as acceptable, and 10 s as the limit before users disengage. No current local AI system meets the 1 s threshold at long context [nielsen2024speed]."
 
-The single most important architectural decision was routing all MLX inference through a single scheduler-worker thread and serializing cross-thread MLX operations with `mlx_io_lock`. This is not elegant, but it is the only correct approach given the framework's constraints.
+The paper uses the 1-second threshold as the target for TTFT, framing warm-cache TTFT of 513 ms (Gemma 4K) as crossing "Nielsen's 1 s threshold into acceptable territory."
 
-### 2. Lazy Evaluation Creates Invisible Dependencies
+### The 1993 Reference
 
-MLX's lazy evaluation model means that the apparent site of a bug (where the crash occurs) is often far from the actual site (where the lazy graph was incorrectly constructed). BUG 1's empty output appeared to be a sampling issue but was actually a threading issue in graph evaluation. BUG 3's Metal assertions appeared in the attention kernel but were caused by unmaterialized tensors from cache operations.
+The citation is to Nielsen, J. (1993). *Usability Engineering*. Academic Press. Chapter 5 defines three thresholds:
+- 0.1 seconds: system reaction feels instantaneous
+- 1.0 seconds: user's flow of thought stays uninterrupted
+- 10 seconds: limit of user's attention; beyond this, users want to switch tasks
 
-The defensive strategy is: **materialize at every transition point**. Call `mx.eval()` after every operation that changes the shape semantics of a tensor (filter, extend, merge, extract). The cost is small (the tensors need to be evaluated eventually), and the benefit is that bugs manifest immediately rather than propagating through lazy chains.
+These thresholds are based on earlier human factors research (Miller, 1968; Card et al., 1983) grounded in neuropsychological constants. Nielsen himself has repeatedly stated that these thresholds remain valid because they derive from human cognitive processing speeds, which have not changed. In a 2023 Substack post, he reaffirmed: "When something has held for 55 years in the computer business, it'll probably remain true for many more laps around the sun."
 
-### 3. Verification Must Match the Failure Mode
+**The 1993 reference is valid.** The thresholds are not arbitrary 1993 technology conventions; they are empirically grounded in human cognitive timing that has not changed.
 
-BUG 1's wrong hypothesis (H1, lazy tensor chain) was "confirmed" by a sequential test script. The actual bug was a concurrency race that only manifested under concurrent execution. BUG 4's wrong hypothesis (temperature) was "confirmed" by changing temperature, which coincidentally improved a different issue.
+### The 2024 Reference
 
-Verification scripts must reproduce the exact conditions of the failure. For concurrency bugs, this means concurrent requests. For timing-sensitive bugs, this means realistic timing (not artificial serialization). For dependency bugs, this means controlled dependency versions.
+The bibliography entry (`nielsen2024speed`) cites "The Need for Speed in the Age of AI" attributed to "Nielsen Norman Group, 2024." The actual article is titled "The Need for Speed in AI" and was published on Jakob Nielsen's Substack (jakobnielsenphd.substack.com) and on uxtigers.com in August 2023, not 2024. The article's core argument is that AI tools need sub-second response times just like all previous UI paradigms, and that current AI systems generally fail to meet this standard.
 
-### 4. Monkeypatching Upstream Code Requires Validation Gates
+**Issues with the citation**:
+1. The year is wrong: the article was published in August 2023, not 2024. The bibliography lists `year={2024}`.
+2. The title is slightly different: the actual title is "The Need for Speed in AI," not "The Need for Speed in the Age of AI."
+3. The publication venue is Nielsen's personal Substack/website, not the Nielsen Norman Group's main website (nngroup.com). Nielsen separated from NN/g and now publishes independently.
 
-BUG 2 existed because upstream `mlx-lm`'s `QuantizedKVCache.make_mask()` silently dropped the `window_size` parameter. Our fix was a monkeypatch, which is fragile -- a future `mlx-lm` update could overwrite it. The validation gate in `validate_q4_pipeline()` catches this regression automatically at startup.
+These are minor bibliographic errors that do not affect the substance of the argument.
 
-Every monkeypatch should have a corresponding validation check that runs at initialization and fails loudly if the patch is not in effect.
+### Applicability to AI Agent Interaction
 
-### 5. Dependency Management is a Safety Issue
+The paper's use of the 1-second threshold for TTFT in AI agent interaction deserves scrutiny:
 
-BUG 4 was caused entirely by a transitive dependency (`mlx-lm` pulling in `transformers==5.0.0rc1`). The fix was a version pin. On Apple Silicon / MLX systems where the entire inference stack is Python-native (no CUDA/cuDNN binary isolation), a single bad transitive dependency can silently corrupt model output with no error messages.
+1. **Different interaction model**: Nielsen's thresholds were developed for direct-manipulation GUIs where the user performs an action and waits for a response. AI chat interaction is different: the user types a prompt, submits, and waits. The "submission to first visible response" is more analogous to a page load than a button click. For page loads, Nielsen used the 10-second threshold, not the 1-second threshold.
 
-Pin all critical dependencies explicitly. Do not trust transitive resolution for inference-critical libraries.
+2. **Streaming changes perception**: The paper measures TTFT (time to first token), not time to complete response. With streaming, the user sees tokens appearing progressively. Research on streaming AI responses (including Nielsen's own article) suggests that progressive display substantially increases perceived responsiveness. The effective perceived wait time for a 500 ms TTFT with streaming is much lower than a 500 ms wait for a complete response. The paper's TTFT metric is actually more favorable than the threshold implies.
+
+3. **Multi-agent context**: In a multi-agent system, the user is typically observing agent-to-agent interactions, not waiting for a direct response. The tolerance for latency in observed multi-agent dialogue (where the user watches agents converse) may be quite different from the tolerance for latency in direct user-to-agent interaction. The paper does not distinguish between these interaction modes.
+
+4. **The paper's argument is still sound**: Despite these nuances, the core argument holds: reducing TTFT from 15.5 seconds to 513 ms is a qualitative improvement in user experience, regardless of which exact threshold applies. At 15.5 seconds, users disengage. At 513 ms, the response feels responsive. The Nielsen framing provides a convenient vocabulary for this argument, even if the exact threshold boundaries may not directly apply to AI agent interaction.
+
+### What Would Strengthen the Claim
+
+1. **Fix the citation**: Correct the year to 2023 and the title to "The Need for Speed in AI."
+
+2. **Acknowledge the interaction model difference**: Add a sentence noting that Nielsen's thresholds were developed for direct-manipulation interfaces, and that AI agent interaction may have different dynamics (especially with streaming and multi-agent observation).
+
+3. **Cite AI-specific latency research**: If available, cite studies measuring user tolerance for AI chatbot response latency specifically. Nielsen's 2023 article itself notes that no current AI system meets the 1-second threshold, which supports the paper's argument without relying on the 1993 GUI thresholds directly.
+
+4. **Distinguish TTFT from end-to-end latency**: The paper already notes that TTFT is 84-94% of total latency for short outputs (Section 2.3), which is good. Making this distinction more explicit in the Nielsen threshold discussion would strengthen the framing.
+
+### Severity
+
+**Low.** The Nielsen references are substantively valid despite minor bibliographic errors. The 1993 thresholds remain accepted in HCI literature. The argument that sub-second TTFT represents a qualitative user experience improvement is well-supported. The main risks are (a) a reviewer catching the incorrect year and (b) a reviewer arguing that 1993 GUI thresholds do not apply to 2026 AI interaction. Both are addressable with minor revisions.
+
+---
+
+## Summary of Findings
+
+| Area | Severity | Core Issue |
+|------|----------|------------|
+| Perplexity methodology | **High** | Simulated via logit quantization, not actual Q4 KV cache. Results table is empty. Claim in abstract is unsupported by the paper's own methodology. |
+| Sliding window evaluation | **Medium** | 512-token window cannot evaluate quality at the 4K-32K context lengths the paper targets. No multi-turn error accumulation testing. |
+| Ablation validity | **Medium** | Labeled as "ablation" but consists of mode comparisons, analytical calculations, and an arithmetic identity. No true component-removal ablation. |
+| Hardware table accuracy | **Low** | All specifications verified correct against manufacturer data. Minor M4 Max configuration ambiguity. |
+| Nielsen thresholds | **Low** | Substantively valid. Minor bibliographic errors (wrong year, slightly wrong title). Interaction model differences unacknowledged but do not invalidate the argument. |
+
+### Recommendations in Priority Order
+
+1. **Critical**: Either run actual Q4 KV cache perplexity evaluation (using the system's own `QuantizedKVCache` for forward passes) or remove the "<0.1 perplexity degradation" claim from the abstract and conclusion. Do not publish with an empty results table.
+
+2. **Important**: Add perplexity evaluation at longer context lengths (at minimum 4K, ideally 8K and 16K) to match the TTFT evaluation matrix. If memory constraints prevent this, acknowledge the limitation explicitly.
+
+3. **Important**: Relabel Section 4.4 from "Ablation Analysis" to "Component Contribution Analysis" or similar. If true ablations are feasible (especially Q4 vs FP16 and batch=1 vs batch=2), run them.
+
+4. **Minor**: Fix the Nielsen 2024 citation to 2023 and correct the title.
+
+5. **Minor**: Note the M4 Max configuration variant in Table 1 or add a footnote indicating the 546 GB/s applies to the 40-core GPU variant.
+
+### What the Paper Gets Right
+
+The paper has genuine strengths that this investigation does not diminish:
+
+- **Real system with real benchmarks**: 216 individual measurements per model, with thermal-aware cooldown and median reporting. The TTFT and throughput numbers are from actual runs, not simulations.
+- **Two architecturally distinct models**: Testing on both GQA (Gemma 3) and MLA/MoE (DeepSeek) demonstrates generality of the approach.
+- **Honest limitations section**: The paper acknowledges two models tested, fixed output length, and no working memory quality metric.
+- **Hardware table is accurate**: Every specification was verified against manufacturer data.
+- **The core contribution is real**: Persistent Q4 KV cache with 30-130x TTFT reduction is a genuine and significant engineering achievement. The methodology issues are about how the quality-safety claim is supported, not about whether the system works.
