@@ -226,8 +226,8 @@ def _patch_for_integration(monkeypatch):
     # at import time may hold a reference to an unconfigured MagicMock's .load if
     # unit test files clobbered sys.modules["mlx_lm"] before these modules loaded.
     _stale_load_modules = [
-        "semantic.entrypoints.api_server",
-        "semantic.adapters.outbound.mlx_model_loader",
+        "agent_memory.entrypoints.api_server",
+        "agent_memory.adapters.outbound.mlx_model_loader",
     ]
     for _mod_name in _stale_load_modules:
         _mod = sys.modules.get(_mod_name)

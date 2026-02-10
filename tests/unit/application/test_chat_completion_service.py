@@ -52,7 +52,7 @@ class TestNoInvalidateHot:
     ) -> None:
         """invalidate_hot should never be called by generate_chat_completion."""
         with patch(
-            "semantic.application.chat_completion_service.tokenize_with_chat_template",
+            "agent_memory.application.chat_completion_service.tokenize_with_chat_template",
             return_value=([1, 2, 3], "templated text"),
         ):
             await generate_chat_completion(
@@ -71,7 +71,7 @@ class TestNoInvalidateHot:
     ) -> None:
         """save() should be called after generation completes."""
         with patch(
-            "semantic.application.chat_completion_service.tokenize_with_chat_template",
+            "agent_memory.application.chat_completion_service.tokenize_with_chat_template",
             return_value=([1, 2, 3], "templated text"),
         ):
             result = await generate_chat_completion(

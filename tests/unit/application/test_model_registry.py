@@ -77,7 +77,7 @@ class TestModelRegistryLifecycle:
         assert "Failed to load model nonexistent/model" in str(exc_info.value)
         assert not registry.is_loaded()
 
-    @patch("semantic.application.model_registry.gc.collect")
+    @patch("agent_memory.application.model_registry.gc.collect")
     def test_unload_model_reclaims_memory(self, mock_gc_collect, mock_loader, mock_extractor):
         mock_model = MagicMock()
         mock_tokenizer = MagicMock()
@@ -157,7 +157,7 @@ class TestModelRegistryLifecycle:
         registry.load_model("mlx-community/SmolLM2-135M-Instruct")
         assert registry.get_current_id() == "mlx-community/SmolLM2-135M-Instruct"
 
-    @patch("semantic.application.model_registry.gc.collect")
+    @patch("agent_memory.application.model_registry.gc.collect")
     def test_swap_models_lifecycle(self, mock_gc_collect, mock_loader, mock_extractor):
         mock_model_1 = MagicMock()
         mock_tokenizer_1 = MagicMock()
