@@ -120,10 +120,13 @@ scripts/launch.sh   # start everything
 
 ## Demos
 
-Two Streamlit demos in `demo/`:
+Streamlit demos in `demo/` (launched via `scripts/launch.sh` or manually):
 
-1. **Prisoner's Dilemma** -- Two LLM agents play iterated prisoner's dilemma with persistent memory across rounds
-2. **Agent Memory** -- Wikipedia routing demo showing cache persistence across server restarts
+1. **Multi-Agent Chat** -- Per-agent KV cache persistence with real-time performance metrics (home page)
+2. **Coordination** -- Dynamic multi-agent session creation with configurable agents
+3. **Agent Memory Inspector** -- View and manage cached agents across hot/warm/cold tiers
+4. **Gossip** -- Three friends, two private conversations, one awkward reunion (YAML-driven)
+5. **Prisoner's Dilemma** -- Two suspects, one warden, iterated game theory with persistent memory
 
 To run the demo manually (two terminals):
 
