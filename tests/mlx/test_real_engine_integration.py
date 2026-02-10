@@ -44,14 +44,22 @@ class TestConcurrentInference:
         model, tokenizer = real_model_and_tokenizer
         engine = _make_engine(model, tokenizer, real_spec)
 
-        uids = []
-        prompts = [
+        # Use chat-template-formatted prompts so the model doesn't
+        # immediately output EOS on the raw text.
+        raw_prompts = [
             ("agent_a", "What is 2+2?"),
             ("agent_b", "Name a color."),
             ("agent_c", "Say hello."),
         ]
-        for agent_id, prompt in prompts:
-            uid = engine.submit(agent_id=agent_id, prompt=prompt, max_tokens=20)
+        uids = []
+        for agent_id, raw_text in raw_prompts:
+            messages = [{"role": "user", "content": raw_text}]
+            formatted = tokenizer.apply_chat_template(
+                messages, tokenize=False, add_generation_prompt=True
+            )
+            uid = engine.submit(
+                agent_id=agent_id, prompt=formatted, max_tokens=20
+            )
             uids.append(uid)
 
         assert len(uids) == 3
@@ -202,16 +210,27 @@ class TestCoordinationWithRealEngine:
     """Test coordination service with real MLX inference."""
 
     @staticmethod
-    def _make_service(engine, cache_dir):
+    def _make_service(engine, cache_dir, spec):
         """Build CoordinationService with real engine, no scheduler."""
-        from agent_memory.application.agent_cache_store import AgentCacheStore
+        from agent_memory.adapters.outbound.safetensors_cache_adapter import (
+            SafetensorsCacheAdapter,
+        )
+        from agent_memory.application.agent_cache_store import AgentCacheStore, ModelTag
         from agent_memory.application.coordination_service import CoordinationService
 
+        tag = ModelTag(
+            model_id="SmolLM2-135M",
+            n_layers=spec.n_layers,
+            n_kv_heads=spec.n_kv_heads,
+            head_dim=spec.head_dim,
+            block_tokens=spec.block_tokens,
+        )
+        cache_adapter = SafetensorsCacheAdapter(cache_dir)
         cache_store = AgentCacheStore(
             cache_dir=cache_dir,
             max_hot_agents=5,
-            model_tag=None,
-            cache_adapter=None,
+            model_tag=tag,
+            cache_adapter=cache_adapter,
         )
         return CoordinationService(
             scheduler=None,
@@ -243,7 +262,7 @@ class TestCoordinationWithRealEngine:
 
         model, tokenizer = real_model_and_tokenizer
         engine = _make_engine(model, tokenizer, real_spec)
-        service = self._make_service(engine, cache_dir)
+        service = self._make_service(engine, cache_dir, real_spec)
 
         agents = self._make_agents([
             ("a1", "Agent1", "You are Agent1. Be brief."),
@@ -287,7 +306,7 @@ class TestCoordinationWithRealEngine:
 
         model, tokenizer = real_model_and_tokenizer
         engine = _make_engine(model, tokenizer, real_spec)
-        service = self._make_service(engine, cache_dir)
+        service = self._make_service(engine, cache_dir, real_spec)
 
         agents = self._make_agents([
             ("alice", "Alice", "You are Alice. Respond briefly."),
