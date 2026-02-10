@@ -96,7 +96,7 @@ SEMANTIC_MLX_MAX_BATCH_SIZE=5
 SEMANTIC_MLX_PREFILL_STEP_SIZE=512
 SEMANTIC_MLX_KV_BITS=null
 SEMANTIC_MLX_DEFAULT_MAX_TOKENS=256
-SEMANTIC_MLX_DEFAULT_TEMPERATURE=0.7
+SEMANTIC_MLX_DEFAULT_TEMPERATURE=0.7  # NOTE: only affects the tune command; coordination service hardcodes T=0.3
 
 # Agent Cache Configuration
 SEMANTIC_AGENT_MAX_AGENTS_IN_MEMORY=5
@@ -298,7 +298,7 @@ launchctl load ~/Library/LaunchAgents/com.semantic.server.plist
 
 For Linux systems (not typical for Apple Silicon):
 
-**File**: `/etc/systemd/system/semantic.service`
+**File**: `/etc/systemd/system/agent-memory.service`
 
 ```ini
 [Unit]
@@ -308,9 +308,9 @@ After=network.target
 [Service]
 Type=simple
 User=semantic
-WorkingDirectory=/home/semantic/semantic-caching-api
+WorkingDirectory=/home/semantic/agent-memory
 Environment="PATH=/home/semantic/venv/bin:/usr/local/bin:/usr/bin:/bin"
-EnvironmentFile=/home/semantic/semantic-caching-api/.env
+EnvironmentFile=/home/semantic/agent-memory/.env
 ExecStart=/home/semantic/venv/bin/agent-memory serve
 Restart=always
 RestartSec=10
@@ -322,9 +322,9 @@ WantedBy=multi-user.target
 **Commands**:
 ```bash
 sudo systemctl daemon-reload
-sudo systemctl enable semantic
-sudo systemctl start semantic
-sudo systemctl status semantic
+sudo systemctl enable agent-memory
+sudo systemctl start agent-memory
+sudo systemctl status agent-memory
 ```
 
 ## Monitoring
@@ -364,7 +364,7 @@ Add to Prometheus config (`prometheus.yml`):
 
 ```yaml
 scrape_configs:
-  - job_name: 'semantic-caching-api'
+  - job_name: 'agent-memory'
     scrape_interval: 15s
     static_configs:
       - targets: ['localhost:8000']
@@ -595,4 +595,3 @@ block in proto tcp to any port 8000
 - [Configuration Guide](configuration.md) - Complete configuration reference
 - [User Guide](user-guide.md) - API usage and examples
 - [Testing Guide](testing.md) - Testing strategy and commands
-- [Adding Models](developer/adding-models.md) - Adding new models

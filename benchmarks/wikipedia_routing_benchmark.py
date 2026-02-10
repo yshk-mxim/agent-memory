@@ -251,7 +251,7 @@ async def download_article(title: str, filename: str) -> str:
 
         # Attempt 1: full extract
         try:
-            resp = await client.get(full_url, headers={"User-Agent": "SemanticBenchmark/1.0 (https://github.com/semantic-cache; academic-research; python-httpx)"})
+            resp = await client.get(full_url, headers={"User-Agent": "AgentMemoryBenchmark/1.0 (https://github.com/yshk-mxim/agent-memory; academic-research; python-httpx)"})
             if resp.status_code == 200:
                 data = resp.json()
                 pages = data.get("query", {}).get("pages", {})
@@ -267,7 +267,7 @@ async def download_article(title: str, filename: str) -> str:
             try:
                 resp = await client.get(
                     summary_url,
-                    headers={"User-Agent": "SemanticBenchmark/1.0 (https://github.com/semantic-cache; academic-research; python-httpx)"},
+                    headers={"User-Agent": "AgentMemoryBenchmark/1.0 (https://github.com/yshk-mxim/agent-memory; academic-research; python-httpx)"},
                 )
                 if resp.status_code == 200:
                     data = resp.json()

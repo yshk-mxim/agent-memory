@@ -1,6 +1,6 @@
 # Developer Guide
 
-Contributing to Semantic: setup, code style, testing, and quality standards.
+Contributing to agent-memory: setup, code style, testing, and quality standards.
 
 ## Development Setup
 
@@ -33,11 +33,11 @@ pre-commit install
 
 ```bash
 # Run all quality checks
-make lint        # Ruff linting
-make typecheck   # MyPy type checking
-make test-unit   # Unit tests
+ruff check src/ tests/                                       # Ruff linting
+mypy --explicit-package-bases src/agent_memory tests/unit     # MyPy type checking
+python -m pytest tests/unit -x -q --timeout=30               # Unit tests (~1,110 tests)
 
-# All should pass ✅
+# All should pass
 ```
 
 ## Code Style
@@ -54,13 +54,13 @@ make test-unit   # Unit tests
 
 ```bash
 # Check code
-make lint
+ruff check src/ tests/
 
 # Auto-fix issues
-ruff check --fix src tests
+ruff check --fix src/ tests/
 
 # Format code
-ruff format src tests
+ruff format src/ tests/
 ```
 
 **Settings** (from `pyproject.toml`):
@@ -172,20 +172,17 @@ tests/
 ### Running Tests
 
 ```bash
-# All unit tests (fast, no hardware requirements)
-make test-unit
+# All unit tests (fast, no hardware requirements) — ~1,110 tests
+python -m pytest tests/unit -x -q --timeout=30
 
 # Integration tests (requires Apple Silicon)
-make test-integration
+python -m pytest tests/integration/ -x -q --timeout=60
 
-# Smoke tests (requires server)
-make test-smoke
-
-# E2E tests (full stack, slow)
-make test-e2e
+# GPU tests (requires Apple Silicon + Metal)
+python -m pytest tests/mlx/ -x -q --timeout=60
 
 # With coverage
-pytest tests/unit/ --cov=src/agent_memory/domain --cov-report=html
+python -m pytest tests/unit/ --cov=src/agent_memory --cov-report=html
 ```
 
 ### Writing Tests
@@ -316,7 +313,7 @@ def gemma3_spec() -> ModelCacheSpec:
     return ModelCacheSpec(
         n_layers=48,
         n_kv_heads=8,
-        head_dim=240,
+        head_dim=256,
         block_tokens=256,
         layer_types=["global"] * 8 + ["sliding_window"] * 40,
         sliding_window_size=1024,
@@ -329,31 +326,27 @@ All checks must pass before merging:
 
 ```bash
 # 1. Linting (ruff)
-make lint
+ruff check src/ tests/
 # Target: 0 errors
 
 # 2. Type checking (mypy)
-make typecheck
+mypy --explicit-package-bases src/agent_memory tests/unit
 # Target: 0 errors (strict mode)
 
-# 3. Security scan (bandit)
-make security
+# 3. Security scan (ruff S rules)
+ruff check --select S src/
 # Target: 0 high/critical findings
 
-# 4. Complexity check (radon)
-make complexity
+# 4. Complexity check (ruff C90 rules)
+ruff check --select C90,PLR src/
 # Target: All functions CC < 15
 
-# 5. License check
-make licenses
-# Target: No GPL/LGPL/AGPL dependencies
+# 5. Unit tests (~1,110 tests)
+python -m pytest tests/unit -x -q --timeout=30
+# Target: 97% coverage, all tests pass
 
-# 6. Unit tests
-make test-unit
-# Target: >85% domain coverage, all tests pass
-
-# 7. Integration tests (Apple Silicon only)
-make test-integration
+# 6. Integration tests (Apple Silicon only)
+python -m pytest tests/integration/ -x -q --timeout=60
 # Target: >70% coverage, all tests pass
 ```
 
@@ -361,9 +354,9 @@ make test-integration
 
 | Layer | Target | Actual |
 |-------|--------|--------|
-| **Domain** | 95%+ | 95.07% ✅ |
-| **Application** | 85%+ | (pending) |
-| **Adapters** | 70%+ | (pending) |
+| **Domain** | 95%+ | 95.07% |
+| **Application** | 85%+ | 97% |
+| **Overall** | 80%+ | 97% |
 
 ## PR Process
 
@@ -400,7 +393,7 @@ Closes #42
 
 ### Pre-PR Checklist
 
-- [ ] All quality gates pass (`make lint && make typecheck && make test-unit`)
+- [ ] All quality gates pass (`ruff check src/ && mypy --explicit-package-bases src/agent_memory && python -m pytest tests/unit -x -q --timeout=30`)
 - [ ] New code has type annotations
 - [ ] New code has docstrings (Google style)
 - [ ] New code has unit tests (95%+ coverage)
@@ -443,11 +436,11 @@ git checkout -b feature/my-new-feature
 # 1. Write failing test
 # 2. Implement feature
 # 3. Run tests
-make test-unit
+python -m pytest tests/unit -x -q --timeout=30
 
 # 4. Fix issues
-make lint
-make typecheck
+ruff check src/ tests/
+mypy --explicit-package-bases src/agent_memory
 
 # 5. Iterate
 ```

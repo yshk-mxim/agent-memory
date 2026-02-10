@@ -73,7 +73,7 @@ The server supports batch=2 concurrent inference with a scheduler that interleav
 | Gemma 3 12B IT | Q4, 6.5 GB | Hybrid attention: 8 global + 40 sliding window layers |
 | DeepSeek-Coder-V2-Lite | Q4, 8 GB | MLA with asymmetric K=192/V=128 dims |
 
-Adding a new model requires a TOML config in `config/models/` and verifying the spec extractor detects its attention architecture. See `docs/developer/adding-models.md`.
+Adding a new model requires a TOML config in `config/models/` and verifying the spec extractor detects its attention architecture. See `docs/developer-guide.md`.
 
 **Note on model access**: Gemma 3 12B is a **gated model** — you must accept Google's license at [the model page](https://huggingface.co/google/gemma-3-12b-it) and run `huggingface-cli login` before first use. DeepSeek community models are not gated (no token needed). Run `scripts/setup.sh` for guided setup.
 
@@ -147,7 +147,7 @@ streamlit run demo/app.py
 
 ```bash
 pip install -e ".[dev]"
-python -m pytest tests/unit -x -q --timeout=30  # ~800 tests, ~3s
+python -m pytest tests/unit -x -q --timeout=30  # ~1,100 tests, ~3s
 ```
 
 Architecture: hexagonal (ports and adapters) with domain-driven design. Source in `src/agent_memory/`, tests in `tests/`, benchmarks in `benchmarks/`.

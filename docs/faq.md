@@ -48,7 +48,7 @@ No. Docker doesn't support Metal GPU passthrough on macOS, which MLX requires.
 python3 -m venv venv
 source venv/bin/activate
 pip install -e .
-agent-memory version
+python -m agent_memory.entrypoints.cli version  # or check pyproject.toml for version
 ```
 
 See [Installation Guide](installation.md) for details.
@@ -82,7 +82,7 @@ Currently tested:
 - **DeepSeek-Coder-V2-Lite** (mlx-community/DeepSeek-Coder-V2-Lite-Instruct-4bit-mlx)
 - **SmolLM2** (mlx-community/SmolLM2-135M-Instruct) - Testing
 
-Any MLX-compatible model can be added. See [Adding Models](developer/adding-models.md).
+Any MLX-compatible model can be added by setting `SEMANTIC_MLX_MODEL_ID` to the HuggingFace model ID.
 
 ### Can I use Llama 3?
 
@@ -92,7 +92,7 @@ Yes! Any MLX model from Hugging Face Hub works. Example:
 SEMANTIC_MLX_MODEL_ID=mlx-community/Meta-Llama-3-8B-Instruct
 ```
 
-See [Adding Models](developer/adding-models.md) for adding new models.
+Set `SEMANTIC_MLX_MODEL_ID` to any MLX model from HuggingFace Hub.
 
 ### How do I switch models?
 
@@ -386,7 +386,7 @@ See [Testing Guide](testing.md).
 3. Start server and verify
 4. Add tests
 
-See [Adding Models](developer/adding-models.md) for detailed steps.
+Set `SEMANTIC_MLX_MODEL_ID` to the HuggingFace model ID and restart the server.
 
 ### Can I contribute?
 
@@ -508,4 +508,4 @@ GitHub Issues (if repository is public)
 
 ---
 
-**Still have questions?** See [User Guide](user-guide.md) or check [GitHub Issues](https://github.com/yourusername/semantic-caching-api/issues).
+**Still have questions?** See [User Guide](user-guide.md) or check [GitHub Issues](https://github.com/yshk-mxim/agent-memory/issues).

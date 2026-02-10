@@ -2,7 +2,7 @@
 # Production Alerting Thresholds
 
 groups:
-  - name: semantic_caching_critical
+  - name: agent_memory_critical
     interval: 30s
     rules:
       # Critical: Pool Exhaustion
@@ -36,7 +36,7 @@ groups:
 
       # Critical: Health Check Failures
       - alert: SemanticHealthCheckFailing
-        expr: up{job="semantic-caching-api"} == 0
+        expr: up{job="agent-memory"} == 0
         for: 2m
         labels:
           severity: critical
@@ -46,7 +46,7 @@ groups:
           description: "Service is down or not responding to health probes."
           runbook: "Check pod status. Review startup logs. Verify MLX model loading."
 
-  - name: semantic_caching_warning
+  - name: agent_memory_warning
     interval: 1m
     rules:
       # Warning: High Latency
@@ -100,7 +100,7 @@ groups:
           description: "Evicting {{ $value }} caches per second."
           runbook: "Check cache budget. Review agent access patterns. Consider increasing max_hot_agents."
 
-  - name: semantic_caching_info
+  - name: agent_memory_info
     interval: 5m
     rules:
       # Info: Request Rate

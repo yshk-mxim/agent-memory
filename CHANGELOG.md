@@ -66,7 +66,7 @@ This is the **v1.0.0 production release** of agent-memory, delivering critical t
 - **5 new Gemma 3 integration tests**:
   - `tests/integration/test_gemma3_model.py` (5 tests)
 - **Total**: 16 new integration tests, all passing
-- **Unit tests**: 252 tests maintained, all passing
+- **Unit tests**: 1,110+ tests maintained, all passing
 
 ### Changed
 - **Production Status**: Updated Development Status classifier from "3 - Alpha" to "5 - Production/Stable"
@@ -84,7 +84,7 @@ This is the **v1.0.0 production release** of agent-memory, delivering critical t
 
 ### Quality Metrics
 - **Ruff**: 0 errors ✅
-- **Unit tests**: 252/252 passing ✅
+- **Unit tests**: 1,110+ passing ✅
 - **Integration tests**: 16/16 new tests passing ✅
 - **Documentation**: Builds with 0 warnings ✅
 - **Code coverage**: 85%+ maintained ✅

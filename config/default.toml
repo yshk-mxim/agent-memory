@@ -6,7 +6,7 @@
 # - This file (lowest priority)
 
 [mlx]
-model_id = "mlx-community/DeepSeek-Coder-V2-Lite-Instruct-4bit-mlx"
+model_id = "mlx-community/gemma-3-12b-it-4bit"
 max_batch_size = 1  # Single request for stability
 prefill_step_size = 256  # Reduced to lower memory usage with large contexts
 kv_bits = 4  # 4-bit quantization (75% memory reduction)

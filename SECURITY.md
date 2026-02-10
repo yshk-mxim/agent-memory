@@ -15,7 +15,7 @@ If you discover a security vulnerability in this project, please report it respo
 
 ### How to Report
 
-1. Email the maintainers with a description of the vulnerability
+1. Open a private security advisory at https://github.com/yshk-mxim/agent-memory/security/advisories
 2. Include steps to reproduce the issue
 3. If possible, suggest a fix or mitigation
 
@@ -46,6 +46,6 @@ The following are **out of scope**:
 
 - Run the server on a trusted network or behind a reverse proxy
 - Do not expose the API server directly to the internet without authentication
-- Keep dependencies updated (`pip install --upgrade semantic-cache`)
+- Keep dependencies updated (`pip install --upgrade agent-memory`)
 - Review model configurations before deploying to production
 - Use `env.json` for sensitive configuration (API keys) and ensure it is gitignored

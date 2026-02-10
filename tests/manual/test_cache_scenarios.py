@@ -176,7 +176,7 @@ def run_scenario(
 def main():
     """Run all test scenarios."""
     print("=" * 60)
-    print("SEMANTIC CACHE END-TO-END TEST")
+    print("AGENT-MEMORY CACHE END-TO-END TEST")
     print("=" * 60)
 
     # Check server is running

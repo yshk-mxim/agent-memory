@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 Yakov Shkolnikov and contributors
-"""Semantic Cache Multi-Agent Demo.
+"""Agent Memory Multi-Agent Demo.
 
 Demonstrates multi-agent conversation with per-agent KV cache persistence.
 Each column represents an independent agent with its own session, showing
@@ -613,7 +613,7 @@ def _reset_all_agents() -> None:
 def render_sidebar() -> None:
     """Render the sidebar with server status, model info, and global stats."""
     with st.sidebar:
-        st.title("Semantic Cache Demo")
+        st.title("Agent Memory Demo")
         st.markdown("Multi-agent KV cache persistence on Apple Silicon")
         st.divider()
 
@@ -638,7 +638,7 @@ def render_sidebar() -> None:
 
 def main() -> None:
     st.set_page_config(
-        page_title="Semantic Cache - Multi-Agent Demo",
+        page_title="Agent Memory - Multi-Agent Demo",
         page_icon="$",
         layout="wide",
         initial_sidebar_state="expanded",

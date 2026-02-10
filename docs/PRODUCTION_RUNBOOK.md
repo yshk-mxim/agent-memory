@@ -52,7 +52,7 @@
    - Check for stuck requests
 
 4. **Long-term**:
-   - Increase cache budget (SEMANTIC_CACHE_BUDGET_MB)
+   - Increase cache budget (SEMANTIC_MLX_CACHE_BUDGET_MB)
    - Review agent retention policy
    - Optimize cache eviction strategy
 
@@ -73,10 +73,10 @@
 2. Review logs for errors:
    ```bash
    # If using JSON logging
-   cat /var/log/semantic/app.log | jq '. | select(.level == "error")'
+   cat /var/log/agent-memory/app.log | jq '. | select(.level == "error")'
 
    # Recent errors
-   tail -100 /var/log/semantic/app.log | grep '"level":"error"'
+   tail -100 /var/log/agent-memory/app.log | grep '"level":"error"'
    ```
 
 3. **Common Causes**:
@@ -100,7 +100,7 @@
 **Response**:
 1. Check pod status:
    ```bash
-   kubectl get pods -l app=semantic-caching-api
+   kubectl get pods -l app=agent-memory
    kubectl describe pod <pod-name>
    ```
 
@@ -245,27 +245,27 @@ Use request_id from X-Request-ID header:
 
 ```bash
 # JSON logs
-cat /var/log/semantic/app.log | jq '. | select(.request_id == "abc123def456")'
+cat /var/log/agent-memory/app.log | jq '. | select(.request_id == "abc123def456")'
 
 # Structured logs (development)
-grep "request_id=abc123def456" /var/log/semantic/app.log
+grep "request_id=abc123def456" /var/log/agent-memory/app.log
 ```
 
 ### Recent Errors
 
 ```bash
 # Last 100 errors
-tail -1000 /var/log/semantic/app.log | jq '. | select(.level == "error")'
+tail -1000 /var/log/agent-memory/app.log | jq '. | select(.level == "error")'
 
 # Error summary
-cat /var/log/semantic/app.log | jq -r '.event' | grep error | sort | uniq -c | sort -rn
+cat /var/log/agent-memory/app.log | jq -r '.event' | grep error | sort | uniq -c | sort -rn
 ```
 
 ### Request Rate
 
 ```bash
 # Requests per minute
-cat /var/log/semantic/app.log | jq '. | select(.event == "request_complete")' | wc -l
+cat /var/log/agent-memory/app.log | jq '. | select(.event == "request_complete")' | wc -l
 ```
 
 ---
@@ -284,12 +284,12 @@ cat /var/log/semantic/app.log | jq '. | select(.event == "request_complete")' | 
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
-  name: semantic-caching-api
+  name: agent-memory
 spec:
   scaleTargetRef:
     apiVersion: apps/v1
     kind: Deployment
-    name: semantic-caching-api
+    name: agent-memory
   minReplicas: 2
   maxReplicas: 10
   metrics:
@@ -364,7 +364,7 @@ rate(semantic_request_total[5m])
 
 **On-Call**: [Configure your on-call rotation]
 **Escalation**: [Configure escalation path]
-**Slack Channel**: #semantic-caching-api
+**Slack Channel**: [Configure your channel]
 
 ---
 
@@ -378,14 +378,10 @@ SEMANTIC_SERVER_LOG_LEVEL=INFO  # DEBUG, INFO, WARNING, ERROR, PRODUCTION
 SEMANTIC_SERVER_CORS_ORIGINS=*
 
 # MLX
-SEMANTIC_MLX_MODEL_ID=mlx-community/gemma-2-2b-it-4bit
-SEMANTIC_MLX_CACHE_BUDGET_MB=2048
-SEMANTIC_MLX_MAX_BATCH_SIZE=4
-SEMANTIC_MLX_PREFILL_STEP_SIZE=512
-
-# Agent
-SEMANTIC_AGENT_CACHE_DIR=~/.cache/agent_memory
-SEMANTIC_AGENT_MAX_AGENTS_IN_MEMORY=100
+SEMANTIC_MLX_MODEL_ID=mlx-community/gemma-3-12b-it-4bit  # default
+SEMANTIC_MLX_CACHE_BUDGET_MB=8192
+SEMANTIC_MLX_MAX_BATCH_SIZE=2
+SEMANTIC_MLX_PREFILL_STEP_SIZE=256
 
 # Rate Limiting
 SEMANTIC_SERVER_RATE_LIMIT_PER_AGENT=60
@@ -417,13 +413,12 @@ curl http://localhost:8000/
 ### Test Request
 
 ```bash
-# Anthropic Messages API
-curl -X POST http://localhost:8000/v1/messages \
+# OpenAI-compatible endpoint (local MLX model)
+curl -X POST http://localhost:8000/v1/chat/completions \
   -H "Content-Type: application/json" \
-  -H "x-api-key: your-api-key" \
   -d '{
-    "model": "claude-3-5-sonnet-20241022",
-    "max_tokens": 1024,
+    "model": "default",
+    "max_tokens": 64,
     "messages": [{"role": "user", "content": "Hello!"}]
   }'
 ```
@@ -449,6 +444,6 @@ kubectl get events --sort-by='.lastTimestamp'
 
 ---
 
-**Runbook Version**: 1.0.0 (Sprint 7)
+**Runbook Version**: 1.1.0
 **Maintainer**: [Your Team]
-**Last Review**: 2026-01-25
+**Last Review**: 2026-02-10

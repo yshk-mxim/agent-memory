@@ -1,12 +1,12 @@
 ## Model Hot-Swap Guide
 
-Sprint 5 implementation - Dynamic model switching while preserving agent caches.
+Dynamic model switching while preserving agent caches.
 
 ### Overview
 
-The Semantic Cache Server supports hot-swapping between MLX models without restarting the server. Agent caches are preserved on disk and automatically reload when the original model returns.
+The agent-memory server supports hot-swapping between MLX models without restarting the server. Agent caches are preserved on disk and automatically reload when the original model returns.
 
-**Constraint**: M4 Pro 24GB can only fit ONE model at a time (see ADR-007).
+**Constraint**: M4 Pro 24GB can only fit ONE model at a time.
 
 ### Quick Start
 
@@ -115,8 +115,6 @@ All MLX 4-bit quantized models on HuggingFace:
 
 ### Architecture
 
-See `project/architecture/ADR-007-one-model-at-a-time.md` for detailed architecture rationale.
-
 Components:
 - **ModelRegistry** - Model lifecycle (load/unload)
 - **ModelSwapOrchestrator** - Coordinates 8-step swap sequence
@@ -139,7 +137,5 @@ Components:
 
 ### References
 
-- ADR-007: One Model At A Time
 - EXP-011: Memory Reclamation Validation (100% pass)
 - EXP-012: Swap Latency Measurement (pending)
-- Sprint 5 Summary: project/sprints/sprint_5_model_hot_swap.md

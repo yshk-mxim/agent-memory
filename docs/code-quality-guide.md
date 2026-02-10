@@ -9,7 +9,7 @@
 
 ## Executive Summary
 
-This document establishes code quality standards for the Semantic project, informed by comprehensive research on AI-generated code issues (2025-2026) and detailed review of our existing codebase. It defines:
+This document establishes code quality standards for the agent-memory project, informed by comprehensive research on AI-generated code issues (2025-2026) and detailed review of our existing codebase. It defines:
 
 1. **Red Flags** - Indicators of low-quality AI-generated code ("slop")
 2. **Good Patterns** - Standards to follow
@@ -589,7 +589,6 @@ class OperationTimeoutError(Exception):
 | **bandit** | Security analysis | pyproject.toml |
 | **vulture** | Dead code detection | CLI |
 | **radon** | Complexity metrics | CLI |
-| **sloppylint** | AI slop detection | CLI (new) |
 | **jscpd** | Duplicate code detection | .jscpd.json |
 
 ### 4.2 Recommended ruff Rules
@@ -631,17 +630,6 @@ select = [
 ```yaml
 # .pre-commit-config.yaml additions
 repos:
-  # AI slop detection
-  - repo: local
-    hooks:
-      - id: sloppylint
-        name: AI slop detector
-        entry: sloppylint
-        args: [--ci, --severity, high, src/agent_memory/]
-        language: python
-        types: [python]
-        additional_dependencies: [sloppylint]
-
   # Dead code detection
   - repo: local
     hooks:

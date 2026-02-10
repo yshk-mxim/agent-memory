@@ -41,16 +41,16 @@ data:
     filebeat.inputs:
     - type: container
       paths:
-        - /var/log/containers/*semantic-caching-api*.log
+        - /var/log/containers/*agent-memory*.log
 
     output.elasticsearch:
       hosts: ["elasticsearch:9200"]
-      index: "semantic-caching-%{+yyyy.MM.dd}"
+      index: "agent-memory-%{+yyyy.MM.dd}"
 
     setup.ilm:
       enabled: true
-      policy_name: "semantic-hot-7days"
-      rollover_alias: "semantic-caching"
+      policy_name: "agent-memory-hot-7days"
+      rollover_alias: "agent-memory"
 ```
 
 ---
@@ -124,18 +124,18 @@ data:
 
 **Example** (logrotate config):
 ```
-/var/log/semantic/app.log {
+/var/log/agent-memory/app.log {
     daily
     rotate 7
     size 100M
     compress
     delaycompress
     notifempty
-    create 0644 semantic semantic
+    create 0644 agent-memory agent-memory
     sharedscripts
     postrotate
         # Signal application to reopen log file (if needed)
-        kill -USR1 $(cat /var/run/semantic.pid) 2>/dev/null || true
+        kill -USR1 $(cat /var/run/agent-memory.pid) 2>/dev/null || true
     endscript
 }
 ```
@@ -153,11 +153,11 @@ data:
 apiVersion: v1
 kind: Pod
 metadata:
-  name: semantic-caching-api
+  name: agent-memory
 spec:
   containers:
   - name: api
-    image: semantic-caching-api:latest
+    image: agent-memory:latest
     env:
     - name: SEMANTIC_SERVER_LOG_LEVEL
       value: "PRODUCTION"  # JSON logging
@@ -284,7 +284,7 @@ logger.debug("request_body", body=request.json())
 - Request IDs linked to user can be purged on request
 - Elasticsearch delete by query:
 ```json
-POST /semantic-caching-*/_delete_by_query
+POST /agent-memory-*/_delete_by_query
 {
   "query": {
     "term": {
@@ -340,10 +340,10 @@ kubectl logs -l app=filebeat | grep "events sent"
 **Elasticsearch Monitoring**:
 ```bash
 # Check index sizes
-curl http://elasticsearch:9200/_cat/indices/semantic-caching-*
+curl http://elasticsearch:9200/_cat/indices/agent-memory-*
 
 # Check document count
-curl http://elasticsearch:9200/semantic-caching-*/_count
+curl http://elasticsearch:9200/agent-memory-*/_count
 ```
 
 ### Alerts

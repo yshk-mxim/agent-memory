@@ -1,10 +1,10 @@
 # API Reference
 
-Complete API documentation for Semantic.
+Complete API documentation for agent-memory.
 
 ## Overview
 
-This reference documents all public APIs in the Semantic codebase. Documentation is auto-generated from source code docstrings using **mkdocstrings**.
+This reference documents all public APIs in the agent-memory codebase. Documentation is auto-generated from source code docstrings using **mkdocstrings**.
 
 ## Domain Layer
 
@@ -59,7 +59,7 @@ from agent_memory.domain.value_objects import ModelCacheSpec
 spec = ModelCacheSpec(
     n_layers=48,
     n_kv_heads=8,
-    head_dim=240,
+    head_dim=256,
     block_tokens=256,
     layer_types=["global"] * 8 + ["sliding_window"] * 40,
     sliding_window_size=1024,
@@ -283,21 +283,18 @@ assert agent.total_tokens == sum(b.token_count for blocks in agent.blocks.values
 
 See [Quick Start](quick-start.md) and [User Guide](user-guide.md) for complete examples.
 
-## Future APIs
+## Application Services
 
-Documentation for application services and adapters will be added as they are implemented:
+- **ConcurrentScheduler** — Per-agent locks, batching window, graceful degradation
+- **BlockPoolBatchEngine** — Block-based prefill and decode, cache extraction
+- **AgentCacheStore** — Three-tier eviction (hot/warm/cold), LRU policy
+- **ModelRegistry** — Model hot-swap, TTL-based unloading, ModelCacheSpec extraction
 
-- **Application Services** (planned)
-    - `ConcurrentScheduler`
-    - `BlockPoolBatchEngine`
-    - `AgentCacheStore`
-    - `ModelRegistry`
+## Adapters
 
-- **Adapters** (planned)
-    - `AnthropicAPIAdapter`
-    - `OpenAIAPIAdapter`
-    - `MLXBackend`
-    - `SafetensorsPersistence`
+- **OpenAIAPIAdapter** — OpenAI-compatible chat completions
+- **MLXBackend** — MLX model loading, prefill, decode, cache extraction
+- **SafetensorsPersistence** — Disk persistence with atomic writes
 
 ## Contributing
 

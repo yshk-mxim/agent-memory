@@ -1,13 +1,13 @@
-# Semantic — Multi-Agent LLM Inference Server
+# agent-memory — Multi-Agent LLM Inference Server
 
 > Block-pool memory management for multi-agent LLM inference on Apple Silicon
 
 **Architecture**: Hexagonal (Ports & Adapters) with domain-driven design
-**Status**: Sprint 1 (Domain Core) — 95.07% coverage, 112 tests passing
+**Status**: 95.07% domain coverage, 112 tests passing
 
 ## Overview
 
-Semantic is a production-quality multi-agent inference server implementing persistent KV cache, continuous batching, and block-pool memory management for local LLMs on Apple Silicon.
+agent-memory is a production-quality multi-agent inference server implementing persistent KV cache, continuous batching, and block-pool memory management for local LLMs on Apple Silicon.
 
 This project fills a critical gap that LM Studio, Ollama, and llama.cpp don't provide: **persistent KV cache across sessions** with **continuous batching** and **native multi-agent orchestration**.
 

@@ -205,7 +205,7 @@ async def lifespan(application: FastAPI):
     yield
 
 
-app = FastAPI(title="Minimal Semantic Cache Server", lifespan=lifespan)
+app = FastAPI(title="Minimal agent-memory Server", lifespan=lifespan)
 
 # Global state
 model = None
@@ -3100,7 +3100,7 @@ async def create_message(request_body: MessagesRequest, request: Request) -> JSO
 
 
 if __name__ == "__main__":
-    logger.info(f"Starting minimal semantic cache server on port {PORT}")
+    logger.info(f"Starting minimal agent-memory server on port {PORT}")
     logger.info(f"Cache directory: {CACHE_DIR}")
     logger.info(f"Model: {MODEL_ID}")
     logger.info(f"Test set log: {TEST_SET_PATH}")

@@ -1,6 +1,6 @@
 # Architecture Overview
 
-Semantic implements **Hexagonal Architecture** (Ports & Adapters pattern) with **Domain-Driven Design** principles.
+agent-memory implements **Hexagonal Architecture** (Ports & Adapters pattern) with **Domain-Driven Design** principles.
 
 ## Design Philosophy
 
@@ -159,22 +159,22 @@ class CachePersistencePort(Protocol):
 
 **Key Services**:
 
-**ConcurrentScheduler** (planned):
+**ConcurrentScheduler**:
 - Per-agent locks (prevent race conditions)
 - 10ms batching window
 - Graceful degradation on pool exhaustion
 
-**BlockPoolBatchEngine** (planned):
+**BlockPoolBatchEngine**:
 - Block-based prefill and decode
 - Block allocation/extension during generation
 - Cache extraction per sequence
 
-**AgentCacheStore** (planned):
+**AgentCacheStore**:
 - Trie-based prefix matching
 - Three-tier eviction (hot/warm/cold)
 - LRU policy
 
-**ModelRegistry** (planned):
+**ModelRegistry**:
 - Model hot-swap capability
 - TTL-based unloading
 - ModelCacheSpec extraction
@@ -187,7 +187,6 @@ class CachePersistencePort(Protocol):
 
 **Purpose**: Translate external requests to domain operations.
 
-**Planned**:
 - `anthropic_api.py` — Anthropic Messages API (SSE streaming, tools, thinking)
 - `openai_api.py` — OpenAI-compatible + session_id extension
 - `direct_api.py` — Direct agent CRUD + stateful generation
@@ -198,7 +197,6 @@ class CachePersistencePort(Protocol):
 
 **Purpose**: Implement ports using real infrastructure.
 
-**Planned**:
 - `mlx_backend.py` — MLX model loading, prefill, decode, cache extraction
 - `safetensors_cache.py` — Disk persistence with atomic writes
 - `hf_tokenizer.py` — HuggingFace tokenizer integration
@@ -381,7 +379,6 @@ flowchart LR
 | ADR-006 | Multi-Protocol Agent ID | Support content-based + explicit IDs |
 | ADR-007 | One Model At A Time | 24GB memory constraint on M4 Pro |
 
-Full ADRs in `project/architecture/` directory.
 
 ## Quality Guarantees
 
@@ -390,9 +387,6 @@ Full ADRs in `project/architecture/` directory.
 - **Type Safety**: mypy --strict (100% type coverage)
 - **No External Dependencies**: Domain core imports only from stdlib + domain
 
-## Next Steps
+## See Also
 
-- **Domain Layer**: [Domain entities and services](architecture/domain.md)
-- **Application Layer**: [Orchestration services](architecture/application.md)
-- **Adapters**: [Infrastructure implementations](architecture/adapters.md)
 - **API Reference**: [Complete API docs](api-reference.md)
