@@ -37,7 +37,7 @@ Persistent Q4 KV Cache for Multi-Agent LLM Inference on Edge Devices}
 \maketitle
 
 \begin{abstract}
-Multi-agent LLM workflows on Apple Silicon spend most of their time re-computing attention state. A 5-agent system with 4K tokens each waits 77 seconds after every server restart while each agent re-prefills from scratch. We persist each agent's KV cache to disk in 4-bit quantized format and reload it in under 700\,ms. Three components make this work: (1)~a block pool giving each agent an isolated, persistent Q4 KV cache stored in safetensors, (2)~BatchQuantizedKVCache for concurrent inference over multiple agents' quantized caches, and (3)~cross-phase context injection that lets agents accumulate attention state across conversation phases without re-computation. On Gemma~3 12B and DeepSeek-Coder-V2-Lite 16B at typical deployment lengths (4K context), warm disk reload reduces TTFT from 15.5s to 513\,ms (30$\times$) and from 3.9s to 252\,ms (16$\times$). At 32K context, the speedup reaches 130$\times$ and 74$\times$. Batched serving of two concurrent agents reaches 22.4 and 64.8 system tokens/second with warm cache. Q4 quantization fits 3.6$\times$ more agent contexts into fixed device memory than FP16, with $<$0.1 perplexity degradation. The system handles both dense GQA (Gemma) and MoE MLA (DeepSeek) architectures through a model-agnostic abstraction, and operates as an infrastructure layer beneath agentic frameworks (AutoGen, CrewAI) via its OpenAI-compatible API. Open-source at \texttt{[anonymized]}.
+Multi-agent LLM workflows on Apple Silicon spend most of their time re-computing attention state. A 5-agent system with 4K tokens each waits 77 seconds after every server restart while each agent re-prefills from scratch. We persist each agent's KV cache to disk in 4-bit quantized format and reload it in under 700\,ms. Three components make this work: (1)~a block pool giving each agent an isolated, persistent Q4 KV cache stored in safetensors, (2)~BatchQuantizedKVCache for concurrent inference over multiple agents' quantized caches, and (3)~cross-phase context injection that lets agents accumulate attention state across conversation phases without re-computation. On Gemma~3 12B and DeepSeek-Coder-V2-Lite 16B at typical deployment lengths (4K context), warm disk reload reduces TTFT from 15.5s to 513\,ms (30$\times$) and from 3.9s to 252\,ms (16$\times$). At 32K context, the speedup reaches 130$\times$ and 74$\times$. Batched serving of two concurrent agents reaches 22.4 and 64.8 system tokens/second with warm cache. Q4 quantization fits 3.6$\times$ more agent contexts into fixed device memory than FP16, with negligible perplexity degradation (estimated $<$0.1 PPL, consistent with prior Q4 KV quantization literature). The system handles both dense GQA (Gemma) and MoE MLA (DeepSeek) architectures through a model-agnostic abstraction, and operates as an infrastructure layer beneath agentic frameworks (AutoGen, CrewAI) via its OpenAI-compatible API. Open-source at \texttt{[anonymized]}.
 \end{abstract}
 
 \section{Introduction}
@@ -431,7 +431,7 @@ The non-portable aspects are MLX's lazy evaluation model (requiring explicit \te
 
 \textbf{Single device.} All agents share one device. Multi-device extension would require cache transfer over Thunderbolt or network interconnects.
 
-\textbf{Q4 quality impact.} Appendix~\ref{app:perplexity} reports perplexity evaluation on WikiText-2. Q4 KV cache with group size 64 shows $<$0.1 perplexity degradation on both models, consistent with prior Q4 quantization results~\cite{liu2024kivi,hooper2024kvquant}. Persistent cache reload produces identical attention state to hot cache (same Q4 tensors), so the quality question reduces to Q4 vs FP16.
+\textbf{Q4 quality impact.} Appendix~\ref{app:perplexity} reports a logit-level proxy for Q4 degradation on WikiText-2, showing $<$0.1 PPL increase on both models. This proxy measures output sensitivity to Q4 noise rather than layer-by-layer KV cache quantization. Prior work with actual Q4 KV caches~\cite{liu2024kivi,hooper2024kvquant} reports similar ($<$0.1) degradation at group sizes 32--128, supporting the estimate. End-to-end perplexity with our Q4 KV cache pipeline remains future work.
 
 \textbf{Two models tested.} We validate on one dense GQA model and one MoE MLA model. Adding Llama~3 (standard GQA) would strengthen generalization.
 
@@ -457,7 +457,7 @@ The non-portable aspects are MLX's lazy evaluation model (requiring explicit \te
 
 Persistent Q4 KV cache turns agent context restoration from a compute-bound O($n$) prefill into an I/O-bound O(1) reload. On Gemma~3 12B at 32K context, hot cache reduces TTFT from 165 seconds to 1.3 seconds (130$\times$). On DeepSeek-Coder-V2-Lite at 32K, from 48 seconds to 652\,ms (74$\times$). Warm disk reload achieves 102$\times$ and 69$\times$ at 32K.
 
-Q4 quantization fits 3.6$\times$ more agents into fixed device memory than FP16 (18 vs 5 agents at 8K context on 24\,GB), with $<$0.1 perplexity degradation (Appendix~\ref{app:perplexity}). Batched serving reaches 22 system TPS (Gemma) and 65 system TPS (DeepSeek) with two warm-cache agents at 1K context.
+Q4 quantization fits 3.6$\times$ more agents into fixed device memory than FP16 (18 vs 5 agents at 8K context on 24\,GB), with negligible estimated quality loss ($<$0.1 PPL, Appendix~\ref{app:perplexity}). Batched serving reaches 22 system TPS (Gemma) and 65 system TPS (DeepSeek) with two warm-cache agents at 1K context.
 
 Two multi-agent scenarios validate the design. A 5-phase interrogation shows 1.9$\times$ TTFT reduction in later phases from cross-phase persistence (23\% total wall-time reduction). A 10-expert routing benchmark shows 24$\times$ TTFT reduction when querying cached experts.
 
@@ -579,7 +579,9 @@ DeepSeek & 14 & 50 & 7 & 25 & 3 & 12 & 1 & 6 \\
 \section{Perplexity Evaluation}
 \label{app:perplexity}
 
-We measure perplexity on WikiText-2 test set (245K tokens) to quantify Q4 KV cache quality loss. For each model, we process the text in 512-token sliding windows and compute per-token log-likelihood under two conditions: FP16 KV cache (baseline) and Q4 KV cache (group size 64). Perplexity = $\exp(-\frac{1}{N}\sum_i \log P(t_i))$.
+We estimate the quality impact of Q4 quantization using a logit-level proxy. For each model, we process WikiText-2 (245K tokens) in 512-token sliding windows, run the model with standard KV caches, then quantize and dequantize the output logits at 4-bit (group size 64) to simulate Q4 round-trip noise. Perplexity = $\exp(-\frac{1}{N}\sum_i \log P(t_i))$.
+
+\textbf{Methodology note.} This measures output-level sensitivity to Q4 noise, not layer-by-layer KV cache quantization. Actual Q4 KV caches introduce error at each attention layer, which may compound differently than a single logit perturbation. We report this proxy alongside prior work that measures actual Q4 KV cache perplexity (KIVI, KVQuant, QuantSpec) to triangulate the quality impact.
 
 \begin{table}[h]
 \centering
@@ -596,7 +598,7 @@ DeepSeek-V2-Lite 16B & 6.26 & 6.33 & +0.07 \\
 \end{tabular}
 \end{table}
 
-Both models show negligible degradation: Gemma~3 increases by 0.06 PPL (+0.4\%), DeepSeek by 0.07 PPL (+1.1\%). These deltas are within the range reported by prior work at 4-bit quantization.
+Both models show small deltas under the logit proxy: Gemma~3 increases by 0.06 PPL (+0.4\%), DeepSeek by 0.07 PPL (+1.1\%). These are consistent with (and slightly smaller than) the $<$0.1 PPL degradation reported by systems that quantize actual KV caches at 4 bits, suggesting our proxy provides a reasonable order-of-magnitude estimate.
 
 Prior work on KV cache quantization reports small quality loss at 4 bits. KIVI~\cite{liu2024kivi} measures $<$0.1 PPL degradation for 4-bit KV with per-channel key quantization (group 32--128). KVQuant~\cite{hooper2024kvquant} shows $<$0.1 PPL degradation at 4 bits with per-layer sensitivity calibration, enabling 10M context on A100. QuantSpec~\cite{li2025quantspec} validates 4-bit KV cache for speculative decoding with no measurable quality loss. RotateKV~\cite{rotatekv2025} reports $<$0.3 PPL degradation even at 2 bits using outlier-aware rotations. XQuant~\cite{tomar2025xquant} demonstrates 4-bit KV with $<$0.05 PPL degradation using rematerialization.
 
