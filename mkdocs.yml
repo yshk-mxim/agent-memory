@@ -79,16 +79,26 @@ nav:
   - User Guide:
       - User Guide: user-guide.md
       - Configuration: configuration.md
+      - Scenarios: scenarios.md
+      - Model Hot-Swap: model-hot-swap.md
       - FAQ: faq.md
   - Architecture:
       - Overview: architecture.md
+      - System Components: architecture/overview.md
+      - Hexagonal Architecture: architecture/hexagonal.md
       - Domain Core: architecture/domain.md
       - Application Services: architecture/application.md
       - Adapters: architecture/adapters.md
+      - Cache Lifecycle: architecture/cache-lifecycle.md
+      - Cache Storage Schema: cache_storage_schema.md
+      - Request Flow: architecture/request-flow.md
   - Development:
       - Developer Guide: developer-guide.md
+      - Setup: developer/setup.md
       - Code Quality Guide: code-quality-guide.md
       - Adding Models: developer/adding-models.md
+      - MLX Notes: developer/mlx-notes.md
+      - Debugging: developer/debugging.md
       - Testing: testing.md
   - API Reference:
       - Overview: api-reference.md
@@ -96,6 +106,7 @@ nav:
       - Services: api/services.md
   - Deployment:
       - Deployment: deployment.md
+      - Production Runbook: PRODUCTION_RUNBOOK.md
 
 extra:
   social:
