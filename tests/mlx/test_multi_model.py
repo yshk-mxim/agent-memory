@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Yakov Shkolnikov and contributors
 """Multi-model real MLX tests.
 
 Validates that the Q4 cache pipeline works across different model architectures:

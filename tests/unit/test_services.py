@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Yakov Shkolnikov and contributors
 """Unit tests for domain services.
 
 Tests BlockPool service with focus on:

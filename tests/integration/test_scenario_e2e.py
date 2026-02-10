@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Yakov Shkolnikov and contributors
 """End-to-end integration tests for the scenario pipeline.
 
 Validates the full flow: YAML -> Pydantic -> Domain -> Template Resolution

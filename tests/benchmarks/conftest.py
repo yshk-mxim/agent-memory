@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Yakov Shkolnikov and contributors
 """Benchmark fixtures for agent-memory server.
 
 Provides fixtures for:

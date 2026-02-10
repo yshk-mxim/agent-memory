@@ -35,7 +35,7 @@ The project pins exact versions for MLX due to API instability:
 
 ### Unit Tests
 
-Unit tests run without GPU access and mock all MLX boundaries. This is the primary test suite (792 tests).
+Unit tests run without GPU access and mock all MLX boundaries. This is the primary test suite (~800 tests).
 
 ```bash
 python -m pytest tests/unit -x -q --timeout=30
@@ -185,6 +185,6 @@ src/agent_memory/
   domain/value_objects.py     -- ModelCacheSpec, ModelTag, etc.
   domain/entities.py          -- BLOCK_SIZE_TOKENS, core domain entities
 benchmarks/                   -- Performance benchmarks
-tests/unit/                   -- Unit tests (792 tests)
+tests/unit/                   -- Unit tests (~800 tests)
 config/models/                -- Model-specific TOML configs
 ```

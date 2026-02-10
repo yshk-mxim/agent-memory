@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Yakov Shkolnikov and contributors
 """Benchmark lock overhead for memory tracking methods (NEW-2).
 
 Validates that lock acquisition for used_memory() and available_memory()

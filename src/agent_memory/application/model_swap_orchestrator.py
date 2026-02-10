@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Yakov Shkolnikov and contributors
 """Model hot-swap orchestrator for dynamic model switching.
 
 Coordinates the full hot-swap sequence:

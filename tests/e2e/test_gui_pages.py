@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Yakov Shkolnikov and contributors
 """GUI tests for Streamlit demo pages — headless rendering validation.
 
 Tests all demo pages can load, render, and respond to basic interactions

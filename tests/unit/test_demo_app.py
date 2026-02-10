@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Yakov Shkolnikov and contributors
 """Unit tests for demo/app.py Streamlit application logic.
 
 Tests pure functions and session state initialization without requiring

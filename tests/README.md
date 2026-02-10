@@ -4,7 +4,7 @@
 
 | Category | Location | Count | Requires GPU | Description |
 |----------|----------|-------|-------------|-------------|
-| Unit | `tests/unit/` | 792 | No | Fast tests with mocked MLX boundaries |
+| Unit | `tests/unit/` | ~800 | No | Fast tests with mocked MLX boundaries |
 | Integration | `tests/integration/` | ~40 | Yes | Real server + API tests |
 | MLX | `tests/mlx/` | ~15 | Yes | Real MLX model + cache round-trip tests |
 | E2E | `tests/e2e/` | ~10 | Yes | Full server lifecycle, cache persistence |

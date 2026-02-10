@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Yakov Shkolnikov and contributors
 """Metrics collection middleware for Prometheus.
 
 Automatically collects request metrics for all HTTP requests.

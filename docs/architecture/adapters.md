@@ -1,6 +1,6 @@
 # Adapters Layer
 
-Adapters implement external interfaces for the Semantic Caching API (Hexagonal Architecture).
+Adapters implement external interfaces for agent-memory (Hexagonal Architecture).
 
 ## Overview
 
@@ -14,7 +14,7 @@ Inbound adapters receive requests from external clients and invoke application l
 
 **Purpose**: Anthropic Claude-compatible Messages API
 
-**Location**: `src/semantic/adapters/inbound/anthropic_adapter.py`
+**Location**: `src/agent_memory/adapters/inbound/anthropic_adapter.py`
 
 **Endpoint**: `POST /v1/messages`
 
@@ -75,7 +75,7 @@ class MessagesResponse(BaseModel):
 
 **Purpose**: OpenAI-compatible Chat Completions API
 
-**Location**: `src/semantic/adapters/inbound/openai_adapter.py`
+**Location**: `src/agent_memory/adapters/inbound/openai_adapter.py`
 
 **Endpoint**: `POST /v1/chat/completions`
 
@@ -144,7 +144,7 @@ class ChatCompletionsResponse(BaseModel):
 
 **Purpose**: Explicit agent management with cache control
 
-**Location**: `src/semantic/adapters/inbound/agent_adapter.py`
+**Location**: `src/agent_memory/adapters/inbound/agent_adapter.py`
 
 **Endpoints**:
 - `POST /v1/agents` - Create agent

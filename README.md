@@ -75,6 +75,8 @@ The server supports batch=2 concurrent inference with a scheduler that interleav
 
 Adding a new model requires a TOML config in `config/models/` and verifying the spec extractor detects its attention architecture. See `docs/developer/adding-models.md`.
 
+**Note on model access**: Gemma 3 12B is a **gated model** — you must accept Google's license at [the model page](https://huggingface.co/google/gemma-3-12b-it) and run `huggingface-cli login` before first use. DeepSeek community models are not gated (no token needed). Run `scripts/setup.sh` for guided setup.
+
 ## Configuration
 
 All configuration via environment variables:
@@ -120,7 +122,7 @@ streamlit run demo/app.py
 
 ```bash
 pip install -e ".[dev]"
-python -m pytest tests/unit -x -q --timeout=30  # 792 tests, ~3s
+python -m pytest tests/unit -x -q --timeout=30  # ~800 tests, ~3s
 ```
 
 Architecture: hexagonal (ports and adapters) with domain-driven design. Source in `src/agent_memory/`, tests in `tests/`, benchmarks in `benchmarks/`.
@@ -134,6 +136,15 @@ The technical details, benchmark methodology, and cache architecture are describ
 > **Agent Memory Below the Prompt: Persistent KV Cache for Multi-Agent LLM Systems on Apple Silicon**
 >
 > [arXiv preprint]
+
+## Known Limitations
+
+- **Apple Silicon only** — requires MLX framework (M1/M2/M3/M4)
+- **`stop` / `stop_sequences`** — accepted but not enforced during generation
+- **`tool_choice`** — accepted but not constrained; tool calls detected via post-hoc parsing
+- **Batch decode** — new requests wait until all active decodes complete
+- **`mx.async_eval`** — replaced process-wide with `mx.eval` to prevent Metal crashes
+- **Cache persistence** — disk save is synchronous on the event loop; ~50-100ms stall once per completed request (not per token)
 
 ## License
 

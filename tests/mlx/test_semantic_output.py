@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Yakov Shkolnikov and contributors
 """Semantic output quality validation tests.
 
 Verifies that model output is meaningful text, not garbage. Tests run

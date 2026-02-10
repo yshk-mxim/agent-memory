@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Yakov Shkolnikov and contributors
 """Analytical estimate validation tests.
 
 Cross-references config/models/*.toml benchmark values against computed

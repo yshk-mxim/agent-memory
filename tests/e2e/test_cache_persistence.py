@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Yakov Shkolnikov and contributors
 """E2E tests for cache persistence across server restarts.
 
 Tests verify that agent caches are saved to disk and can be restored

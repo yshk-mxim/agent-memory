@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Yakov Shkolnikov and contributors
 """Prometheus metrics for production monitoring.
 
 Defines core metrics for observability:

@@ -1,6 +1,6 @@
-# Log Retention Policy - Semantic Caching API
+# Log Retention Policy - agent-memory
 
-**Version**: 1.0.0 (Sprint 7 Day 7)
+**Version**: 1.0.0
 **Effective Date**: 2026-01-25
 
 ---

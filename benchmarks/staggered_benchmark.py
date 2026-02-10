@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Yakov Shkolnikov and contributors
 """Staggered arrivals benchmark for batched vs sequential serving.
 
 Tests User A arriving at t=0 and User B arriving at t=2s, both with 4K context.
@@ -7,7 +9,7 @@ Compares:
 - Batched: B joins while A is running (batching benefit)
 
 Usage:
-    # Against managed semantic server
+    # Against managed agent-memory server
     python benchmarks/staggered_benchmark.py
 
     # Against running server
@@ -439,7 +441,7 @@ async def main():
     try:
         # Start server if not external
         if not args.external:
-            print("Starting semantic server...")
+            print("Starting agent-memory server...")
             server_mgr = ServerManager(PORT, env=OPENAI_BENCH_ENV)
             server_mgr.start()
             if not await _wait_for_server(args.base_url):

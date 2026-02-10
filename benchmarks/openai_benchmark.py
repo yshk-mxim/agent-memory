@@ -1,4 +1,6 @@
-"""OpenAI Chat Completions benchmark suite for semantic server.
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Yakov Shkolnikov and contributors
+"""OpenAI Chat Completions benchmark suite for agent-memory server.
 
 Benchmarks the /v1/chat/completions endpoint with:
 - Cold start latency across context lengths
@@ -11,7 +13,7 @@ Benchmarks the /v1/chat/completions endpoint with:
 Supports external servers (LM Studio) for direct comparison.
 
 Usage:
-    # Against semantic server (manages server lifecycle)
+    # Against agent-memory server (manages server lifecycle)
     python benchmarks/openai_benchmark.py --quick
     python benchmarks/openai_benchmark.py --context-mode session --runs 3
 
@@ -841,7 +843,7 @@ class OpenAIBenchmarkSuite:
         print(f"  Output: {self.output_path}")
 
         if not self.external:
-            print("\n[SERVER] Starting semantic server...")
+            print("\n[SERVER] Starting agent-memory server...")
             assert self.server is not None
             env = {**OPENAI_BENCH_ENV}
             if self.concurrency > 0:
@@ -1102,7 +1104,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--semantic-results", type=str,
-        help="Path to semantic server results JSON"
+        help="Path to agent-memory server results JSON"
     )
     parser.add_argument(
         "--lmstudio-results", type=str,

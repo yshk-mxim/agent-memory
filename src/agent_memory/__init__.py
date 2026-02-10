@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Yakov Shkolnikov and contributors
 """agent-memory: Persistent KV cache for multi-agent LLM systems on Apple Silicon.
 
 Block-pool memory management with hexagonal architecture.

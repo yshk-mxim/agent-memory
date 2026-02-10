@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Yakov Shkolnikov and contributors
 """Integration tests for cache round-trip validation.
 
 Verifies the full cache lifecycle: create → store → recover → compare.

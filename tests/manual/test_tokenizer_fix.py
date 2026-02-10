@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Yakov Shkolnikov and contributors
 """Verify tokenizer accepts 100K tokens after fix.
 
 This test verifies that the tokenizer override in mlx_model_loader.py

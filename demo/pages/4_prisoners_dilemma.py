@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Yakov Shkolnikov and contributors
 """Prisoner's Dilemma Demo - YAML-driven game theory scenario.
 
 Two suspects, one warden, classic prisoner's dilemma with optional yard session.

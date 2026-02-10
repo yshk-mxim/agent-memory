@@ -70,7 +70,7 @@ graph TB
 
 ### 1. Domain Core (Zero Dependencies)
 
-**Location**: `src/semantic/domain/`
+**Location**: `src/agent_memory/domain/`
 
 **Purpose**: Pure business logic, independent of frameworks.
 
@@ -127,7 +127,7 @@ class BlockPool:
 
 ### 2. Ports (Interface Definitions)
 
-**Location**: `src/semantic/ports/`
+**Location**: `src/agent_memory/ports/`
 
 **Purpose**: Define contracts between layers.
 
@@ -153,7 +153,7 @@ class CachePersistencePort(Protocol):
 
 ### 3. Application Services (Orchestration)
 
-**Location**: `src/semantic/application/`
+**Location**: `src/agent_memory/application/`
 
 **Purpose**: Coordinate domain objects and ports.
 
@@ -183,7 +183,7 @@ class CachePersistencePort(Protocol):
 
 #### Inbound Adapters (API Protocols)
 
-**Location**: `src/semantic/adapters/inbound/`
+**Location**: `src/agent_memory/adapters/inbound/`
 
 **Purpose**: Translate external requests to domain operations.
 
@@ -194,7 +194,7 @@ class CachePersistencePort(Protocol):
 
 #### Outbound Adapters (Infrastructure)
 
-**Location**: `src/semantic/adapters/outbound/`
+**Location**: `src/agent_memory/adapters/outbound/`
 
 **Purpose**: Implement ports using real infrastructure.
 

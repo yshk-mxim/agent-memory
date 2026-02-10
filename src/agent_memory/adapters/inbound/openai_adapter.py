@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Yakov Shkolnikov and contributors
 r"""OpenAI Chat Completions API adapter (POST /v1/chat/completions).
 
 Implements the OpenAI Chat Completions API with:

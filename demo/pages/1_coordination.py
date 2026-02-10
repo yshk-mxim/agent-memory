@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Yakov Shkolnikov and contributors
 """Multi-Agent Coordination Page.
 
 Dynamic session creation with configurable agents.
@@ -196,7 +198,7 @@ def render_sidebar() -> None:
         if stats is not None:
             st.success("Server connected")
         else:
-            st.error("Server not reachable. Start with: `semantic serve`")
+            st.error("Server not reachable. Start with: `agent-memory serve`")
 
         sessions = st.session_state.coord_sessions
         active = st.session_state.coord_active

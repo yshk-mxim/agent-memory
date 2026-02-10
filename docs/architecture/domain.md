@@ -1,6 +1,6 @@
 # Domain Core
 
-Domain layer implementation for Semantic Caching API (Hexagonal Architecture).
+Domain layer implementation for agent-memory (Hexagonal Architecture).
 
 ## Overview
 
@@ -12,7 +12,7 @@ The domain layer contains core business logic and entities, independent of frame
 
 **Purpose**: Specification for model architecture and cache requirements
 
-**Location**: `src/semantic/domain/model_cache_spec.py`
+**Location**: `src/agent_memory/domain/model_cache_spec.py`
 
 **Attributes**:
 - `num_layers: int` - Number of transformer layers
@@ -60,7 +60,7 @@ bytes_per_block = spec.bytes_per_block_per_layer()
 
 **Purpose**: Container for KV cache blocks with metadata
 
-**Location**: `src/semantic/domain/block_pool.py` (as part of BlockPool)
+**Location**: `src/agent_memory/domain/block_pool.py` (as part of BlockPool)
 
 **Attributes**:
 - `blocks: list` - List of KV cache blocks (MLX arrays)
@@ -79,7 +79,7 @@ bytes_per_block = spec.bytes_per_block_per_layer()
 
 **Purpose**: Manages allocation and lifecycle of KV cache blocks
 
-**Location**: `src/semantic/domain/block_pool.py`
+**Location**: `src/agent_memory/domain/block_pool.py`
 
 **Responsibilities**:
 1. Allocate blocks from budget-limited pool
@@ -121,7 +121,7 @@ pool.free("agent-1")
 
 **Purpose**: Orchestrates batched MLX inference with cache management
 
-**Location**: `src/semantic/application/batch_engine.py`
+**Location**: `src/agent_memory/application/batch_engine.py`
 
 **Responsibilities**:
 1. Accept generation requests from multiple agents

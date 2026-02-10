@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Yakov Shkolnikov and contributors
 """Agent Memory Inspector - View and manage cached agents across tiers.
 
 Uses shared api_client for all server communication.

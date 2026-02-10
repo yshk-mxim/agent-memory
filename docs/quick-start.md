@@ -12,8 +12,8 @@ Get Semantic running in 5 minutes.
 
 ```bash
 # Clone repository
-git clone https://github.com/yshk-mxim/rdic.git
-cd rdic
+git clone https://github.com/yshk-mxim/agent-memory.git
+cd agent-memory
 
 # Install in development mode
 pip install -e .
@@ -46,7 +46,7 @@ make test-unit
 
 ```
 semantic/
-├── src/semantic/
+├── src/agent_memory/
 │   ├── domain/          # Core business logic (zero dependencies)
 │   │   ├── entities.py      # KVBlock, AgentBlocks
 │   │   ├── value_objects.py # ModelCacheSpec, CacheKey
@@ -95,4 +95,4 @@ For issues, see:
 
 - [Installation Guide](installation.md) — Detailed setup
 - [Developer Guide](developer-guide.md) — Contributing guidelines
-- [GitHub Issues](https://github.com/yshk-mxim/rdic/issues) — Report bugs
+- [GitHub Issues](https://github.com/yshk-mxim/agent-memory/issues) — Report bugs

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Yakov Shkolnikov and contributors
 """Fused Q4 attention monkeypatch for MLX.
 
 Replaces mlx_lm's 3-dispatch Q4 attention path with:

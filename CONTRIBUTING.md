@@ -1,6 +1,6 @@
-# Contributing to Semantic Server
+# Contributing to agent-memory
 
-Thank you for your interest in contributing to Semantic Server! This document provides guidelines and instructions for contributing to the project.
+Thank you for your interest in contributing to agent-memory! This document provides guidelines and instructions for contributing to the project.
 
 ---
 
@@ -43,8 +43,8 @@ By participating in this project, you agree to maintain a respectful and collabo
 
 1. **Clone the repository**:
    ```bash
-   git clone https://github.com/yshk-mxim/semantic-server.git
-   cd semantic-server
+   git clone https://github.com/yshk-mxim/agent-memory.git
+   cd agent-memory
    ```
 
 2. **Create a virtual environment**:
@@ -96,8 +96,8 @@ pre-commit run --all-files
 ## Project Structure
 
 ```
-semantic-server/
-├── src/semantic/            # Source code
+agent-memory/
+├── src/agent_memory/            # Source code
 │   ├── domain/              # Domain models (pure business logic)
 │   ├── application/         # Application services (use cases)
 │   ├── adapters/            # Infrastructure adapters
@@ -127,7 +127,7 @@ semantic-server/
 
 ### Architecture
 
-Semantic Server follows **Hexagonal Architecture** (Ports & Adapters):
+agent-memory follows **Hexagonal Architecture** (Ports & Adapters):
 
 - **Domain Layer**: Pure business logic (no external dependencies)
 - **Application Layer**: Use cases and orchestration
@@ -257,7 +257,7 @@ Use **mypy** for static type checking:
 mypy --strict src/
 
 # Check specific file
-mypy --strict src/semantic/application/batch_engine.py
+mypy --strict src/agent_memory/application/batch_engine.py
 ```
 
 ---
@@ -372,27 +372,27 @@ Your PR will be reviewed for:
 
 ```bash
 # Start server (development mode)
-semantic serve --reload --log-level DEBUG
+python -m agent_memory.entrypoints.cli serve --log-level DEBUG
 
 # Start with custom settings
-semantic serve --host 0.0.0.0 --port 8080
+python -m agent_memory.entrypoints.cli serve --host 0.0.0.0 --port 8080
 
 # View configuration
-semantic config
+python -m agent_memory.entrypoints.cli config
 ```
 
 ---
 
 ## Getting Help
 
-- **Issues**: https://github.com/yshk-mxim/semantic-server/issues
+- **Issues**: https://github.com/yshk-mxim/agent-memory/issues
 - **Documentation**: `docs/` directory
 
 ---
 
 ## License
 
-By contributing to Semantic Server, you agree that your contributions will be licensed under the MIT License.
+By contributing to agent-memory, you agree that your contributions will be licensed under the MIT License.
 
 See [LICENSE](LICENSE) for details.
 

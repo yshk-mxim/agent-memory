@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Yakov Shkolnikov and contributors
 """Smoke tests for server lifecycle.
 
 These tests verify basic server functionality:
@@ -65,7 +67,7 @@ def test_model_loads_correctly(live_server: str):
     assert "name" in data
     assert "version" in data
     assert "endpoints" in data
-    assert data["name"] == "Semantic Caching API"
+    assert data["name"] == "agent-memory"
 
 
 @pytest.mark.smoke

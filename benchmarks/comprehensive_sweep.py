@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Yakov Shkolnikov and contributors
 """Comprehensive parameter sweep benchmark via OpenAI API.
 
 Tests all combinations of:

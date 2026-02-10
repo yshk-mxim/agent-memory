@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Yakov Shkolnikov and contributors
 """Domain value objects (immutable data structures)."""
 
 from dataclasses import dataclass
@@ -175,7 +177,7 @@ class StreamDelta:
     finish_reason: str | None = None
 
 
-@dataclass
+@dataclass(frozen=True)
 class StepOneResult:
     """Result from a single decode step for one sequence."""
 

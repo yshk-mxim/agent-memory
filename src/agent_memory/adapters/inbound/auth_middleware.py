@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Yakov Shkolnikov and contributors
 """Authentication middleware for API key validation.
 
 Validates ANTHROPIC_API_KEY from request headers against configured keys.

@@ -1,6 +1,6 @@
 # Deployment Guide
 
-Guide for deploying Semantic Caching API on Apple Silicon.
+Guide for deploying agent-memory on Apple Silicon.
 
 **Important**: This application is optimized for Apple Silicon (M1/M2/M3) with MLX framework. Docker deployment is not supported due to MLX Metal GPU requirements.
 
@@ -56,12 +56,12 @@ python3 -c "import mlx.core as mx; print('Metal available:', mx.metal.is_availab
 python3 -m venv venv
 source venv/bin/activate
 
-# Install semantic-caching-api
-pip install -e .
+# Install agent-memory
+pip install agent-memory
 
 # Verify installation
-semantic version
-# Expected: semantic-caching-api v1.0.0
+agent-memory version
+# Expected: agent-memory v1.0.0
 ```
 
 ### Step 2: Verify Installation
@@ -75,8 +75,8 @@ pip show mlx-lm
 python3 -c "import mlx.core as mx; print(mx.metal.is_available())"
 # Should print: True
 
-# Check semantic CLI
-semantic --help
+# Check agent-memory CLI
+agent-memory --help
 # Should show available commands
 ```
 
@@ -91,7 +91,7 @@ Create a `.env` file in your project directory:
 
 # MLX Model Configuration
 SEMANTIC_MLX_MODEL_ID=mlx-community/DeepSeek-Coder-V2-Lite-Instruct-4bit-mlx
-SEMANTIC_MLX_CACHE_BUDGET_MB=4096
+SEMANTIC_MLX_CACHE_BUDGET_MB=8192
 SEMANTIC_MLX_MAX_BATCH_SIZE=5
 SEMANTIC_MLX_PREFILL_STEP_SIZE=512
 SEMANTIC_MLX_KV_BITS=null
@@ -147,7 +147,7 @@ SEMANTIC_SERVER_CORS_ORIGINS=*
 **Production** (.env.production):
 ```bash
 SEMANTIC_MLX_MODEL_ID=mlx-community/DeepSeek-Coder-V2-Lite-Instruct-4bit-mlx
-SEMANTIC_MLX_CACHE_BUDGET_MB=4096
+SEMANTIC_MLX_CACHE_BUDGET_MB=8192
 SEMANTIC_MLX_MAX_BATCH_SIZE=5
 SEMANTIC_SERVER_LOG_LEVEL=INFO
 SEMANTIC_SERVER_HOST=0.0.0.0
@@ -166,10 +166,10 @@ Start server in foreground:
 source venv/bin/activate
 
 # Start server (uses .env)
-semantic serve
+agent-memory serve
 
 # Or specify options
-semantic serve --port 8080 --log-level DEBUG
+agent-memory serve --port 8080 --log-level DEBUG
 ```
 
 **Expected output**:
@@ -203,7 +203,7 @@ For production, run server in background with logging:
 
 ```bash
 # Start in background
-nohup semantic serve > semantic.log 2>&1 &
+nohup agent-memory serve > semantic.log 2>&1 &
 
 # Save PID
 echo $! > semantic.pid
@@ -233,7 +233,7 @@ Create a launchd plist for automatic startup:
 
     <key>ProgramArguments</key>
     <array>
-        <string>/Users/YOUR_USERNAME/venv/bin/semantic</string>
+        <string>/Users/YOUR_USERNAME/venv/bin/agent-memory</string>
         <string>serve</string>
         <string>--port</string>
         <string>8000</string>
@@ -249,16 +249,16 @@ Create a launchd plist for automatic startup:
         <key>SEMANTIC_MLX_MODEL_ID</key>
         <string>mlx-community/DeepSeek-Coder-V2-Lite-Instruct-4bit-mlx</string>
         <key>SEMANTIC_MLX_CACHE_BUDGET_MB</key>
-        <string>4096</string>
+        <string>8192</string>
         <key>SEMANTIC_SERVER_LOG_LEVEL</key>
         <string>INFO</string>
     </dict>
 
     <key>StandardOutPath</key>
-    <string>/Users/YOUR_USERNAME/.semantic/logs/semantic.log</string>
+    <string>/Users/YOUR_USERNAME/.agent_memory/logs/semantic.log</string>
 
     <key>StandardErrorPath</key>
-    <string>/Users/YOUR_USERNAME/.semantic/logs/semantic.error.log</string>
+    <string>/Users/YOUR_USERNAME/.agent_memory/logs/semantic.error.log</string>
 
     <key>RunAtLoad</key>
     <true/>
@@ -302,7 +302,7 @@ For Linux systems (not typical for Apple Silicon):
 
 ```ini
 [Unit]
-Description=Semantic Caching API Server
+Description=agent-memory server
 After=network.target
 
 [Service]
@@ -311,7 +311,7 @@ User=semantic
 WorkingDirectory=/home/semantic/semantic-caching-api
 Environment="PATH=/home/semantic/venv/bin:/usr/local/bin:/usr/bin:/bin"
 EnvironmentFile=/home/semantic/semantic-caching-api/.env
-ExecStart=/home/semantic/venv/bin/semantic serve
+ExecStart=/home/semantic/venv/bin/agent-memory serve
 Restart=always
 RestartSec=10
 
@@ -376,20 +376,20 @@ Configure logging levels:
 
 ```bash
 # Development (verbose)
-SEMANTIC_SERVER_LOG_LEVEL=DEBUG semantic serve
+SEMANTIC_SERVER_LOG_LEVEL=DEBUG agent-memory serve
 
 # Production (standard)
-SEMANTIC_SERVER_LOG_LEVEL=INFO semantic serve
+SEMANTIC_SERVER_LOG_LEVEL=INFO agent-memory serve
 
 # Errors only
-SEMANTIC_SERVER_LOG_LEVEL=ERROR semantic serve
+SEMANTIC_SERVER_LOG_LEVEL=ERROR agent-memory serve
 ```
 
 **Log rotation** (using logrotate on Linux):
 
 ```bash
 # /etc/logrotate.d/semantic
-/home/semantic/.semantic/logs/*.log {
+/home/semantic/.agent_memory/logs/*.log {
     daily
     rotate 14
     compress
@@ -412,7 +412,7 @@ ps aux | grep semantic
 open -a "Activity Monitor"
 
 # Real-time monitoring
-top -pid $(pgrep -f "semantic serve")
+top -pid $(pgrep -f "agent-memory serve")
 ```
 
 ## Security
@@ -430,7 +430,7 @@ echo "SEMANTIC_API_KEY=your-generated-key" >> .env
 
 # Restart server
 kill $(cat semantic.pid)
-nohup semantic serve > semantic.log 2>&1 &
+nohup agent-memory serve > semantic.log 2>&1 &
 ```
 
 **Usage**:
@@ -595,4 +595,4 @@ block in proto tcp to any port 8000
 - [Configuration Guide](configuration.md) - Complete configuration reference
 - [User Guide](user-guide.md) - API usage and examples
 - [Testing Guide](testing.md) - Testing strategy and commands
-- [Model Onboarding](model-onboarding.md) - Adding new models
+- [Adding Models](developer/adding-models.md) - Adding new models

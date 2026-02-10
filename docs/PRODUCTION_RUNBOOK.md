@@ -1,6 +1,6 @@
-# Semantic Caching API - Production Runbook
+# agent-memory — Production Runbook
 
-**Version**: 0.2.0 (Sprint 7)
+**Version**: 0.2.0
 **Last Updated**: 2026-01-25
 
 ---

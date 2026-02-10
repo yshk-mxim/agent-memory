@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Yakov Shkolnikov and contributors
 """Concurrency tests for BlockPool memory tracking.
 
 Tests that used_memory() and available_memory() are thread-safe and return

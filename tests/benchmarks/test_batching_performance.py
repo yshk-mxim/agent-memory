@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Yakov Shkolnikov and contributors
 """Batching performance benchmarks.
 
 Measures throughput benefits of batching multiple agents:

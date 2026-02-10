@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Yakov Shkolnikov and contributors
 """Model lifecycle management with hot-swap support.
 
 Manages loading, unloading, and tracking of ML models. Supports dynamic
@@ -53,6 +55,23 @@ class ModelRegistry:
         self._tokenizer: Any | None = None  # Framework tokenizer object
         self._spec: ModelCacheSpec | None = None  # Cache spec
         self._current_model_id: str | None = None  # HuggingFace model ID
+
+    def set_loaded_model(
+        self,
+        model: Any,
+        tokenizer: Any,
+        spec: ModelCacheSpec,
+        model_id: str,
+    ) -> None:
+        """Set registry state for an already-loaded model.
+
+        Used during server startup when the model is loaded outside the
+        registry (e.g., via direct mlx_lm.load call for performance).
+        """
+        self._model = model
+        self._tokenizer = tokenizer
+        self._spec = spec
+        self._current_model_id = model_id
 
     def load_model(
         self,

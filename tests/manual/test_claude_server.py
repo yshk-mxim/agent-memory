@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Yakov Shkolnikov and contributors
 """Minimal semantic caching server for Claude Code CLI testing.
 
 This is a simplified extraction of the core semantic caching functionality

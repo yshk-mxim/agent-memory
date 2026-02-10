@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 **Sprint 8: Production Release - Tool Calling + Multi-Model Support + Complete Documentation**
 
-This is the **v1.0.0 production release** of Semantic Caching API, delivering critical tool calling features, multi-model support, and comprehensive documentation.
+This is the **v1.0.0 production release** of agent-memory, delivering critical tool calling features, multi-model support, and comprehensive documentation.
 
 ### Added
 
@@ -215,7 +215,7 @@ Upgrading from v0.1.0 to v0.2.0:
 
 1. **Update package**:
    ```bash
-   pip install --upgrade semantic-server
+   pip install --upgrade agent-memory
    ```
 
 2. **Optional: Configure logging level**:
@@ -230,10 +230,10 @@ Upgrading from v0.1.0 to v0.2.0:
 3. **Optional: Use new CLI**:
    ```bash
    # Instead of uvicorn
-   semantic serve
+   python -m agent_memory.entrypoints.cli serve
 
    # With custom options
-   semantic serve --host 0.0.0.0 --port 8080 --log-level INFO
+   python -m agent_memory.entrypoints.cli serve --host 0.0.0.0 --port 8080 --log-level INFO
    ```
 
 4. **Optional: Set up monitoring**:
@@ -399,6 +399,6 @@ This project follows [Semantic Versioning](https://semver.org/):
 
 ---
 
-**Maintainer**: Semantic Team
+**Maintainer**: Yakov Shkolnikov and contributors
 **License**: MIT
-**Repository**: https://github.com/yshk-mxim/semantic-server
+**Repository**: https://github.com/yshk-mxim/agent-memory

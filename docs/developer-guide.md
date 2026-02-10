@@ -15,8 +15,8 @@ Contributing to Semantic: setup, code style, testing, and quality standards.
 
 ```bash
 # Clone repository
-git clone https://github.com/yshk-mxim/rdic.git
-cd rdic
+git clone https://github.com/yshk-mxim/agent-memory.git
+cd agent-memory
 
 # Create virtual environment
 python3.12 -m venv venv
@@ -185,7 +185,7 @@ make test-smoke
 make test-e2e
 
 # With coverage
-pytest tests/unit/ --cov=src/semantic/domain --cov-report=html
+pytest tests/unit/ --cov=src/agent_memory/domain --cov-report=html
 ```
 
 ### Writing Tests
@@ -425,8 +425,8 @@ Reviewers check:
 ### 1. Setup Development Environment
 
 ```bash
-git clone https://github.com/yshk-mxim/rdic.git
-cd rdic
+git clone https://github.com/yshk-mxim/agent-memory.git
+cd agent-memory
 pip install -e ".[dev]"
 pre-commit install
 ```
@@ -554,7 +554,7 @@ def allocate(self, n_blocks: int, layer_id: int, agent_id: str) -> list[KVBlock]
 ### View Coverage Report
 
 ```bash
-pytest tests/unit/ --cov=src/semantic/domain --cov-report=html
+pytest tests/unit/ --cov=src/agent_memory/domain --cov-report=html
 open htmlcov/index.html
 ```
 
@@ -568,6 +568,6 @@ open htmlcov/index.html
 
 ## Getting Help
 
-- **Questions**: [GitHub Discussions](https://github.com/yshk-mxim/rdic/discussions)
-- **Bugs**: [GitHub Issues](https://github.com/yshk-mxim/rdic/issues)
+- **Questions**: [GitHub Discussions](https://github.com/yshk-mxim/agent-memory/discussions)
+- **Bugs**: [GitHub Issues](https://github.com/yshk-mxim/agent-memory/issues)
 - **Chat**: Project Slack (request invite in Discussions)

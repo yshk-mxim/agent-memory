@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Yakov Shkolnikov and contributors
 """Integration tests for Anthropic Messages API.
 
 Tests POST /v1/messages endpoint with:

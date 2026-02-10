@@ -88,7 +88,7 @@ nav:
   - Development:
       - Developer Guide: developer-guide.md
       - Code Quality Guide: code-quality-guide.md
-      - Model Onboarding: model-onboarding.md
+      - Adding Models: developer/adding-models.md
       - Testing: testing.md
   - API Reference:
       - Overview: api-reference.md

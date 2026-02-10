@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Yakov Shkolnikov and contributors
 """Cache resume performance benchmarks.
 
 Measures cache save/load performance across different cache sizes:

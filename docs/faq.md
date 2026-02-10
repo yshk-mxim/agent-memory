@@ -1,14 +1,14 @@
 # Frequently Asked Questions
 
-Common questions about Semantic Caching API.
+Common questions about agent-memory.
 
 ## General Questions
 
-### What is Semantic Caching API?
+### What is agent-memory?
 
-Semantic Caching API is a production-ready HTTP server for running MLX language models on Apple Silicon with persistent KV cache across sessions. It enables true multi-agent workflows with intelligent cache management.
+agent-memory is a production-ready HTTP server for running MLX language models on Apple Silicon with persistent KV cache across sessions. It enables true multi-agent workflows with intelligent cache management.
 
-### Why use Semantic Caching API instead of LM Studio or Ollama?
+### Why use agent-memory instead of LM Studio or Ollama?
 
 Key differences:
 - **Persistent KV Cache**: Conversations resume instantly without re-computing context
@@ -42,20 +42,20 @@ No. Docker doesn't support Metal GPU passthrough on macOS, which MLX requires.
 
 ## Installation & Setup
 
-### How do I install Semantic Caching API?
+### How do I install agent-memory?
 
 ```bash
 python3 -m venv venv
 source venv/bin/activate
 pip install -e .
-semantic version
+agent-memory version
 ```
 
 See [Installation Guide](installation.md) for details.
 
 ### Which Python version should I use?
 
-Python 3.10, 3.11, or 3.12. Python 3.9 and earlier are not supported.
+Python 3.11+. Python 3.10 and earlier are not supported.
 
 ### Where are caches stored?
 
@@ -78,10 +78,11 @@ Caches grow as conversations get longer.
 ### Which models are supported?
 
 Currently tested:
-- **DeepSeek-Coder-V2-Lite** (mlx-community/DeepSeek-Coder-V2-Lite-Instruct-4bit-mlx) - Default
+- **Gemma 3 12B** (mlx-community/gemma-3-12b-it-4bit) - Default
+- **DeepSeek-Coder-V2-Lite** (mlx-community/DeepSeek-Coder-V2-Lite-Instruct-4bit-mlx)
 - **SmolLM2** (mlx-community/SmolLM2-135M-Instruct) - Testing
 
-Any MLX-compatible model can be added. See [Model Onboarding](model-onboarding.md).
+Any MLX-compatible model can be added. See [Adding Models](developer/adding-models.md).
 
 ### Can I use Llama 3?
 
@@ -91,14 +92,14 @@ Yes! Any MLX model from Hugging Face Hub works. Example:
 SEMANTIC_MLX_MODEL_ID=mlx-community/Meta-Llama-3-8B-Instruct
 ```
 
-See [Model Onboarding](model-onboarding.md) for adding new models.
+See [Adding Models](developer/adding-models.md) for adding new models.
 
 ### How do I switch models?
 
 **Option 1**: Update `.env` and restart server
 ```bash
 SEMANTIC_MLX_MODEL_ID=mlx-community/SmolLM2-135M-Instruct
-semantic serve
+agent-memory serve
 ```
 
 **Option 2**: Use model hot-swap (zero downtime)
@@ -108,9 +109,9 @@ curl -X POST http://localhost:8000/admin/swap \
   -d '{"model_id": "mlx-community/SmolLM2-135M-Instruct"}'
 ```
 
-### Why is DeepSeek-Coder-V2-Lite the default?
+### Why is Gemma 3 12B the default?
 
-DeepSeek-Coder-V2-Lite offers the best balance of:
+Gemma 3 12B offers the best balance of:
 - Quality (12B parameters)
 - Tool calling support
 - Memory efficiency (4-bit quantization)
@@ -299,13 +300,13 @@ See [Deployment Guide](deployment.md#background-process-management)
 
 **Simple background**:
 ```bash
-nohup semantic serve > semantic.log 2>&1 &
-echo $! > semantic.pid
+nohup agent-memory serve > agent-memory.log 2>&1 &
+echo $! > agent-memory.pid
 ```
 
 Stop:
 ```bash
-kill $(cat semantic.pid)
+kill $(cat agent-memory.pid)
 ```
 
 ## Troubleshooting
@@ -315,7 +316,7 @@ kill $(cat semantic.pid)
 **Check**:
 1. Model ID is correct: `pip show mlx-lm`
 2. Port is available: `lsof -i :8000`
-3. Python version: `python3 --version` (3.10+)
+3. Python version: `python3 --version` (3.11+)
 4. MLX installed: `python3 -c "import mlx"`
 
 ### Out of memory errors
@@ -385,7 +386,7 @@ See [Testing Guide](testing.md).
 3. Start server and verify
 4. Add tests
 
-See [Model Onboarding](model-onboarding.md) for detailed steps.
+See [Adding Models](developer/adding-models.md) for detailed steps.
 
 ### Can I contribute?
 
@@ -436,10 +437,10 @@ See [Deployment Guide](deployment.md#security).
 Yes! Run on different ports:
 ```bash
 # Instance 1
-semantic serve --port 8000
+agent-memory serve --port 8000
 
 # Instance 2
-semantic serve --port 8001
+agent-memory serve --port 8001
 ```
 
 Use load balancer to distribute requests.
@@ -448,7 +449,7 @@ Use load balancer to distribute requests.
 
 ### vs LM Studio?
 
-**Semantic Caching** advantages:
+**agent-memory** advantages:
 - Persistent KV cache (not just text)
 - Multi-agent native support
 - Full tool calling support
@@ -461,7 +462,7 @@ Use load balancer to distribute requests.
 
 ### vs Ollama?
 
-**Semantic Caching** advantages:
+**agent-memory** advantages:
 - Persistent cache across restarts
 - Block pool memory management
 - Tool calling support
@@ -474,7 +475,7 @@ Use load balancer to distribute requests.
 
 ### vs llama.cpp?
 
-**Semantic Caching** advantages:
+**agent-memory** advantages:
 - Apple Silicon optimized (MLX)
 - Multi-agent orchestration
 - Full API compatibility

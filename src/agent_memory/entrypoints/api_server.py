@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Yakov Shkolnikov and contributors
 """FastAPI application factory and server setup.
 
 This module provides the main FastAPI application with dependency injection,
@@ -308,11 +310,12 @@ async def lifespan(app: FastAPI):
             model_loader=model_loader,
             spec_extractor=spec_extractor,
         )
-        # Manually set registry state (model already loaded above)
-        model_registry._model = model
-        model_registry._tokenizer = tokenizer
-        model_registry._spec = model_spec
-        model_registry._current_model_id = settings.mlx.model_id
+        model_registry.set_loaded_model(
+            model=model,
+            tokenizer=tokenizer,
+            spec=model_spec,
+            model_id=settings.mlx.model_id,
+        )
 
         model_swap_orchestrator = ModelSwapOrchestrator(
             model_registry=model_registry,
@@ -764,7 +767,7 @@ def _register_routes(app: FastAPI):
     async def root():
         """Root endpoint with API info."""
         return {
-            "name": "Semantic Caching API",
+            "name": "agent-memory",
             "version": "0.2.0",
             "endpoints": {
                 "health": "/health",
@@ -843,7 +846,7 @@ def create_app() -> FastAPI:
 
     # Create FastAPI app
     app = FastAPI(
-        title="Semantic Caching API",
+        title="agent-memory",
         description="Multi-protocol API for agent-memory KV cache management",
         version="0.2.0",
         lifespan=lifespan,

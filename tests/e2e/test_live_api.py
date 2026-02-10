@@ -1,10 +1,12 @@
-"""Live API endpoint tests — requires a running semantic server on port 8000.
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Yakov Shkolnikov and contributors
+"""Live API endpoint tests — requires a running agent-memory server on port 8000.
 
 Tests all coordination and agent management endpoints against a real server.
 Run with: pytest tests/e2e/test_live_api.py -v --timeout=120
 
 Prerequisites:
-    semantic serve --port 8000
+    agent-memory serve --port 8000
 """
 
 from __future__ import annotations

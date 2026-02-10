@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Yakov Shkolnikov and contributors
 """Integration tests for request ID middleware.
 
 Tests verify that request correlation IDs are:

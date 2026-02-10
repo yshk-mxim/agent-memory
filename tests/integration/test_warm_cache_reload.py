@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Yakov Shkolnikov and contributors
 """Integration test for warm cache reload from disk.
 
 CRITICAL: This test ensures warm cache actually reloads from disk.

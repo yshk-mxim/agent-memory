@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Yakov Shkolnikov and contributors
 """Stress test harness for managing concurrent load tests.
 
 Provides StressTestHarness class for:

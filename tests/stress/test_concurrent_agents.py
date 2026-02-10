@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Yakov Shkolnikov and contributors
 """Concurrent agent stress tests.
 
 Tests verify multi-agent scenarios with rapid, concurrent requests:

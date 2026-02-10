@@ -12,7 +12,7 @@ The application layer implements use cases by coordinating domain services, mana
 
 **Purpose**: Manages agent cache lifecycle with LRU eviction and disk persistence
 
-**Location**: `src/semantic/application/agent_cache_store.py`
+**Location**: `src/agent_memory/application/agent_cache_store.py`
 
 **Responsibilities**:
 1. Load/save agent caches from/to disk
@@ -70,7 +70,7 @@ evicted_id = store.evict_lru()  # Removes oldest agent from memory
 
 **Purpose**: Core inference orchestrator with batching and cache management
 
-**Location**: `src/semantic/application/batch_engine.py`
+**Location**: `src/agent_memory/application/batch_engine.py`
 
 **Responsibilities**:
 1. Accept generation requests from multiple agents
@@ -116,7 +116,7 @@ class BlockPoolBatchEngine:
 
 **Purpose**: Centralized configuration via Pydantic Settings
 
-**Location**: `src/semantic/application/settings.py`
+**Location**: `src/agent_memory/application/settings.py`
 
 **Structure**:
 ```python

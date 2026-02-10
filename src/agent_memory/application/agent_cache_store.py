@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Yakov Shkolnikov and contributors
 """Agent cache storage with trie-based prefix matching and LRU eviction."""
 
 import json

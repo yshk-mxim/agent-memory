@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Yakov Shkolnikov and contributors
 """ConcurrentScheduler: interleaves chunked prefill with decode steps.
 
 The scheduler runs a dedicated worker thread that alternates between:

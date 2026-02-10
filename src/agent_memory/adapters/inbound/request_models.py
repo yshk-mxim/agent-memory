@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Yakov Shkolnikov and contributors
 """Pydantic request and response models for inbound API adapters.
 
 Defines models for:
@@ -96,6 +98,8 @@ class MessagesRequest(BaseModel):
           ]
         }
     """
+
+    model_config = {"extra": "ignore"}
 
     model: str
     messages: list[Message]
@@ -254,6 +258,8 @@ class ChatCompletionsRequest(BaseModel):
           ]
         }
     """
+
+    model_config = {"extra": "ignore"}
 
     model: str
     messages: list[OpenAIChatMessage]

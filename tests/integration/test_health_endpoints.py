@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Yakov Shkolnikov and contributors
 """Integration tests for 3-tier health endpoints.
 
 Tests verify Kubernetes-compatible health endpoints:

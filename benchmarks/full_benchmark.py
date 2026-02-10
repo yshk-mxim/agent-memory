@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""COLM 2026 full benchmark suite for semantic server.
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Yakov Shkolnikov and contributors
+"""Full benchmark suite for agent-memory server.
 
 Runs the complete measurement matrix for the paper:
 - Models: gemma-3-12b-it-4bit, DeepSeek-Coder-V2-Lite-Instruct-4bit-mlx
@@ -22,13 +24,13 @@ no effect: the OpenAI adapter uses request_body.temperature directly, and
 the coordination service hardcodes T=0.3 (ignoring the env var).
 
 Usage:
-    python benchmarks/colm_full_benchmark.py              # Full run (~35 hours)
-    python benchmarks/colm_full_benchmark.py --quick       # 1 pass, 1K/4K/16K only
-    python benchmarks/colm_full_benchmark.py --models gemma
-    python benchmarks/colm_full_benchmark.py --models deepseek
-    python benchmarks/colm_full_benchmark.py --resume FILE
-    python benchmarks/colm_full_benchmark.py --port 8399
-    python benchmarks/colm_full_benchmark.py --passes 1
+    python benchmarks/full_benchmark.py              # Full run (~35 hours)
+    python benchmarks/full_benchmark.py --quick       # 1 pass, 1K/4K/16K only
+    python benchmarks/full_benchmark.py --models gemma
+    python benchmarks/full_benchmark.py --models deepseek
+    python benchmarks/full_benchmark.py --resume FILE
+    python benchmarks/full_benchmark.py --port 8399
+    python benchmarks/full_benchmark.py --passes 1
 """
 
 from __future__ import annotations
@@ -384,7 +386,7 @@ def clean_cache_files() -> None:
 
 
 def kill_all_servers() -> None:
-    """Kill any running semantic servers and streamlit processes.
+    """Kill any running agent-memory servers and streamlit processes.
 
     Kills by name pattern AND by port to catch stragglers.
     Uses SIGKILL (-9) after a grace period.
@@ -1227,7 +1229,7 @@ def make_result_doc(model_id: str, env: dict[str, str]) -> dict[str, Any]:
     """Create initial result document."""
     return {
         "metadata": {
-            "benchmark": "colm_2026_full",
+            "benchmark": "full",
             "git_sha": _git_sha(),
             "timestamp_start": datetime.now(timezone.utc).isoformat(),
             "timestamp_end": "",
@@ -1917,7 +1919,7 @@ async def main() -> int:
     global MAX_COOLDOWN_SECONDS
 
     parser = argparse.ArgumentParser(
-        description="COLM 2026 full benchmark suite"
+        description="Full benchmark suite for agent-memory"
     )
     parser.add_argument(
         "--quick", action="store_true",
@@ -1962,7 +1964,7 @@ async def main() -> int:
     # Handle --merge mode (no server needed)
     if args.merge:
         merge_paths = [Path(p.strip()) for p in args.merge.split(",")]
-        out = Path(args.output) if args.output else RESULTS_DIR / "colm_full_merged.json"
+        out = Path(args.output) if args.output else RESULTS_DIR / "full_merged.json"
         print(f"Merging {len(merge_paths)} result files...")
         merge_result_files(merge_paths, out)
         print(f"Output: {out}")
@@ -2009,7 +2011,7 @@ async def main() -> int:
 
     for model_key, model_id in model_list:
         model_slug = model_key
-        result_path = RESULTS_DIR / f"colm_full_{model_slug}_{timestamp}.json"
+        result_path = RESULTS_DIR / f"full_{model_slug}_{timestamp}.json"
 
         await run_model(
             model_key, model_id, args.port, passes, contexts,

@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Yakov Shkolnikov and contributors
 """Wikipedia Multi-Agent Routing Benchmark with Persistent KV Cache.
 
 Demonstrates multi-agent routing where 10 expert agents are each primed

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Yakov Shkolnikov and contributors
 """Shared control bar for coordination session management.
 
 Provides reusable button groups for running turns, rounds,

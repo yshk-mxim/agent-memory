@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Yakov Shkolnikov and contributors
 """Block-pool batch inference engine."""
 
 import asyncio
@@ -1330,7 +1332,8 @@ class BlockPoolBatchEngine:
                 break
             iterations += 1
             try:
-                batch_response = self._batch_gen.next()  # type: ignore[no-untyped-call]
+                with mlx_io_lock:
+                    batch_response = self._batch_gen.next()  # type: ignore[no-untyped-call]
             except MemoryError as e:
                 logger.error(f"OOM during batch generation step: {e}")
                 self._batch_gen = None

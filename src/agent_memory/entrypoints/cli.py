@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Yakov Shkolnikov and contributors
 """CLI entrypoint for agent-memory server.
 
 Usage:
@@ -144,7 +146,7 @@ def serve(
     setup_signal_handlers(logger)
 
     logger.info("=" * 60)
-    logger.info("Semantic Caching Server")
+    logger.info("agent-memory")
     logger.info("=" * 60)
     logger.info(f"Host: {final_host}")
     logger.info(f"Port: {final_port}")
@@ -179,8 +181,8 @@ def serve(
 @app.command()
 def version() -> None:
     """Show version information."""
-    typer.echo(f"Semantic Caching Server v{__version__}")
-    typer.echo("Sprint 8: Production Release - Tool Calling + Multi-Model Support")
+    typer.echo(f"agent-memory v{__version__}")
+    typer.echo("MLX inference server with persistent KV cache for multi-agent workflows")
 
 
 @app.command()
@@ -224,7 +226,7 @@ def config() -> None:
     settings = get_settings()
 
     typer.echo("=" * 60)
-    typer.echo("Semantic Caching Server - Configuration")
+    typer.echo("agent-memory - Configuration")
     typer.echo("=" * 60)
     typer.echo()
     typer.echo("[Server]")

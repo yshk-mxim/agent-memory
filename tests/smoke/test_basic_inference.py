@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Yakov Shkolnikov and contributors
 """Smoke tests for basic inference functionality.
 
 These tests verify basic API operations:

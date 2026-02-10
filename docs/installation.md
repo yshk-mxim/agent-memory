@@ -1,6 +1,6 @@
 # Installation Guide
 
-Complete installation instructions for Semantic.
+Complete installation instructions for agent-memory.
 
 ## System Requirements
 
@@ -26,8 +26,8 @@ For contributors and active development:
 
 ```bash
 # Clone repository
-git clone https://github.com/yshk-mxim/rdic.git
-cd rdic
+git clone https://github.com/yshk-mxim/agent-memory.git
+cd agent-memory
 
 # Create virtual environment (recommended)
 python3.12 -m venv venv
@@ -51,8 +51,8 @@ For running the server without development tools:
 
 ```bash
 # Clone repository
-git clone https://github.com/yshk-mxim/rdic.git
-cd rdic
+git clone https://github.com/yshk-mxim/agent-memory.git
+cd agent-memory
 
 # Install core dependencies only
 pip install -e .
@@ -63,10 +63,10 @@ pip install -e .
 For building from source:
 
 ```bash
-git clone https://github.com/yshk-mxim/rdic.git
-cd rdic
+git clone https://github.com/yshk-mxim/agent-memory.git
+cd agent-memory
 python -m build
-pip install dist/semantic-*.whl
+pip install dist/agent_memory-*.whl
 ```
 
 ## Verify Installation
@@ -85,10 +85,10 @@ python -c "import mlx.core as mx; print(f'MLX version: {mx.__version__}')"
 # Should print MLX version without errors
 ```
 
-### Check Semantic Installation
+### Check agent-memory Installation
 
 ```bash
-python -c "from agent_memory.domain.services import BlockPool; print('✓ Semantic installed')"
+python -c "from agent_memory.domain.services import BlockPool; print('✓ agent-memory installed')"
 # Should print success message
 ```
 
@@ -96,14 +96,14 @@ python -c "from agent_memory.domain.services import BlockPool; print('✓ Semant
 
 ```bash
 make test-unit
-# Should see: 112 tests passed, 95.07% coverage
+# Should see: ~800 tests passed
 ```
 
 ## Configuration
 
 ### Default Configuration
 
-Semantic uses sensible defaults. No configuration needed for basic usage.
+agent-memory uses sensible defaults. No configuration needed for basic usage.
 
 ### Custom Configuration (Advanced)
 
@@ -112,7 +112,7 @@ Create `~/.agent_memory/config.toml`:
 ```toml
 [model]
 model_id = "mlx-community/DeepSeek-Coder-V2-Lite-Instruct-4bit-mlx"
-max_batch_size = 5
+max_batch_size = 2
 block_tokens = 256
 
 [cache]
@@ -191,7 +191,7 @@ uname -m
 # Should output: arm64
 ```
 
-### ModuleNotFoundError: No module named 'semantic'
+### ModuleNotFoundError: No module named 'agent_memory'
 
 **Solution**: Install in editable mode:
 ```bash
@@ -218,17 +218,17 @@ pre-commit install
 **Solution**: Create directory with correct permissions:
 ```bash
 mkdir -p ~/.agent_memory/caches
-chmod 755 ~/.semantic
+chmod 755 ~/.agent_memory
 ```
 
 ## Uninstallation
 
 ```bash
 # Remove package
-pip uninstall semantic
+pip uninstall agent-memory
 
 # Remove cache directory (optional)
-rm -rf ~/.semantic
+rm -rf ~/.agent_memory
 ```
 
 ## Next Steps
@@ -240,5 +240,5 @@ rm -rf ~/.semantic
 ## Getting Help
 
 - **Documentation**: Browse this site
-- **Issues**: [GitHub Issues](https://github.com/yshk-mxim/rdic/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/yshk-mxim/rdic/discussions)
+- **Issues**: [GitHub Issues](https://github.com/yshk-mxim/agent-memory/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/yshk-mxim/agent-memory/discussions)

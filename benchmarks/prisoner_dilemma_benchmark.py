@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Yakov Shkolnikov and contributors
 """Prisoner's dilemma timing benchmark -- cross-phase KV cache persistence.
 
 Measures the benefit of persistent KV caches across the 5-phase prisoner's

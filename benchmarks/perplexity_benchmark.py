@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Yakov Shkolnikov and contributors
 """
 Perplexity benchmark: FP16 vs actual Q4 KV cache quality evaluation.
 

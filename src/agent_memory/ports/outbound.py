@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Yakov Shkolnikov and contributors
 """Outbound port interfaces (driven adapters).
 
 These ports define the contracts for the application core to interact

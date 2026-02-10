@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Yakov Shkolnikov and contributors
 """Integration test configuration.
 
 Mocks MLX modules at module level to prevent C-level crashes from Metal GPU

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Yakov Shkolnikov and contributors
 """E2E test fixtures for full-stack testing.
 
 This module provides fixtures for end-to-end testing with real components:

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Yakov Shkolnikov and contributors
 """Integration tests for Anthropic API tool calling.
 
 Tests tool_use functionality including:

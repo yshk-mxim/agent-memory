@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Yakov Shkolnikov and contributors
 """Integration tests for server lifecycle (startup/shutdown).
 
 Tests FastAPI application creation, health endpoints, and middleware.
@@ -34,7 +36,7 @@ class TestServerHealth:
 
         assert response.status_code == 200
         data = response.json()
-        assert data["name"] == "Semantic Caching API"
+        assert data["name"] == "agent-memory"
         assert data["version"] == "0.2.0"
         assert "endpoints" in data
         assert data["endpoints"]["health"] == "/health"

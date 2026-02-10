@@ -1,5 +1,5 @@
-# Prometheus Alerting Rules for Semantic Caching API
-# Sprint 7 Day 7: Production Alerting Thresholds
+# Prometheus Alerting Rules for agent-memory
+# Production Alerting Thresholds
 
 groups:
   - name: semantic_caching_critical

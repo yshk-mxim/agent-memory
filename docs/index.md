@@ -114,7 +114,7 @@ This project implements novel techniques in:
 
 ## License
 
-MIT License — See [LICENSE](https://github.com/yshk-mxim/rdic/blob/main/LICENSE)
+MIT License — See [LICENSE](https://github.com/yshk-mxim/agent-memory/blob/main/LICENSE)
 
 ## Acknowledgments
 

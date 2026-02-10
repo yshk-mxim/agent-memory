@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Yakov Shkolnikov and contributors
 """E2E tests for OpenAI streaming API.
 
 Tests verify SSE (Server-Sent Events) streaming for OpenAI Chat Completions API:

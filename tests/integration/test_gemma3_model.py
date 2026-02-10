@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Yakov Shkolnikov and contributors
 """Integration tests for Gemma 3 model support.
 
 Tests that Gemma-3-12b-it-4bit works correctly with all API endpoints.

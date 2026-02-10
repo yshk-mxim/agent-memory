@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Yakov Shkolnikov and contributors
 """E2E tests for model hot-swap functionality.
 
 Tests verify that the server can swap models at runtime while maintaining

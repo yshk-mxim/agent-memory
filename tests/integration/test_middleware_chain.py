@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Yakov Shkolnikov and contributors
 """Middleware chain ordering tests.
 
 Verifies that middleware fires in the correct order and each middleware's

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Yakov Shkolnikov and contributors
 """Shared prefix cache for system+tools KV state reuse.
 
 When multiple agents share the same system prompt and tool definitions,

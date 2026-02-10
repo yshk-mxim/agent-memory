@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Yakov Shkolnikov and contributors
 """Scenario renderer — renders any ScenarioSpec as a Streamlit UI.
 
 This is the core shared component. Each demo page loads a YAML scenario
@@ -120,7 +122,7 @@ class ScenarioRenderer:
             if stats is not None:
                 st.success("Server connected")
             else:
-                st.error("Server not reachable. Start with: `semantic serve`")
+                st.error("Server not reachable. Start with: `agent-memory serve`")
             st.divider()
 
             # Model info and switch UI

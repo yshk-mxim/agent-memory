@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Yakov Shkolnikov and contributors
 """Request and response models for coordination API endpoints.
 
 All models use Pydantic for validation and OpenAPI schema generation.

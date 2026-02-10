@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Yakov Shkolnikov and contributors
 """Auto-tuning CLI for agent-memory server.
 
 Runs a subset of profiling experiments on the user's hardware to find
@@ -291,7 +293,7 @@ def _run_tune(
 
     # Execute tuning
     typer.echo("=" * 60)
-    typer.echo("  Semantic Auto-Tuning")
+    typer.echo("  agent-memory Auto-Tuning")
     typer.echo("=" * 60)
     typer.echo(f"Mode: {'quick' if quick else 'full'}")
     typer.echo(f"Runs per scenario: {runs}")

@@ -1,10 +1,12 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Yakov Shkolnikov and contributors
 """Shared chat completion logic used by OpenAI API and Coordination."""
 
 import asyncio
 import structlog
 from typing import Any
 
-from agent_memory.adapters.inbound.adapter_helpers import tokenize_with_chat_template
+from agent_memory.application.tokenization import tokenize_with_chat_template
 
 logger = structlog.get_logger(__name__)
 

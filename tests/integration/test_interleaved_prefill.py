@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Yakov Shkolnikov and contributors
 """Integration test: interleaved chunked prefill with decode.
 
 Tests the full ConcurrentScheduler flow with a FakeBatchEngine,

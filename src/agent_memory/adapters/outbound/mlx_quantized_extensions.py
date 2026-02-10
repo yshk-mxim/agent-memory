@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Yakov Shkolnikov and contributors
 """MLX QuantizedKVCache extensions for batching support.
 
 Adds merge() method to QuantizedKVCache to enable direct Q4 cache injection.
@@ -227,7 +229,7 @@ class BatchQuantizedKVCache(_BaseCache):
         if self.keys is None or required_capacity > self.keys[0].shape[-2]:
             expanded = True
             el_per_int = 8 * mx.uint32.size // self.bits
-            extra = min(256, 1024)
+            extra = 256
             new_capacity = (required_capacity + extra + self.step - 1) // self.step * self.step
             new_steps = new_capacity - prev if self.keys is not None else new_capacity
             shape = (B, n_kv_heads, new_steps)
@@ -548,7 +550,9 @@ def _q4_dynamic_roll(q4_tuple: tuple[Any, Any, Any], shifts: Any) -> tuple:
                     row = t[b : b + 1]
                 parts.append(row)
             rolled.append(mx.concatenate(parts, axis=0))
-        return tuple(rolled)
+        result = tuple(rolled)
+        mx.eval(*result)  # Materialize lazy concatenations
+        return result
 
 
 # ======================================================================

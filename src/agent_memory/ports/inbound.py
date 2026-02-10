@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Yakov Shkolnikov and contributors
 """Inbound port interfaces (driving adapters).
 
 These ports define the contracts for external systems to interact with

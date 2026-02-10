@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Yakov Shkolnikov and contributors
 """Safetensors cache persistence adapter.
 
 CRITICAL: Preserves 4-bit quantization when saving/loading KV cache.

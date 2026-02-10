@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Yakov Shkolnikov and contributors
 """Real MLX test configuration.
 
 NO MOCKING. This conftest loads actual MLX models and runs real GPU operations.

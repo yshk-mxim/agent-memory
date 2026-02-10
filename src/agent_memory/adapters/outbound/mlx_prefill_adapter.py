@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Yakov Shkolnikov and contributors
 """MLX adapter for single-chunk prefill processing.
 
 Implements PrefillChunkPort to process one chunk of a sequence's prefill

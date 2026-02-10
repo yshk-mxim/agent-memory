@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Yakov Shkolnikov and contributors
 """Unit tests for CoordinationService.
 
 Tests coordination service logic with mocked scheduler, cache_store, and engine.

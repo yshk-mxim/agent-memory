@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Yakov Shkolnikov and contributors
 """E2E tests for multi-agent concurrent sessions.
 
 Tests verify that multiple agents can run concurrently with independent caches

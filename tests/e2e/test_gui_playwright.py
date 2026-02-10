@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Yakov Shkolnikov and contributors
 """Playwright browser-based GUI tests for Streamlit demo pages.
 
 Tests actual browser rendering, navigation, and interactive elements.
@@ -5,7 +7,7 @@ Uses a real headless Chromium browser to interact with the Streamlit UI,
 catching visual rendering bugs, JavaScript errors, and navigation failures
 that headless AppTest cannot detect.
 
-Requires: pytest-playwright, a running semantic server on :8000.
+Requires: pytest-playwright, a running agent-memory server on :8000.
 Run with: pytest tests/e2e/test_gui_playwright.py -v --timeout=120
 """
 
@@ -37,18 +39,18 @@ PAGE_LOAD_TIMEOUT = 15_000  # 15s for Streamlit page load
 
 
 @pytest.fixture(scope="module")
-def semantic_server() -> None:
-    """Skip all tests if the semantic server at localhost:8000 is not reachable."""
+def agent_memory_server() -> None:
+    """Skip all tests if the agent-memory server at localhost:8000 is not reachable."""
     try:
         resp = httpx.get("http://localhost:8000/health/ready", timeout=5.0)
         if resp.status_code != 200:
-            pytest.skip("Semantic server not ready at localhost:8000")
+            pytest.skip("agent-memory server not ready at localhost:8000")
     except httpx.HTTPError:
-        pytest.skip("Semantic server not reachable at localhost:8000")
+        pytest.skip("agent-memory server not reachable at localhost:8000")
 
 
 @pytest.fixture(scope="module")
-def streamlit_app(semantic_server: None) -> Iterator[str]:
+def streamlit_app(agent_memory_server: None) -> Iterator[str]:
     """Start Streamlit app and yield the base URL.
 
     Launches Streamlit in headless mode on a dedicated port, waits for it

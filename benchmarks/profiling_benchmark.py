@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Yakov Shkolnikov and contributors
 """Profiling benchmark suite for optimal parameter discovery.
 
 Runs 9 experiments across all tunable parameters to find the optimal

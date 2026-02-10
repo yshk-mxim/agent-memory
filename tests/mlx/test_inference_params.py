@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Yakov Shkolnikov and contributors
 """Per-request inference parameter tests.
 
 Validates that temperature, top_p, and other sampling parameters are

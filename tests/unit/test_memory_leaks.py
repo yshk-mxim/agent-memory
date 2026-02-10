@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Yakov Shkolnikov and contributors
 """Memory leak detection tests using tracemalloc.
 
 Verifies that BlockPool and AgentCacheStore operations do not leak

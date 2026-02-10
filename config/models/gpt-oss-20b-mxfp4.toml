@@ -8,7 +8,7 @@
 # Model memory: ~10.6GB
 #
 # NOTE: GPT-OSS uses attention sinks which are incompatible with MLX's
-# quantized SDPA kernel. The semantic server applies a runtime patch
+# quantized SDPA kernel. The agent-memory server applies a runtime patch
 # (mlx_sink_compat.py) that dequantizes Q4 KV to FP16 transiently during
 # attention compute while preserving Q4 storage. See novelty/q4_attention_sink_compat.md.
 

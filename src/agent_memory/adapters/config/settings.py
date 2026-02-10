@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Yakov Shkolnikov and contributors
 """Configuration management using Pydantic Settings."""
 
 import logging
@@ -364,7 +366,7 @@ def _find_model_profile_path(model_id: str) -> Path | None:
     Searches config/models/ for a TOML file whose filename matches
     a slug derived from the model_id.
     """
-    # settings.py is at src/semantic/adapters/config/ → parents[4] = project root
+    # settings.py is at src/agent_memory/adapters/config/ → parents[4] = project root
     config_dir = Path(__file__).resolve().parents[4] / "config" / "models"
     if not config_dir.is_dir():
         return None

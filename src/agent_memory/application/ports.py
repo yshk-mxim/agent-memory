@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Yakov Shkolnikov and contributors
 """Application layer ports (interfaces for adapters).
 
 Defines protocols that external adapters must implement to interact

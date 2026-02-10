@@ -3496,16 +3496,16 @@
     },
     {
       "bom-ref": "requirements-L230",
-      "description": "requirements line 230: -e git+https://github.com/yshk-mxim/rdic.git@38a007e397e12f466ee867bb117b41562ea5cbda#egg=semantic_server",
+      "description": "requirements line 230: -e git+https://github.com/yshk-mxim/agent-memory.git@38a007e397e12f466ee867bb117b41562ea5cbda#egg=agent_memory",
       "externalReferences": [
         {
           "comment": "explicit dist url",
           "type": "vcs",
-          "url": "git+https://github.com/yshk-mxim/rdic.git@38a007e397e12f466ee867bb117b41562ea5cbda#egg=semantic_server"
+          "url": "git+https://github.com/yshk-mxim/agent-memory.git@38a007e397e12f466ee867bb117b41562ea5cbda#egg=agent_memory"
         }
       ],
-      "name": "semantic_server",
-      "purl": "pkg:pypi/semantic-server?vcs_url=git%2Bhttps://github.com/yshk-mxim/rdic.git%4038a007e397e12f466ee867bb117b41562ea5cbda%23egg%3Dsemantic_server",
+      "name": "agent_memory",
+      "purl": "pkg:pypi/agent-memory?vcs_url=git%2Bhttps://github.com/yshk-mxim/agent-memory.git%4038a007e397e12f466ee867bb117b41562ea5cbda%23egg%3Dagent_memory",
       "type": "library"
     },
     {
@@ -5268,22 +5268,22 @@
         {
           "comment": "from pyproject urls: Documentation",
           "type": "documentation",
-          "url": "https://github.com/yshk-mxim/semantic-server/docs"
+          "url": "https://github.com/yshk-mxim/agent-memory/docs"
         },
         {
           "comment": "from pyproject urls: Issues",
           "type": "issue-tracker",
-          "url": "https://github.com/yshk-mxim/semantic-server/issues"
+          "url": "https://github.com/yshk-mxim/agent-memory/issues"
         },
         {
           "comment": "from pyproject urls: Repository",
           "type": "vcs",
-          "url": "https://github.com/yshk-mxim/semantic-server"
+          "url": "https://github.com/yshk-mxim/agent-memory"
         },
         {
           "comment": "from pyproject urls: Homepage",
           "type": "website",
-          "url": "https://github.com/yshk-mxim/semantic-server"
+          "url": "https://github.com/yshk-mxim/agent-memory"
         }
       ],
       "licenses": [
@@ -5294,7 +5294,7 @@
           }
         }
       ],
-      "name": "semantic-server",
+      "name": "agent-memory",
       "type": "application"
     },
     "timestamp": "2026-01-26T04:03:42.884922+00:00",

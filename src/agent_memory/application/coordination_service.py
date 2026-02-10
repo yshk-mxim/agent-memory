@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Yakov Shkolnikov and contributors
 """CoordinationService: orchestrates multi-agent coordination sessions.
 
 Manages structured multi-agent conversations: session lifecycle, prompt
@@ -383,7 +385,7 @@ class CoordinationService:
 
         # Check if DeepSeek model (needs special anti-echo instructions)
         is_deepseek = (
-            self._chat_template.is_deepseek(self._engine._tokenizer)
+            self._chat_template.is_deepseek(self._engine.tokenizer)
             if self._chat_template
             else False
         )
@@ -455,7 +457,7 @@ class CoordinationService:
 
         # Detect DeepSeek model for special handling
         is_deepseek = (
-            self._chat_template.is_deepseek(self._engine._tokenizer)
+            self._chat_template.is_deepseek(self._engine.tokenizer)
             if self._chat_template
             else False
         )
@@ -516,13 +518,12 @@ class CoordinationService:
         # where the agent's own prior messages appear as assistant role.
         # add_generation_prompt=True appends "Assistant:" for generation.
 
-        # DEBUG: Log the full prompt being sent
-        logger.info(
-            f"[PROMPT_DEBUG] agent={agent_role.agent_id} messages_count={len(messages)}"
+        logger.debug(
+            f"agent={agent_role.agent_id} messages_count={len(messages)}"
         )
         for i, msg in enumerate(messages):
             content_preview = msg["content"][:200] if len(msg["content"]) > 200 else msg["content"]
-            logger.info(
+            logger.debug(
                 f"  [{i}] role={msg['role']} content={repr(content_preview)}"
             )
 
@@ -605,7 +606,7 @@ class CoordinationService:
         gen_max_tokens = self._get_generation_max_tokens()
 
         is_deepseek = (
-            self._chat_template.is_deepseek(self._engine._tokenizer)
+            self._chat_template.is_deepseek(self._engine.tokenizer)
             if self._chat_template
             else False
         )
@@ -714,7 +715,7 @@ class CoordinationService:
 
         # DeepSeek: inject agent name into token stream (see option 3 comments)
         is_deepseek = (
-            self._chat_template.is_deepseek(self._engine._tokenizer)
+            self._chat_template.is_deepseek(self._engine.tokenizer)
             if self._chat_template
             else False
         )

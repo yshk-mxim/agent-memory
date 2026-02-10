@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Yakov Shkolnikov and contributors
 """Concurrent tests for thread-safety.
 
 These tests verify that BlockPool and batch engine are thread-safe.

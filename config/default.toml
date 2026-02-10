@@ -1,4 +1,4 @@
-# Default configuration for Semantic server
+# Default configuration for agent-memory server
 # All settings can be overridden via:
 # - CLI arguments (highest priority)
 # - Environment variables (SEMANTIC_*)

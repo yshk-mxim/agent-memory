@@ -3,7 +3,7 @@
 **Version**: 1.0.0
 **Date**: 2026-01-25
 **Status**: Active
-**Scope**: All code in `src/semantic/` and `tests/`
+**Scope**: All code in `src/agent_memory/` and `tests/`
 
 ---
 
@@ -637,7 +637,7 @@ repos:
       - id: sloppylint
         name: AI slop detector
         entry: sloppylint
-        args: [--ci, --severity, high, src/semantic/]
+        args: [--ci, --severity, high, src/agent_memory/]
         language: python
         types: [python]
         additional_dependencies: [sloppylint]
@@ -648,7 +648,7 @@ repos:
       - id: vulture
         name: Dead code check
         entry: vulture
-        args: [src/semantic/, --min-confidence, "80"]
+        args: [src/agent_memory/, --min-confidence, "80"]
         language: python
         types: [python]
         additional_dependencies: [vulture]
@@ -659,7 +659,7 @@ repos:
       - id: radon-cc
         name: Complexity check
         entry: radon
-        args: [cc, --min, C, src/semantic/]
+        args: [cc, --min, C, src/agent_memory/]
         language: python
         pass_filenames: false
         additional_dependencies: [radon]

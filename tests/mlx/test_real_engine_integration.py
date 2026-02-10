@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Yakov Shkolnikov and contributors
 """Real MLX engine integration tests for behaviors tested with FakeEngine.
 
 Tests concurrent inference, cache reuse, streaming, and coordination

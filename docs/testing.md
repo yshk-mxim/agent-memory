@@ -1,6 +1,6 @@
 # Testing Guide
 
-Comprehensive testing strategy for Semantic Caching API.
+Comprehensive testing strategy for agent-memory.
 
 ## Table of Contents
 
@@ -15,7 +15,7 @@ Comprehensive testing strategy for Semantic Caching API.
 
 ## Test Categories
 
-Semantic Caching API uses a multi-tier testing strategy:
+agent-memory uses a multi-tier testing strategy:
 
 | Category | Location | Purpose | Speed | Model Loading |
 |----------|----------|---------|-------|---------------|
@@ -91,7 +91,7 @@ pytest tests/ -v
 pytest tests/ -v -s
 
 # Show coverage
-pytest tests/ -v --cov=src/semantic --cov-report=term-missing
+pytest tests/ -v --cov=src/agent_memory --cov-report=term-missing
 ```
 
 ### Specific Test Files
@@ -314,7 +314,7 @@ jobs:
           pip install pytest pytest-cov
 
       - name: Run unit tests
-        run: pytest tests/unit/ -v --cov=src/semantic
+        run: pytest tests/unit/ -v --cov=src/agent_memory
 
       - name: Run integration tests (no model)
         run: pytest tests/integration/ -k "not WithModel" -v
@@ -359,7 +359,7 @@ test-model:
 	pytest tests/integration/ -k "WithModel" -v
 
 test-all:
-	pytest tests/ -v --cov=src/semantic --cov-report=term-missing
+	pytest tests/ -v --cov=src/agent_memory --cov-report=term-missing
 
 test-tool-calling:
 	pytest tests/integration/test_anthropic_tool_calling.py -v
@@ -388,10 +388,10 @@ make test-all
 
 ```bash
 # Generate coverage report
-pytest tests/ --cov=src/semantic --cov-report=term-missing
+pytest tests/ --cov=src/agent_memory --cov-report=term-missing
 
 # Generate HTML report
-pytest tests/ --cov=src/semantic --cov-report=html
+pytest tests/ --cov=src/agent_memory --cov-report=html
 
 # Open HTML report
 open htmlcov/index.html
@@ -403,7 +403,7 @@ open htmlcov/index.html
 
 ```ini
 [run]
-source = src/semantic
+source = src/agent_memory
 omit =
     */tests/*
     */migrations/*
@@ -437,7 +437,7 @@ pytest tests/integration/ -k "not WithModel" -v
 # Exit code: 0
 
 # Coverage above threshold
-pytest tests/ --cov=src/semantic --cov-fail-under=85
+pytest tests/ --cov=src/agent_memory --cov-fail-under=85
 # Exit code: 0
 ```
 

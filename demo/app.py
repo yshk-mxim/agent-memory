@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Yakov Shkolnikov and contributors
 """Semantic Cache Multi-Agent Demo.
 
 Demonstrates multi-agent conversation with per-agent KV cache persistence.
@@ -6,7 +8,7 @@ cache state transitions (COLD -> WARM -> HOT) and real-time performance metrics.
 
 Usage:
     pip install -r demo/requirements.txt
-    semantic serve  # start the server on :8000
+    agent-memory serve  # start the server on :8000
     streamlit run demo/app.py
 """
 
@@ -447,7 +449,7 @@ def _render_server_status() -> None:
     if mem_info is None:
         st.error("Server offline")
         st.caption(f"Expected at {SERVER_URL}")
-        st.markdown("Start with: `semantic serve`")
+        st.markdown("Start with: `agent-memory serve`")
         return
 
     st.success("Server online")
@@ -630,7 +632,7 @@ def render_sidebar() -> None:
         st.divider()
         st.caption(
             "Built with [Streamlit](https://streamlit.io) | "
-            "[Semantic Cache API](https://github.com/yshk-mxim/rdic)"
+            "[agent-memory](https://github.com/yshk-mxim/agent-memory)"
         )
 
 

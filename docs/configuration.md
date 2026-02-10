@@ -1,11 +1,11 @@
 ```markdown
 # Configuration Guide
 
-Semantic Caching API uses environment variables for configuration. All settings can be specified via:
+agent-memory uses environment variables for configuration. All settings can be specified via:
 
 - Environment variables
 - `.env` file in the project root
-- Command-line arguments (for `semantic serve`)
+- Command-line arguments (for `python -m agent_memory.entrypoints.cli serve`)
 
 ## Configuration Files
 
@@ -15,9 +15,9 @@ Create a `.env` file in your project root:
 
 ```bash
 # MLX Model Configuration
-SEMANTIC_MLX_MODEL_ID=mlx-community/DeepSeek-Coder-V2-Lite-Instruct-4bit-mlx
-SEMANTIC_MLX_CACHE_BUDGET_MB=4096
-SEMANTIC_MLX_MAX_BATCH_SIZE=5
+SEMANTIC_MLX_MODEL_ID=mlx-community/gemma-3-12b-it-4bit
+SEMANTIC_MLX_CACHE_BUDGET_MB=8192
+SEMANTIC_MLX_MAX_BATCH_SIZE=2
 
 # Agent Cache Configuration
 SEMANTIC_AGENT_MAX_AGENTS_IN_MEMORY=5
@@ -41,32 +41,34 @@ Control MLX inference engine behavior.
 
 | Variable | Type | Default | Description |
 |----------|------|---------|-------------|
-| `SEMANTIC_MLX_MODEL_ID` | string | `mlx-community/DeepSeek-Coder-V2-Lite-Instruct-4bit-mlx` | HuggingFace model ID or local path |
-| `SEMANTIC_MLX_MAX_BATCH_SIZE` | int | `5` | Maximum concurrent sequences (1-20) |
+| `SEMANTIC_MLX_MODEL_ID` | string | `mlx-community/gemma-3-12b-it-4bit` | HuggingFace model ID or local path |
+| `SEMANTIC_MLX_MAX_BATCH_SIZE` | int | `2` | Maximum concurrent sequences (1-20) |
 | `SEMANTIC_MLX_PREFILL_STEP_SIZE` | int | `512` | Tokens per prefill step (128-2048) |
 | `SEMANTIC_MLX_KV_BITS` | int\|null | `null` | KV cache quantization (4, 8, or null for FP16) |
 | `SEMANTIC_MLX_BLOCK_TOKENS` | int | `256` | Tokens per cache block (64-512) |
-| `SEMANTIC_MLX_CACHE_BUDGET_MB` | int | `4096` | Maximum cache memory budget in MB (512-16384) |
+| `SEMANTIC_MLX_CACHE_BUDGET_MB` | int | `8192` | Maximum cache memory budget in MB (512-16384) |
 | `SEMANTIC_MLX_DEFAULT_MAX_TOKENS` | int | `256` | Default max tokens for generation (1-8192) |
-| `SEMANTIC_MLX_DEFAULT_TEMPERATURE` | float | `0.7` | Default sampling temperature (0.0-2.0) |
+| `SEMANTIC_MLX_DEFAULT_TEMPERATURE` | float | `0.7` | Default sampling temperature (0.0-2.0). **Note**: coordination_service.py hardcodes T=0.3, ignoring this env var. |
 
 ### Supported Models
 
 **Production-Ready**:
-- `mlx-community/DeepSeek-Coder-V2-Lite-Instruct-4bit-mlx` (default, 16B model, 163K context)
+- `mlx-community/gemma-3-12b-it-4bit` (default, 12B model, hybrid sliding window + global attention)
+- `mlx-community/DeepSeek-Coder-V2-Lite-Instruct-4bit-mlx` (16B model, MLA, 163K context)
 - `mlx-community/SmolLM2-135M-Instruct` (lightweight, testing)
 
 **Memory Requirements**:
-- DeepSeek-Coder-V2-Lite: 20GB+ RAM recommended (163K context support)
+- Gemma 3 12B: 16GB+ RAM recommended (~6.5 GB model + KV cache)
+- DeepSeek-Coder-V2-Lite: 20GB+ RAM recommended (163K context support, set `SEMANTIC_MLX_CACHE_BUDGET_MB=4096`)
 - SmolLM2: 4GB+ RAM sufficient
 
 ### Cache Budget Calculation
 
 ```python
-# Example: DeepSeek-Coder-V2-Lite with 4GB cache budget
+# Example: Gemma 3 12B with 8GB cache budget
 bytes_per_block = model_spec.bytes_per_block_per_layer()
-total_blocks = (4096 * 1024 * 1024) // bytes_per_block
-# ~1400 blocks for DeepSeek-Coder-V2-Lite (each block = 256 tokens)
+total_blocks = (8192 * 1024 * 1024) // bytes_per_block
+# each block = 256 tokens
 ```
 
 ## Agent Settings
@@ -157,7 +159,7 @@ Tool calling is enabled by default when tools are provided in requests.
 curl -X POST http://localhost:8000/v1/messages \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "deepseek-coder-v2-lite",
+    "model": "gemma-3-12b-it",
     "max_tokens": 200,
     "messages": [
       {"role": "user", "content": "What's the weather in Paris?"}
@@ -184,7 +186,7 @@ curl -X POST http://localhost:8000/v1/messages \
 curl -X POST http://localhost:8000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "deepseek-coder-v2-lite",
+    "model": "gemma-3-12b-it",
     "messages": [
       {"role": "user", "content": "What's the weather in Paris?"}
     ],
@@ -225,11 +227,11 @@ SEMANTIC_SERVER_CORS_ORIGINS=*
 
 ```bash
 # .env.production
-SEMANTIC_MLX_MODEL_ID=mlx-community/DeepSeek-Coder-V2-Lite-Instruct-4bit-mlx
-SEMANTIC_MLX_CACHE_BUDGET_MB=4096
-SEMANTIC_MLX_MAX_BATCH_SIZE=5
+SEMANTIC_MLX_MODEL_ID=mlx-community/gemma-3-12b-it-4bit
+SEMANTIC_MLX_CACHE_BUDGET_MB=8192
+SEMANTIC_MLX_MAX_BATCH_SIZE=2
 SEMANTIC_AGENT_MAX_AGENTS_IN_MEMORY=10
-SEMANTIC_AGENT_CACHE_DIR=/var/lib/semantic/caches
+SEMANTIC_AGENT_CACHE_DIR=/var/lib/agent_memory/caches
 SEMANTIC_SERVER_HOST=0.0.0.0
 SEMANTIC_SERVER_PORT=8000
 SEMANTIC_SERVER_LOG_LEVEL=INFO
@@ -242,7 +244,7 @@ SEMANTIC_ADMIN_KEY=your-admin-key
 
 ```bash
 # .env.multitenant
-SEMANTIC_MLX_MODEL_ID=mlx-community/DeepSeek-Coder-V2-Lite-Instruct-4bit-mlx
+SEMANTIC_MLX_MODEL_ID=mlx-community/gemma-3-12b-it-4bit
 SEMANTIC_MLX_CACHE_BUDGET_MB=8192
 SEMANTIC_MLX_MAX_BATCH_SIZE=10
 SEMANTIC_AGENT_MAX_AGENTS_IN_MEMORY=50
@@ -258,7 +260,7 @@ SEMANTIC_API_KEY=required
 Check your configuration:
 
 ```bash
-semantic config --show
+python -m agent_memory.entrypoints.cli config --show
 ```
 
 ## Environment Variable Precedence
@@ -271,6 +273,6 @@ semantic config --show
 ## See Also
 
 - [User Guide](user-guide.md) - Usage examples
-- [Model Onboarding](model-onboarding.md) - Adding new models
+- [Adding Models](developer/adding-models.md) - Adding new models
 - [Deployment Guide](deployment.md) - Production deployment
 ```

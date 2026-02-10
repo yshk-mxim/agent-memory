@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Yakov Shkolnikov and contributors
 """Compatibility patch: quantized KV cache with attention sinks.
 
 GPT-OSS and similar models use attention sinks, but MLX's quantized SDPA

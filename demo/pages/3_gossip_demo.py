@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Yakov Shkolnikov and contributors
 """Gossip Demo - YAML-driven three-phase scenario.
 
 Three friends, two private conversations, one awkward reunion.

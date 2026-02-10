@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Yakov Shkolnikov and contributors
 """Adaptive runtime configuration for inference parameters.
 
 Adjusts prefill step size, batch size, and chunk sizes based on

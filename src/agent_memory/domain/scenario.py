@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Yakov Shkolnikov and contributors
 """Scenario configuration domain model.
 
 Pure Python dataclasses defining the structure of YAML-driven

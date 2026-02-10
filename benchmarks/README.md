@@ -6,7 +6,7 @@ Performance measurement scripts for agent-memory. All benchmarks target Apple Si
 
 | Script | What it measures |
 |--------|------------------|
-| `colm_full_benchmark.py` | Full paper benchmark: cold/warm TTFT, TPS, concurrent batch=2, staggered arrivals |
+| `full_benchmark.py` | Full paper benchmark: cold/warm TTFT, TPS, concurrent batch=2, staggered arrivals |
 | `paper_benchmark.py` | Simplified version of the full benchmark for quick validation |
 | `perplexity_benchmark.py` | Q4 KV cache perplexity impact vs FP16 baseline |
 | `staggered_benchmark.py` | Interleaved prefill latency hiding with staggered agent arrivals |
@@ -32,7 +32,7 @@ Then run the benchmark:
 
 ```bash
 # Full paper benchmark (both models, ~30 min)
-python benchmarks/colm_full_benchmark.py
+python benchmarks/full_benchmark.py
 
 # Perplexity measurement
 python benchmarks/perplexity_benchmark.py
@@ -45,8 +45,8 @@ python benchmarks/streaming_benchmark.py
 
 Tracked result files in `results/`:
 
-- `colm_full_gemma_merged.json` — Gemma 3 12B IT Q4 full benchmark
-- `colm_full_deepseek_merged.json` — DeepSeek-Coder-V2-Lite Q4 full benchmark
+- `full_gemma_merged.json` — Gemma 3 12B IT Q4 full benchmark
+- `full_deepseek_merged.json` — DeepSeek-Coder-V2-Lite Q4 full benchmark
 
 These are the results reported in the paper. Raw per-run files are also included for reproducibility.
 

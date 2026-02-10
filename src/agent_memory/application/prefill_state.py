@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Yakov Shkolnikov and contributors
 """Stateful chunked prefill tracker for interleaved scheduling.
 
 PrefillState tracks the progress of a single sequence's chunked prefill,

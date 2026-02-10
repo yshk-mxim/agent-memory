@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Yakov Shkolnikov and contributors
 """Rate limiting middleware for API requests.
 
 Implements per-agent and global rate limiting using sliding window algorithm.

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Yakov Shkolnikov and contributors
 """Domain entities for block-pool memory management.
 
 Entities represent objects with identity and lifecycle in the domain.

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Yakov Shkolnikov and contributors
 """Template resolver for cross-phase context injection.
 
 Resolves ${phase_name.messages[agent_key]} placeholders in

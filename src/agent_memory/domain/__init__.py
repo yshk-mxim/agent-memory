@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Yakov Shkolnikov and contributors
 """Domain layer for block-pool memory management.
 
 This package contains pure business logic with zero external dependencies.

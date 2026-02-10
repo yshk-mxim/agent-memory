@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Yakov Shkolnikov and contributors
 """Sustained load tests for latency degradation detection.
 
 Tests verify stability and performance over extended periods (1 hour):

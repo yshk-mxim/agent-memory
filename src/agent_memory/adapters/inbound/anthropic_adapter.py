@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Yakov Shkolnikov and contributors
 """Anthropic Messages API adapter (POST /v1/messages).
 
 Implements the Anthropic Messages API with:
@@ -641,7 +643,7 @@ async def create_message(request_body: MessagesRequest, request: Request):  # no
             request_body.system,
             tools_arg,
         )
-        tokens = await asyncio.to_thread(
+        tokens, templated_prompt = await asyncio.to_thread(
             tokenize_with_chat_template,
             tokenizer,
             chat_dicts,
@@ -699,7 +701,7 @@ async def create_message(request_body: MessagesRequest, request: Request):  # no
                         cache_store,
                         batch_engine,
                         tokens,
-                        prompt,
+                        templated_prompt,
                         agent_id,
                         cached_blocks,
                     )
@@ -728,7 +730,7 @@ async def create_message(request_body: MessagesRequest, request: Request):  # no
                 prompt_tokens=tokens,
                 cache=cached_blocks,
                 max_tokens=request_body.max_tokens,
-                prompt_text=prompt,
+                prompt_text=templated_prompt,
                 temperature=temperature,
                 top_p=top_p,
                 top_k=top_k,
@@ -746,7 +748,7 @@ async def create_message(request_body: MessagesRequest, request: Request):  # no
             uid = await asyncio.to_thread(
                 batch_engine.submit,
                 agent_id=agent_id,
-                prompt=prompt,
+                prompt=templated_prompt,
                 cache=cached_blocks,
                 max_tokens=request_body.max_tokens,
                 temperature=temperature,

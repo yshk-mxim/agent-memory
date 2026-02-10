@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Yakov Shkolnikov and contributors
 """Chat template adapter — model-specific tokenizer behavior.
 
 Detects model family from tokenizer chat template strings and provides

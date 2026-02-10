@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Yakov Shkolnikov and contributors
 """Request ID middleware for correlation tracking.
 
 Generates unique request IDs and propagates them through the request lifecycle

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Yakov Shkolnikov and contributors
 """Real MLX Q4 cache round-trip tests.
 
 NO MOCKING. Tests actual Q4 quantization, safetensors persistence,

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Yakov Shkolnikov and contributors
 """Shared HTTP client for coordination API calls.
 
 Wraps all coordination and agent management endpoints.

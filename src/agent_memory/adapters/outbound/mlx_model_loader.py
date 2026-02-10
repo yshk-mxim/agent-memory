@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Yakov Shkolnikov and contributors
 """MLX implementation of ModelLoaderPort.
 
 Provides model loading and memory management via Apple's MLX framework.

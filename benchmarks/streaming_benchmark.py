@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Yakov Shkolnikov and contributors
 """Streaming vs Non-streaming benchmark with cache state comparison.
 
 Tests all combinations of:

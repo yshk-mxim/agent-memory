@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Yakov Shkolnikov and contributors
 """End-to-end cache scenario testing with memory monitoring.
 
 Scenarios:
@@ -183,7 +185,7 @@ def main():
         print(f"Server status: {health.json()}")
     except Exception as e:
         print(f"ERROR: Server not reachable: {e}")
-        print("Start the server with: semantic serve")
+        print("Start the server with: agent-memory serve")
         return
 
     # Generate prompts

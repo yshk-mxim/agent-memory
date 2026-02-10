@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Yakov Shkolnikov and contributors
 """Smoke test fixtures for basic server validation.
 
 Smoke tests are minimal tests that verify the server can start and handle

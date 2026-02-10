@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Yakov Shkolnikov and contributors
 """Memory utilization benchmarks.
 
 Measures actual memory usage vs. theoretical predictions:

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Yakov Shkolnikov and contributors
 """Legacy src package - DEPRECATED.
 
 All new code should use `agent_memory.*` imports, not `src.*`.

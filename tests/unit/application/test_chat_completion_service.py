@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Yakov Shkolnikov and contributors
 """Unit tests for chat_completion_service.
 
 Verifies that generate_chat_completion does not prematurely invalidate the hot cache.

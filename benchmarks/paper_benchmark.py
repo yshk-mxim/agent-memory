@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Yakov Shkolnikov and contributors
 """
-Paper Benchmark Suite - Replicates all benchmarks from semantic_colm2026 paper.
+Paper Benchmark Suite - Replicates all benchmarks from the agent-memory paper.
 
 This script runs the complete benchmark suite as described in the paper:
 - Context lengths: 1K, 2K, 4K, 8K, 16K, 32K tokens
@@ -128,7 +130,7 @@ def build_followup(messages: list[dict], response: str, output_tokens: int) -> d
 
 
 class SemanticClient:
-    """Client for semantic server OpenAI-compatible API."""
+    """Client for agent-memory server OpenAI-compatible API."""
 
     def __init__(self, base_url: str):
         self.base_url = base_url
@@ -248,7 +250,7 @@ class SemanticClient:
 
 
 def get_memory_usage() -> float:
-    """Get current memory usage of semantic server process."""
+    """Get current memory usage of agent-memory server process."""
     try:
         result = subprocess.run(
             ["lsof", f"-ti:{SERVER_PORT}"],
@@ -279,7 +281,7 @@ def get_cache_size() -> float:
 
 
 def kill_all_servers():
-    """Kill any running semantic servers."""
+    """Kill any running agent-memory servers."""
     try:
         subprocess.run(["pkill", "-9", "-f", "agent-memory serve"],
                       capture_output=True, timeout=5)
@@ -297,8 +299,8 @@ def kill_all_servers():
 
 
 def start_server() -> subprocess.Popen:
-    """Start semantic server and wait for ready."""
-    print(f"Starting semantic server with {MODEL_ID}...")
+    """Start agent-memory server and wait for ready."""
+    print(f"Starting agent-memory server with {MODEL_ID}...")
 
     # Clear cache directory
     cache_dir = Path.home() / ".agent_memory" / "caches"

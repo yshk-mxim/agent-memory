@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Yakov Shkolnikov and contributors
 """Property-based tests for scenario domain, Pydantic models, and template resolver."""
 
 from __future__ import annotations

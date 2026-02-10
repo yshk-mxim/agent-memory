@@ -1,4 +1,6 @@
-"""Capability benchmark suite for semantic server.
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Yakov Shkolnikov and contributors
+"""Capability benchmark suite for agent-memory server.
 
 Measures: TTFT, ITL, TPOT, E2E, decode TPS, memory pressure.
 Configs: single-request, batched, unchunked prefill.
@@ -283,7 +285,7 @@ class MemoryProbe:
 # ---------------------------------------------------------------------------
 
 class ServerManager:
-    """Start/stop semantic server subprocess."""
+    """Start/stop agent-memory server subprocess."""
 
     def __init__(self, port: int = 8399) -> None:
         self.port = port
@@ -1090,7 +1092,7 @@ class BenchmarkSuite:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Capability benchmark suite for semantic server"
+        description="Capability benchmark suite for agent-memory server"
     )
     parser.add_argument(
         "--quick", action="store_true",

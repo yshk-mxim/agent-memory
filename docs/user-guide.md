@@ -1,6 +1,6 @@
 # User Guide
 
-Comprehensive guide for using Semantic Caching API in production and development.
+Comprehensive guide for using agent-memory in production and development.
 
 ## Table of Contents
 
@@ -20,7 +20,7 @@ Comprehensive guide for using Semantic Caching API in production and development
 Start the server with default settings:
 
 ```bash
-semantic serve
+agent-memory serve
 ```
 
 This starts the server on `http://0.0.0.0:8000` with the default Gemma 3 model.
@@ -31,19 +31,19 @@ Start with custom settings:
 
 ```bash
 # Specify port
-semantic serve --port 8080
+agent-memory serve --port 8080
 
 # Specify host
-semantic serve --host 127.0.0.1
+agent-memory serve --host 127.0.0.1
 
 # Specify model
-semantic serve --model mlx-community/SmolLM2-135M-Instruct
+agent-memory serve --model mlx-community/SmolLM2-135M-Instruct
 
 # Specify log level
-semantic serve --log-level DEBUG
+agent-memory serve --log-level DEBUG
 
 # Combine options
-semantic serve --port 8080 --log-level INFO --model mlx-community/DeepSeek-Coder-V2-Lite-Instruct-4bit-mlx
+agent-memory serve --port 8080 --log-level INFO --model mlx-community/DeepSeek-Coder-V2-Lite-Instruct-4bit-mlx
 ```
 
 ### Using Environment Variables
@@ -72,7 +72,7 @@ SEMANTIC_API_KEY=your-api-key-here
 Then start the server:
 
 ```bash
-semantic serve
+agent-memory serve
 ```
 
 The server will automatically load configuration from `.env`.
@@ -90,12 +90,12 @@ curl http://localhost:8000/health
 curl http://localhost:8000/metrics
 
 # Get version
-semantic version
+agent-memory version
 ```
 
 ## API Protocols
 
-Semantic Caching API supports three API protocols:
+agent-memory supports three API protocols:
 
 ### 1. Anthropic Messages API
 
@@ -214,7 +214,7 @@ curl -X DELETE http://localhost:8000/v1/agents/my-agent
 
 ## Tool Calling
 
-Semantic Caching API supports tool calling for both Anthropic and OpenAI formats.
+agent-memory supports tool calling for both Anthropic and OpenAI formats.
 
 ### Anthropic Tool Use
 
@@ -648,7 +648,7 @@ Caches are automatically persisted to disk:
 ~/.agent_memory/caches/
 
 # Custom location (via env var)
-SEMANTIC_AGENT_CACHE_DIR=/var/lib/semantic/caches
+SEMANTIC_AGENT_CACHE_DIR=/var/lib/agent_memory/caches
 ```
 
 Cache files are named by agent ID and include metadata about the model.
@@ -706,10 +706,10 @@ Configure log level:
 
 ```bash
 # Via CLI
-semantic serve --log-level DEBUG
+agent-memory serve --log-level DEBUG
 
 # Via environment variable
-SEMANTIC_SERVER_LOG_LEVEL=DEBUG semantic serve
+SEMANTIC_SERVER_LOG_LEVEL=DEBUG agent-memory serve
 ```
 
 **Log levels**:
@@ -796,7 +796,7 @@ SEMANTIC_SERVER_LOG_LEVEL=DEBUG semantic serve
 
 ### Getting Help
 
-1. **Check logs**: `semantic serve --log-level DEBUG`
+1. **Check logs**: `agent-memory serve --log-level DEBUG`
 2. **Review documentation**: See [Configuration Guide](configuration.md)
 3. **Check GitHub issues**: Report bugs and feature requests
 4. **Test with minimal example**: Isolate the problem
@@ -835,5 +835,5 @@ SEMANTIC_SERVER_LOG_LEVEL=DEBUG semantic serve
 
 - [Configuration Guide](configuration.md) - Complete configuration reference
 - [API Reference](api-reference.md) - Detailed API documentation
-- [Model Onboarding](model-onboarding.md) - Adding new models
+- [Adding Models](developer/adding-models.md) - Adding new models
 - [Deployment Guide](deployment.md) - Production deployment

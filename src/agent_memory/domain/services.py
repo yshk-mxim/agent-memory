@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright (c) 2026 Yakov Shkolnikov and contributors
 """Domain services for business logic that doesn't belong to entities.
 
 Services encapsulate domain logic that involves multiple entities or
