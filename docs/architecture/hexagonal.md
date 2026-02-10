@@ -12,7 +12,7 @@ graph TB
     subgraph Inbound Adapters ["Inbound Adapters (driving)"]
         direction TB
         OA["OpenAI Adapter<br>POST /v1/chat/completions<br>Streaming + non-streaming"]
-        AN["Anthropic Adapter<br>POST /v1/messages<br>(non-functioning)"]
+        AN["Anthropic Adapter<br>POST /v1/messages"]
         CO["Coordination Adapter<br>POST /v1/coordinate<br>Multi-agent sessions"]
         DA["Direct Agent Adapter<br>Lower-level agent API"]
         AD["Admin API<br>Health, metrics, model swap"]

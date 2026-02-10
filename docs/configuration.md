@@ -21,7 +21,7 @@ SEMANTIC_MLX_MAX_BATCH_SIZE=5
 
 # Agent Cache Configuration
 SEMANTIC_AGENT_MAX_AGENTS_IN_MEMORY=5
-SEMANTIC_AGENT_CACHE_DIR=~/.semantic/caches
+SEMANTIC_AGENT_CACHE_DIR=~/.agent_memory/caches
 
 # Server Configuration
 SEMANTIC_SERVER_HOST=0.0.0.0
@@ -78,7 +78,7 @@ Control agent cache lifecycle and persistence.
 | Variable | Type | Default | Description |
 |----------|------|---------|-------------|
 | `SEMANTIC_AGENT_MAX_AGENTS_IN_MEMORY` | int | `5` | Maximum agents with hot caches (1-50) |
-| `SEMANTIC_AGENT_CACHE_DIR` | string | `~/.semantic/caches` | Directory for persistent cache storage |
+| `SEMANTIC_AGENT_CACHE_DIR` | string | `~/.agent_memory/caches` | Directory for persistent cache storage |
 | `SEMANTIC_AGENT_BATCH_WINDOW_MS` | int | `10` | Batch collection window in milliseconds (1-1000) |
 | `SEMANTIC_AGENT_LRU_EVICTION_ENABLED` | bool | `true` | Enable LRU eviction when max_agents exceeded |
 | `SEMANTIC_AGENT_EVICT_TO_DISK` | bool | `true` | Persist evicted caches to disk (warm tier) |

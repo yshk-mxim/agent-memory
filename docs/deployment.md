@@ -100,7 +100,7 @@ SEMANTIC_MLX_DEFAULT_TEMPERATURE=0.7
 
 # Agent Cache Configuration
 SEMANTIC_AGENT_MAX_AGENTS_IN_MEMORY=5
-SEMANTIC_AGENT_CACHE_DIR=~/.semantic/caches
+SEMANTIC_AGENT_CACHE_DIR=~/.agent_memory/caches
 SEMANTIC_AGENT_BATCH_WINDOW_MS=10
 SEMANTIC_AGENT_LRU_EVICTION_ENABLED=true
 SEMANTIC_AGENT_EVICT_TO_DISK=true
@@ -123,10 +123,10 @@ SEMANTIC_ADMIN_KEY=your-secure-admin-key-here
 
 ```bash
 # Create cache directory
-mkdir -p ~/.semantic/caches
+mkdir -p ~/.agent_memory/caches
 
 # Verify permissions
-ls -la ~/.semantic/caches
+ls -la ~/.agent_memory/caches
 
 # Optional: Custom location
 mkdir -p /path/to/custom/caches
@@ -276,7 +276,7 @@ Create a launchd plist for automatic startup:
 sed -i '' 's/YOUR_USERNAME/'"$(whoami)"'/g' ~/Library/LaunchAgents/com.semantic.server.plist
 
 # Create log directory
-mkdir -p ~/.semantic/logs
+mkdir -p ~/.agent_memory/logs
 
 # Load service
 launchctl load ~/Library/LaunchAgents/com.semantic.server.plist
@@ -285,7 +285,7 @@ launchctl load ~/Library/LaunchAgents/com.semantic.server.plist
 launchctl list | grep semantic
 
 # View logs
-tail -f ~/.semantic/logs/semantic.log
+tail -f ~/.agent_memory/logs/semantic.log
 
 # Stop service
 launchctl unload ~/Library/LaunchAgents/com.semantic.server.plist
@@ -564,7 +564,7 @@ block in proto tcp to any port 8000
    ```
 4. View service logs:
    ```bash
-   tail -f ~/.semantic/logs/semantic.error.log
+   tail -f ~/.agent_memory/logs/semantic.error.log
    ```
 
 ## Best Practices
@@ -574,7 +574,7 @@ block in proto tcp to any port 8000
 3. **Enable Monitoring**: Use Prometheus for metrics
 4. **Rotate Logs**: Prevent disk space issues
 5. **Use API Keys**: Secure production deployments
-6. **Backup Caches**: Periodically backup `~/.semantic/caches/`
+6. **Backup Caches**: Periodically backup `~/.agent_memory/caches/`
 7. **Update Regularly**: Keep dependencies current
 8. **Test Before Deploy**: Validate with SmolLM2 first
 

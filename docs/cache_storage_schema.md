@@ -9,7 +9,7 @@ Agent caches are persisted to disk in [safetensors](https://github.com/huggingfa
 Each agent's cache is stored as a single `.safetensors` file:
 
 ```
-~/.semantic/caches/<agent_id>.safetensors
+~/.agent_memory/caches/<agent_id>.safetensors
 ```
 
 ## Metadata Fields

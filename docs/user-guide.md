@@ -63,7 +63,7 @@ SEMANTIC_MLX_MAX_BATCH_SIZE=5
 
 # Agent cache settings
 SEMANTIC_AGENT_MAX_AGENTS_IN_MEMORY=5
-SEMANTIC_AGENT_CACHE_DIR=~/.semantic/caches
+SEMANTIC_AGENT_CACHE_DIR=~/.agent_memory/caches
 
 # Security (optional)
 SEMANTIC_API_KEY=your-api-key-here
@@ -645,7 +645,7 @@ Caches are automatically persisted to disk:
 
 ```bash
 # Default location
-~/.semantic/caches/
+~/.agent_memory/caches/
 
 # Custom location (via env var)
 SEMANTIC_AGENT_CACHE_DIR=/var/lib/semantic/caches

@@ -107,7 +107,7 @@ Semantic uses sensible defaults. No configuration needed for basic usage.
 
 ### Custom Configuration (Advanced)
 
-Create `~/.semantic/config.toml`:
+Create `~/.agent_memory/config.toml`:
 
 ```toml
 [model]
@@ -116,7 +116,7 @@ max_batch_size = 5
 block_tokens = 256
 
 [cache]
-cache_dir = "~/.semantic/caches"
+cache_dir = "~/.agent_memory/caches"
 max_agents_in_memory = 5
 batch_window_ms = 10
 
@@ -128,7 +128,7 @@ port = 8000
 ### Environment Variables
 
 ```bash
-export SEMANTIC_CACHE_DIR="~/.semantic/caches"
+export SEMANTIC_CACHE_DIR="~/.agent_memory/caches"
 export SEMANTIC_MAX_BATCH_SIZE=5
 ```
 
@@ -213,11 +213,11 @@ pip install pre-commit
 pre-commit install
 ```
 
-### Permission denied on ~/.semantic/
+### Permission denied on ~/.agent_memory/
 
 **Solution**: Create directory with correct permissions:
 ```bash
-mkdir -p ~/.semantic/caches
+mkdir -p ~/.agent_memory/caches
 chmod 755 ~/.semantic
 ```
 

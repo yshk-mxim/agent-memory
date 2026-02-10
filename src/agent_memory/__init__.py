@@ -1,4 +1,4 @@
-"""Semantic: Production-quality multi-agent LLM inference server.
+"""agent-memory: Persistent KV cache for multi-agent LLM systems on Apple Silicon.
 
 Block-pool memory management with hexagonal architecture.
 
@@ -11,7 +11,7 @@ Architecture: Hexagonal (Ports & Adapters)
 - Ports: Protocol-based interfaces
 - Adapters: Infrastructure bindings (MLX, FastAPI, safetensors)
 
-For details, see project/architecture/ADR-001-hexagonal-architecture.md.
+For details, see docs/architecture/hexagonal.md.
 """
 
 __version__ = "1.0.0"

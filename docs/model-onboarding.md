@@ -573,7 +573,7 @@ print(f"Blocks: {num_blocks}")
 **Solutions**:
 1. Verify cache directory is writable:
    ```bash
-   ls -la ~/.semantic/caches/
+   ls -la ~/.agent_memory/caches/
    ```
 2. Check agent ID consistency
 3. Verify model tag matches:

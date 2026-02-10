@@ -59,7 +59,7 @@ Python 3.10, 3.11, or 3.12. Python 3.9 and earlier are not supported.
 
 ### Where are caches stored?
 
-Default: `~/.semantic/caches/`
+Default: `~/.agent_memory/caches/`
 
 Configure via:
 ```bash
@@ -333,7 +333,7 @@ SEMANTIC_MLX_MODEL_ID=mlx-community/SmolLM2-135M-Instruct
 **Check**:
 1. Same session_id across requests
 2. Message history matches exactly
-3. Cache directory is writable: `ls -la ~/.semantic/caches/`
+3. Cache directory is writable: `ls -la ~/.agent_memory/caches/`
 4. Model tag hasn't changed
 
 ### Slow generation

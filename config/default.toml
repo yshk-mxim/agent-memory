@@ -16,7 +16,7 @@ cache_budget_mb = 8192  # 8GB for large context support
 
 [agent]
 max_agents_in_memory = 5
-cache_dir = "~/.semantic/caches"
+cache_dir = "~/.agent_memory/caches"
 batch_window_ms = 10
 eviction_policy = "lru"  # Options: lru, lru_3tier (upgrade if profiling shows need)
 
@@ -31,7 +31,7 @@ worker_count = 1  # Single worker (one model instance per process)
 level = "INFO"  # DEBUG, INFO, WARNING, ERROR
 format = "json"  # json, console
 output = "stdout"  # stdout, file
-file_path = "~/.semantic/logs/semantic.log"
+file_path = "~/.agent_memory/logs/semantic.log"
 
 [metrics]
 enabled = true

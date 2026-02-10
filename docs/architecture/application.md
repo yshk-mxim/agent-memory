@@ -52,7 +52,7 @@ class AgentCacheStore:
 ```python
 store = AgentCacheStore(
     max_agents_in_memory=5,
-    cache_dir=Path("~/.semantic/caches"),
+    cache_dir=Path("~/.agent_memory/caches"),
     model_tag="gemma-3-12b-it-4bit",
 )
 

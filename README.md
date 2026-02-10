@@ -73,7 +73,7 @@ The server supports batch=2 concurrent inference with a scheduler that interleav
 | Gemma 3 12B IT | Q4, 6.5 GB | Hybrid attention: 8 global + 40 sliding window layers |
 | DeepSeek-Coder-V2-Lite | Q4, 8 GB | MLA with asymmetric K=192/V=128 dims |
 
-Adding a new model requires a TOML config in `config/models/` and verifying the spec extractor detects its attention architecture. See `docs/model-onboarding.md`.
+Adding a new model requires a TOML config in `config/models/` and verifying the spec extractor detects its attention architecture. See `docs/developer/adding-models.md`.
 
 ## Configuration
 
@@ -82,7 +82,7 @@ All configuration via environment variables:
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `SEMANTIC_MLX_MODEL_ID` | Gemma 3 12B IT Q4 | HuggingFace model ID |
-| `SEMANTIC_MLX_CACHE_BUDGET_MB` | 2048 | Max GPU memory for KV caches (MB) |
+| `SEMANTIC_MLX_CACHE_BUDGET_MB` | 8192 | Max GPU memory for KV caches (MB) |
 | `SEMANTIC_MLX_MAX_BATCH_SIZE` | 2 | Max concurrent sequences |
 | `SEMANTIC_MLX_SCHEDULER_ENABLED` | true | Enable concurrent scheduler |
 | `SEMANTIC_ADMIN_KEY` | (none) | Admin API authentication key |

@@ -309,7 +309,7 @@ Outbound adapters connect application layer to external systems.
 **Location**: Integrated in `AgentCacheStore`
 
 **Operations**:
-- Save cache to `~/.semantic/caches/{agent_id}.cache`
+- Save cache to `~/.agent_memory/caches/{agent_id}.cache`
 - Load cache from disk
 - List cached agents
 - Delete cache files
