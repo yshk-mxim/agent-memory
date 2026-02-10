@@ -609,13 +609,13 @@ Our group size of 64 is within the range showing negligible degradation across a
 \section{Staggered Arrivals}
 \label{app:staggered}
 
-Real multi-agent workflows have staggered request arrivals. We simulate: User~A submits at $t{=}0$ (4K cold context), User~B submits at $t{=}2$s (4K cold context).
+Real multi-agent workflows have staggered request arrivals. A single user may trigger multiple agents in sequence: Agent~A begins at $t{=}0$ (4K cold context), Agent~B begins at $t{=}2$s (4K cold context).
 
 \input{figures/fig_staggered}
 
-In sequential mode, User~B waits for User~A to complete before starting. In batched mode, User~B joins User~A's batch and begins prefill immediately.
+In sequential mode, Agent~B waits for Agent~A to complete before starting. In batched mode, Agent~B joins Agent~A's batch and begins prefill immediately.
 
-For Gemma, total wall time is similar (38.8\,s sequential vs 38.6\,s batched). For DeepSeek, also similar (9.5\,s vs 9.4\,s). The benefit of batching appears in User~B's time-to-completion: DeepSeek batched User~B finishes in 6.4\,s vs 8.7\,s sequential from experiment start (includes both queuing and processing time). The effect is smaller for Gemma because its prefill is long enough to dominate. With warm or hot caches, the staggered benefit would be larger since prefill overhead vanishes and decode interleaving matters more.
+For Gemma, total wall time is similar (38.8\,s sequential vs 38.6\,s batched). For DeepSeek, also similar (9.5\,s vs 9.4\,s). The benefit of batching appears in Agent~B's time-to-completion: DeepSeek batched Agent~B finishes in 6.4\,s vs 8.7\,s sequential from experiment start (includes both queuing and processing time). The effect is smaller for Gemma because its prefill is long enough to dominate. With warm or hot caches, the staggered benefit would be larger since prefill overhead vanishes and decode interleaving matters more.
 
 \section{Hardware Landscape}
 \label{app:hardware}

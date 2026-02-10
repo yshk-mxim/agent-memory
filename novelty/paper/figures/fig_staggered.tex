@@ -37,14 +37,14 @@
 };
 \addlegendentry{Total wall time}
 
-% User B perceived TTFT (from B's submission to B's first token)
+% Agent B perceived TTFT (from B's submission to B's first token)
 \addplot[fill=orange!40, draw=orange!90!black, line width=0.8pt] coordinates {
     (Gemma Seq, 36.5)
     (Gemma Bat, 33.8)
     (DeepSeek Seq, 8.7)
     (DeepSeek Bat, 6.4)
 };
-\addlegendentry{User B wait (submit to first token)}
+\addlegendentry{Agent B wait (submit to first token)}
 
 % Annotations
 \node[font=\scriptsize, text=blue!70!black, anchor=south] at (axis cs:Gemma Bat,39.5) {0.5\% faster};
@@ -52,6 +52,6 @@
 
 \end{axis}
 \end{tikzpicture}
-\caption{Staggered request arrivals (4K cold context, User B arrives 2s after User A). Total wall time is similar between sequential and batched modes for both models. User B benefits from batched scheduling because it begins prefill immediately rather than waiting for User A's decode phase to complete. The effect is larger on DeepSeek due to shorter prefill relative to decode.}
+\caption{Staggered request arrivals (4K cold context, Agent B arrives 2s after Agent A). Total wall time is similar between sequential and batched modes for both models. Agent B benefits from batched scheduling because it begins prefill immediately rather than waiting for Agent A's decode phase to complete. The effect is larger on DeepSeek due to shorter prefill relative to decode.}
 \label{fig:staggered}
 \end{figure}
