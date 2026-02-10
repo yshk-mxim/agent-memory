@@ -5,16 +5,16 @@ The style file: plainnat.bst
 Database file #1: semantic_colm2026.bib
 You've used 31 entries,
             2773 wiz_defined-function locations,
-            730 strings with 11667 characters,
-and the built_in function-call counts, 17471 in all, are:
-= -- 1362
+            729 strings with 11546 characters,
+and the built_in function-call counts, 17457 in all, are:
+= -- 1359
 > -- 1548
 < -- 17
 + -- 527
 - -- 492
-* -- 1476
-:= -- 2805
-add.period$ -- 107
+* -- 1474
+:= -- 2802
+add.period$ -- 106
 call.type$ -- 31
 change.case$ -- 249
 chr.to.int$ -- 27
@@ -22,13 +22,13 @@ cite$ -- 62
 duplicate$ -- 696
 empty$ -- 1177
 format.name$ -- 529
-if$ -- 3571
+if$ -- 3568
 int.to.chr$ -- 5
 int.to.str$ -- 1
 missing$ -- 30
-newline$ -- 176
+newline$ -- 175
 num.names$ -- 124
-pop$ -- 570
+pop$ -- 571
 preamble$ -- 1
 purify$ -- 219
 quote$ -- 0
@@ -43,4 +43,4 @@ type$ -- 336
 warning$ -- 0
 while$ -- 101
 width$ -- 0
-write$ -- 414
+write$ -- 412

@@ -146,9 +146,8 @@ Zirui Liu, Jiayi Yuan, Hongye Jin, Shaochen Zhong, Zhaozhuo Xu, Vladimir
 {NDSS 2025 Authors}.
 \newblock I know what you asked: Prompt leakage via kv-cache sharing in
   multi-tenant llm serving.
-\newblock In \emph{Network and Distributed System Security Symposium}, 2025.
-\newblock URL
-  \url{https://www.ndss-symposium.org/ndss-paper/i-know-what-you-asked-prompt-leakage-via-kv-cache-sharing-in-multi-tenant-llm-serving/}.
+\newblock In \emph{Network and Distributed System Security Symposium (NDSS)},
+  2025.
 
 \bibitem[Nielsen(1993)]{nielsen1993}
 Jakob Nielsen.

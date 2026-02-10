@@ -37,15 +37,15 @@
 \node[cylinder, draw=black, fill=yellow!20, minimum width=1.5cm, minimum height=0.8cm, shape border rotate=90, font=\scriptsize, below=0.6cm of bp] (disk) {safetensors};
 \draw[arrow] (bp) -- (disk);
 
-% Key differences annotations
-\node[font=\tiny, align=left, text=blue!70!black, anchor=north west] at (-4.5, -1.2) {
+% Key differences annotations (below disk)
+\node[font=\tiny, align=left, text=blue!70!black, anchor=north west] at (-4.5, -2.2) {
     Gemma challenges:\\
     -- 5D mask for GQA broadcast\\
     -- Sliding window in chunked prefill\\
     -- clip\_residual monkeypatch
 };
 
-\node[font=\tiny, align=left, text=red!70!black, anchor=north east] at (4.5, -1.2) {
+\node[font=\tiny, align=left, text=red!70!black, anchor=north east] at (4.5, -2.2) {
     DeepSeek challenges:\\
     -- Asymmetric K/V dimensions\\
     -- MoE intermediate memory\\
