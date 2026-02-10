@@ -44,14 +44,14 @@
     (DeepSeek Seq, 8.7)
     (DeepSeek Bat, 6.4)
 };
-\addlegendentry{User B wait (submit $\to$ first token)}
+\addlegendentry{User B wait (submit to first token)}
 
 % Annotations
 \node[font=\scriptsize, text=blue!70!black, anchor=south] at (axis cs:Gemma Bat,39.5) {0.5\% faster};
-\node[font=\scriptsize, text=orange!80!black, anchor=south] at (axis cs:DeepSeek Bat,7.5) {1.36$\times$ faster};
+\node[font=\scriptsize, text=orange!80!black, anchor=south] at (axis cs:DeepSeek Bat,7.5) {$1.36\times$ faster};
 
 \end{axis}
 \end{tikzpicture}
-\caption{Staggered request arrivals (4K cold context, User B arrives 2s after User A). Total wall time is similar between sequential and batched modes for both models. User B benefits from batched scheduling because it begins prefill immediately rather than waiting for User A's decode phase to complete. The effect is larger on DeepSeek (1.36$\times$) due to shorter prefill relative to decode.}
+\caption{Staggered request arrivals (4K cold context, User B arrives 2s after User A). Total wall time is similar between sequential and batched modes for both models. User B benefits from batched scheduling because it begins prefill immediately rather than waiting for User A's decode phase to complete. The effect is larger on DeepSeek due to shorter prefill relative to decode.}
 \label{fig:staggered}
 \end{figure}
