@@ -1295,10 +1295,22 @@ def load_resume(paths: list[Path]) -> set[str]:
 
 
 def _measurement_key(m: dict) -> str:
-    """Unique key for deduplication."""
+    """Unique key for deduplication (includes full pass_id with timestamp)."""
     return (
         f"{m.get('cache_state', '')}_{m.get('context_tokens', '')}_"
         f"{m.get('mode', '')}_{m.get('batch_size', '')}_{m.get('pass_id', '')}"
+    )
+
+
+def _measurement_config_key(m: dict) -> str:
+    """Config-level key for merging (strips timestamp from pass_id).
+
+    pass_id is like 'p0_1770614494' — we only want 'p0' for dedup."""
+    pass_id = str(m.get("pass_id", ""))
+    pass_prefix = pass_id.split("_")[0] if "_" in pass_id else pass_id
+    return (
+        f"{m.get('cache_state', '')}_{m.get('context_tokens', '')}_"
+        f"{m.get('mode', '')}_{m.get('batch_size', '')}_{pass_prefix}"
     )
 
 
@@ -1322,7 +1334,7 @@ def merge_result_files(paths: list[Path], output: Path) -> None:
             metadata = doc.get("metadata", {})
 
         for m in doc.get("measurements", []):
-            key = _measurement_key(m)
+            key = _measurement_config_key(m)
             if not key:
                 continue
             existing = all_measurements.get(key)
