@@ -7,7 +7,8 @@ set -euo pipefail
 PORT="${SEMANTIC_SERVER_PORT:-8000}"
 STREAMLIT_PORT="${STREAMLIT_PORT:-8501}"
 SERVER_URL="http://127.0.0.1:${PORT}"
-PIDS=()
+SERVER_PID=""
+DEMO_PID=""
 
 info()  { printf "\033[1;34m[INFO]\033[0m  %s\n" "$*"; }
 warn()  { printf "\033[1;33m[WARN]\033[0m  %s\n" "$*"; }
@@ -16,15 +17,14 @@ ok()    { printf "\033[1;32m[OK]\033[0m    %s\n" "$*"; }
 
 cleanup() {
     info "Shutting down..."
-    for pid in "${PIDS[@]}"; do
-        if kill -0 "$pid" 2>/dev/null; then
+    for pid in $SERVER_PID $DEMO_PID; do
+        if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
             kill -TERM "$pid" 2>/dev/null || true
         fi
     done
-    # Wait for graceful shutdown
     sleep 3
-    for pid in "${PIDS[@]}"; do
-        if kill -0 "$pid" 2>/dev/null; then
+    for pid in $SERVER_PID $DEMO_PID; do
+        if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
             kill -9 "$pid" 2>/dev/null || true
         fi
     done
@@ -38,25 +38,19 @@ if lsof -ti:"${PORT}" &>/dev/null; then
     exit 1
 fi
 
-# ── Check virtualenv ───────────────────────────────────────────────
-if [ -z "${VIRTUAL_ENV:-}" ]; then
-    if [ -d ".venv" ]; then
-        # shellcheck disable=SC1091
-        source .venv/bin/activate
-    else
-        error "No virtualenv active and .venv not found. Run scripts/setup.sh first."
-        exit 1
-    fi
+# ── Check Python environment ──────────────────────────────────────
+if [ -z "${VIRTUAL_ENV:-}" ] && [ -d ".venv" ]; then
+    # shellcheck disable=SC1091
+    source .venv/bin/activate
 fi
 
-# ── Check dependencies ─────────────────────────────────────────────
-python -c "import agent_memory" 2>/dev/null || {
-    error "agent-memory not installed. Run: pip install -e ."
+python3 -c "import agent_memory" 2>/dev/null || python -c "import agent_memory" 2>/dev/null || {
+    error "agent-memory not installed. Run: pip install -e . (or scripts/setup.sh)"
     exit 1
 }
-python -c "import streamlit" 2>/dev/null || {
+python3 -c "import streamlit" 2>/dev/null || {
     info "Installing streamlit..."
-    pip install -r demo/requirements.txt --quiet
+    pip3 install -r demo/requirements.txt --quiet
 }
 
 # ── Start server ───────────────────────────────────────────────────
@@ -66,9 +60,8 @@ info "Settings: scheduler=on, batch=2, cache_budget=8192 MB, T=0.3 (hardcoded)"
 
 SEMANTIC_MLX_SCHEDULER_ENABLED=true \
 SEMANTIC_MLX_MAX_BATCH_SIZE=2 \
-python -m agent_memory.entrypoints.cli serve --port "${PORT}" &
+python3 -m agent_memory.entrypoints.cli serve --port "${PORT}" &
 SERVER_PID=$!
-PIDS+=("$SERVER_PID")
 
 # ── Wait for readiness ─────────────────────────────────────────────
 info "Waiting for server to load model and become ready..."
@@ -97,7 +90,7 @@ fi
 ok "Server ready on ${SERVER_URL}"
 
 # ── Quick health info ──────────────────────────────────────────────
-MODEL_INFO=$(curl -sf "${SERVER_URL}/v1/models" 2>/dev/null | python -c "
+MODEL_INFO=$(curl -sf "${SERVER_URL}/v1/models" 2>/dev/null | python3 -c "
 import sys, json
 data = json.load(sys.stdin)
 models = data.get('data', [])
@@ -116,7 +109,6 @@ fi
 info "Starting Streamlit demo on port ${STREAMLIT_PORT}..."
 streamlit run demo/app.py --server.port "${STREAMLIT_PORT}" --server.headless true &
 DEMO_PID=$!
-PIDS+=("$DEMO_PID")
 
 sleep 2
 ok "Demo running at http://localhost:${STREAMLIT_PORT}"
