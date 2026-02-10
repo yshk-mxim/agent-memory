@@ -104,10 +104,12 @@ python -m agent_memory.entrypoints.cli serve --port 8000
 One script launches the inference server with Gemma 3 12B (recommended settings) and opens the Streamlit demo:
 
 ```bash
-scripts/launch.sh
+scripts/launch.sh                # server + demo UI
+scripts/launch.sh --server-only  # server only, no Streamlit
+scripts/launch.sh --stop         # stop running server + demo
 ```
 
-This starts the server on port 8000 (scheduler on, batch=2, 8 GB cache budget, T=0.3) and the demo UI on port 8501. Press Ctrl+C to stop both. Override ports with `SEMANTIC_SERVER_PORT` and `STREAMLIT_PORT`.
+This starts the server on port 8000 (scheduler on, batch=2, 8 GB cache budget, T=0.3) and the demo UI on port 8501. Press Ctrl+C to stop both with graceful shutdown (persists KV caches, releases GPU memory). If instances are already running, the script detects them and offers to shut them down first. Override ports with `SEMANTIC_SERVER_PORT` and `STREAMLIT_PORT`.
 
 For first-time setup (venv, dependencies, HuggingFace login, model download):
 
