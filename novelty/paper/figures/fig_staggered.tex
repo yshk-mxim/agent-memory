@@ -1,50 +1,57 @@
-% Figure 3: Staggered Arrivals
-% pgfplots grouped bar chart: User A penalty vs User B benefit
-% Sequential vs Batched
+% Figure: Staggered Arrivals — Both Models
+% Data: colm_full_{gemma,deepseek}_merged.json staggered section
+% Gemma: sequential A=17036 B=16426 (B waits for A+gen) | batched A=17075 B=33792 (B joins batch)
+% DeepSeek: sequential A=3862 B=3706 | batched A=3852 B=6422
+% Note: Both use cold cache, 4K context. "Sequential" means B waits for A to finish entirely.
+% In sequential mode, B_delay ~= A_e2e (B doesn't start until A completes).
+% In batched mode, B starts 2s after A and joins the batch.
 
 \begin{figure}[t]
 \centering
 \begin{tikzpicture}
 \begin{axis}[
-    width=0.85\linewidth,
+    width=0.95\linewidth,
     height=5.5cm,
     ybar,
-    bar width=0.6cm,
-    xlabel={Scenario},
-    ylabel={TTFT (seconds)},
-    symbolic x coords={User A, User B, Total},
+    bar width=0.45cm,
+    xlabel={},
+    ylabel={Wall-clock time (seconds)},
+    symbolic x coords={Gemma Seq, Gemma Bat, DeepSeek Seq, DeepSeek Bat},
     xtick=data,
-    ymin=0, ymax=40,
-    enlarge x limits=0.25,
-    legend pos=north west,
+    xticklabel style={font=\small, align=center},
+    ymin=0, ymax=45,
+    enlarge x limits=0.2,
+    legend pos=north east,
     legend style={font=\small},
     grid=major,
     grid style={line width=.1pt, draw=gray!20},
+    nodes near coords style={font=\tiny, /pgf/number format/fixed, /pgf/number format/precision=1},
 ]
 
-% Sequential serving - blue (colorblind-safe)
-\addplot[fill=blue!30, draw=blue!80!black, line width=1pt] coordinates {
-    (User A, 7.0)
-    (User B, 24.5)
-    (Total, 31.5)
+% Total wall time
+\addplot[fill=blue!25, draw=blue!80!black, line width=0.8pt] coordinates {
+    (Gemma Seq, 38.8)
+    (Gemma Bat, 38.6)
+    (DeepSeek Seq, 9.5)
+    (DeepSeek Bat, 9.4)
 };
-\addlegendentry{Sequential}
+\addlegendentry{Total wall time}
 
-% Batched serving - orange (colorblind-safe)
-\addplot[fill=orange!40, draw=orange!90!black, line width=1pt] coordinates {
-    (User A, 7.3)
-    (User B, 9.6)
-    (Total, 16.9)
+% User B perceived TTFT (from B's submission to B's first token)
+\addplot[fill=orange!40, draw=orange!90!black, line width=0.8pt] coordinates {
+    (Gemma Seq, 36.5)
+    (Gemma Bat, 33.8)
+    (DeepSeek Seq, 8.7)
+    (DeepSeek Bat, 6.4)
 };
-\addlegendentry{Batched}
+\addlegendentry{User B wait (submit $\to$ first token)}
 
-% Annotations - positioned above bars with better spacing, colorblind-safe colors
-\node[font=\footnotesize, text=violet!80!black] at (axis cs:User A,10.5) {4\% penalty};
-\node[font=\footnotesize, text=orange!90!black] at (axis cs:User B,27) {2.6$\times$ faster};
-\node[font=\footnotesize, text=orange!90!black] at (axis cs:Total,35) {1.86$\times$ total};
+% Annotations
+\node[font=\scriptsize, text=blue!70!black, anchor=south] at (axis cs:Gemma Bat,39.5) {0.5\% faster};
+\node[font=\scriptsize, text=orange!80!black, anchor=south] at (axis cs:DeepSeek Bat,7.5) {1.36$\times$ faster};
 
 \end{axis}
 \end{tikzpicture}
-\caption{Staggered request arrivals (both users 4K context). User A submits at t=0, User B at t=2s. Sequential serving forces User B to wait for User A's completion (24.5s TTFT). Batched serving provides 2.6$\times$ speedup for User B at minimal cost to User A (4\% penalty). Net total TTFT improves 1.86$\times$.}
+\caption{Staggered request arrivals (4K cold context, User B arrives 2s after User A). Total wall time is similar between sequential and batched modes for both models. User B benefits from batched scheduling because it begins prefill immediately rather than waiting for User A's decode phase to complete. The effect is larger on DeepSeek (1.36$\times$) due to shorter prefill relative to decode.}
 \label{fig:staggered}
 \end{figure}

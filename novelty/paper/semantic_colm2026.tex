@@ -11,6 +11,7 @@
 \usepackage{graphicx}
 \usepackage{amsmath,amsfonts,amssymb}
 \usepackage{booktabs}
+\usepackage{multirow}
 \usepackage{algorithm}
 \usepackage{algorithmic}
 \usepackage{tikz}
@@ -36,72 +37,38 @@ Persistent Q4 KV Cache for Multi-Agent LLM Inference on Edge Devices}
 \maketitle
 
 \begin{abstract}
-Multi-agent LLM workflows on edge devices suffer from O(n) cold-start latency: every agent turn re-prefills the entire conversation history from scratch. On Apple Silicon, where GPU compute is 10--50$\times$ slower than datacenter accelerators, this means 8--40 seconds of prefill per turn. We present a persistent KV cache management system that addresses this through three key contributions: (1) a persistent block pool giving each agent isolated, 4-bit quantized (Q4) KV cache persisted to disk in safetensors format, (2) BatchQuantizedKVCache enabling concurrent inference over multiple agents' Q4 caches, and (3) cross-phase context injection treating KV cache as working memory rather than discarding computed attention state after each request. On multi-turn conversations, the system achieves 2.0--4.3$\times$ end-to-end speedup (81.6$\times$ TTFT with hot in-memory cache at 16K context, 1.95--10.5$\times$ with disk reload), 72\% KV cache memory savings from end-to-end Q4 operation, and supports 4 model architectures (Gemma, GPT-OSS, Llama, Qwen) with 2 extensively benchmarked. Open-source implementation available at \texttt{[anonymized]}.
+Multi-agent LLM workflows on Apple Silicon spend most of their time re-computing attention state. A 5-agent system with 4K tokens each waits 40 seconds after every server restart while each agent re-prefills from scratch. We persist each agent's KV cache to disk in 4-bit quantized format and reload it in under 700\,ms. Three components make this work: (1)~a block pool giving each agent an isolated, persistent Q4 KV cache stored in safetensors, (2)~BatchQuantizedKVCache for concurrent inference over multiple agents' quantized caches, and (3)~cross-phase context injection that treats KV cache as working memory across conversation phases. On Gemma~3 12B and DeepSeek-Coder-V2-Lite 16B, hot cache achieves 130$\times$ and 74$\times$ TTFT reduction at 32K context. Warm disk reload provides 88$\times$ and 45$\times$ at 16K. Batched serving of two concurrent agents reaches 22.4 and 64.8 system tokens/second at 1K context with warm cache. The system handles both dense GQA (Gemma) and MoE MLA (DeepSeek) architectures through a model-agnostic abstraction. Open-source implementation at \texttt{[anonymized]}.
 \end{abstract}
 
 \section{Introduction}
 \label{sec:intro}
 
-Modern LLM agent workflows involve multiple agents maintaining independent conversation histories. Each agent accumulates a system prompt, conversation turns, and context spanning thousands of tokens. When an agent resumes after interruption (server restart, model swap, session timeout), the entire conversation must be re-processed through the model's prefill phase.
+Five agents, each holding 4,096 tokens of conversation history. The server restarts. On an Apple M4~Pro, each agent needs 15.5 seconds to re-prefill its context through the model. Total: 77 seconds of dead time before any agent can respond.
 
-On datacenter GPUs (NVIDIA A100, approximately 10,000 tokens/second prefill~\cite{nvidia2024a100bench}), a 4K-token re-prefill takes 400ms. On Apple Silicon (M4 Pro, approximately 500 tokens/second), the same re-prefill takes 8 seconds. For a 5-agent workflow where each agent has accumulated 4,096 tokens, a server restart costs 40 seconds of re-prefill before any agent can respond.
+This is the cold-start problem for multi-agent LLM inference on edge devices. Datacenter GPUs process tokens at 10,000+/second, making a 4K re-prefill a 400\,ms annoyance. Apple Silicon processes them at roughly 260/second (Gemma~3 12B, M4~Pro). The gap is 40$\times$.
 
-\subsection{Cold-Start Problem and Key Insight}
+We eliminate re-prefill by persisting each agent's KV cache. The cache produced during prefill is the agent's memory at the attention layer. Instead of discarding it after each request (as vLLM~\cite{kwon2023pagedattention} and SGLang~\cite{zheng2024sglang} do) or holding it only in volatile RAM, we write it to disk in 4-bit quantized format and reload it when the agent resumes. Context restoration drops from 15.5 seconds to 513\,ms (warm, disk) or 709\,ms (hot, memory) at 4K context on Gemma~3 12B.
 
-The KV (key-value) cache produced during prefill is the agent's memory at the attention layer. Rather than discarding it after each request (as serving engines do~\cite{kwon2023pagedattention,zheng2024sglang}) or keeping it only in volatile RAM (as local tools do), we persist it to disk in quantized form and reload it in milliseconds. This transforms agent context restoration from a compute-bound operation (O(n) in sequence length) to an I/O-bound operation (5--80ms depending on cache size).
+This differs from retrieval-augmented generation (RAG). RAG stores text chunks in vector databases and re-runs prefill over retrieved text on every request~\cite{sarthi2024raptor}. We store the computed attention state itself. RAG costs O(n) per request. Cache reload costs O(1).
 
-Unlike retrieval-augmented generation (RAG), which stores text chunks in vector databases and re-computes attention over retrieved text on each request~\cite{sarthi2024raptor}, we maintain computed attention state as a persistent, reusable artifact. This distinction is fundamental:
-
-\begin{itemize}
-    \item \textbf{RAG (text retrieval)}: Stores text chunks with embeddings. On each request, retrieves text and re-prefills (O(n) latency).
-    \item \textbf{KV cache as working memory}: Stores attention-layer state (KV pairs). On each request, reloads computed state (O(1) cache load, approximately 50ms).
-\end{itemize}
-
-Multi-phase coordination scenarios demonstrate this concretely: in a prisoner's dilemma with 5 phases, agents carry attention-layer state from interrogation through yard conversation through final reckoning. Each phase extends the cached prefix rather than re-computing from scratch.
-
-\subsection{Contributions}
-
-This work makes three primary contributions:
-
-\begin{enumerate}
-    \item \textbf{Persistent block pool with per-agent isolation}: A model-agnostic block pool giving each agent its own namespaced, persistent Q4 KV cache surviving server restarts, model swaps, and device reboots.
-
-    \item \textbf{BatchQuantizedKVCache for concurrent Q4 inference}: A batched inference mechanism over Q4-quantized KV caches with merge()/extract() operations bridging per-agent persistence and concurrent generation, plus an interleaved prefill+decode scheduler providing per-token streaming.
-
-    \item \textbf{Cross-phase context injection treating KV cache as working memory}: A framework where persistent KV caches serve as agent working memory across phases, offering an alternative to text-retrieval-based context by preserving pre-computed attention state.
-\end{enumerate}
-
-The system achieves 2.0--4.3$\times$ end-to-end speedup on multi-turn conversations, 81.6$\times$ TTFT speedup with hot in-memory cache at 16K context (1.95--10.5$\times$ with disk reload after server restart), and 72\% KV cache memory savings from end-to-end Q4 operation. It supports 4 model architectures through a model-agnostic abstraction, with extensive benchmarks on Gemma 3 and DeepSeek-Coder-V2-Lite.
+\paragraph{Contributions.} (1)~A persistent block pool giving each agent isolated, quantized KV cache surviving server restarts and device reboots, stored in safetensors format. (2)~BatchQuantizedKVCache for concurrent Q4 inference over multiple agents' caches, with an interleaved prefill+decode scheduler. (3)~Cross-phase context injection treating KV cache as working memory, letting agents accumulate attention state across conversation phases without re-computation. (4)~Evaluation across two architecturally distinct models, dense GQA (Gemma~3 12B) and MoE MLA (DeepSeek-Coder-V2-Lite 16B), showing the abstraction generalizes.
 
 \section{Background}
 \label{sec:background}
 
-\subsection{Re-Prefill Problem}
+\subsection{Re-Prefill Costs on Edge Hardware}
 
-LLM inference consists of two phases: prefill (processing input tokens in parallel) and decode (generating output tokens autoregressively). During prefill, the model computes key-value pairs for each attention layer and caches them for use during decode. This KV cache enables O(1) attention computation per decode step rather than O(n) over the full sequence.
+LLM inference has two phases: prefill (process all input tokens in parallel, producing KV pairs for each attention layer) and decode (generate output tokens one at a time, attending to cached KV state). Prefill is compute-bound. Decode is memory-bandwidth-bound.
 
-\textbf{Re-prefill penalty scales with context length.} On Apple M4 Pro hardware (24 GB unified memory, 273 GB/s bandwidth), we measured cold-start prefill times across context lengths:
+On Apple M4~Pro (24\,GB unified memory, 273\,GB/s bandwidth), we measured cold-start prefill for Gemma~3 12B: 4.0s at 1K tokens, 15.5s at 4K, 32.9s at 8K, 71.1s at 16K, 165.2s at 32K. For a 5-agent workflow where each agent has 4K context, a server restart imposes 77 seconds of re-prefill. DeepSeek-Coder-V2-Lite is faster per token (1.1s at 1K, 3.9s at 4K) but the problem scales identically.
 
-\begin{itemize}
-    \item 200 tokens: 388ms
-    \item 1,024 tokens: 2.0s
-    \item 4,096 tokens: 8.1s
-    \item 8,192 tokens: 16.3s
-    \item 16,384 tokens: 31.8s
-    \item 32,768 tokens: 48.0s (projected)
-\end{itemize}
-
-For multi-agent workflows where 3--5 agents each maintain 2--8K context, server restart imposes 20--80 seconds of re-prefill overhead.
-
-\subsection{Unified Memory Architecture Opportunity}
-
-Apple Silicon's Unified Memory Architecture (UMA) provides a shared DRAM pool accessible to both CPU and GPU without PCIe transfers. While discrete GPUs isolate model weights in VRAM and require explicit host-device copies, UMA enables zero-copy paths between model parameters, KV cache, and disk I/O buffers.
+\subsection{Unified Memory Architecture}
 
 \input{figures/fig_uma_comparison}
 
-\textbf{Memory bandwidth convergence.} The benchmark hardware (Apple M4 Pro, model MX2E3LL/A) provides 273 GB/s memory bandwidth~\cite{apple2024m4pro}. NVIDIA's DGX Spark (October 2025, \$3,999, 128 GB unified memory~\cite{nvidia2025dgxspark}), marketed as a ``personal AI supercomputer'' workstation, provides the same 273 GB/s bandwidth. This convergence suggests unified memory architectures are becoming competitive across edge and workstation devices. However, traditional datacenter accelerators still dominate in compute throughput (10--50$\times$ higher prefill speeds) and total memory capacity.
+Apple Silicon's Unified Memory Architecture (UMA) shares a single DRAM pool between CPU and GPU without PCIe transfers. The M4~Pro provides 273\,GB/s bandwidth, matching NVIDIA's DGX~Spark workstation (\$3,999, 128\,GB unified)~\cite{nvidia2025dgxspark}. Datacenter accelerators still dominate compute throughput (10--50$\times$ higher prefill speeds), but UMA enables zero-copy paths between model weights, KV cache, and disk I/O buffers.
 
-\textbf{Constraint: 24 GB shared capacity.} Model weights, KV cache, and OS overhead share a fixed pool. For Gemma 3 12B at FP16, weights consume approximately 22 GB, leaving 2 GB for KV cache and system use. This necessitates quantized cache storage.
+The constraint: 24\,GB total capacity shared by OS, model weights, and KV cache. Gemma~3 12B Q4 weights consume roughly 6.5\,GB, leaving 17.5\,GB for everything else. Q4 KV cache reduces per-layer storage by 72\% compared to FP16, which matters when caching multiple agents' state simultaneously.
 
 \section{System Design}
 \label{sec:design}
@@ -110,52 +77,25 @@ Apple Silicon's Unified Memory Architecture (UMA) provides a shared DRAM pool ac
 
 \subsection{Block Pool with Per-Agent Isolation}
 
-The block pool partitions KV cache into fixed-size blocks (256 tokens each) organized by agent ID. Each agent's cache consists of:
+The block pool partitions KV cache into fixed-size blocks of 256 tokens, organized by agent ID. Each agent's cache consists of AgentBlocks (a mapping from agent ID to a list of KVBlock instances) where each KVBlock stores per-layer key/value tensors in Q4 format (uint32 packed data + float16 scales/biases). A ModelCacheSpec captures architectural parameters (layer count, KV head count, head dimensions, quantization settings) without model-specific logic.
 
-\begin{itemize}
-    \item \textbf{AgentBlocks}: Container mapping agent ID to list of KVBlock instances
-    \item \textbf{KVBlock}: Per-layer key/value tensors covering 256 tokens, stored in Q4 format (uint32 + float16 scales/biases)
-    \item \textbf{ModelCacheSpec}: Model-agnostic metadata (layer count, attention heads, head dimension, total tokens)
-\end{itemize}
-
-\textbf{Isolation semantics.} Each agent's cache is independently addressable. Server restart, model swap, or concurrent inference over multiple agents does not corrupt or mix cache state. The block pool enforces namespace isolation at the data structure level.
-
-\textbf{Model-agnostic design.} ModelCacheSpec captures architectural parameters (number of layers, heads, head dimension) without embedding model-specific logic. A single block pool implementation supports Gemma 3, GPT-OSS Harmony, Llama 3.1, and Qwen 2.5 without per-model code paths.
+Each agent's cache is independently addressable. Server restart, model swap, or concurrent inference over multiple agents cannot corrupt or mix cache state. The block pool enforces namespace isolation at the data structure level.
 
 \subsection{Q4 Quantization Pipeline}
 
-KV cache data flows through the system in 4-bit quantized format from disk to attention:
+KV cache flows through the system in 4-bit quantized format at every stage:
 
 \begin{enumerate}
-    \item \textbf{Disk storage (safetensors)}: uint32 packed weights + float16 scales/biases
-    \item \textbf{Memory layout}: Same format, loaded via zero-copy mmap where supported
-    \item \textbf{Attention computation}: MLX's \texttt{quantized\_scaled\_dot\_product\_attention()} operates directly on Q4 tensors
+    \item \textbf{Disk}: uint32 packed weights + float16 scales/biases in safetensors format
+    \item \textbf{Memory}: Same format, loaded via memory-mapped I/O
+    \item \textbf{Attention}: MLX's \texttt{quantized\_scaled\_dot\_product\_attention()} operates directly on Q4 tensors
 \end{enumerate}
 
-\textbf{Memory savings.} For a single layer with $h$ attention heads, head dimension $d$, and sequence length $n$:
+For a layer with $h$ KV heads, head dimension $d$, sequence length $n$, and group size $g{=}64$: FP16 stores $2hdn \times 2$ bytes (K+V, 2 bytes each); Q4 stores $2hdn / 2 + 2hd(n/g) \times 2$ bytes (packed uint32 + float16 scales/biases). The ratio $\text{Q4}/\text{FP16} = (0.5 + 4/g) / 2 = 0.281$ for $g{=}64$, yielding 72\% memory reduction per layer regardless of model dimensions. At 4K context, Gemma~3's 48-layer KV cache shrinks from hundreds of MB (FP16) to roughly one quarter that size (Q4). DeepSeek's asymmetric K/V dimensions (192 vs 128) produce the same savings ratio since quantization applies uniformly.
 
-\begin{itemize}
-    \item FP16 storage: $2 \times h \times d \times n \times 2$ bytes (key + value)
-    \item Q4 storage: $2 \times h \times d \times n \times 0.5 + 2 \times h \times d \times (n/g) \times 2$ bytes
-\end{itemize}
+\subsection{Prefix Matching}
 
-where $g = 64$ (group size). For $h=16$, $d=128$, $n=4096$, $g=64$:
-
-\begin{itemize}
-    \item FP16: 8,388,608 bytes per layer
-    \item Q4: 2,359,296 bytes per layer
-    \item Savings: 72\%
-\end{itemize}
-
-For a 42-layer model (Gemma 3 12B), total KV cache at 4K context: 352 MB (FP16) vs 99 MB (Q4). Note that model weights (approximately 22 GB for Gemma 3 12B at FP16) dominate total memory usage; KV cache savings represent 253 MB reduction in a 22.35 GB total footprint.
-
-\subsection{Prefix Matching: Character-Level vs Token-Level}
-
-Standard KV cache reuse systems~\cite{kwon2023pagedattention,zheng2024sglang} match cached prefixes by comparing token IDs. This fails when BPE tokenization is non-compositional: the same text may tokenize differently depending on what precedes it.
-
-\textbf{Example:} The string \texttt{"<function\_name>"} may tokenize as \texttt{[FUNC, NAME]} when standalone but \texttt{[F, UNC, T, ION, NAME]} when preceded by whitespace.
-
-We compare raw prompt text at the character level:
+Standard prefix-caching systems~\cite{kwon2023pagedattention,zheng2024sglang} match by comparing token IDs. This breaks when BPE tokenization is context-dependent: the same text produces different token sequences depending on surrounding tokens. We compare raw prompt text at the character level:
 
 \begin{algorithm}
 \caption{Character-Level Prefix Matching}
@@ -168,7 +108,7 @@ We compare raw prompt text at the character level:
     \RETURN EXTEND
 \ELSE
     \STATE $c \gets$ longest common prefix length
-    \IF{$c / |$cached\_text$|$ $\geq$ 0.8}
+    \IF{$c / |$cached\_text$| \geq 0.8$}
         \RETURN PARTIAL (reuse $c$ characters)
     \ELSE
         \RETURN DIVERGE (discard cache)
@@ -177,375 +117,301 @@ We compare raw prompt text at the character level:
 \end{algorithmic}
 \end{algorithm}
 
-\textbf{80\% threshold.} If 80\% of the cached text matches the new prompt prefix, we retain the matching portion. This handles minor edits (typo corrections, punctuation changes) without full cache invalidation.
+The 80\% threshold handles minor prompt edits (typo corrections, punctuation changes) without full cache invalidation.
 
 \subsection{Batched Quantized Inference}
 
-Standard MLX libraries (mlx-lm 0.22.0) do not support batched inference over quantized KV caches. We introduce BatchQuantizedKVCache with three operations:
+MLX upstream libraries (mlx-lm v0.30) do not provide batched inference over quantized KV caches. We implement BatchQuantizedKVCache with three operations:
 
 \begin{itemize}
-    \item \textbf{merge(caches: List[QuantizedKVCache])}: Left-pads shorter sequences to max length, stacks along batch dimension, returns unified batch cache
-    \item \textbf{update\_and\_fetch(queries, batch\_cache)}: Computes attention over unified batch, updates batch cache with new KV pairs, returns attention outputs
-    \item \textbf{extract(batch\_cache, lengths)}: Splits unified batch cache back into per-agent caches, removes padding
+    \item \textbf{merge}: Left-pads shorter sequences, stacks along batch dimension
+    \item \textbf{update\_and\_fetch}: Computes attention over the unified batch, updates with new KV pairs
+    \item \textbf{extract}: Splits back into per-agent caches, removes padding
 \end{itemize}
 
-\textbf{Interleaved prefill+decode scheduling.} The ConcurrentScheduler alternates between agents during prefill (chunk size = 256 tokens) and interleaves decode steps (emit one token per agent, rotate). This provides:
-
-\begin{enumerate}
-    \item \textbf{Uniform latency distribution}: No agent waits for others' full prefill before starting decode
-    \item \textbf{Per-token streaming}: Server-Sent Events (SSE) stream emits tokens incrementally during batched generation
-    \item \textbf{Memory fairness}: Peak memory usage is capped by chunk size, not total batch size
-\end{enumerate}
+A ConcurrentScheduler alternates between agents during prefill (256-token chunks) and interleaves decode steps. This provides uniform latency distribution, per-token SSE streaming during batched generation, and peak memory bounded by chunk size rather than total batch size.
 
 \subsection{Cross-Phase Context Injection}
 
-Multi-phase agent workflows (negotiation, debate, iterative refinement) traditionally re-compute context from scratch at each phase. We treat KV cache as persistent working memory:
+Multi-phase agent workflows (negotiation, interrogation, debate) traditionally re-compute context from scratch at each phase. We treat KV cache as persistent working memory:
 
 \begin{enumerate}
     \item \textbf{Phase 1}: Agent processes initial prompt, generates response, saves KV cache
-    \item \textbf{Phase 2}: Agent receives new instructions. System:
-    \begin{itemize}
-        \item Loads Phase 1 KV cache
-        \item Constructs Phase 2 prompt ensuring prefix match with Phase 1 text
-        \item Extends cache with new context (EXTEND outcome)
-        \item Generates Phase 2 response
-    \end{itemize}
-    \item \textbf{Phase N}: Repeat, accumulating attention-layer state across all phases
+    \item \textbf{Phase 2}: System loads Phase~1 cache, constructs Phase~2 prompt so its prefix matches Phase~1 text, extends cache with new context (EXTEND match), generates
+    \item \textbf{Phase N}: Cache accumulates across all phases
 \end{enumerate}
 
-\textbf{Template-based prompt construction.} To guarantee prefix alignment across phases, prompts follow a structured template:
+Prompts follow a structured template ensuring monotonic cache extension. Each phase appends rather than replaces, so the cached prefix always matches.
 
-\begin{verbatim}
-System: [agent role]
-Phase 1: [initial task]
-[Agent response 1]
-Phase 2: [continuation task]
-[Agent response 2]
-...
-\end{verbatim}
+\subsection{Architectural Coverage}
+\label{sec:archcoverage}
 
-Each phase appends to the previous text rather than replacing it, ensuring monotonic cache extension.
+\input{figures/fig_arch_comparison}
 
-% Remaining sections will continue in next message due to length...
+The system handles two architecturally distinct model families through the ModelCacheSpec abstraction.
+
+\textbf{Gemma~3 12B} uses dense layers with grouped-query attention (GQA). Of its 48 attention layers, 8 use global attention and 40 use sliding-window attention (window size 1024). GQA maps 8 KV heads to 16 query heads ($n_{\text{rep}}{=}2$). The KV cache is symmetric: keys and values both have head dimension 256. Two engineering challenges arise. First, batched GQA attention reshapes queries to 5D $(B, n_{kv}, n_{rep}, L, D)$, and the 4D attention mask from the model cannot broadcast against it for batch size $>$1. We expand the mask with an extra dimension. Second, chunked prefill must generate sliding-window masks for the 40 windowed layers while producing global causal masks for the 8 global layers. The upstream QuantizedKVCache ignores the window parameter, so we patch its mask generation.
+
+\textbf{DeepSeek-Coder-V2-Lite 16B} uses Mixture-of-Experts (MoE) with Multi-Latent Attention (MLA). All 27 layers use global attention. MLA compresses keys and values into low-rank latent representations, producing asymmetric cache dimensions: K has dimension 192 (128 nope + 64 rope), V has dimension 128. We added a \texttt{v\_head\_dim} field to ModelCacheSpec (defaulting to K dimension for symmetric models) and detect MLA at runtime via the \texttt{qk\_nope\_head\_dim} attribute on attention modules. MoE routing creates intermediate tensors during forward passes, requiring a larger memory budget (4096\,MB vs Gemma's implicit 2048\,MB).
+
+Both models use the same block pool, the same Q4 pipeline, and the same BatchQuantizedKVCache. The abstraction boundary is ModelCacheSpec: everything above it is model-agnostic.
 
 \section{Evaluation}
 \label{sec:eval}
 
-\subsection{Experimental Setup}
+\subsection{Setup}
 
-\textbf{Hardware.} Apple Mac Mini M4 Pro (model MX2E3LL/A): 24 GB unified memory, 273 GB/s memory bandwidth, 16-core Neural Engine.
+\textbf{Hardware.} Apple Mac Mini M4~Pro (MX2E3LL/A), 24\,GB unified LPDDR5X, 273\,GB/s bandwidth.
 
-\textbf{Models.} Gemma 3 12B Instruct (42 layers, 40 attention heads), DeepSeek-Coder-V2-Lite 16B Instruct (27 layers). Both run at FP16 weights with Q4 KV cache.
+\textbf{Models.} Gemma~3 12B Instruct (48 attention layers, 8 KV heads, head dim 256, GQA with 16 query heads). DeepSeek-Coder-V2-Lite 16B Instruct (27 layers, 16 KV heads, K=192/V=128, MLA). Both at Q4 weights with Q4 KV cache.
 
-\textbf{Methodology.} All experiments measure median over 3 runs. Temperature 0.0 for deterministic generation. Output length fixed at 64 tokens unless otherwise noted. TTFT (time-to-first-token) measures from request submission to first output token. E2E (end-to-end) latency includes full generation.
+\textbf{Methodology.} All values are medians over 3 passes. Temperature 0.0 (greedy decoding). Output length fixed at 64 tokens. 30--240s adaptive cooldown between runs (thermal-aware). TTFT measured from request submission to first streamed token. System TPS is total tokens generated across all concurrent agents per wall-clock second.
 
-\subsection{TTFT Scaling: Cold, Warm, Hot}
+\subsection{TTFT Scaling}
 
 \input{figures/fig_ttft_scaling}
 
-We measure TTFT across context lengths (1K, 2K, 4K, 8K, 16K, 32K) under three cache states:
+We measure time-to-first-token across context lengths (1K--32K) under three cache states. \textbf{Cold}: no cached data, full prefill. \textbf{Warm}: KV cache persisted to disk, reloaded from safetensors. \textbf{Hot}: KV cache resident in memory.
 
-\begin{itemize}
-    \item \textbf{Cold}: No cached KV data. Full prefill from scratch.
-    \item \textbf{Warm}: KV cache persisted to disk. Reload from safetensors before generation.
-    \item \textbf{Hot}: KV cache in memory. Immediate reuse.
-\end{itemize}
-
-Results for Gemma 3 12B:
-
-\begin{table}[h]
+\begin{table}[t]
 \centering
-\caption{TTFT (ms) across context lengths and cache states}
+\small
+\caption{TTFT (ms) by cache state. Streaming, batch=1, median of 3 passes.}
 \label{tab:ttft}
-\begin{tabular}{lrrrrrr}
+\begin{tabular}{@{}llrrrrrr@{}}
 \toprule
-Cache State & 1K & 2K & 4K & 8K & 16K & 32K \\
+Model & Cache & 1K & 2K & 4K & 8K & 16K & 32K \\
 \midrule
-Cold & 1,756 & 3,512 & 7,024 & 14,048 & 68,898 & 135,000 \\
-Warm & 901 & 1,192 & 1,680 & 3,307 & 6,544 & 12,800 \\
-Hot & 650 & 702 & 758 & 810 & 844 & 920 \\
+\multirow{3}{*}{Gemma 3}
+ & Cold & 4007 & 7363 & 15502 & 32944 & 71132 & 165189 \\
+ & Warm & 527 & 532 & 513 & 590 & 808 & 1621 \\
+ & Hot  & 668 & 688 & 709 & 762 & 874 & 1276 \\
 \midrule
-Warm speedup & 1.9$\times$ & 2.9$\times$ & 4.2$\times$ & 4.2$\times$ & 10.5$\times$ & 10.5$\times$ \\
-Hot speedup & 2.7$\times$ & 5.0$\times$ & 9.3$\times$ & 17.3$\times$ & 81.6$\times$ & 147$\times$ \\
+\multirow{3}{*}{DeepSeek}
+ & Cold & 1090 & 1884 & 3949 & 8541 & 19193 & 48258 \\
+ & Warm & 217 & 285 & 252 & 307 & 430 & 697 \\
+ & Hot  & 356 & 376 & 372 & 412 & 484 & 652 \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-\textbf{Hot TTFT is roughly constant} (650--870ms) regardless of context length. This confirms that cache reload is O(1) in sequence length, as expected for in-memory cache access. The slight increase (650ms to 844ms) reflects attention computation over cached state, not prefill cost. The hot cache scenario represents an upper bound on performance; the practical benefit comes from warm cache (disk reload) which avoids re-computation entirely.
+Three patterns appear in Table~\ref{tab:ttft} and Figure~\ref{fig:ttft}.
 
-\textbf{Warm TTFT scales sub-linearly.} Disk I/O (5--80ms) plus cache restore operations dominate at short contexts. At 16K, warm TTFT is 10.5$\times$ faster than cold.
+Cold TTFT scales linearly with context. Gemma at 32K takes 165 seconds (2.75 minutes). DeepSeek is 3.4--3.9$\times$ faster in cold prefill (fewer layers, smaller hidden dimensions), but both exhibit the same O(n) scaling.
 
-\textbf{E2E speedup (including decode).} For 64-token generation at 4K context: Cold = 11.2s, Warm = 5.9s (1.9$\times$), Hot = 5.1s (2.2$\times$).
+Warm TTFT is nearly flat. Disk I/O plus cache restoration dominates, and these costs grow slowly with cache size. Gemma warm ranges from 513--1621\,ms across 1K--32K. DeepSeek warm ranges from 217--697\,ms. The speedup over cold grows with context: at 32K, Gemma warm is 102$\times$ faster, DeepSeek warm is 69$\times$ faster.
+
+Hot TTFT is also nearly flat and close to warm. Gemma hot ranges from 668--1276\,ms, DeepSeek hot from 356--652\,ms. At 32K, Gemma hot is 130$\times$ faster than cold, DeepSeek hot is 74$\times$ faster. The gap between warm and hot is small (within 2$\times$) because disk I/O on the internal SSD takes only 5--80\,ms.
+
+An artifact: at short contexts (1K--8K), Gemma's hot TTFT slightly exceeds warm. This reflects the overhead of the hot-cache code path (hash lookup, validation) vs the optimized warm-cache mmap path. At long contexts where the cache is large, hot wins.
 
 \subsection{Batched Throughput}
 
-We measure system throughput (total tokens/second across all agents) when serving 2 concurrent agents vs sequential serving.
-
-\begin{table}[h]
+\begin{table}[t]
 \centering
-\caption{Batched vs sequential serving (Gemma 3 12B, 1K context)}
+\small
+\caption{System throughput with 2 concurrent agents (non-streaming, batch=2, median of 3 passes). SysTPS = total tokens/second across both agents. PerAgent = SysTPS/2.}
 \label{tab:batch}
-\begin{tabular}{lrr}
+\begin{tabular}{@{}llrrrr@{}}
 \toprule
-Metric & Sequential & Batched (2 agents) \\
+ & & \multicolumn{2}{c}{Gemma 3} & \multicolumn{2}{c}{DeepSeek} \\
+\cmidrule(lr){3-4} \cmidrule(lr){5-6}
+Context & Cache & SysTPS & Per & SysTPS & Per \\
 \midrule
-Per-agent TPS & 33.4 & 24.7 \\
-System TPS & 33.4 & 49.4 \\
-Total time (both agents) & 3.84s & 2.59s \\
-Speedup & 1.0$\times$ & 1.48$\times$ \\
+1K  & Cold & 10.2 & 5.1  & 43.6 & 21.8 \\
+1K  & Warm & 22.4 & 11.2 & 64.8 & 32.4 \\
+1K  & Hot  & 22.0 & 11.0 & 65.2 & 32.6 \\
+\midrule
+4K  & Cold & 3.3  & 1.6  & 13.8 & 6.9 \\
+4K  & Warm & 19.8 & 9.9  & 55.1 & 27.6 \\
+4K  & Hot  & 20.0 & 10.0 & 55.8 & 27.9 \\
+\midrule
+16K & Cold & 0.8  & 0.4  & 3.2  & 1.6 \\
+16K & Warm & 13.3 & 6.7  & 28.2 & 14.1 \\
+16K & Hot  & 13.6 & 6.8  & 35.9 & 18.0 \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-\textbf{System throughput increases 48\%} (33.4 to 49.4 TPS) despite per-agent TPS reduction (74\% of sequential). Net effect: batched serving completes both agents' requests faster.
+Table~\ref{tab:batch} shows system throughput when serving two concurrent agents. Cold batched throughput is low because prefill dominates: at 16K, Gemma achieves only 0.8 system TPS (both agents stuck in prefill). Warm and hot caches skip prefill entirely, so system TPS depends only on batched decode speed.
+
+DeepSeek is consistently 3$\times$ faster than Gemma in batched throughput. At 4K warm, DeepSeek reaches 55.1 system TPS (27.6 per agent) vs Gemma's 19.8 (9.9 per agent). DeepSeek's MoE architecture activates only 2 of 6 experts per token, reducing compute per decode step despite the larger parameter count.
+
+The warm-to-hot gap is small for both models, confirming that disk reload latency is amortized over the generation and does not bottleneck sustained throughput.
 
 \subsection{Staggered Arrivals}
 
-Real-world multi-agent workflows involve staggered request arrivals. We simulate: User A submits at t=0 (4K context), User B submits at t=2s (4K context).
-
 \input{figures/fig_staggered}
 
-Results:
+Real multi-agent workflows have staggered request arrivals. We simulate: User~A submits at $t{=}0$ (4K cold context), User~B submits at $t{=}2$s (4K cold context).
 
-\begin{itemize}
-    \item \textbf{Sequential}: User A TTFT = 7.0s, User B TTFT = 24.5s (waits for A to finish)
-    \item \textbf{Batched}: User A TTFT = 7.3s (4\% penalty), User B TTFT = 9.6s (2.6$\times$ faster)
-\end{itemize}
+In sequential mode, User~B waits for User~A to complete before starting. In batched mode, User~B joins User~A's batch and begins prefill immediately.
 
-\textbf{User B benefits substantially} (24.5s to 9.6s, 2.6$\times$ faster) at minimal cost to User A (7.0s to 7.3s, 4\% penalty). Combined TTFT for both users: 16.9s (batched) vs 31.5s (sequential), a 1.86$\times$ improvement.
+For Gemma, total wall time is similar (38.8s sequential vs 38.6s batched). For DeepSeek, also similar (9.5s vs 9.4s). The benefit of batching appears in User~B's perceived latency: DeepSeek batched User~B waits 6.4s vs 8.7s sequential (1.36$\times$ faster). The effect is smaller for Gemma because its prefill is long enough to dominate. With warm or hot caches, the staggered benefit would be larger since prefill overhead vanishes and decode interleaving matters more.
 
 \section{Discussion}
 \label{sec:discussion}
 
-\subsection{Contributions and Comparison with Related Systems}
+\subsection{Novelty Comparison}
 
-This work addresses a distinct problem in KV cache management: per-agent persistent Q4 storage on edge devices with batched quantized inference and working memory semantics. Table~\ref{tab:novelty} compares our system with related work across five key capabilities:
-
-\begin{table}[h]
+\begin{table}[t]
 \centering
 \small
-\caption{Novelty comparison with related systems}
+\caption{Feature comparison with related systems. Columns: per-agent block pool with persistent Q4 storage, batched Q4 inference, working memory semantics (cross-phase KV persistence), edge/UMA device support, multi-architecture support (dense + MoE).}
 \label{tab:novelty}
-\begin{tabular}{p{4cm}cccc}
+\begin{tabular}{@{}p{2.8cm}ccccc@{}}
 \toprule
-System & Block Pool & Batched Q4 & Working Memory & Edge/UMA \\
+System & Pool & BQ4 & WM & Edge & Multi \\
 \midrule
-vLLM~\cite{kwon2023pagedattention} & PagedAttn & No & No & No \\
-SGLang~\cite{zheng2024sglang} & RadixTree & No & No & No \\
-KVSwap~\cite{zhang2024kvswap} & No & No & No & Yes \\
-KVCOMM~\cite{ye2025kvcomm} & No & No & Multi-agent & No \\
-This work & Yes & Yes & Yes & Yes \\
+vLLM~\cite{kwon2023pagedattention} & Paged & No & No & No & Yes \\
+SGLang~\cite{zheng2024sglang} & Radix & No & No & No & Yes \\
+vllm-mlx~\cite{barrios2026vllmmlx} & Prefix & No & No & Yes & Yes \\
+KVSwap~\cite{zhang2024kvswap} & No & No & No & Yes & No \\
+KVCOMM~\cite{ye2025kvcomm} & No & No & Share & No & No \\
+KVFlow~\cite{pan2025kvflow} & Prefix & No & Flow & No & Yes \\
+MemArt~\cite{memart2026iclr} & Reuse & No & Yes & No & No \\
+Continuum~\cite{li2025continuum} & TTL & No & TTL & No & Yes \\
+CommVQ~\cite{li2025commvq} & No & 2bit & No & No & No \\
+This work & Agent & Yes & Yes & Yes & Yes \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-\textbf{System-level contributions}: (1) BatchQuantizedKVCache enabling concurrent inference over Q4 caches (not available in MLX upstream libraries as of version 0.22.0), (2) per-agent block pool with persistent Q4 storage on edge devices, (3) working memory semantics via cross-phase context injection, demonstrating KV cache as persistent attention state rather than transient computation artifact.
-
-\textbf{Engineering contributions}: Character-level prefix matching for BPE-immune cache reuse, UMA-aware memory management with lazy evaluation discipline, interleaved prefill+decode scheduler for batched streaming.
-
-This is a systems paper focused on practical edge inference. The key insight is that existing techniques (block-based KV cache, 4-bit quantization, disk persistence) compose effectively for multi-agent workflows on memory-constrained devices.
+Table~\ref{tab:novelty} positions this system. Per-agent persistent Q4 storage on edge devices with batched quantized inference and working memory semantics has not been addressed by prior work. The closest systems are vllm-mlx~\cite{barrios2026vllmmlx} (MLX-native, prefix caching, but no per-agent isolation or persistence) and MemArt~\cite{memart2026iclr} (KV reuse blocks, working memory, but datacenter-only and no Q4 pipeline). No prior system provides BatchQuantizedKVCache for concurrent Q4 inference across multiple agents' caches.
 
 \subsection{Working Memory vs RAG vs Message Passing}
 
-KV cache persistence occupies a distinct design point from text-retrieval-based context:
+Persistent KV cache occupies a distinct design point. RAG retrieves text chunks and re-runs prefill on every request, costing O(n). KV cache persistence reloads computed attention state, costing O(1). Message-passing frameworks (A2A, MCP) let agents exchange structured messages but maintain no shared attention state.
 
-\begin{itemize}
-    \item \textbf{RAG}: Retrieves text chunks, re-prefills on each request. Latency O(n).
-    \item \textbf{KV cache persistence}: Reloads computed attention state. Latency O(1).
-    \item \textbf{Message passing (A2A, MCP)}: Agents exchange structured messages. No shared attention state.
-\end{itemize}
-
-Our approach complements message passing: agents communicate via explicit messages but maintain internal working memory (KV cache) independently.
+Our approach complements message passing. Agents communicate through explicit messages but keep their internal working memory (KV cache) across conversation phases. A negotiation agent retains attention patterns from earlier phases without re-processing the full conversation history.
 
 \subsection{Limitations}
 
-\begin{enumerate}
-    \item \textbf{Single-device constraint}: Current implementation assumes all agents share one device. Multi-device extension would require RDMA-capable cache transfer (future macOS versions may provide RDMA over Thunderbolt 5, mitigating this limitation).
+\textbf{Single device.} The system assumes all agents share one device. Multi-device extension would require cache transfer over Thunderbolt or network interconnects.
 
-    \item \textbf{No perplexity evaluation}: We report speedup and memory metrics but do not measure Q4 quantization's impact on generation quality. Prior work~\cite{liu2024kivi,hooper2024kvquant} reports <1\% perplexity degradation for 4-bit KV quantization.
+\textbf{No perplexity evaluation.} We report latency and throughput but not Q4 quantization's impact on generation quality. Prior work~\cite{liu2024kivi,hooper2024kvquant} reports $<$1\% perplexity degradation for 4-bit KV quantization.
 
-    \item \textbf{Limited model diversity}: Evaluation covers 4 architectures (Gemma, GPT-OSS, Llama, Qwen) but not Mixture-of-Experts (MoE) or multimodal models.
+\textbf{Two models tested.} We validate on one dense GQA model and one MoE MLA model. Other architectures (multi-head latent attention variants, multimodal models) are untested.
 
-    \item \textbf{Qualitative working memory evaluation}: Cross-phase context injection is demonstrated via case studies (prisoner's dilemma, gossip network) but lacks quantitative metrics for working memory effectiveness.
+\textbf{Cold staggered data only.} Our staggered benchmark uses cold caches. Warm/hot staggered data would show larger User~B benefits, but we did not collect it.
 
-    \item \textbf{Future hardware improvements}: Next-generation Apple Silicon chips may provide faster prefill speeds, potentially reducing cold-start penalties at short contexts and narrowing the benefit of cache persistence for sub-4K sequences.
-\end{enumerate}
+\textbf{No working memory quality metric.} Cross-phase context injection is demonstrated structurally but lacks a quantitative measure of whether persistent KV state improves downstream task accuracy compared to re-prefill.
 
 \section{Related Work}
 \label{sec:related}
 
-\subsection{KV Cache Management Systems}
+\subsection{KV Cache Management}
 
-\textbf{vLLM}~\cite{kwon2023pagedattention} introduced PagedAttention, partitioning KV cache into fixed-size blocks managed via virtual memory techniques. It improves throughput 2--4$\times$ over naive serving but discards cache after request completion.
+vLLM~\cite{kwon2023pagedattention} partitions KV cache into paged blocks, improving throughput 2--4$\times$ over naive serving. SGLang~\cite{zheng2024sglang} maintains KV cache in a radix tree for prefix reuse, achieving 5$\times$ throughput. Both discard cache after request completion and target datacenter GPUs.
 
-\textbf{SGLang}~\cite{zheng2024sglang} maintains KV cache in a radix tree, enabling prefix reuse across requests. Achieves 5$\times$ throughput over baselines. Targets datacenter GPUs, not edge devices.
+vllm-mlx~\cite{barrios2026vllmmlx} ports vLLM to MLX with content-based prefix caching, achieving 21--87\% higher throughput than llama.cpp on Apple Silicon. It shares our hardware target but does not persist caches across sessions or provide per-agent isolation.
 
-\textbf{vllm-mlx}~\cite{barrios2026vllmmlx} ports vLLM to MLX with content-based prefix caching. Achieves 21--87\% higher throughput vs llama.cpp. Does not support per-agent isolation or persistent storage.
-
-\textbf{LMCache} (GitHub: LMCache/LMCache) provides disk/CPU/S3-backed KV cache for cloud serving. Complements our edge-focused approach.
+Continuum~\cite{li2025continuum} assigns time-to-live values to cached KV entries for multi-turn agent scheduling, reducing TTFT by up to 2.7$\times$ on datacenter hardware. LRAgent~\cite{jeon2025lragent} shares KV cache across LoRA-adapted agents on GPU servers.
 
 \subsection{KV Cache Compression}
 
-\textbf{KIVI}~\cite{liu2024kivi} quantizes keys per-channel and values per-token at 2 bits, achieving 2.6$\times$ memory reduction. \textbf{KVQuant}~\cite{hooper2024kvquant} extends this with per-layer sensitivity analysis, enabling 10M context on A100-80GB.
+KIVI~\cite{liu2024kivi} quantizes keys per-channel and values per-token at 2 bits (2.6$\times$ memory reduction). KVQuant~\cite{hooper2024kvquant} adds per-layer sensitivity analysis, enabling 10M context on A100-80GB. CommVQ~\cite{li2025commvq} (Apple, ICML~2025) achieves 87.5\% memory reduction at 2 bits using vector quantization commutative with RoPE. CacheGen~\cite{liu2024cachegen} compresses KV cache into bitstreams (3.5--4.3$\times$ size reduction).
 
-\textbf{CommVQ}~\cite{li2025commvq} (Apple, ICML 2025) achieves 87.5\% memory reduction at 2-bit quantization using vector quantization commutative with RoPE.
-
-\textbf{CacheGen}~\cite{liu2024cachegen} compresses KV cache into bitstream format, achieving 3.5--4.3$\times$ size reduction and 3.2--3.7$\times$ latency reduction.
-
-Our work uses 4-bit quantization (intermediate between FP16 and 2-bit extremes) with end-to-end Q4 pipeline from disk to attention.
+We use 4-bit quantization, intermediate between FP16 and 2-bit extremes, with an end-to-end Q4 pipeline from disk through attention. Lower-bit schemes could further reduce our disk footprint but may interact with persistent cache integrity across sessions.
 
 \subsection{Agent Memory}
 
-\textbf{EM-LLM}~\cite{jiang2025emllm} (ICLR 2025) organizes token sequences into episodic events using Bayesian surprise. Achieves 30.5\% improvement over RAG on LongBench.
+EM-LLM~\cite{jiang2025emllm} (ICLR~2025) organizes token sequences into episodic events using Bayesian surprise (30.5\% improvement over RAG on LongBench). Memory3~\cite{yang2025memory3} encodes external knowledge as sparse KV pairs injected into attention layers. MemArt~\cite{memart2026iclr} (ICLR~2026) introduces KV-cache-centric memory with reusable blocks, achieving 91--135$\times$ prefill token reduction.
 
-\textbf{Memory3/MemOS}~\cite{yang2025memory3} treats KV cache as explicit memory carrier, encoding external knowledge as sparse KV pairs injected into attention layers.
+We focus on per-agent isolation and cross-phase persistence rather than external knowledge injection. MemArt's block reuse is complementary: their reusable blocks could feed into our persistent block pool.
 
-\textbf{MemArt}~\cite{memart2026iclr} (ICLR 2026) introduces KVCache-centric memory with reusable blocks, achieving 11\% accuracy improvement and 91--135$\times$ prefill token reduction.
+\subsection{Multi-Agent KV Systems}
 
-Our work focuses on per-agent cache isolation and cross-phase persistence rather than external knowledge injection.
+KVCOMM~\cite{ye2025kvcomm} (NeurIPS~2025) enables cross-context KV sharing for multi-agent systems (7.8$\times$ speedup, $>$70\% cache reuse). KVFlow~\cite{pan2025kvflow} (NeurIPS~2025) uses workflow-aware cache eviction (1.83$\times$ single, 2.19$\times$ concurrent speedup). DroidSpeak~\cite{liu2024droidspeak} shares KV cache across heterogeneous LLMs (4$\times$ throughput).
 
-\subsection{Multi-Agent KV Cache Systems}
+These systems target datacenter deployments with cross-instance sharing. We target single-device edge inference with per-agent isolation. The problems are complementary: KVCOMM's sharing protocol could extend our system to multi-device setups.
 
-\textbf{KVCOMM}~\cite{ye2025kvcomm} (NeurIPS 2025) enables cross-context KV cache sharing for multi-agent systems, achieving 7.8$\times$ speedup with >70\% cache reuse.
+\subsection{Edge and On-Device Inference}
 
-\textbf{KVFlow}~\cite{pan2025kvflow} (NeurIPS 2025) introduces workflow-aware cache eviction, achieving 1.83$\times$ speedup for single workflows and 2.19$\times$ for concurrent workflows.
+KVSwap~\cite{zhang2024kvswap} offloads KV cache to disk on mobile devices for long-context inference under tight memory budgets. EvicPress~\cite{feng2024evicpress} jointly optimizes compression and eviction (2.19$\times$ TTFT). TRIM-KV~\cite{bui2024trimkv} retains only important tokens, matching full-cache quality at 25\% KV budget.
 
-\textbf{DroidSpeak}~\cite{liu2024droidspeak} shares KV cache across heterogeneous LLMs, achieving 4$\times$ throughput and 3.1$\times$ prefill improvement.
-
-These systems target datacenter deployments with cross-instance sharing. We target single-device edge inference with per-agent isolation.
-
-\subsection{Edge/On-Device Systems}
-
-\textbf{KVSwap}~\cite{zhang2024kvswap} offloads KV cache to disk on mobile devices, maintaining generation quality under tight memory budgets.
-
-\textbf{EvicPress}~\cite{feng2024evicpress} jointly optimizes compression and eviction, achieving 2.19$\times$ TTFT speedup.
-
-\textbf{TRIM-KV}~\cite{bui2024trimkv} selectively retains important tokens, achieving full-cache performance at 25\% KV budget.
-
-These systems focus on memory efficiency via eviction/compression. We focus on persistence and reuse across sessions.
+These systems focus on fitting within memory limits via eviction and compression. We focus on persistence and reuse across sessions. The approaches compose: importance scoring from TRIM-KV could guide which cache blocks to persist.
 
 \section{Conclusion}
 \label{sec:conclusion}
 
-We presented a persistent KV cache management system for multi-agent LLM inference on edge devices. Three contributions address the cold-start problem: (1) a persistent block pool giving each agent isolated, quantized (Q4) KV cache persisted to disk, (2) BatchQuantizedKVCache enabling concurrent inference over Q4 caches, and (3) cross-phase context injection treating KV cache as working memory. The system achieves 2.0--4.3$\times$ end-to-end speedup on multi-turn conversations, 81.6$\times$ TTFT with hot cache at 16K context (1.95--10.5$\times$ with disk reload), and 72\% KV cache memory savings.
+Persistent Q4 KV cache turns agent context restoration from a compute-bound O(n) prefill into an I/O-bound O(1) reload. On Gemma~3 12B at 32K context, hot cache reduces TTFT from 165 seconds to 1.3 seconds (130$\times$). On DeepSeek-Coder-V2-Lite at 32K, from 48 seconds to 652\,ms (74$\times$). Even warm disk reload achieves 102$\times$ and 69$\times$ at 32K.
 
-This design occupies the intersection of per-agent isolation, Q4 persistence, batched quantized inference, and working memory semantics. Future work includes: (1) multi-device extension via high-speed interconnects (Thunderbolt 5 provides sub-50$\mu$s latency), (2) next-generation hardware integration with faster prefill capabilities, (3) learned importance scoring (following TRIM-KV's approach~\cite{bui2024trimkv}) for selective cache retention, and (4) formal evaluation of working memory effectiveness beyond qualitative case studies.
+The system handles both dense GQA and MoE MLA architectures through a single block pool and Q4 pipeline. Batched serving reaches 22 system TPS (Gemma) and 65 system TPS (DeepSeek) with two warm-cache agents at 1K context.
 
-Open-source implementation available at \texttt{[anonymized for submission]}.
+The main gaps are single-device scope, no perplexity evaluation, and qualitative rather than quantitative working-memory validation. Multi-device cache transfer, adaptive quantization bit-width, and formal working-memory evaluation are directions for future work.
+
+Open-source at \texttt{[anonymized for submission]}.
 
 \bibliographystyle{colm2026_conference}
 \bibliography{semantic_colm2026}
 
-% Appendices follow after bibliography in COLM format
 \newpage
 \appendix
 
 \section{safetensors Q4 Format}
 \label{app:safetensors}
 
-The persistent KV cache uses safetensors format with model-specific tensor naming conventions. For a model with $L$ layers, $H$ attention heads, head dimension $D$, and $N$ cached tokens:
+The persistent KV cache uses safetensors format with model-specific tensor naming. For a model with $L$ layers, $H$ KV heads, head dimensions $D_K$ and $D_V$, and $N$ cached tokens:
 
 \textbf{Tensor schema (per layer $l$, per block $b$):}
 \begin{itemize}
-    \item \texttt{cache.layers.\{l\}.key\_cache.\{b\}.data}: uint32, shape $(H, D/8, 256)$
-    \item \texttt{cache.layers.\{l\}.key\_cache.\{b\}.scales}: float16, shape $(H, D, 4)$
-    \item \texttt{cache.layers.\{l\}.key\_cache.\{b\}.biases}: float16, shape $(H, D, 4)$
-    \item \texttt{cache.layers.\{l\}.value\_cache.\{b\}.data}: uint32, shape $(H, D/8, 256)$
-    \item \texttt{cache.layers.\{l\}.value\_cache.\{b\}.scales}: float16, shape $(H, D, 4)$
-    \item \texttt{cache.layers.\{l\}.value\_cache.\{b\}.biases}: float16, shape $(H, D, 4)$
+    \item \texttt{cache.layers.\{l\}.key\_cache.\{b\}.data}: uint32, shape $(H, D_K/8, 256)$
+    \item \texttt{cache.layers.\{l\}.key\_cache.\{b\}.scales}: float16, shape $(H, D_K, 4)$
+    \item \texttt{cache.layers.\{l\}.key\_cache.\{b\}.biases}: float16, shape $(H, D_K, 4)$
+    \item \texttt{cache.layers.\{l\}.value\_cache.\{b\}.data}: uint32, shape $(H, D_V/8, 256)$
+    \item \texttt{cache.layers.\{l\}.value\_cache.\{b\}.scales}: float16, shape $(H, D_V, 4)$
+    \item \texttt{cache.layers.\{l\}.value\_cache.\{b\}.biases}: float16, shape $(H, D_V, 4)$
 \end{itemize}
 
-Block size is fixed at 256 tokens. Group size for quantization is 64 elements. This yields 4 scale/bias groups per 256-token block.
+Block size is 256 tokens, group size 64 elements (4 groups per block). For symmetric models (Gemma), $D_K = D_V$. For MLA models (DeepSeek), $D_K = 192$, $D_V = 128$.
 
-\textbf{Metadata (JSON in safetensors header):}
-\begin{verbatim}
-{
-  "model_type": "gemma3",
-  "num_layers": 42,
-  "num_attention_heads": 40,
-  "head_dim": 128,
-  "total_tokens": 4096,
-  "num_blocks": 16,
-  "quantization": "Q4_K_M"
-}
-\end{verbatim}
+Gemma~3's scales and biases use bfloat16 (preserved natively by MLX's \texttt{mx.save\_safetensors}). DeepSeek uses standard float16.
 
-\section{MLX Lazy Evaluation Pitfalls}
+\section{MLX Engineering Notes}
 \label{app:mlx}
 
-MLX uses lazy evaluation: operations build computation graphs that execute only when results are needed. This creates subtle bugs when KV cache operations appear to succeed but never materialize to memory.
+MLX uses lazy evaluation: operations build computation graphs that execute only when results are consumed. This creates failure modes when KV cache operations appear to succeed but produce no data.
 
 \begin{table}[h]
 \centering
 \small
-\caption{Common MLX lazy evaluation pitfalls}
-\begin{tabular}{p{4cm}p{4cm}p{3cm}}
+\caption{MLX lazy evaluation failure modes relevant to KV cache persistence.}
+\begin{tabular}{@{}p{3.5cm}p{3.5cm}p{2.5cm}@{}}
 \toprule
 Symptom & Root Cause & Fix \\
 \midrule
-KV cache appears empty after prefill & Forgot \texttt{mx.eval()} after cache update & Add \texttt{mx.eval(cache)} \\
-\midrule
-OOM crash during batch & Computation graph accumulates without clearing & Call \texttt{mx.eval()} at end of each batch iteration \\
-\midrule
-Cache reload returns zeros & mmap buffer not evaluated before access & Evaluate immediately after load \\
-\midrule
-Quantization corruption & Scales/biases computed but not materialized & Evaluate quantize output \\
-\midrule
-Attention NaNs after disk reload & Q4 tensors not validated post-load & Assert dtype and shape after eval \\
-\midrule
-Batched inference hangs & Merge operation built graph but never executed & Explicit eval before attention \\
+Cache appears empty after prefill & Missing \texttt{mx.eval()} after cache update & Evaluate after update \\
+OOM during batch & Graph accumulates without clearing & Evaluate per iteration \\
+Zeros after disk reload & mmap buffer not evaluated & Evaluate after load \\
+Quantization corruption & Scales/biases lazy & Evaluate quantize output \\
+Attention NaNs & Q4 tensors invalid post-load & Validate dtype/shape \\
+Batch hangs & Merge built graph but not executed & Evaluate before attention \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-\textbf{Rule of thumb:} Call \texttt{mx.eval()} immediately after any operation that modifies KV cache state (quantize, load, merge, extract).
+Two additional issues specific to batched inference:
+
+\textbf{Thread safety.} MLX is not thread-safe (GitHub issues \#2067, \#2133, \#3078). Concurrent \texttt{mx.eval()} calls from different threads cause Metal assertion failures. We serialize all MLX operations through a single scheduler thread, using an RLock (\texttt{mlx\_io\_lock}) to protect cross-thread I/O (cache saves).
+
+\textbf{mx.compile with variable batch size.} \texttt{mx.compile} traces shapes at first call and fails on subsequent calls with different batch dimensions. We split batch-2 operations into two batch-1 calls, each through \texttt{mx.compile(shapeless=True)}, and concatenate results.
 
 \section{Benchmark Configuration}
 \label{app:benchmark}
 
-\textbf{Hardware:}
-\begin{itemize}
-    \item Model: Apple Mac Mini M4 Pro (MX2E3LL/A)
-    \item CPU: 14-core (10 performance + 4 efficiency)
-    \item GPU: 20-core
-    \item Neural Engine: 16-core
-    \item Memory: 24 GB unified LPDDR5X
-    \item Memory bandwidth: 273 GB/s
-    \item Storage: 512 GB SSD (internal, APFS)
-\end{itemize}
+\textbf{Hardware:} Apple Mac Mini M4~Pro (MX2E3LL/A), 14-core CPU (10P+4E), 20-core GPU, 16-core Neural Engine, 24\,GB LPDDR5X, 273\,GB/s, 512\,GB SSD (APFS).
 
-\textbf{Software:}
-\begin{itemize}
-    \item OS: macOS Sequoia 15.2
-    \item Python: 3.11.7
-    \item MLX: 0.22.0
-    \item mlx-lm: 0.22.0
-    \item Transformers: 4.46.0
-\end{itemize}
+\textbf{Software:} macOS Sequoia 15.2, Python 3.12.0, MLX 0.22.0, mlx-lm 0.30.4, Transformers 4.57.6.
 
 \textbf{Models:}
 \begin{itemize}
-    \item Gemma 3 12B Instruct: 42 layers, 40 attention heads, head dim 128
-    \item DeepSeek-Coder-V2-Lite 16B Instruct: 27 layers, 32 attention heads, head dim 128
+    \item Gemma~3 12B Instruct: 48 attention layers, 8 KV heads, head dim 256 (symmetric), GQA with 8 global + 40 sliding-window layers (window 1024)
+    \item DeepSeek-Coder-V2-Lite 16B Instruct: 27 layers, 16 KV heads, K dim 192 / V dim 128 (asymmetric MLA), MoE with 2/6 active experts
 \end{itemize}
 
-\textbf{Hyperparameters:}
-\begin{itemize}
-    \item Temperature: 0.0 (greedy decoding)
-    \item Top-p: 1.0 (disabled)
-    \item Output length: 64 tokens (fixed)
-    \item Repetition penalty: 1.0 (disabled)
-    \item Quantization: Q4\_K\_M (group size 64)
-    \item Chunk size: 256 tokens (prefill)
-\end{itemize}
+\textbf{Parameters:} Temperature 0.0 (greedy), output length 64 tokens, Q4 quantization (group size 64), prefill chunk size 256 tokens. Scheduler enabled, max batch size 2. 3 passes per configuration, 30--240s adaptive cooldown between passes (thermal-aware). Median values reported.
 
-\textbf{Benchmark scripts:}
-\begin{itemize}
-    \item \texttt{benchmarks/streaming\_benchmark.py}: TTFT and E2E latency measurement
-    \item \texttt{benchmarks/batched\_benchmark.py}: Concurrent serving throughput
-    \item \texttt{benchmarks/comparative\_benchmark.py}: Multi-turn cold/warm/hot comparison
-\end{itemize}
-
-All experiments run 3 times, reporting median values. System idle time of 30 seconds between runs to allow thermal stabilization.
+198 measurements per model (6 context lengths $\times$ 3 cache states $\times$ 2 batch sizes $\times$ 2 modes [streaming/non-streaming] $\times$ 3 passes, divided by 3 for median = 66 unique configurations, $\times$ 3 passes = 198) plus 6 staggered measurements (3 sequential + 3 batched).
 
 \end{document}

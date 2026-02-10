@@ -1,13 +1,13 @@
-% Figure 2: TTFT Scaling Chart
-% pgfplots line chart: X=context length, Y=TTFT
-% Three lines: Cold, Warm, Hot
+% Figure: TTFT Scaling — Both Models (Log-Log)
+% 6 lines: Cold/Warm/Hot x Gemma/DeepSeek
+% Data: median of 3 passes from colm_full_{gemma,deepseek}_merged.json
 
 \begin{figure}[t]
 \centering
 \begin{tikzpicture}
 \begin{axis}[
-    width=0.9\linewidth,
-    height=6cm,
+    width=0.95\linewidth,
+    height=7cm,
     xlabel={Context Length (tokens)},
     ylabel={TTFT (ms)},
     xmode=log,
@@ -15,61 +15,63 @@
     log basis x=2,
     log basis y=10,
     xmin=900, xmax=40000,
-    ymin=500, ymax=150000,
+    ymin=150, ymax=200000,
     xtick={1024,2048,4096,8192,16384,32768},
     xticklabels={1K,2K,4K,8K,16K,32K},
-    ytick={1000,10000,100000},
-    yticklabels={1s,10s,100s},
+    ytick={100,1000,10000,100000},
+    yticklabels={0.1s,1s,10s,100s},
     legend pos=north west,
-    legend style={font=\small},
+    legend style={font=\scriptsize, row sep=-2pt},
     legend cell align=left,
     clip=false,
     grid=both,
     grid style={line width=.1pt, draw=gray!20},
     major grid style={line width=.2pt,draw=gray!40},
-    mark size=2.5pt,
-    line width=1.2pt
+    mark size=2pt,
+    line width=1pt
 ]
 
-% Cold (no cache) - blue (colorblind-safe)
+% Gemma Cold - solid blue
 \addplot[color=blue!80!black, mark=square*, line width=1.5pt] coordinates {
-    (1024, 1756)
-    (2048, 3512)
-    (4096, 7024)
-    (8192, 14048)
-    (16384, 68898)
-    (32768, 135000)
+    (1024, 4007) (2048, 7363) (4096, 15502) (8192, 32944) (16384, 71132) (32768, 165189)
 };
-\addlegendentry{Cold (no cache)}
+\addlegendentry{Gemma Cold}
 
-% Warm (disk reload) - orange (colorblind-safe)
+% DeepSeek Cold - dashed blue
+\addplot[color=blue!80!black, mark=square, dashed, line width=1.2pt] coordinates {
+    (1024, 1090) (2048, 1884) (4096, 3949) (8192, 8541) (16384, 19193) (32768, 48258)
+};
+\addlegendentry{DeepSeek Cold}
+
+% Gemma Warm - solid orange
 \addplot[color=orange!90!black, mark=triangle*, line width=1.5pt] coordinates {
-    (1024, 901)
-    (2048, 1192)
-    (4096, 1680)
-    (8192, 3307)
-    (16384, 6544)
-    (32768, 12800)
+    (1024, 527) (2048, 532) (4096, 513) (8192, 590) (16384, 808) (32768, 1621)
 };
-\addlegendentry{Warm (disk reload)}
+\addlegendentry{Gemma Warm}
 
-% Hot (in-memory) - purple (colorblind-safe)
-\addplot[color=violet!80!black, mark=*, line width=1.5pt] coordinates {
-    (1024, 650)
-    (2048, 702)
-    (4096, 758)
-    (8192, 810)
-    (16384, 844)
-    (32768, 920)
+% DeepSeek Warm - dashed orange
+\addplot[color=orange!90!black, mark=triangle, dashed, line width=1.2pt] coordinates {
+    (1024, 217) (2048, 285) (4096, 252) (8192, 307) (16384, 430) (32768, 697)
 };
-\addlegendentry{Hot (memory)}
+\addlegendentry{DeepSeek Warm}
 
-% Annotations - speedup at 16K context
-\node[font=\small, text=blue!80!black, anchor=south west] at (axis cs:16384,80000) {81.6$\times$ speedup (hot vs cold)};
-\node[font=\small, text=orange!90!black, anchor=north west] at (axis cs:16384,7500) {10.5$\times$ speedup (warm vs cold)};
+% Gemma Hot - solid red
+\addplot[color=red!70!black, mark=*, line width=1.5pt] coordinates {
+    (1024, 668) (2048, 688) (4096, 709) (8192, 762) (16384, 874) (32768, 1276)
+};
+\addlegendentry{Gemma Hot}
+
+% DeepSeek Hot - dashed red
+\addplot[color=red!70!black, mark=o, dashed, line width=1.2pt] coordinates {
+    (1024, 356) (2048, 376) (4096, 372) (8192, 412) (16384, 484) (32768, 652)
+};
+\addlegendentry{DeepSeek Hot}
+
+% Annotation: speedup gap at 32K
+\draw[<->, thick, gray] (axis cs:35000,1276) -- node[right, font=\scriptsize, align=left] {130$\times$} (axis cs:35000,165189);
 
 \end{axis}
 \end{tikzpicture}
-\caption{TTFT scaling across cache states (Gemma 3 12B). Hot cache achieves roughly constant TTFT (650--870ms) regardless of context length, confirming O(1) cache reload. Warm (disk reload) provides 10.5$\times$ speedup at 16K. Cold start exhibits O(n) prefill scaling.}
+\caption{TTFT scaling across cache states for both models. Cold prefill scales linearly with context length. Hot and warm caches reduce TTFT by 40--130$\times$ at 32K tokens, with sub-second reload regardless of context length. DeepSeek's smaller layer count (27 vs 46) yields faster cold prefill but both models converge at similar warm/hot latencies relative to their cold baselines.}
 \label{fig:ttft}
 \end{figure}
