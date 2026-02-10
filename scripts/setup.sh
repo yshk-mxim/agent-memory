@@ -1,7 +1,24 @@
 #!/usr/bin/env bash
 # agent-memory — guided setup script
+#
+# Usage:
+#   scripts/setup.sh      # guided first-time setup
+#
 # Handles Python check, venv, pip install, HF login, model download, and smoke test.
 set -euo pipefail
+
+# ── Resolve project root (works from any directory) ───────────────
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+cd "$PROJECT_ROOT"
+
+for arg in "$@"; do
+    case "$arg" in
+        --help|-h)
+            sed -n '2,/^set /{ /^#/s/^# \{0,1\}//p; }' "$0"
+            exit 0 ;;
+    esac
+done
 
 PYTHON_MIN="3.11"
 DEFAULT_MODEL="mlx-community/gemma-3-12b-it-4bit"
@@ -65,7 +82,7 @@ if command -v huggingface-cli &>/dev/null; then
         echo "  2. Run: huggingface-cli login"
         echo "  3. Paste your token when prompted"
         echo ""
-        read -rp "  Run huggingface-cli login now? [Y/n] " answer
+        read -rp "  Run huggingface-cli login now? [Y/n] " answer </dev/tty
         if [ "${answer:-Y}" != "n" ] && [ "${answer:-Y}" != "N" ]; then
             huggingface-cli login
         else
@@ -88,7 +105,7 @@ fi
 
 # ── 6. Run smoke test ────────────────────────────────────────────────
 info "Running unit tests..."
-if python -m pytest tests/unit -x -q --timeout=30 2>/dev/null; then
+if python3 -m pytest tests/unit -x -q --timeout=30 2>/dev/null; then
     ok "All unit tests passed"
 else
     warn "Some tests failed. Check output above."
@@ -100,14 +117,9 @@ echo "============================================"
 ok "Setup complete!"
 echo "============================================"
 echo ""
-echo "  Start the server:"
-echo "    python -m agent_memory.entrypoints.cli serve --port 8000"
+echo "  Launch server + demo:"
+echo "    scripts/launch.sh"
 echo ""
-echo "  Health check:"
-echo "    curl -sf http://localhost:8000/health/ready"
-echo ""
-echo "  Quick test:"
-echo '    curl http://localhost:8000/v1/chat/completions \'
-echo '      -H "Content-Type: application/json" \'
-echo '      -d '\''{"model":"default","messages":[{"role":"user","content":"Hello"}],"max_tokens":50}'\'''
+echo "  Or server only:"
+echo "    scripts/launch.sh --server-only"
 echo ""
