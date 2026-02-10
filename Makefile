@@ -1,6 +1,6 @@
 .PHONY: help install dev-install lint format typecheck security complexity licenses \
         test test-unit test-integration test-smoke test-e2e coverage bench docs docs-build \
-        clean validate quality-full vulnerabilities ci all
+        clean validate quality-full ci all
 
 help:  ## Show this help message
 	@echo "Usage: make [target]"
@@ -13,7 +13,6 @@ install:  ## Install production dependencies only
 
 dev-install:  ## Install all dependencies including dev and docs
 	pip install -e ".[dev,docs]"
-	pre-commit install
 
 lint:  ## Run ruff linter
 	ruff check src tests
@@ -25,15 +24,9 @@ format:  ## Format code with ruff
 typecheck:  ## Run mypy type checker
 	mypy --explicit-package-bases src/agent_memory tests/unit tests/conftest.py
 
-security:  ## Run security scans (ruff S rules + semgrep)
+security:  ## Run security scans (ruff S rules)
 	@echo "==> Running ruff security rules (bandit equivalent)..."
 	ruff check --select S src
-	@echo "\n==> Running semgrep semantic analysis..."
-	semgrep --config=auto src || echo "Semgrep not configured (optional)"
-
-vulnerabilities:  ## Scan dependencies for known security vulnerabilities
-	@echo "==> Checking dependencies for vulnerabilities..."
-	safety check --json || echo "Safety check complete (warnings are informational)"
 
 complexity:  ## Check cyclomatic complexity (ruff C90 rules)
 	@echo "==> Ruff complexity check (CC < 15 enforced via pylint rules)..."
@@ -42,19 +35,18 @@ complexity:  ## Check cyclomatic complexity (ruff C90 rules)
 licenses:  ## Check OSS license compliance
 	liccheck --sfile pyproject.toml || echo "⚠️  License check found unknown packages (non-blocking)"
 
-quality-full:  ## Run full quality pipeline (portfolio-grade)
+quality-full:  ## Run full quality pipeline
 	@echo "=========================================="
 	@echo "COMPREHENSIVE QUALITY VALIDATION"
 	@echo "=========================================="
 	$(MAKE) lint
 	$(MAKE) typecheck
 	$(MAKE) security
-	$(MAKE) vulnerabilities
 	$(MAKE) complexity
 	$(MAKE) licenses
 	$(MAKE) test-unit
 	@echo "\n=========================================="
-	@echo "✅ QUALITY VALIDATION COMPLETE"
+	@echo "QUALITY VALIDATION COMPLETE"
 	@echo "=========================================="
 
 test:  ## Run all tests (unit + integration + smoke)
@@ -75,10 +67,8 @@ test-e2e:  ## Run end-to-end tests (slow, requires Apple Silicon)
 coverage:  ## Generate coverage report
 	pytest --cov --cov-report=term-missing --cov-report=html
 
-bench:  ## Run benchmarks
-	python benchmarks/bench_block_pool.py
-	python benchmarks/bench_batched_decode.py
-	python benchmarks/bench_cache_load.py
+bench:  ## Run benchmarks (see benchmarks/ for full suite)
+	python benchmarks/full_benchmark.py
 
 docs:  ## Build and serve documentation locally
 	mkdocs serve

@@ -53,14 +53,14 @@ By participating in this project, you agree to maintain a respectful and collabo
    source .venv/bin/activate
    ```
 
-3. **Install development dependencies**:
+3. **Run first-time setup** (installs deps, downloads model):
    ```bash
-   pip install -e .[dev]
+   scripts/setup.sh
    ```
 
 4. **Run tests to verify setup**:
    ```bash
-   pytest tests/unit/ -v
+   python -m pytest tests/unit -x -q --timeout=30
    ```
 
 ---
@@ -71,24 +71,13 @@ By participating in this project, you agree to maintain a respectful and collabo
 
 ```bash
 # Install with all dev dependencies
-pip install -e .[dev]
+pip install -e ".[dev]"
 
 # This includes:
 # - pytest (testing framework)
 # - ruff (linting and formatting)
 # - mypy (type checking)
-# - pre-commit (git hooks)
-# - All other dev tools
-```
-
-### Set Up Pre-Commit Hooks
-
-```bash
-# Install pre-commit hooks
-pre-commit install
-
-# Run hooks manually on all files (optional)
-pre-commit run --all-files
+# - hypothesis (property-based testing)
 ```
 
 ---
@@ -113,12 +102,13 @@ agent-memory/
 │   ├── smoke/               # Basic server lifecycle tests
 │   └── stress/              # Load and performance tests
 ├── config/                  # Configuration files
+│   ├── models/              # Model-specific TOML configs
 │   ├── prometheus/          # Alert rules
 │   └── logging/             # Log retention policies
 ├── docs/                    # Documentation
-├── project/                 # Project management
-│   ├── architecture/        # Architecture Decision Records (ADRs)
-│   └── sprints/             # Sprint planning and reports
+├── benchmarks/              # Performance benchmarks
+├── demo/                    # Streamlit demo apps
+├── scripts/                 # Setup and launch scripts
 ├── pyproject.toml           # Package metadata and dependencies
 ├── LICENSE                  # MIT License
 ├── NOTICE                   # Dependency attributions
@@ -134,7 +124,7 @@ agent-memory follows **Hexagonal Architecture** (Ports & Adapters):
 - **Adapters Layer**: Infrastructure bindings (FastAPI, MLX, disk I/O)
 - **Ports Layer**: Protocol definitions for dependency inversion
 
-See `project/architecture/ADR-001-hexagonal-architecture.md` for details.
+See `docs/architecture.md` for details.
 
 ---
 
@@ -159,30 +149,30 @@ git checkout -b fix/issue-123
 ### 3. Run Tests
 
 ```bash
-# Run unit tests (fast)
-pytest tests/unit/ -v
+# Run unit tests (fast, no GPU needed)
+python -m pytest tests/unit -x -q --timeout=30
 
-# Run integration tests (requires MLX)
-pytest tests/integration/ -v -m integration
+# Run integration tests (requires Apple Silicon + MLX)
+python -m pytest tests/integration -x -q --timeout=60
 
-# Run all tests
-pytest tests/ -v
+# Run GPU tests (requires Apple Silicon + MLX)
+python -m pytest tests/mlx -x -q --timeout=60
 ```
 
 ### 4. Check Code Quality
 
 ```bash
 # Run ruff linter
-ruff check src/ tests/
+ruff check src tests
 
 # Auto-fix issues
-ruff check --fix src/ tests/
+ruff check --fix src tests
 
 # Run type checker
-mypy --strict src/
+mypy --explicit-package-bases src/agent_memory
 
-# Run all checks
-pre-commit run --all-files
+# Or use the Makefile
+make ci
 ```
 
 ### 5. Commit Changes
@@ -231,13 +221,13 @@ The project uses **Ruff** for linting and formatting:
 
 ```bash
 # Check code
-ruff check src/ tests/
+ruff check src tests
 
 # Auto-fix issues
-ruff check --fix src/ tests/
+ruff check --fix src tests
 
 # Format code
-ruff format src/ tests/
+ruff format src tests
 ```
 
 ### Code Quality Rules
@@ -254,10 +244,10 @@ Use **mypy** for static type checking:
 
 ```bash
 # Run type checker
-mypy --strict src/
+mypy --explicit-package-bases src/agent_memory
 
 # Check specific file
-mypy --strict src/agent_memory/application/batch_engine.py
+mypy --explicit-package-bases src/agent_memory/application/batch_engine.py
 ```
 
 ---
@@ -277,30 +267,24 @@ The project has multiple test suites with different markers:
 ### Running Tests
 
 ```bash
-# Run unit tests only (fast)
-pytest tests/unit/ -v
+# Unit tests (fast, no GPU)
+python -m pytest tests/unit -x -q --timeout=30
 
-# Run integration tests (requires MLX)
-pytest tests/integration/ -v -m integration
+# Integration tests (requires Apple Silicon)
+python -m pytest tests/integration -x -q --timeout=60
 
-# Run smoke tests
-pytest tests/smoke/ -v -m smoke
+# GPU tests (requires Apple Silicon)
+python -m pytest tests/mlx -x -q --timeout=60
 
-# Run all tests (slow)
-pytest tests/ -v
-
-# Run specific test file
-pytest tests/unit/test_block_pool.py -v
-
-# Run specific test
-pytest tests/unit/test_block_pool.py::test_allocate_blocks -v
+# Specific test file
+python -m pytest tests/unit/test_block_pool.py -v
 ```
 
 ### Coverage
 
 ```bash
 # Run tests with coverage
-pytest tests/ --cov=src --cov-report=html
+python -m pytest tests/unit --cov=src --cov-report=html --timeout=30
 
 # View coverage report
 open htmlcov/index.html
@@ -336,14 +320,13 @@ def test_feature_description():
 
 1. **Run all checks**:
    ```bash
-   # Pre-commit checks
-   pre-commit run --all-files
+   # Lint + typecheck + unit tests
+   make ci
 
-   # All tests
-   pytest tests/ -v
-
-   # Type checking
-   mypy --strict src/
+   # Or manually:
+   ruff check src tests
+   mypy --explicit-package-bases src/agent_memory
+   python -m pytest tests/unit -x -q --timeout=30
    ```
 
 2. **Update documentation**:
@@ -371,14 +354,14 @@ Your PR will be reviewed for:
 ### Running the Server
 
 ```bash
-# Start server (development mode)
-python -m agent_memory.entrypoints.cli serve --log-level DEBUG
+# Recommended: use the launch script (starts server + demo UI)
+scripts/launch.sh
 
-# Start with custom settings
-python -m agent_memory.entrypoints.cli serve --host 0.0.0.0 --port 8080
+# Server only
+scripts/launch.sh --server-only
 
-# View configuration
-python -m agent_memory.entrypoints.cli config
+# Or manually
+python -m agent_memory.entrypoints.cli serve --port 8000
 ```
 
 ---
