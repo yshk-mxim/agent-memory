@@ -143,7 +143,7 @@ Multi-phase agent workflows (negotiation, interrogation, debate) traditionally r
     \item \textbf{Phase N}: Cache accumulates across all phases
 \end{enumerate}
 
-Prompts follow a structured template ensuring monotonic cache extension. Each phase appends rather than replaces, so the cached prefix always matches.
+Prompts follow a structured template that enforces monotonic cache extension. Each phase appends rather than replaces, so the cached prefix always matches.
 
 \subsection{Architectural Coverage}
 \label{sec:archcoverage}
@@ -255,7 +255,7 @@ For Gemma, total wall time is similar (38.8s sequential vs 38.6s batched). For D
 
 \input{figures/fig_phase_timeline}
 
-Multi-agent workflows often span several phases (interrogation rounds, debate stages, collaborative drafts). Without persistent cache, each phase re-prefills every agent from scratch. We design a 5-phase prisoner's dilemma scenario with 4 agents (3 permanent, 1 ephemeral) and 25 total conversational turns to measure cross-phase cache benefit.
+Multi-agent workflows often span several phases (interrogation rounds, debate stages, collaborative drafts). Without persistent cache, each phase re-prefills every agent from scratch. We design a 5-phase prisoner's dilemma scenario (Figure~\ref{fig:timeline}) with 4 agents (3 permanent, 1 ephemeral) and 25 total conversational turns to measure cross-phase cache benefit.
 
 \textbf{Scenario structure.} A warden interrogates two suspects (Marco, Danny) separately (Phases~1--2), suspects confer in the yard (Phase~3), all meet for a final reckoning (Phase~4), and an analyst renders a verdict (Phase~5). Permanent agents use \texttt{persistent\_cache\_prefix}, enabling EXTEND-match cache hits when prior context is prepended via \texttt{prior\_agent\_messages}.
 
@@ -289,7 +289,7 @@ Phase~1 shows no benefit (both modes cold-start). By Phase~5, persistent mode re
 
 \input{figures/fig_wiki_routing}
 
-Information-retrieval workflows route queries to domain-expert agents. We design a Wikipedia routing benchmark with 10 expert agents, each primed with a 2--4K token article on a statistics topic (Bayesian inference, regression analysis, hypothesis testing, etc.).
+Information-retrieval workflows route queries to domain-expert agents. We design a Wikipedia routing benchmark (Figure~\ref{fig:wikirouting}) with 10 expert agents, each primed with a 2--4K token article on a statistics topic (Bayesian inference, regression analysis, hypothesis testing, etc.).
 
 \textbf{Three-phase protocol.} Phase~1 (priming): each expert processes its article, cold-starting at 2--4K context. Phase~2 (cross-topic queries): 5 questions route to 2--3 relevant experts each; experts' caches are warm/hot from priming. Phase~3 (repeated queries): 3 experts re-queried with additional context; caches are hot.
 
@@ -316,7 +316,7 @@ Hot/cold speedup & \multicolumn{2}{c}{23.8$\times$} & \multicolumn{2}{c}{12.1$\t
 \end{tabular}
 \end{table}
 
-Table~\ref{tab:wiki} shows measured results. Cold priming averages 20.5s (Gemma) and 5.1s (DeepSeek) per expert at ${\sim}$4K token context. After priming, warm-cache queries drop to 847\,ms (Gemma, 24.2$\times$ faster) and 396\,ms (DeepSeek, 13.0$\times$). Repeated hot-cache queries show similar speedups. Per-expert breakdown: the largest cold TTFT is 31s (Gemma, Monte Carlo at 3K words), reduced to 761\,ms warm. Quality passes range from 80\% (Gemma Phase~2) to 30\% (DeepSeek Phase~1), reflecting the structural quality checks (keyword overlap, minimum length) rather than factual accuracy.
+Table~\ref{tab:wiki} shows measured results. Cold priming averages 20.5s (Gemma) and 5.1s (DeepSeek) per expert at ${\sim}$4K token context. After priming, warm-cache queries drop to 847\,ms (Gemma, 24.2$\times$ faster) and 396\,ms (DeepSeek, 13.0$\times$). Repeated hot-cache queries show similar speedups. Per-expert breakdown: the largest cold TTFT is 31s (Gemma, Monte Carlo at 3K words), reduced to 761\,ms warm. Quality passes range from 80\% (Gemma Phase~2) to 30\% (DeepSeek Phase~1); these scores measure structural quality (keyword overlap, minimum length), not factual accuracy.
 
 \section{Discussion}
 \label{sec:discussion}
