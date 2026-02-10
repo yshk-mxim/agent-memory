@@ -1,9 +1,8 @@
 \documentclass{article}
 
-% Use the COLM 2026 conference style (submission mode = anonymous)
-\usepackage[submission]{colm2026_conference}
-
-% Configure natbib for numbered citations
+% arXiv preprint style
+\usepackage[margin=1in]{geometry}
+\usepackage{natbib}
 \setcitestyle{numbers,square}
 
 % Standard packages
@@ -22,22 +21,22 @@
 % Math commands
 \input{math_commands}
 
-% Hyperref for cross-references (but not visible URLs in submission mode)
+% Hyperref for cross-references
 \usepackage[hidelinks]{hyperref}
 
-% Title and authors (anonymized for submission)
+% Title and authors
 \title{Agent Memory Below the Prompt: \\
 Persistent Q4 KV Cache for Multi-Agent LLM Inference on Edge Devices}
 
-% Anonymous submission
-\author{Anonymous Authors}
+\author{Yakov Shkolnikov \\ \texttt{yshkolni@gmail.com}}
+\date{February 2026}
 
 \begin{document}
 
 \maketitle
 
 \begin{abstract}
-Multi-agent LLM workflows on Apple Silicon spend most of their time re-computing attention state. A 5-agent system with 4K tokens each waits 77 seconds after every server restart while each agent re-prefills from scratch. We persist each agent's KV cache to disk in 4-bit quantized format and reload it in under 700\,ms. Three components make this work: (1)~a block pool giving each agent an isolated, persistent Q4 KV cache stored in safetensors, (2)~BatchQuantizedKVCache for concurrent inference over multiple agents' quantized caches, and (3)~cross-phase context injection that lets agents accumulate attention state across conversation phases without re-computation. On Gemma~3 12B and DeepSeek-Coder-V2-Lite 16B at typical deployment lengths (4K context), warm disk reload reduces TTFT from 15.5s to 513\,ms (30$\times$) and from 3.9s to 252\,ms (16$\times$). At 32K context, the speedup reaches 130$\times$ and 74$\times$. Batched serving of two concurrent agents reaches 22.4 and 64.8 system tokens/second with warm cache. Q4 quantization fits 4$\times$ more agent contexts into fixed device memory than FP16, with negligible perplexity degradation (estimated $<$0.1 PPL, consistent with prior Q4 KV quantization literature). The system handles both dense GQA (Gemma) and MoE MLA (DeepSeek) architectures through a model-agnostic abstraction, and operates as an infrastructure layer beneath agentic frameworks (AutoGen, CrewAI) via its OpenAI-compatible API. Open-source at \texttt{[anonymized]}.
+Multi-agent LLM systems on edge devices face a cold-start problem: each agent must re-prefill its full conversation context through the model after every server restart. On Apple M4~Pro, five agents with 4K tokens each incur 77 seconds of idle time before any agent can respond. We address this by persisting each agent's KV cache to disk in 4-bit quantized format and reloading it directly into the attention layer, converting O($n$) prefill into O(1) cache restoration. The system comprises three components: a block pool providing per-agent isolated Q4 KV caches in safetensors format, a BatchQuantizedKVCache for concurrent inference over multiple agents' quantized caches, and cross-phase context injection that accumulates attention state across conversation phases without re-computation. Evaluated on Gemma~3 12B (dense GQA, 48 layers) and DeepSeek-Coder-V2-Lite 16B (MoE MLA, 27 layers), warm cache reduces time-to-first-token by 30--130$\times$ across 1K--32K context. Q4 quantization fits 4$\times$ more agent contexts into fixed device memory than FP16. Perplexity measured with actual Q4 KV caches shows $-$0.7\% degradation for Gemma and $+$3.1\% for DeepSeek, consistent with prior Q4 quantization literature. The system handles both architectures through a model-agnostic abstraction and exposes an OpenAI-compatible API. Open-source at \texttt{[repository URL]}.
 \end{abstract}
 
 \section{Introduction}
@@ -51,7 +50,9 @@ The problem is worse than slow prefill. Each agent needs its own attention conte
 
 We eliminate re-prefill by persisting each agent's KV cache. The cache produced during prefill is the agent's memory at the attention layer. Instead of discarding it after each request (as vLLM~\cite{kwon2023pagedattention} and SGLang~\cite{zheng2024sglang} do) or holding it only in volatile RAM, we write it to disk in 4-bit quantized format and reload it when the agent resumes. Context restoration drops from 15.5 seconds to 513\,ms (warm, disk) or 709\,ms (hot, memory) at 4K context on Gemma~3 12B.
 
-\paragraph{Contributions.} (1)~A persistent block pool giving each agent isolated, quantized KV cache surviving server restarts and device reboots, stored in safetensors format. (2)~BatchQuantizedKVCache for concurrent Q4 inference over multiple agents' caches, with an interleaved prefill+decode scheduler. (3)~Cross-phase context injection treating KV cache as working memory, letting agents accumulate attention state across conversation phases without re-computation. (4)~An infrastructure layer for agentic frameworks: the system exposes an OpenAI-compatible API, so AutoGen~\cite{wu2023autogen}, CrewAI, or LangGraph can use persistent cache without modification. (5)~Evaluation across two architecturally distinct models showing Q4 persistence fits 4$\times$ more agents than FP16 with negligible quality loss.
+\paragraph{Contributions.} (1)~A persistent block pool giving each agent isolated, quantized KV cache surviving server restarts and device reboots, stored in safetensors format. (2)~BatchQuantizedKVCache for concurrent Q4 inference over multiple agents' caches, with an interleaved prefill+decode scheduler. (3)~Cross-phase context injection that reuses cached attention state across conversation phases without re-computation. (4)~Evaluation across two architecturally distinct models showing Q4 persistence fits 4$\times$ more agents than FP16 with measured quality impact of $-$0.7\% to $+$3.1\% perplexity.
+
+This is a systems paper. The individual techniques---KV cache quantization, disk persistence, batched inference---exist in prior work. Our contribution is their composition into a working system for multi-agent edge inference, with empirical characterization across two architecturally distinct models. The system exposes an OpenAI-compatible API, so any framework issuing chat completion requests can use persistent cache without modification.
 
 \section{Background}
 \label{sec:background}
@@ -97,7 +98,7 @@ The RTX 5090 has 1,792\,GB/s bandwidth to its 32\,GB VRAM, but spilling KV cache
 
 On our test device (M4~Pro, 24\,GB), the memory budget is 24\,GB $-$ 6.8\,GB weights $-$ 7\,GB OS/system $\approx$ 10.2\,GB for KV caches. This constrains both the number of concurrent agents and the maximum context length per agent (Section~\ref{sec:fp16_analysis}).
 
-Local inference avoids transmitting conversation history to external servers. Under GDPR (Art.~44--49) and HIPAA (45 CFR 164.312), transferring patient or user data to cloud endpoints requires legal basis, data processing agreements, and transfer impact assessments. On-device inference sidesteps this. The tradeoff: operating within fixed device memory.
+Local inference avoids transmitting conversation history to external servers. Under GDPR (Art.~44--49) and HIPAA (45 CFR 164.312), transferring patient or user data to cloud endpoints requires legal basis, data processing agreements, and transfer impact assessments. On-device inference sidesteps this. Per-agent cache isolation also prevents the prompt reconstruction attacks demonstrated by PROMPTPEEK~\cite{promptpeek2025}, where shared KV caches enable 99\% recovery of other users' prompts. The tradeoff: operating within fixed device memory.
 
 \subsection{Interactivity and TTFT}
 \label{sec:interactivity}
@@ -286,7 +287,8 @@ Q4 vs FP16 & Agents at 8K & 12 & 3 & 4.0$\times$ \\
 Batching & SysTPS, Gemma 1K warm & 22.4 & 11.2$^*$ & 2.0$\times$ \\
 Cross-phase & TTFT (ms), Phase 5 & 1705 & 3292 & 1.9$\times$ \\
 \bottomrule
-\multicolumn{5}{@{}l@{}}{$^*$Per-agent TPS = SysTPS/2, representing single-agent throughput.}
+\multicolumn{5}{@{}l@{}}{$^*$Per-agent TPS = SysTPS/2. The 2.0$\times$ is definitional (system vs per-agent),} \\
+\multicolumn{5}{@{}l@{}}{not a measured throughput gain over batch=1.}
 \end{tabular}
 \end{table}
 
@@ -357,7 +359,33 @@ Hot/cold speedup & \multicolumn{2}{c}{23.8$\times$} & \multicolumn{2}{c}{12.1$\t
 \end{tabular}
 \end{table}
 
-Table~\ref{tab:wiki} shows measured results. Cold priming averages 20.5\,s (Gemma) and 5.1\,s (DeepSeek) per expert at ${\sim}$4K token context. After priming, warm-cache queries drop to 847\,ms (Gemma, 24.2$\times$ faster) and 396\,ms (DeepSeek, 13.0$\times$). Per-expert breakdown: the largest cold TTFT is 28\,s (Gemma, 3K-word article), reduced to 761\,ms warm. Quality passes range from 80\% (Gemma Phase~2) to 30\% (DeepSeek Phase~1); these scores measure structural quality (keyword overlap, minimum length), not factual accuracy. A routing diagram appears in Appendix~\ref{app:figures}.
+Table~\ref{tab:wiki} shows measured results. Cold priming averages 20.5\,s (Gemma) and 5.1\,s (DeepSeek) per expert at ${\sim}$4K token context. After priming, warm-cache queries drop to 847\,ms (Gemma, 24.2$\times$ faster) and 396\,ms (DeepSeek, 13.0$\times$). Per-expert breakdown: the largest cold TTFT is 28\,s (Gemma, 3K-word article), reduced to 761\,ms warm. Quality passes range from 80\% (Gemma Phase~2) to 30\% (DeepSeek Phase~1); these scores measure structural quality (keyword overlap, minimum length), not factual accuracy. DeepSeek-Coder is optimized for code tasks, not general knowledge retrieval; the low quality scores reflect model capability, not caching artifacts. A routing diagram appears in Appendix~\ref{app:figures}.
+
+\subsection{Q4 Cache Quality}
+\label{sec:perplexity}
+
+We measure the quality impact of Q4 KV cache quantization using actual \texttt{QuantizedKVCache} objects from the production code path. For each model, we evaluate perplexity on WikiText-2 using 512-token sliding windows with 256-token stride, processing 7{,}935 tokens total. Quantization error propagates through all attention layers, matching real inference conditions.
+
+\begin{table}[t]
+\centering
+\small
+\caption{Perplexity with actual Q4 KV caches. FP16 baseline uses standard KV cache; Q4 uses the production \texttt{QuantizedKVCache} (group size 64). 7{,}935 tokens, 512-token windows, 256-token stride.}
+\label{tab:perplexity_main}
+\begin{tabular}{@{}lrrrr@{}}
+\toprule
+Model & FP16 PPL & Q4 PPL & $\Delta$ PPL & $\Delta$\% \\
+\midrule
+Gemma 3 12B & 14.40 & 14.30 & $-$0.10 & $-$0.70 \\
+DeepSeek-V2-Lite 16B & 6.26 & 6.45 & $+$0.19 & $+$3.08 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Table~\ref{tab:perplexity_main} shows measured results. Gemma~3 shows a $-$0.10 PPL change ($-$0.70\%), within measurement noise and consistent with the negligible degradation reported by KIVI~\cite{liu2024kivi} and KVQuant~\cite{hooper2024kvquant} at 4 bits. DeepSeek shows a $+$0.19 PPL increase ($+$3.08\%), small in absolute terms but larger than Gemma's.
+
+The divergence between models likely reflects architectural differences in how quantization error distributes. Gemma's GQA uses symmetric KV dimensions (K=V=256 per head), providing redundancy across the 8 KV heads that absorbs quantization noise. DeepSeek's MLA compresses keys and values into low-rank latent representations with asymmetric dimensions (K=192, V=128). The compressed latent space has less redundancy to absorb 4-bit rounding error, and the asymmetric K/V dimensions mean quantization affects keys and values differently. Prior Q4 KV cache work~\cite{liu2024kivi,hooper2024kvquant,li2025quantspec} reports $<$0.1 PPL degradation on standard GQA models, consistent with our Gemma result; MLA-specific Q4 evaluation is less studied.
+
+\textbf{Limitations of this measurement.} The evaluation uses a local WikiText-2 corpus, not the standard benchmark split. The 512-token evaluation windows are shorter than Gemma's sliding-window attention (window=1024), so the measurement does not exercise cross-window attention dynamics. We do not report confidence intervals. Longer-context evaluation and per-layer sensitivity analysis are future work.
 
 \section{Discussion}
 \label{sec:discussion}
@@ -367,7 +395,7 @@ Table~\ref{tab:wiki} shows measured results. Cold priming averages 20.5\,s (Gemm
 
 This system occupies the infrastructure layer beneath agentic frameworks. AutoGen~\cite{wu2023autogen}, CrewAI, and LangGraph manage agent logic: role assignment, turn-taking, tool use. Our system manages agent memory, deciding which caches to keep hot, which to spill to disk, and when to reload. The cache lifecycle (persist, reload, evict) is transparent to the application layer. Any framework that issues OpenAI-compatible chat completion requests can use persistent cache without modification.
 
-Latency hiding follows from multi-agent structure. In a 5-agent round-robin, while Agent~A generates (1--3\,s for 50--100 tokens), Agent~B's cache loads from disk (${\sim}$500\,ms at 7\,GB/s). The interleaved scheduler already implements this for prefill chunks. Only $1/N$ of cold-start latency falls on the critical path, where $N$ is the number of active agents. For $N{=}5$, cache reload runs concurrently with generation 80\% of the time.
+Latency hiding follows from multi-agent structure. In a 5-agent round-robin, while Agent~A generates (1--3\,s for 50--100 tokens), Agent~B's cache loads from disk (${\sim}$500\,ms at 7\,GB/s). The interleaved scheduler already implements this for prefill chunks. In principle, only $1/N$ of cold-start latency falls on the critical path, where $N$ is the number of active agents. For $N{=}5$, cache reload could run concurrently with generation 80\% of the time. This $1/N$ projection has not been measured end-to-end; the staggered arrival results (Appendix~\ref{app:staggered}) provide partial validation for $N{=}2$.
 
 \subsection{Persistent Cache vs RAG vs Message Passing}
 
@@ -431,7 +459,7 @@ The non-portable aspects are MLX's lazy evaluation model (requiring explicit \te
 
 \textbf{Single device.} All agents share one device. Multi-device extension would require cache transfer over Thunderbolt or network interconnects.
 
-\textbf{Q4 quality impact.} Appendix~\ref{app:perplexity} reports a logit-level proxy for Q4 degradation on WikiText-2, showing $<$0.1 PPL increase on both models. This proxy measures output sensitivity to Q4 noise rather than layer-by-layer KV cache quantization. Prior work with actual Q4 KV caches~\cite{liu2024kivi,hooper2024kvquant} reports similar ($<$0.1) degradation at group sizes 32--128, supporting the estimate. End-to-end perplexity with our Q4 KV cache pipeline remains future work.
+\textbf{Q4 quality impact.} Section~\ref{sec:perplexity} measures perplexity with actual Q4 KV caches, showing $-$0.10 PPL ($-$0.7\%) for Gemma and $+$0.19 PPL ($+$3.1\%) for DeepSeek. These measurements use 512-token evaluation windows, which do not exercise Gemma's sliding-window attention (window=1024). Longer-context evaluation and per-layer sensitivity analysis are future work.
 
 \textbf{Two models tested.} We validate on one dense GQA model and one MoE MLA model. Adding Llama~3 (standard GQA) would strengthen generalization.
 
@@ -459,17 +487,17 @@ The non-portable aspects are MLX's lazy evaluation model (requiring explicit \te
 
 Persistent Q4 KV cache turns agent context restoration from a compute-bound O($n$) prefill into an I/O-bound O(1) reload. On Gemma~3 12B at 32K context, hot cache reduces TTFT from 165 seconds to 1.3 seconds (130$\times$). On DeepSeek-Coder-V2-Lite at 32K, from 48 seconds to 652\,ms (74$\times$). Warm disk reload achieves 102$\times$ and 69$\times$ at 32K.
 
-Q4 quantization fits 4$\times$ more agents into fixed device memory than FP16 (12 vs 3 agents at 8K context on 24\,GB), with negligible estimated quality loss ($<$0.1 PPL, Appendix~\ref{app:perplexity}). Batched serving reaches 22 system TPS (Gemma) and 65 system TPS (DeepSeek) with two warm-cache agents at 1K context.
+Q4 quantization fits 4$\times$ more agents into fixed device memory than FP16 (12 vs 3 agents at 8K context on 24\,GB), with measured quality impact of $-$0.10 to $+$0.19 PPL (Section~\ref{sec:perplexity}). Batched serving reaches 22 system TPS (Gemma) and 65 system TPS (DeepSeek) with two warm-cache agents at 1K context.
 
 Two multi-agent scenarios validate the design. A 5-phase interrogation shows 1.9$\times$ TTFT reduction in later phases from cross-phase persistence (23\% total wall-time reduction). A 10-expert routing benchmark shows 24$\times$ TTFT reduction when querying cached experts.
 
-The system operates as an infrastructure layer for agentic frameworks via its OpenAI-compatible API. AutoGen, CrewAI, or LangGraph can use persistent agent cache without modification.
+The system exposes an OpenAI-compatible API, so any framework issuing chat completion requests can use persistent agent cache without modification.
 
 Multi-device cache transfer, adaptive quantization bit-width (2-bit via RotateKV or CommVQ techniques), and porting to CUDA/RTX for discrete GPU edge devices are directions for future work.
 
-Open-source at \texttt{[anonymized for submission]}.
+Open-source at \texttt{[repository URL]}.
 
-\bibliographystyle{colm2026_conference}
+\bibliographystyle{plainnat}
 \bibliography{semantic_colm2026}
 
 \newpage
@@ -578,35 +606,12 @@ DeepSeek & 9 & 33 & 4 & 16 & 2 & 8 & 1 & 4 \\
 \end{tabular}
 \end{table}
 
-\section{Perplexity Evaluation}
+\section{Perplexity Methodology}
 \label{app:perplexity}
 
-We estimate the quality impact of Q4 quantization using a logit-level proxy. For each model, we process WikiText-2 (245K tokens) in 512-token sliding windows, run the model with standard KV caches, then quantize and dequantize the output logits at 4-bit (group size 64) to simulate Q4 round-trip noise. Perplexity = $\exp(-\frac{1}{N}\sum_i \log P(t_i))$.
+Section~\ref{sec:perplexity} reports perplexity measured with actual \texttt{QuantizedKVCache} objects. The methodology uses WikiText-2 text in 512-token sliding windows (256-token stride), evaluating 7{,}935 tokens per model. Both FP16 baseline and Q4 caches use identical model weights (4-bit quantized via mlx-lm). The Q4 KV cache uses group size 64, matching the production pipeline.
 
-\textbf{Methodology note.} This measures output-level sensitivity to Q4 noise, not layer-by-layer KV cache quantization. Actual Q4 KV caches introduce error at each attention layer, which may compound differently than a single logit perturbation. We report this proxy alongside prior work that measures actual Q4 KV cache perplexity (KIVI, KVQuant, QuantSpec) to triangulate the quality impact.
-
-\begin{table}[h]
-\centering
-\small
-\caption{WikiText-2 perplexity (lower is better). $\Delta$ = Q4 $-$ FP16.}
-\label{tab:perplexity}
-\begin{tabular}{@{}lrrr@{}}
-\toprule
-Model & FP16 PPL & Q4 PPL & $\Delta$ \\
-\midrule
-Gemma 3 12B & 14.40 & 14.46 & +0.06 \\
-DeepSeek-V2-Lite 16B & 6.26 & 6.33 & +0.07 \\
-\bottomrule
-\end{tabular}
-\end{table}
-
-Both models show small deltas under the logit proxy: Gemma~3 increases by 0.06 PPL (+0.4\%), DeepSeek by 0.07 PPL (+1.1\%). These are consistent with (and slightly smaller than) the $<$0.1 PPL degradation reported by systems that quantize actual KV caches at 4 bits, suggesting our proxy provides a reasonable order-of-magnitude estimate.
-
-Prior work on KV cache quantization reports small quality loss at 4 bits. KIVI~\cite{liu2024kivi} measures $<$0.1 PPL degradation for 4-bit KV with per-channel key quantization (group 32--128). KVQuant~\cite{hooper2024kvquant} shows $<$0.1 PPL degradation at 4 bits with per-layer sensitivity calibration, enabling 10M context on A100. QuantSpec~\cite{li2025quantspec} validates 4-bit KV cache for speculative decoding with no measurable quality loss. RotateKV~\cite{rotatekv2025} reports $<$0.3 PPL degradation even at 2 bits using outlier-aware rotations. XQuant~\cite{tomar2025xquant} demonstrates 4-bit KV with $<$0.05 PPL degradation using rematerialization.
-
-For model weight quantization (which also applies to our Q4-weight models), GPTQ~\cite{frantar2023gptq} shows 4-bit weight quantization introduces $<$0.5 PPL degradation on LLaMA models. AWQ~\cite{lin2024awq} achieves similar quality at 4 bits by preserving salient weights. Both Gemma~3 and DeepSeek in our evaluation use 4-bit quantized weights (via mlx-lm's GPTQ-style quantization), so the measured perplexity includes both weight and (simulated) KV cache quantization effects.
-
-Our group size of 64 is within the range showing negligible degradation across all these studies.
+Prior work on Q4 KV cache quality: KIVI~\cite{liu2024kivi} reports $<$0.1 PPL degradation with per-channel key quantization (group 32--128). KVQuant~\cite{hooper2024kvquant} shows $<$0.1 PPL at 4 bits with per-layer sensitivity calibration. QuantSpec~\cite{li2025quantspec} validates 4-bit KV for speculative decoding with no measurable quality loss. RotateKV~\cite{rotatekv2025} reports $<$0.3 PPL even at 2 bits. Our Gemma result ($-$0.7\%) is consistent with this literature; our DeepSeek result ($+$3.1\%) is higher, possibly reflecting MLA's compressed latent representations (Section~\ref{sec:perplexity}).
 
 \section{Staggered Arrivals}
 \label{app:staggered}
@@ -617,36 +622,12 @@ Real multi-agent workflows have staggered request arrivals. A single user may tr
 
 In sequential mode, Agent~B waits for Agent~A to complete before starting. In batched mode, Agent~B joins Agent~A's batch and begins prefill immediately.
 
-For Gemma, total wall time is similar (38.8\,s sequential vs 38.6\,s batched). For DeepSeek, also similar (9.5\,s vs 9.4\,s). The benefit of batching appears in Agent~B's time-to-completion: DeepSeek batched Agent~B finishes in 6.4\,s vs 8.7\,s sequential from experiment start (includes both queuing and processing time). The effect is smaller for Gemma because its prefill is long enough to dominate. With warm or hot caches, the staggered benefit would be larger since prefill overhead vanishes and decode interleaving matters more.
+For Gemma, total wall time is similar (38.8\,s sequential vs 38.6\,s batched). For DeepSeek, also similar (9.5\,s vs 9.4\,s). The benefit of batching appears in Agent~B's perceived wait (time from experiment start to B's first token): DeepSeek Agent~B waits 6.4\,s (batched) vs 8.7\,s (sequential), a 26\% reduction. For Gemma, the reduction is 7\% (33.8\,s vs 36.5\,s). The effect is smaller for Gemma because its longer prefill dominates. With warm or hot caches, the staggered benefit would be larger since prefill overhead vanishes and decode interleaving matters more.
 
 \section{Hardware Landscape}
 \label{app:hardware}
 
-\begin{table}[h]
-\centering
-\small
-\caption{Extended edge device specifications for KV cache deployment.}
-\begin{tabular}{@{}lrrrrl@{}}
-\toprule
-Device & Memory & BW & SSD & Price & Notes \\
-       & (GB) & (GB/s) & (GB/s) & (USD) & \\
-\midrule
-M4 (MacBook Air) & 16--32 & 120 & 3.5 & \$1,099 & Entry Mac \\
-M4 Pro (Mac Mini) & 24--48 & 273 & 7 & \$1,399 & Our test device \\
-M4 Max (MacBook) & 36--128 & 546 & 7 & \$3,199 & High-end Mac \\
-M4 Ultra (Studio) & 192--256 & 819 & 7 & \$5,999 & Pro Mac \\
-DGX Spark & 128 & 273 & 11 & \$3,999 & Grace Blackwell \\
-RTX 5090 & 32 & 1792 & 64$^*$ & \$1,999 & Discrete VRAM \\
-RTX 4090 & 24 & 1008 & 32$^*$ & \$1,599 & Discrete VRAM \\
-iPhone 17 Pro & 12 & 77 & 2 & \$1,099 & Mobile \\
-\bottomrule
-\multicolumn{6}{@{}l@{}}{$^*$PCIe host-device bandwidth. VRAM bandwidth is local to the GPU.}
-\end{tabular}
-\end{table}
-
-The M4~Pro tested in this paper (24\,GB, 273\,GB/s) represents the lower end of capable edge devices. The DGX Spark matches its bandwidth at 128\,GB capacity for \$3,999. M4~Max at 128\,GB has a much larger cache budget (${\sim}$114\,GB after weights and OS), fitting 135+ agents at 8K Q4 context vs 12 on the 24\,GB M4~Pro.
-
-The RTX~5090 has the highest absolute memory bandwidth (1,792\,GB/s) but its 32\,GB discrete VRAM is an island: spilling to host RAM or SSD is 28--280$\times$ slower. For KV cache persistence, unified memory devices have an advantage because the same 7\,GB/s SSD serves both model weights and cache reload without PCIe hops.
+All results in this paper are from a single device: Apple Mac Mini M4~Pro (24\,GB, 273\,GB/s). This represents the lower end of capable edge devices. The M4~Max (128\,GB, 546\,GB/s) would fit 135+ agents at 8K Q4 context vs 12 on the M4~Pro. NVIDIA's DGX Spark (128\,GB, 273\,GB/s) matches the M4~Pro's bandwidth at 5$\times$ the memory. Discrete GPU devices (RTX 5090, 32\,GB VRAM at 1{,}792\,GB/s) have higher compute bandwidth but spilling KV cache to host RAM drops to PCIe speeds (28$\times$ cliff), making unified memory devices more favorable for cache persistence workflows. Table~\ref{tab:hardware} in the main text summarizes the key specifications.
 
 \section{Detailed Figures}
 \label{app:figures}

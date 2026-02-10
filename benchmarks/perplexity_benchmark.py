@@ -1,17 +1,19 @@
 #!/usr/bin/env python3
 """
-Perplexity benchmark: FP16 vs Q4 KV cache quality evaluation.
+Perplexity benchmark: FP16 vs actual Q4 KV cache quality evaluation.
 
 Measures perplexity on WikiText-2 test set to quantify Q4 KV cache
-quality loss. Compares FP16 KV cache (baseline) with Q4 KV cache
-(group size 64) for both Gemma 3 and DeepSeek-Coder-V2-Lite.
+quality loss. Uses actual QuantizedKVCache objects during model forward
+passes — K/V tensors are quantized to 4-bit at every attention layer,
+stored in the cache, and dequantized for attention computation. This is
+the same code path used in production inference.
 
-Memory-aware sizing:
-  - Gemma 3 12B Q4 weights: ~6.5 GB
-  - DeepSeek-Coder-V2-Lite Q4 weights: ~8 GB
-  - On 24 GB M4 Pro: ~15 GB free after weights + OS
-  - KV cache at 512 tokens FP16: ~100 MB (fits easily)
-  - We evaluate ~8K tokens total to stay well within budget
+Compares:
+  - FP16 KV cache (KVCache from mlx-lm, no quantization)
+  - Q4 KV cache (QuantizedKVCache, group size 64, 4-bit)
+
+Both paths create fresh cache objects per window and pass them to the
+model's forward method. The only difference is quantization of K/V.
 
 Usage:
     python benchmarks/perplexity_benchmark.py --model gemma
@@ -28,8 +30,6 @@ import argparse
 import json
 import math
 import gc
-import os
-import sys
 import time
 from pathlib import Path
 
@@ -49,15 +49,13 @@ BITS = 4             # Quantization bits
 
 
 def load_corpus():
-    """Load evaluation corpus. Try WikiText-2, fall back to local."""
-    # Try local corpus first (faster, no network)
+    """Load evaluation corpus. Try local first, then WikiText-2."""
     corpus_path = Path(__file__).parent / "data" / "prefill_corpus.txt"
     if corpus_path.exists():
         text = corpus_path.read_text()
         print(f"Loaded local corpus: {len(text)} chars")
         return text
 
-    # Fall back to HuggingFace
     try:
         from datasets import load_dataset
         dataset = load_dataset("wikitext", "wikitext-2-raw-v1", split="test")
@@ -75,44 +73,49 @@ def load_model_and_tokenizer(model_id: str):
     t0 = time.time()
     model, tokenizer = load(model_id)
     mx.eval(model.parameters())
-    print(f"Model loaded in {time.time() - t0:.1f}s")
-    return model, tokenizer
+    # DeepSeek model lacks make_cache(); fall back to counting model.layers
+    if hasattr(model, "make_cache"):
+        n_layers = len(model.make_cache())
+    elif hasattr(model, "model") and hasattr(model.model, "layers"):
+        n_layers = len(model.model.layers)
+    elif hasattr(model, "layers"):
+        n_layers = len(model.layers)
+    else:
+        raise RuntimeError("Cannot determine number of layers")
+    print(f"Model loaded in {time.time() - t0:.1f}s ({n_layers} layers)")
+    return model, tokenizer, n_layers
 
 
-def evaluate_window_fp16(model, input_ids):
-    """Forward pass with standard FP16 KV cache. Returns per-token log probs."""
-    logits = model(input_ids)
+def evaluate_window_fp16(model, input_ids, n_layers):
+    """Forward pass with FP16 KV cache (baseline).
+
+    Creates standard KVCache objects — K/V stored in full precision.
+    This is the reference for measuring Q4 degradation.
+    """
+    from mlx_lm.models.cache import KVCache
+    caches = [KVCache() for _ in range(n_layers)]
+    logits = model(input_ids, cache=caches)
     mx.eval(logits)
     return logits
 
 
-def evaluate_window_q4(model, input_ids, group_size=64, bits=4):
+def evaluate_window_q4(model, input_ids, n_layers, group_size=64, bits=4):
+    """Forward pass with actual Q4 KV cache.
+
+    Creates QuantizedKVCache objects — K/V tensors are quantized to 4-bit
+    at each attention layer via cache.update_and_fetch(), stored as
+    (uint32 packed data, float16 scales, float16 biases), and dequantized
+    on-the-fly during attention computation.
+
+    This is the exact code path used in production. The quantization error
+    propagates through all subsequent attention layers, matching real
+    inference behavior.
     """
-    Forward pass simulating Q4 KV cache degradation.
-
-    Strategy: Run the model normally (FP16 KV internally), then quantize
-    and dequantize the logits to simulate the noise floor of Q4 KV cache.
-
-    This is an upper bound on Q4 KV degradation because:
-    - Q4 noise in KV cache propagates through subsequent attention layers
-    - Quantizing final logits applies noise only once
-    - Actual Q4 KV cache error is distributed across layers
-
-    A more precise approach would patch the model's cache to use Q4,
-    but mlx-lm's cache is internal to the forward pass. The logit-level
-    simulation gives us a conservative (worst-case) estimate.
-    """
-    logits = model(input_ids)
+    from mlx_lm.models.cache import QuantizedKVCache
+    caches = [QuantizedKVCache(group_size=group_size, bits=bits) for _ in range(n_layers)]
+    logits = model(input_ids, cache=caches)
     mx.eval(logits)
-
-    # Quantize logits to Q4 and dequantize — simulates Q4 round-trip noise
-    logits_f16 = logits.astype(mx.float16)
-    q_data, q_scales, q_biases = mx.quantize(logits_f16, group_size=group_size, bits=bits)
-    logits_q4 = mx.dequantize(q_data, q_scales, q_biases, group_size=group_size, bits=bits)
-    logits_q4 = logits_q4.astype(logits.dtype)
-    mx.eval(logits_q4)
-
-    return logits_q4
+    return logits
 
 
 def compute_ppl_from_logits(logits, tokens, count_start, count_end):
@@ -131,7 +134,7 @@ def compute_ppl_from_logits(logits, tokens, count_start, count_end):
     return window_lp.sum().item(), count_end - count_start
 
 
-def run_perplexity(model, tokenizer, tokens, mode="fp16"):
+def run_perplexity(model, n_layers, tokens, mode="fp16"):
     """Run perplexity evaluation over sliding windows."""
     n_tokens = min(len(tokens), MAX_TOKENS)
     total_log_prob = 0.0
@@ -146,9 +149,9 @@ def run_perplexity(model, tokenizer, tokens, mode="fp16"):
         input_ids = mx.array(window).reshape(1, -1)
 
         if mode == "fp16":
-            logits = evaluate_window_fp16(model, input_ids)
+            logits = evaluate_window_fp16(model, input_ids, n_layers)
         else:
-            logits = evaluate_window_q4(model, input_ids, GROUP_SIZE, BITS)
+            logits = evaluate_window_q4(model, input_ids, n_layers, GROUP_SIZE, BITS)
 
         # Count only non-overlapping tokens (except first window)
         if i == 0:
@@ -181,17 +184,17 @@ def run_benchmark(model_id: str, model_name: str):
 
     # Load corpus and tokenize
     text = load_corpus()
-    model, tokenizer = load_model_and_tokenizer(model_id)
+    model, tokenizer, n_layers = load_model_and_tokenizer(model_id)
     tokens = tokenizer.encode(text)
     print(f"Tokenized: {len(tokens)} tokens, evaluating first {min(len(tokens), MAX_TOKENS)}")
 
     # FP16 baseline
     print(f"\n--- FP16 KV Cache (baseline) ---")
-    fp16_ppl, fp16_n, fp16_t = run_perplexity(model, tokenizer, tokens, mode="fp16")
+    fp16_ppl, fp16_n, fp16_t = run_perplexity(model, n_layers, tokens, mode="fp16")
 
-    # Q4 evaluation
-    print(f"\n--- Q4 KV Cache (group={GROUP_SIZE}, bits={BITS}) ---")
-    q4_ppl, q4_n, q4_t = run_perplexity(model, tokenizer, tokens, mode="q4")
+    # Q4 evaluation — actual QuantizedKVCache
+    print(f"\n--- Q4 KV Cache (actual, group={GROUP_SIZE}, bits={BITS}) ---")
+    q4_ppl, q4_n, q4_t = run_perplexity(model, n_layers, tokens, mode="q4")
 
     # Results
     delta = q4_ppl - fp16_ppl
@@ -204,10 +207,12 @@ def run_benchmark(model_id: str, model_name: str):
     print(f"  Q4 PPL:      {q4_ppl:.4f}")
     print(f"  Delta:       {delta:+.4f} ({pct:+.2f}%)")
     print(f"  Tokens:      {fp16_n}")
+    print(f"  Method:      Actual QuantizedKVCache (not logit proxy)")
 
     results = {
         "model_id": model_id,
         "model_name": model_name,
+        "method": "actual_q4_kv_cache",
         "corpus": "local_prefill_corpus",
         "window_size": WINDOW_SIZE,
         "stride": STRIDE,
@@ -269,11 +274,11 @@ def main():
         print(f"\n{'='*60}")
         print("SUMMARY")
         print(f"{'='*60}")
-        print(f"{'Model':<25} {'FP16':>8} {'Q4':>8} {'Delta':>8}")
-        print("-" * 55)
+        print(f"{'Model':<25} {'FP16':>8} {'Q4':>8} {'Delta':>8} Method")
+        print("-" * 65)
         for r in all_results:
             print(f"{r['model_name']:<25} {r['fp16_ppl']:>8.4f} {r['q4_ppl']:>8.4f} "
-                  f"{r['delta_ppl']:>+8.4f}")
+                  f"{r['delta_ppl']:>+8.4f} {r['method']}")
 
 
 if __name__ == "__main__":

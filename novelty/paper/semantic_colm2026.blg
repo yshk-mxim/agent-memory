@@ -1,46 +1,46 @@
 This is BibTeX, Version 0.99d (TeX Live 2025)
 Capacity: max_strings=200000, hash_size=200000, hash_prime=170003
 The top-level auxiliary file: semantic_colm2026.aux
-The style file: colm2026_conference.bst
+The style file: plainnat.bst
 Database file #1: semantic_colm2026.bib
-You've used 20 entries,
+You've used 31 entries,
             2773 wiz_defined-function locations,
-            688 strings with 9976 characters,
-and the built_in function-call counts, 12419 in all, are:
-= -- 961
-> -- 1182
-< -- 10
-+ -- 400
-- -- 378
-* -- 1093
-:= -- 2002
-add.period$ -- 71
-call.type$ -- 20
-change.case$ -- 184
-chr.to.int$ -- 18
-cite$ -- 40
-duplicate$ -- 449
-empty$ -- 762
-format.name$ -- 399
-if$ -- 2519
-int.to.chr$ -- 3
+            730 strings with 11667 characters,
+and the built_in function-call counts, 17471 in all, are:
+= -- 1362
+> -- 1548
+< -- 17
++ -- 527
+- -- 492
+* -- 1476
+:= -- 2805
+add.period$ -- 107
+call.type$ -- 31
+change.case$ -- 249
+chr.to.int$ -- 27
+cite$ -- 62
+duplicate$ -- 696
+empty$ -- 1177
+format.name$ -- 529
+if$ -- 3571
+int.to.chr$ -- 5
 int.to.str$ -- 1
-missing$ -- 17
-newline$ -- 118
-num.names$ -- 80
-pop$ -- 413
+missing$ -- 30
+newline$ -- 176
+num.names$ -- 124
+pop$ -- 570
 preamble$ -- 1
-purify$ -- 164
+purify$ -- 219
 quote$ -- 0
-skip$ -- 392
+skip$ -- 567
 stack$ -- 0
-substring$ -- 120
-swap$ -- 58
+substring$ -- 167
+swap$ -- 80
 text.length$ -- 4
 text.prefix$ -- 0
 top$ -- 0
-type$ -- 220
+type$ -- 336
 warning$ -- 0
-while$ -- 66
+while$ -- 101
 width$ -- 0
-write$ -- 274
+write$ -- 414
