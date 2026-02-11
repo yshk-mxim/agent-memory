@@ -31,6 +31,16 @@ FAKE_BATCH_GEN_DEFAULT_STEPS = 3  # tokens generated before completion
 # in the test environment. These mocks allow api_server.py to be imported safely.
 # =============================================================================
 
+# Save real modules BEFORE mocking — tests/mlx/conftest.py restores them.
+_REAL_MODULES: dict[str, object] = {}
+for _key in [
+    "mlx", "mlx.core", "mlx.utils",
+    "mlx_lm", "mlx_lm.models", "mlx_lm.models.cache",
+    "mlx_lm.server", "mlx_lm.sample_utils",
+]:
+    if _key in sys.modules and type(sys.modules[_key]).__name__ != "MagicMock":
+        _REAL_MODULES[_key] = sys.modules[_key]
+
 # --- mlx.core with sensible return values ---
 _mock_mx = MagicMock()
 _mock_mx.get_active_memory.return_value = 100 * 1024 * 1024
@@ -43,9 +53,10 @@ _mock_mx.quantize.return_value = [MagicMock(), MagicMock(), MagicMock()]
 _mock_mlx = MagicMock()
 _mock_mlx.core = _mock_mx  # Wire parent.core → child mock
 _mock_mlx_utils = MagicMock()
-sys.modules["mlx"] = _mock_mlx
-sys.modules["mlx.core"] = _mock_mx
-sys.modules["mlx.utils"] = _mock_mlx_utils
+
+# NOTE: Do NOT assign mocks into sys.modules at module level!
+# This pollutes the entire pytest session and breaks tests/mlx/ GPU tests.
+# Mocks are installed in the _patch_for_integration fixture instead.
 
 # --- Mock model with attributes for spec extraction ---
 _mock_model = MagicMock()
@@ -89,9 +100,6 @@ _mock_mlx_lm_models = MagicMock()
 _mock_mlx_lm_models_cache = MagicMock()
 _mock_mlx_lm_models.cache = _mock_mlx_lm_models_cache
 _mock_mlx_lm.models = _mock_mlx_lm_models
-sys.modules["mlx_lm"] = _mock_mlx_lm
-sys.modules["mlx_lm.models"] = _mock_mlx_lm_models
-sys.modules["mlx_lm.models.cache"] = _mock_mlx_lm_models_cache
 
 
 # =============================================================================
@@ -177,8 +185,6 @@ _mock_server.BatchGenerator = FakeBatchGenerator
 _mock_sample_utils = MagicMock()
 _mock_mlx_lm.server = _mock_server
 _mock_mlx_lm.sample_utils = _mock_sample_utils
-sys.modules["mlx_lm.server"] = _mock_server
-sys.modules["mlx_lm.sample_utils"] = _mock_sample_utils
 
 
 # =============================================================================
@@ -188,19 +194,33 @@ sys.modules["mlx_lm.sample_utils"] = _mock_sample_utils
 
 @pytest.fixture(autouse=True, scope="session")
 def _reinstall_mlx_mocks():
-    """Re-install MLX mocks that may be clobbered by unit test module-level code.
+    """Install MLX mocks for integration tests, restore originals on teardown.
 
     Session-scoped so it runs before module-scoped fixtures like model_and_tokenizer.
+    Restores real modules on teardown so tests/mlx/ GPU tests work when running
+    the full suite (unit + integration + mlx) in a single pytest invocation.
     """
-    sys.modules["mlx"] = _mock_mlx
-    sys.modules["mlx.core"] = _mock_mx
-    sys.modules["mlx.utils"] = _mock_mlx_utils
-    sys.modules["mlx_lm"] = _mock_mlx_lm
-    sys.modules["mlx_lm.models"] = _mock_mlx_lm_models
-    sys.modules["mlx_lm.models.cache"] = _mock_mlx_lm_models_cache
-    sys.modules["mlx_lm.server"] = _mock_server
-    sys.modules["mlx_lm.sample_utils"] = _mock_sample_utils
+    _mock_modules = {
+        "mlx": _mock_mlx,
+        "mlx.core": _mock_mx,
+        "mlx.utils": _mock_mlx_utils,
+        "mlx_lm": _mock_mlx_lm,
+        "mlx_lm.models": _mock_mlx_lm_models,
+        "mlx_lm.models.cache": _mock_mlx_lm_models_cache,
+        "mlx_lm.server": _mock_server,
+        "mlx_lm.sample_utils": _mock_sample_utils,
+    }
+    for key, mock in _mock_modules.items():
+        sys.modules[key] = mock
+
     yield
+
+    # Restore real modules so tests/mlx/ GPU tests work
+    for key in _mock_modules:
+        if key in _REAL_MODULES:
+            sys.modules[key] = _REAL_MODULES[key]
+        else:
+            sys.modules.pop(key, None)
 
 
 @pytest.fixture(autouse=True)
@@ -211,19 +231,6 @@ def _patch_for_integration(monkeypatch):
     - Patches _extract_cache to skip deep MLX tensor operations
     - Resets spec extractor singleton
     """
-    # Re-install configured mocks into sys.modules — unit test files may
-    # clobber these with unconfigured MagicMock() at module level.
-    # Direct assignment (not monkeypatch) because this must take effect before
-    # module-scoped fixtures run, and the values are idempotent.
-    sys.modules["mlx"] = _mock_mlx
-    sys.modules["mlx.core"] = _mock_mx
-    sys.modules["mlx.utils"] = _mock_mlx_utils
-    sys.modules["mlx_lm"] = _mock_mlx_lm
-    sys.modules["mlx_lm.models"] = _mock_mlx_lm_models
-    sys.modules["mlx_lm.models.cache"] = _mock_mlx_lm_models_cache
-    sys.modules["mlx_lm.server"] = _mock_server
-    sys.modules["mlx_lm.sample_utils"] = _mock_sample_utils
-
     # Fix stale module-level references: modules that did `from mlx_lm import load`
     # at import time may hold a reference to an unconfigured MagicMock's .load if
     # unit test files clobbered sys.modules["mlx_lm"] before these modules loaded.

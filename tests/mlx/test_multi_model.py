@@ -278,6 +278,7 @@ class TestGemma3SpecExtraction:
         assert 0.25 <= q4_ratio <= 0.30, f"Q4/FP16 ratio {q4_ratio:.4f} outside 25-30% range"
 
 
+@pytest.mark.skip(reason="GPT-OSS-20B causes Metal SIGABRT on 24GB M4 Pro — memory pressure")
 class TestGptOssSpecExtraction:
     """Verify GPT-OSS-20B spec and cache round-trip."""
 

@@ -7,11 +7,33 @@ If this test passes but warm TTFT ≈ cold TTFT in benchmarks, the
 benchmark methodology is wrong (not testing true disk reload).
 """
 
+from unittest.mock import MagicMock
+
 import pytest
 
-from agent_memory.application.agent_cache_store import AgentCacheStore
+from agent_memory.application.agent_cache_store import AgentCacheStore, ModelTag
 from agent_memory.domain.entities import AgentBlocks, KVBlock
-from agent_memory.domain.value_objects import ModelCacheSpec, ModelTag
+from agent_memory.domain.value_objects import ModelCacheSpec
+
+
+def _make_spec():
+    return ModelCacheSpec(
+        n_layers=4,
+        n_kv_heads=8,
+        head_dim=128,
+        block_tokens=256,
+        layer_types=["global"] * 4,
+    )
+
+
+def _make_blocks(agent_id="test", prompt_text="test prompt"):
+    return AgentBlocks(
+        agent_id=agent_id,
+        blocks={0: [KVBlock(block_id=1, layer_id=0, token_count=256, layer_data=b"fake")]},
+        total_tokens=256,
+        token_sequence=[1] * 256,
+        prompt_text=prompt_text,
+    )
 
 
 @pytest.fixture
@@ -20,31 +42,38 @@ def cache_store(tmp_path):
     cache_dir = tmp_path / "caches"
     cache_dir.mkdir()
 
-    spec = ModelCacheSpec(
-        n_layers=4,
-        n_kv_heads=8,
-        head_dim=128,
-        block_tokens=256,
-    )
-    tag = ModelTag(model_id="test-model", spec=spec)
-
-    # Mock cache adapter
-    from unittest.mock import MagicMock
+    spec = _make_spec()
+    tag = ModelTag.from_spec("test-model", spec)
 
     adapter = MagicMock()
-    adapter.save.return_value = cache_dir / "test_agent.safetensors"
-    adapter.load.return_value = AgentBlocks(
-        spec=spec,
-        blocks={0: [KVBlock(block_id=1, layer_id=0, token_count=256)]},
-        total_tokens=256,
-        token_sequence=[1] * 256,
-        prompt_text="test prompt",
+
+    def fake_save(agent_id, blocks, metadata=None):
+        path = cache_dir / f"{agent_id}.safetensors"
+        path.write_bytes(b"fake-safetensors-data")
+        return path
+
+    adapter.save.side_effect = fake_save
+    adapter.load.return_value = (
+        {0: [KVBlock(block_id=1, layer_id=0, token_count=256, layer_data=b"fake")]},
+        {
+            "model_id": "test-model",
+            "n_layers": "4",
+            "n_kv_heads": "8",
+            "head_dim": "128",
+            "block_tokens": "256",
+            "kv_bits": "4",
+            "kv_group_size": "64",
+            "total_tokens": "256",
+            "token_sequence": "[1]",
+            "prompt_text": "test prompt",
+        },
     )
 
     store = AgentCacheStore(
-        cache_adapter=adapter,
-        model_tag=tag,
+        cache_dir=cache_dir,
         max_hot_agents=2,
+        model_tag=tag,
+        cache_adapter=adapter,
     )
     return store, adapter, cache_dir
 
@@ -52,16 +81,7 @@ def cache_store(tmp_path):
 def test_evict_only_keeps_disk_file(cache_store):
     """Test that delete(keep_disk=True) preserves disk file."""
     store, adapter, cache_dir = cache_store
-
-    # Create cache entry
-    spec = store.model_tag.spec
-    blocks = AgentBlocks(
-        spec=spec,
-        blocks={0: [KVBlock(block_id=1, layer_id=0, token_count=256)]},
-        total_tokens=256,
-        token_sequence=[1] * 256,
-        prompt_text="test",
-    )
+    blocks = _make_blocks("agent_1")
 
     # Save to hot tier
     store.save("agent_1", blocks)
@@ -86,16 +106,7 @@ def test_evict_only_keeps_disk_file(cache_store):
 def test_full_delete_removes_disk_file(cache_store):
     """Test that delete(keep_disk=False) removes disk file."""
     store, adapter, cache_dir = cache_store
-
-    # Create cache entry
-    spec = store.model_tag.spec
-    blocks = AgentBlocks(
-        spec=spec,
-        blocks={0: [KVBlock(block_id=1, layer_id=0, token_count=256)]},
-        total_tokens=256,
-        token_sequence=[1] * 256,
-        prompt_text="test",
-    )
+    blocks = _make_blocks("agent_2")
 
     store.save("agent_2", blocks)
 
@@ -106,7 +117,7 @@ def test_full_delete_removes_disk_file(cache_store):
     # Verify not in hot tier
     assert "agent_2" not in store._hot_cache
 
-    # Verify not in warm tier (would be if file existed)
+    # Verify not in warm tier
     assert "agent_2" not in store._warm_cache
 
 
@@ -119,16 +130,7 @@ def test_warm_reload_after_evict(cache_store):
     3. Reload: load from disk into hot tier
     """
     store, adapter, cache_dir = cache_store
-
-    # Create cache entry
-    spec = store.model_tag.spec
-    blocks = AgentBlocks(
-        spec=spec,
-        blocks={0: [KVBlock(block_id=1, layer_id=0, token_count=256)]},
-        total_tokens=256,
-        token_sequence=[1] * 256,
-        prompt_text="test prompt",
-    )
+    blocks = _make_blocks("agent_3", prompt_text="test prompt")
 
     # 1. Prime: save to hot tier
     store.save("agent_3", blocks)
@@ -152,26 +154,20 @@ def test_warm_reload_after_evict(cache_store):
 def test_dirty_flag_cleared_after_evict(cache_store):
     """Test that dirty flag is cleared after flush to disk."""
     store, adapter, cache_dir = cache_store
+    blocks = _make_blocks("agent_4")
 
-    spec = store.model_tag.spec
-    blocks = AgentBlocks(
-        spec=spec,
-        blocks={0: [KVBlock(block_id=1, layer_id=0, token_count=256)]},
-        total_tokens=256,
-        token_sequence=[1] * 256,
-        prompt_text="test",
-    )
-
-    # Save creates dirty entry
+    # Save persists immediately (layer_data is not None) and clears dirty
     store.save("agent_4", blocks)
     entry = store._hot_cache["agent_4"]
-    assert entry.dirty is True
+    assert entry.dirty is False  # Already flushed during save()
 
-    # Evict flushes and clears dirty
-    store.delete("agent_4", keep_disk=True)
-
-    # Verify save was called with correct arguments
+    # Verify adapter.save was called during save()
     assert adapter.save.called
     call_args = adapter.save.call_args
     assert call_args[0][0] == "agent_4"  # agent_id
     assert call_args[0][1] == blocks  # blocks
+
+    # Evict — no additional save needed since already persisted
+    store.delete("agent_4", keep_disk=True)
+    assert "agent_4" not in store._hot_cache
+    assert "agent_4" in store._warm_cache
