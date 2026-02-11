@@ -65,6 +65,9 @@ fi
 
 # ── 3. Install package ───────────────────────────────────────────────
 info "Installing agent-memory with dev dependencies..."
+# mlx-lm pins transformers==5.0.0rc1 which has a SentencePiece bug.
+# Install it without deps first, then our package pins transformers==4.57.6.
+pip install --no-deps mlx-lm==0.30.4 --quiet
 pip install -e ".[dev]" --quiet
 ok "Package installed"
 

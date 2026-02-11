@@ -71,10 +71,11 @@ By participating in this project, you agree to maintain a respectful and collabo
 
 ```bash
 # Install with all dev dependencies and pre-commit hooks
+pip install --no-deps mlx-lm==0.30.4  # separate: avoids transformers version conflict
 pip install -e ".[dev]"
 pre-commit install
 
-# Or use the Makefile (does both):
+# Or use the Makefile (does all three):
 make dev-install
 ```
 

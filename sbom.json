@@ -1,332 +1,257 @@
 {
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.6",
+  "$schema": "http://cyclonedx.org/schema/bom-1.6.schema.json",
+  "version": 1,
+  "serialNumber": "urn:uuid:agent-memory-sbom-v1.0.0",
+  "metadata": {
+    "timestamp": "2026-02-11T00:25:29.373628+00:00",
+    "component": {
+      "name": "agent-memory",
+      "version": "1.0.0",
+      "type": "application"
+    }
+  },
   "components": [
     {
-      "bom-ref": "requirements-L3",
-      "description": "requirements line 3: fastapi==0.122.0",
-      "externalReferences": [
-        {
-          "comment": "implicit dist url",
-          "type": "distribution",
-          "url": "https://pypi.org/simple/fastapi/"
-        }
-      ],
-      "name": "fastapi",
-      "purl": "pkg:pypi/fastapi@0.122.0",
-      "type": "library",
-      "version": "0.122.0"
-    },
-    {
-      "bom-ref": "requirements-L1",
-      "description": "requirements line 1: mlx==0.30.3",
-      "externalReferences": [
-        {
-          "comment": "implicit dist url",
-          "type": "distribution",
-          "url": "https://pypi.org/simple/mlx/"
-        }
-      ],
+      "bom-ref": "dep-1",
       "name": "mlx",
+      "version": "0.30.3",
+      "type": "library",
       "purl": "pkg:pypi/mlx@0.30.3",
-      "type": "library",
-      "version": "0.30.3"
-    },
-    {
-      "bom-ref": "requirements-L2",
-      "description": "requirements line 2: mlx-lm==0.30.4",
       "externalReferences": [
         {
-          "comment": "implicit dist url",
           "type": "distribution",
-          "url": "https://pypi.org/simple/mlx-lm/"
+          "url": "https://pypi.org/simple/mlx/",
+          "comment": "implicit dist url"
         }
-      ],
+      ]
+    },
+    {
+      "bom-ref": "dep-2",
       "name": "mlx-lm",
+      "version": "0.30.4",
+      "type": "library",
       "purl": "pkg:pypi/mlx-lm@0.30.4",
-      "type": "library",
-      "version": "0.30.4"
-    },
-    {
-      "bom-ref": "requirements-L11",
-      "description": "requirements line 11: prometheus-client==0.24.1",
       "externalReferences": [
         {
-          "comment": "implicit dist url",
           "type": "distribution",
-          "url": "https://pypi.org/simple/prometheus-client/"
+          "url": "https://pypi.org/simple/mlx-lm/",
+          "comment": "implicit dist url"
         }
-      ],
-      "name": "prometheus-client",
-      "purl": "pkg:pypi/prometheus-client@0.24.1",
-      "type": "library",
-      "version": "0.24.1"
+      ]
     },
     {
-      "bom-ref": "requirements-L5",
-      "description": "requirements line 5: pydantic==2.12.4",
+      "bom-ref": "dep-3",
+      "name": "sentencepiece",
+      "version": "0.2.1",
+      "type": "library",
+      "purl": "pkg:pypi/sentencepiece@0.2.1",
       "externalReferences": [
         {
-          "comment": "implicit dist url",
           "type": "distribution",
-          "url": "https://pypi.org/simple/pydantic/"
+          "url": "https://pypi.org/simple/sentencepiece/",
+          "comment": "implicit dist url"
         }
-      ],
-      "name": "pydantic",
-      "purl": "pkg:pypi/pydantic@2.12.4",
-      "type": "library",
-      "version": "2.12.4"
+      ]
     },
     {
-      "bom-ref": "requirements-L6",
-      "description": "requirements line 6: pydantic-settings==2.12.0",
+      "bom-ref": "dep-4",
+      "name": "protobuf",
+      "version": "6.32.0",
+      "type": "library",
+      "purl": "pkg:pypi/protobuf@6.32.0",
       "externalReferences": [
         {
-          "comment": "implicit dist url",
           "type": "distribution",
-          "url": "https://pypi.org/simple/pydantic-settings/"
+          "url": "https://pypi.org/simple/protobuf/",
+          "comment": "implicit dist url"
         }
-      ],
-      "name": "pydantic-settings",
-      "purl": "pkg:pypi/pydantic-settings@2.12.0",
-      "type": "library",
-      "version": "2.12.0"
+      ]
     },
     {
-      "bom-ref": "requirements-L7",
-      "description": "requirements line 7: safetensors==0.7.0",
+      "bom-ref": "dep-5",
+      "name": "fastapi",
+      "version": "0.122.0",
+      "type": "library",
+      "purl": "pkg:pypi/fastapi@0.122.0",
       "externalReferences": [
         {
-          "comment": "implicit dist url",
           "type": "distribution",
-          "url": "https://pypi.org/simple/safetensors/"
+          "url": "https://pypi.org/simple/fastapi/",
+          "comment": "implicit dist url"
         }
-      ],
-      "name": "safetensors",
-      "purl": "pkg:pypi/safetensors@0.7.0",
-      "type": "library",
-      "version": "0.7.0"
+      ]
     },
     {
-      "bom-ref": "requirements-L9",
-      "description": "requirements line 9: sse-starlette==3.2.0",
-      "externalReferences": [
-        {
-          "comment": "implicit dist url",
-          "type": "distribution",
-          "url": "https://pypi.org/simple/sse-starlette/"
-        }
-      ],
-      "name": "sse-starlette",
-      "purl": "pkg:pypi/sse-starlette@3.2.0",
-      "type": "library",
-      "version": "3.2.0"
-    },
-    {
-      "bom-ref": "requirements-L10",
-      "description": "requirements line 10: structlog==25.5.0",
-      "externalReferences": [
-        {
-          "comment": "implicit dist url",
-          "type": "distribution",
-          "url": "https://pypi.org/simple/structlog/"
-        }
-      ],
-      "name": "structlog",
-      "purl": "pkg:pypi/structlog@25.5.0",
-      "type": "library",
-      "version": "25.5.0"
-    },
-    {
-      "bom-ref": "requirements-L8",
-      "description": "requirements line 8: transformers==4.57.6",
-      "externalReferences": [
-        {
-          "comment": "implicit dist url",
-          "type": "distribution",
-          "url": "https://pypi.org/simple/transformers/"
-        }
-      ],
-      "name": "transformers",
-      "purl": "pkg:pypi/transformers@4.57.6",
-      "type": "library",
-      "version": "4.57.6"
-    },
-    {
-      "bom-ref": "requirements-L12",
-      "description": "requirements line 12: typer==0.20.0",
-      "externalReferences": [
-        {
-          "comment": "implicit dist url",
-          "type": "distribution",
-          "url": "https://pypi.org/simple/typer/"
-        }
-      ],
-      "name": "typer",
-      "purl": "pkg:pypi/typer@0.20.0",
-      "type": "library",
-      "version": "0.20.0"
-    },
-    {
-      "bom-ref": "requirements-L4",
-      "description": "requirements line 4: uvicorn==0.38.0",
-      "externalReferences": [
-        {
-          "comment": "implicit dist url",
-          "type": "distribution",
-          "url": "https://pypi.org/simple/uvicorn/"
-        }
-      ],
+      "bom-ref": "dep-6",
       "name": "uvicorn",
-      "purl": "pkg:pypi/uvicorn@0.38.0",
+      "version": "0.38.0",
       "type": "library",
-      "version": "0.38.0"
+      "purl": "pkg:pypi/uvicorn@0.38.0",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://pypi.org/simple/uvicorn/",
+          "comment": "implicit dist url"
+        }
+      ]
+    },
+    {
+      "bom-ref": "dep-7",
+      "name": "pydantic",
+      "version": "2.12.4",
+      "type": "library",
+      "purl": "pkg:pypi/pydantic@2.12.4",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://pypi.org/simple/pydantic/",
+          "comment": "implicit dist url"
+        }
+      ]
+    },
+    {
+      "bom-ref": "dep-8",
+      "name": "pydantic-settings",
+      "version": "2.12.0",
+      "type": "library",
+      "purl": "pkg:pypi/pydantic-settings@2.12.0",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://pypi.org/simple/pydantic-settings/",
+          "comment": "implicit dist url"
+        }
+      ]
+    },
+    {
+      "bom-ref": "dep-9",
+      "name": "safetensors",
+      "version": "0.7.0",
+      "type": "library",
+      "purl": "pkg:pypi/safetensors@0.7.0",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://pypi.org/simple/safetensors/",
+          "comment": "implicit dist url"
+        }
+      ]
+    },
+    {
+      "bom-ref": "dep-10",
+      "name": "transformers",
+      "version": "4.57.6",
+      "type": "library",
+      "purl": "pkg:pypi/transformers@4.57.6",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://pypi.org/simple/transformers/",
+          "comment": "implicit dist url"
+        }
+      ]
+    },
+    {
+      "bom-ref": "dep-11",
+      "name": "sse-starlette",
+      "version": "3.2.0",
+      "type": "library",
+      "purl": "pkg:pypi/sse-starlette@3.2.0",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://pypi.org/simple/sse-starlette/",
+          "comment": "implicit dist url"
+        }
+      ]
+    },
+    {
+      "bom-ref": "dep-12",
+      "name": "structlog",
+      "version": "25.5.0",
+      "type": "library",
+      "purl": "pkg:pypi/structlog@25.5.0",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://pypi.org/simple/structlog/",
+          "comment": "implicit dist url"
+        }
+      ]
+    },
+    {
+      "bom-ref": "dep-13",
+      "name": "prometheus-client",
+      "version": "0.24.1",
+      "type": "library",
+      "purl": "pkg:pypi/prometheus-client@0.24.1",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://pypi.org/simple/prometheus-client/",
+          "comment": "implicit dist url"
+        }
+      ]
+    },
+    {
+      "bom-ref": "dep-14",
+      "name": "typer",
+      "version": "0.20.0",
+      "type": "library",
+      "purl": "pkg:pypi/typer@0.20.0",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://pypi.org/simple/typer/",
+          "comment": "implicit dist url"
+        }
+      ]
     }
   ],
   "dependencies": [
     {
-      "ref": "requirements-L1"
+      "ref": "dep-1"
     },
     {
-      "ref": "requirements-L10"
+      "ref": "dep-2"
     },
     {
-      "ref": "requirements-L11"
+      "ref": "dep-3"
     },
     {
-      "ref": "requirements-L12"
+      "ref": "dep-4"
     },
     {
-      "ref": "requirements-L2"
+      "ref": "dep-5"
     },
     {
-      "ref": "requirements-L3"
+      "ref": "dep-6"
     },
     {
-      "ref": "requirements-L4"
+      "ref": "dep-7"
     },
     {
-      "ref": "requirements-L5"
+      "ref": "dep-8"
     },
     {
-      "ref": "requirements-L6"
+      "ref": "dep-9"
     },
     {
-      "ref": "requirements-L7"
+      "ref": "dep-10"
     },
     {
-      "ref": "requirements-L8"
+      "ref": "dep-11"
     },
     {
-      "ref": "requirements-L9"
+      "ref": "dep-12"
+    },
+    {
+      "ref": "dep-13"
+    },
+    {
+      "ref": "dep-14"
     }
-  ],
-  "metadata": {
-    "timestamp": "2026-02-10T22:41:36.941597+00:00",
-    "tools": {
-      "components": [
-        {
-          "description": "CycloneDX Software Bill of Materials (SBOM) generator for Python projects and environments",
-          "externalReferences": [
-            {
-              "type": "build-system",
-              "url": "https://github.com/CycloneDX/cyclonedx-python/actions"
-            },
-            {
-              "type": "distribution",
-              "url": "https://pypi.org/project/cyclonedx-bom/"
-            },
-            {
-              "type": "documentation",
-              "url": "https://cyclonedx-bom-tool.readthedocs.io/"
-            },
-            {
-              "type": "issue-tracker",
-              "url": "https://github.com/CycloneDX/cyclonedx-python/issues"
-            },
-            {
-              "type": "license",
-              "url": "https://github.com/CycloneDX/cyclonedx-python/blob/main/LICENSE"
-            },
-            {
-              "type": "release-notes",
-              "url": "https://github.com/CycloneDX/cyclonedx-python/blob/main/CHANGELOG.md"
-            },
-            {
-              "type": "vcs",
-              "url": "https://github.com/CycloneDX/cyclonedx-python/"
-            },
-            {
-              "type": "website",
-              "url": "https://github.com/CycloneDX/cyclonedx-python/#readme"
-            }
-          ],
-          "group": "CycloneDX",
-          "licenses": [
-            {
-              "license": {
-                "acknowledgement": "declared",
-                "id": "Apache-2.0"
-              }
-            }
-          ],
-          "name": "cyclonedx-py",
-          "type": "application",
-          "version": "7.2.1"
-        },
-        {
-          "description": "Python library for CycloneDX",
-          "externalReferences": [
-            {
-              "type": "build-system",
-              "url": "https://github.com/CycloneDX/cyclonedx-python-lib/actions"
-            },
-            {
-              "type": "distribution",
-              "url": "https://pypi.org/project/cyclonedx-python-lib/"
-            },
-            {
-              "type": "documentation",
-              "url": "https://cyclonedx-python-library.readthedocs.io/"
-            },
-            {
-              "type": "issue-tracker",
-              "url": "https://github.com/CycloneDX/cyclonedx-python-lib/issues"
-            },
-            {
-              "type": "license",
-              "url": "https://github.com/CycloneDX/cyclonedx-python-lib/blob/main/LICENSE"
-            },
-            {
-              "type": "release-notes",
-              "url": "https://github.com/CycloneDX/cyclonedx-python-lib/blob/main/CHANGELOG.md"
-            },
-            {
-              "type": "vcs",
-              "url": "https://github.com/CycloneDX/cyclonedx-python-lib"
-            },
-            {
-              "type": "website",
-              "url": "https://github.com/CycloneDX/cyclonedx-python-lib/#readme"
-            }
-          ],
-          "group": "CycloneDX",
-          "licenses": [
-            {
-              "license": {
-                "acknowledgement": "declared",
-                "id": "Apache-2.0"
-              }
-            }
-          ],
-          "name": "cyclonedx-python-lib",
-          "type": "library",
-          "version": "11.6.0"
-        }
-      ]
-    }
-  },
-  "serialNumber": "urn:uuid:76ffe2b6-8066-41d1-8366-59f0bd236e24",
-  "version": 1,
-  "$schema": "http://cyclonedx.org/schema/bom-1.6.schema.json",
-  "bomFormat": "CycloneDX",
-  "specVersion": "1.6"
+  ]
 }

@@ -9,9 +9,11 @@ help:  ## Show this help message
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
 
 install:  ## Install production dependencies only
+	pip install --no-deps mlx-lm==0.30.4
 	pip install -e .
 
 dev-install:  ## Install all dependencies including dev and docs
+	pip install --no-deps mlx-lm==0.30.4
 	pip install -e ".[dev,docs]"
 	pre-commit install
 

@@ -31,7 +31,11 @@ classifiers = [
 ]
 dependencies = [
     "mlx==0.30.3",
-    "mlx-lm==0.30.4",
+    # mlx-lm==0.30.4 is installed separately with --no-deps (see scripts/setup.sh).
+    # Reason: mlx-lm pins transformers==5.0.0rc1 which has a SentencePiece bug
+    # (huggingface/transformers#43066). We pin transformers==4.57.6 instead.
+    "sentencepiece==0.2.1",         # mlx-lm runtime dep
+    "protobuf==6.32.0",            # mlx-lm runtime dep
     "fastapi==0.122.0",
     "uvicorn[standard]==0.38.0",
     "pydantic==2.12.4",

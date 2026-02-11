@@ -10,7 +10,7 @@ scripts/launch.sh   # start server + demo UI
 Or manually:
 
 ```bash
-pip install -e .
+pip install --no-deps mlx-lm==0.30.4 && pip install -e .
 python -m agent_memory.entrypoints.cli serve --port 8000
 curl http://localhost:8000/v1/chat/completions \
   -H "Content-Type: application/json" \
@@ -147,7 +147,7 @@ Streamlit demos in `demo/` (launched via `scripts/launch.sh`):
 ## Development
 
 ```bash
-pip install -e ".[dev]"
+pip install --no-deps mlx-lm==0.30.4 && pip install -e ".[dev]"
 python -m pytest tests/unit -x -q --timeout=30  # ~1,100 tests, ~3s
 ```
 
