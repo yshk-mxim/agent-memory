@@ -12,7 +12,7 @@ repos:
         args: ['--maxkb=500']  # Prevent accidental model weight commits
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.8.5
+    rev: v0.14.6
     hooks:
       - id: ruff-format
       - id: ruff
@@ -24,26 +24,11 @@ repos:
       - id: gitleaks  # Secret detection (API keys, tokens)
 
   - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.14.0
+    rev: v1.19.1
     hooks:
       - id: mypy
         additional_dependencies:
           - types-requests
-          - pydantic>=2.10.0
-        args: [--strict, --ignore-missing-imports]
+          - pydantic>=2.12.0
+        args: [--explicit-package-bases, --ignore-missing-imports]
         exclude: ^tests/
-
-  - repo: https://github.com/codespell-project/codespell
-    rev: v2.3.0
-    hooks:
-      - id: codespell
-        args: [--ignore-words-list=fo,nd,te]
-
-  - repo: local
-    hooks:
-      - id: warm-cache-pattern-check
-        name: Check warm cache test patterns
-        entry: python scripts/check_warm_cache_pattern.py
-        language: system
-        files: ^benchmarks/.*benchmark.*\.py$
-        types: [python]

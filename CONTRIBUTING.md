@@ -70,14 +70,12 @@ By participating in this project, you agree to maintain a respectful and collabo
 ### Install Development Dependencies
 
 ```bash
-# Install with all dev dependencies
+# Install with all dev dependencies and pre-commit hooks
 pip install -e ".[dev]"
+pre-commit install
 
-# This includes:
-# - pytest (testing framework)
-# - ruff (linting and formatting)
-# - mypy (type checking)
-# - hypothesis (property-based testing)
+# Or use the Makefile (does both):
+make dev-install
 ```
 
 ---

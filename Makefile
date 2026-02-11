@@ -13,6 +13,7 @@ install:  ## Install production dependencies only
 
 dev-install:  ## Install all dependencies including dev and docs
 	pip install -e ".[dev,docs]"
+	pre-commit install
 
 lint:  ## Run ruff linter
 	ruff check src tests
