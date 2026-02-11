@@ -2,23 +2,18 @@
 # Copyright (c) 2026 Yakov Shkolnikov and contributors
 """Coverage tests for CoordinationService — streaming, helpers, _generate_direct."""
 
-import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from agent_memory.application.coordination_service import CoordinationService, _DirectResult
 from agent_memory.domain.coordination import (
-    AgentLifecycle,
     AgentRole,
-    ChannelMessage,
     DebateFormat,
     DecisionMode,
     Topology,
     Vote,
-    VoteTally,
 )
-from agent_memory.domain.errors import InvalidTurnError, SessionNotFoundError
 from agent_memory.domain.value_objects import CompletedGeneration, StreamDelta
 
 pytestmark = pytest.mark.unit
@@ -27,6 +22,7 @@ pytestmark = pytest.mark.unit
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def mock_scheduler():
@@ -233,9 +229,7 @@ class TestGetGenerationMaxTokens:
 
 
 class TestNameRegistry:
-    async def test_prior_agent_messages_populates_registry(
-        self, service, sample_agents
-    ):
+    async def test_prior_agent_messages_populates_registry(self, service, sample_agents):
         session = await _create_session(
             service,
             sample_agents,
@@ -251,9 +245,7 @@ class TestNameRegistry:
         await _create_session(
             service,
             sample_agents,
-            prior_agent_messages={
-                "a": [{"sender_id": "y", "sender_name": "Yara", "content": ""}]
-            },
+            prior_agent_messages={"a": [{"sender_id": "y", "sender_name": "Yara", "content": ""}]},
         )
         assert "y" not in service._agent_name_registry
 
@@ -309,9 +301,23 @@ class TestTallyVotes:
     async def test_normal_tally(self, service, sample_agents):
         session = await _create_session(service, sample_agents)
         votes = [
-            Vote(vote_id="v1", session_id=session.session_id, agent_id="a", question="Q", choice="yes"),
-            Vote(vote_id="v2", session_id=session.session_id, agent_id="b", question="Q", choice="no"),
-            Vote(vote_id="v3", session_id=session.session_id, agent_id="c", question="Q", choice="yes"),
+            Vote(
+                vote_id="v1",
+                session_id=session.session_id,
+                agent_id="a",
+                question="Q",
+                choice="yes",
+            ),
+            Vote(
+                vote_id="v2", session_id=session.session_id, agent_id="b", question="Q", choice="no"
+            ),
+            Vote(
+                vote_id="v3",
+                session_id=session.session_id,
+                agent_id="c",
+                question="Q",
+                choice="yes",
+            ),
         ]
         tally = service.tally_votes(session.session_id, votes)
         assert tally.total_votes == 3
@@ -328,8 +334,16 @@ class TestTallyVotes:
     async def test_tied_votes(self, service, sample_agents):
         session = await _create_session(service, sample_agents)
         votes = [
-            Vote(vote_id="v1", session_id=session.session_id, agent_id="a", question="Q", choice="yes"),
-            Vote(vote_id="v2", session_id=session.session_id, agent_id="b", question="Q", choice="no"),
+            Vote(
+                vote_id="v1",
+                session_id=session.session_id,
+                agent_id="a",
+                question="Q",
+                choice="yes",
+            ),
+            Vote(
+                vote_id="v2", session_id=session.session_id, agent_id="b", question="Q", choice="no"
+            ),
         ]
         tally = service.tally_votes(session.session_id, votes)
         assert tally.tied is True
@@ -344,18 +358,14 @@ class TestTallyVotes:
 class TestTokenizeChatMessages:
     def test_no_chat_template_fallback(self, service):
         service._engine.tokenizer.chat_template = None
-        tokens, text = service._tokenize_chat_messages(
-            [{"role": "system", "content": "Hello"}]
-        )
+        tokens, text = service._tokenize_chat_messages([{"role": "system", "content": "Hello"}])
         service._engine.tokenizer.encode.assert_called()
 
     def test_template_exception_fallback(self, service):
         tok = service._engine.tokenizer
         tok.chat_template = "some template"
         tok.apply_chat_template.side_effect = RuntimeError("template fail")
-        tokens, text = service._tokenize_chat_messages(
-            [{"role": "user", "content": "Test"}]
-        )
+        tokens, text = service._tokenize_chat_messages([{"role": "user", "content": "Test"}])
         tok.encode.assert_called()
 
     def test_generation_prefix_injection(self, service):
@@ -577,9 +587,7 @@ class TestExecuteRoundStream:
         mock_scheduler.submit_and_stream = fake_stream
 
         collected = []
-        async for agent_id, agent_name, delta in service.execute_round_stream(
-            session.session_id
-        ):
+        async for agent_id, agent_name, delta in service.execute_round_stream(session.session_id):
             collected.append((agent_id, agent_name, delta))
 
         assert len(collected) >= 2  # At least 1 per agent
@@ -593,9 +601,7 @@ class TestExecuteRoundStream:
         mock_scheduler.submit_and_stream = fake_stream
 
         collected = []
-        async for agent_id, agent_name, delta in service.execute_round_stream(
-            session.session_id
-        ):
+        async for agent_id, agent_name, delta in service.execute_round_stream(session.session_id):
             collected.append((agent_id, agent_name, delta))
 
         # Should only process one agent because max_turns=1 deactivates after first

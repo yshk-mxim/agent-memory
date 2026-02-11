@@ -2238,7 +2238,9 @@ def parse_tool_calls(
                         inferred_name = None
                         if "command" in obj:
                             inferred_name = "Bash"
-                        elif ("prompt" in obj and "subagent_type" in obj) or ("description" in obj and "subagent_type" in obj):
+                        elif ("prompt" in obj and "subagent_type" in obj) or (
+                            "description" in obj and "subagent_type" in obj
+                        ):
                             inferred_name = "Task"
                         elif "file_path" in obj and "content" not in obj:
                             inferred_name = "Read"

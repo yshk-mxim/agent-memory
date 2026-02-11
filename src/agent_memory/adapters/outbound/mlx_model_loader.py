@@ -1,3 +1,4 @@
+# mypy: disable-error-code="misc"
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 Yakov Shkolnikov and contributors
 """MLX implementation of ModelLoaderPort.

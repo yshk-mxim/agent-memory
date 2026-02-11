@@ -1,3 +1,4 @@
+# mypy: disable-error-code="misc,assignment,no-untyped-call,arg-type"
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 Yakov Shkolnikov and contributors
 """Block-pool batch inference engine."""
@@ -46,12 +47,11 @@ def adaptive_chunk_size(
     """
     if cache_pos < _CHUNK_TIER_SMALL_CACHE:
         return max_chunk
-    elif cache_pos < _CHUNK_TIER_MEDIUM_CACHE:
+    if cache_pos < _CHUNK_TIER_MEDIUM_CACHE:
         return max(min_chunk, max_chunk // 2)
-    elif cache_pos < _CHUNK_TIER_LARGE_CACHE:
+    if cache_pos < _CHUNK_TIER_LARGE_CACHE:
         return max(min_chunk, max_chunk // 4)
-    else:
-        return min_chunk
+    return min_chunk
 
 
 class BlockPoolBatchEngine:
@@ -141,7 +141,7 @@ class BlockPoolBatchEngine:
             min_chunk, max_chunk = self._adaptive_config.effective_chunk_sizes
 
         return (
-            self._chunked_prefill_enabled,
+            self._chunked_prefill_enabled or False,
             self._chunked_prefill_threshold or 2048,
             min_chunk,
             max_chunk,
@@ -275,7 +275,7 @@ class BlockPoolBatchEngine:
                             layer_id=block.layer_id,
                             token_count=block.token_count,
                             layer_data=block.layer_data,  # Reference is fine
-                            metadata=block.metadata.copy() if block.metadata else None,
+                            metadata=block.metadata.copy() if block.metadata else {},
                         )
                         valid_blocks.append(block_copy)
                 blocks_copy[layer_id] = valid_blocks
@@ -361,7 +361,7 @@ class BlockPoolBatchEngine:
         import mlx.core as mx
         from mlx_lm.models.cache import QuantizedKVCache
 
-        enabled, threshold, min_chunk, max_chunk = self._get_chunked_prefill_settings()
+        _, _, min_chunk, max_chunk = self._get_chunked_prefill_settings()
 
         cache_mode = "extending warm cache" if initial_cache is not None else "cold start"
         logger.info(
@@ -448,7 +448,8 @@ class BlockPoolBatchEngine:
         logger.info(
             f"[CHUNKED PREFILL DONE] Agent: {agent_id}, Chunks: {chunk_count}, "
             f"Prefilled: {prefill_len}/{seq_len} tokens (last token reserved for BatchGenerator), "
-            f"Total time: {total_time:.1f}s, Tokens/s: {(prefill_len / total_time) if total_time > 0 else 0:.0f}, "
+            f"Total time: {total_time:.1f}s, "
+            f"Tokens/s: {(prefill_len / total_time) if total_time > 0 else 0:.0f}, "
             f"Memory: {mem_start:.2f}GB -> {mem_end:.2f}GB (peak: {mem_peak:.2f}GB)"
         )
 
@@ -512,8 +513,8 @@ class BlockPoolBatchEngine:
             # CRITICAL: Check if cache is too large to reconstruct safely
             # Q4: 0.5 bytes per element per layer, separate K and V dims
             # (DeepSeek V2 MLA has K=192, V=128 — asymmetric)
-            kv_elements_per_token = (
-                self._spec.n_kv_heads * (self._spec.head_dim + self._spec.effective_v_head_dim)
+            kv_elements_per_token = self._spec.n_kv_heads * (
+                self._spec.head_dim + self._spec.effective_v_head_dim
             )
             bytes_per_token_q4 = kv_elements_per_token * 0.5 * self._spec.n_layers
             max_safe_memory_mb = self.MAX_SAFE_CACHE_MEMORY_MB
@@ -522,7 +523,8 @@ class BlockPoolBatchEngine:
             if cache.total_tokens > max_safe_cache_tokens:
                 q4_size_mb = (cache.total_tokens * bytes_per_token_q4) / (1024 * 1024)
                 logger.warning(
-                    f"[CACHE SKIP] Cache too large ({cache.total_tokens} tokens > {max_safe_cache_tokens} threshold). "
+                    f"[CACHE SKIP] Cache too large "
+                    f"({cache.total_tokens} tokens > {max_safe_cache_tokens} threshold). "
                     f"Q4 reconstruction would require ~{q4_size_mb:.0f}MB. "
                     f"Treating as cache miss - will regenerate from scratch."
                 )
@@ -586,7 +588,8 @@ class BlockPoolBatchEngine:
                             if freed_blocks > 0:
                                 gc.collect()
                                 logger.debug(
-                                    "[EARLY EXACT FREE] Freed %d generated-token blocks before reconstruction",
+                                    "[EARLY EXACT FREE] Freed %d "
+                                    "generated-token blocks before reconstruction",
                                     freed_blocks,
                                 )
 
@@ -638,7 +641,8 @@ class BlockPoolBatchEngine:
                         first_offset = getattr(first_layer, "offset", None)
                         first_size = first_layer.size() if hasattr(first_layer, "size") else None
                         logger.debug(
-                            "[CACHE VALIDATION] Layer 0: offset=%s, size()=%s, total=%s, max_reconstruct=%s",
+                            "[CACHE VALIDATION] Layer 0: offset=%s, "
+                            "size()=%s, total=%s, max_reconstruct=%s",
                             first_offset,
                             first_size,
                             cache.total_tokens,
@@ -653,13 +657,13 @@ class BlockPoolBatchEngine:
                                     f"Cache offset too small: layer 0 offset ({first_offset}) < "
                                     f"requested reconstruction ({max_reconstruct})."
                                 )
-                        else:
-                            # Full reconstruction: offset must exactly match total_tokens.
-                            if first_offset is not None and first_offset != cache.total_tokens:
-                                raise GenerationError(
-                                    f"Cache offset mismatch: layer 0 offset ({first_offset}) != "
-                                    f"expected tokens ({cache.total_tokens}). This would cause shape mismatch."
-                                )
+                        # Full reconstruction: offset must exactly match total_tokens.
+                        elif first_offset is not None and first_offset != cache.total_tokens:
+                            raise GenerationError(
+                                f"Cache offset mismatch: layer 0 offset ({first_offset}) != "
+                                f"expected tokens ({cache.total_tokens}). "
+                                f"This would cause shape mismatch."
+                            )
                         if (
                             first_size is not None
                             and first_offset is not None
@@ -676,7 +680,8 @@ class BlockPoolBatchEngine:
                         else str(cache.total_tokens)
                     )
                     logger.debug(
-                        "[RECONSTRUCT COMPLETE] Loaded %s tokens across %d layers as QuantizedKVCache (Q4)",
+                        "[RECONSTRUCT COMPLETE] Loaded %s tokens "
+                        "across %d layers as QuantizedKVCache (Q4)",
                         loaded_desc,
                         len(cache.blocks),
                     )
@@ -687,7 +692,7 @@ class BlockPoolBatchEngine:
                     # (hot cache hit), clearing the dict would prevent step() from
                     # finding and freeing the pool blocks → permanent pool leak.
                     blocks_cleared = 0
-                    for layer_id, layer_blocks in cache.blocks.items():
+                    for _layer_id, layer_blocks in cache.blocks.items():
                         for block in layer_blocks:
                             block.layer_data = None
                             blocks_cleared += 1
@@ -718,7 +723,7 @@ class BlockPoolBatchEngine:
 
         if cache is None:
             # No cache - check if we should use chunked prefill for long prompts
-            enabled, threshold, min_chunk, max_chunk = self._get_chunked_prefill_settings()
+            enabled, threshold, _, _ = self._get_chunked_prefill_settings()
 
             # Use chunked prefill for long prompts (reduces peak memory by 38-65%)
             if enabled and len(prompt_tokens) >= threshold and self._batch_gen_factory is None:
@@ -887,8 +892,8 @@ class BlockPoolBatchEngine:
                     )
                     if char_match < len(stored_text) and char_match < len(prompt):
                         ctx = 40
-                        stored_at = stored_text[char_match:char_match + ctx]
-                        prompt_at = prompt[char_match:char_match + ctx]
+                        stored_at = stored_text[char_match : char_match + ctx]
+                        prompt_at = prompt[char_match : char_match + ctx]
                         logger.debug(
                             "[CACHE DIVERGE AT] stored='%s' vs prompt='%s'",
                             stored_at.replace("\n", "\\n"),
@@ -905,10 +910,11 @@ class BlockPoolBatchEngine:
                         if char_match > 0 and char_match < len(stored_text):
                             ctx = 30
                             logger.info(
-                                "[CACHE DIVERGE POINT] at char %d: stored='...%s' vs prompt='...%s'",
+                                "[CACHE DIVERGE POINT] at char %d: "
+                                "stored='...%s' vs prompt='...%s'",
                                 char_match,
-                                stored_text[char_match:char_match+ctx].replace('\n', '\\n'),
-                                prompt[char_match:char_match+ctx].replace('\n', '\\n'),
+                                stored_text[char_match : char_match + ctx].replace("\n", "\\n"),
+                                prompt[char_match : char_match + ctx].replace("\n", "\\n"),
                             )
 
                     if char_match == len(stored_text) == len(prompt):
@@ -936,10 +942,7 @@ class BlockPoolBatchEngine:
                         stored_prompt_token_count = (
                             len(cache.token_sequence) if cache.token_sequence else 0
                         )
-                        if (
-                            cache.total_tokens > stored_prompt_token_count
-                            and stored_prompt_token_count > 0
-                        ):
+                        if cache.total_tokens > stored_prompt_token_count > 0:
                             logger.debug(
                                 "[CACHE EXTEND] Trimming from %d to %d tokens",
                                 cache.total_tokens,
@@ -1328,12 +1331,15 @@ class BlockPoolBatchEngine:
         iterations = 0
         while True:
             if iterations >= max_iterations:
-                logger.error("step() exceeded %d iterations — breaking to prevent infinite loop", max_iterations)
+                logger.error(
+                    "step() exceeded %d iterations — breaking to prevent infinite loop",
+                    max_iterations,
+                )
                 break
             iterations += 1
             try:
                 with mlx_io_lock:
-                    batch_response = self._batch_gen.next()  # type: ignore[no-untyped-call]
+                    batch_response = self._batch_gen.next()
             except MemoryError as e:
                 logger.error(f"OOM during batch generation step: {e}")
                 self._batch_gen = None
@@ -1380,8 +1386,10 @@ class BlockPoolBatchEngine:
         only the final channel content.
         """
         # GPT-OSS: Extract final channel content
-        # Normal: <|channel|>analysis<|message|>...<|end|><|start|>assistant<|channel|>final<|message|>...
-        # Malformed: <|channel|>final<|channel|>commentary<|message|>... (missing <|message|> after final)
+        # Normal: <|channel|>analysis<|message|>...<|end|>
+        #   <|start|>assistant<|channel|>final<|message|>...
+        # Malformed: <|channel|>final<|channel|>commentary
+        #   <|message|>... (missing <|message|> after final)
         if "<|channel|>final" in text:
             # Find the last occurrence of final channel marker
             final_idx = text.rfind("<|channel|>final")
@@ -1390,7 +1398,7 @@ class BlockPoolBatchEngine:
             # Look for <|message|> after the final channel marker
             msg_idx = text_after_final.find("<|message|>")
             if msg_idx != -1:
-                text = text_after_final[msg_idx + len("<|message|>"):]
+                text = text_after_final[msg_idx + len("<|message|>") :]
                 # Remove trailing markers
                 for marker in ("<|end|>", "<|return|>"):
                     if marker in text:
@@ -1570,7 +1578,10 @@ class BlockPoolBatchEngine:
             # thread + model forward pass here → SIGSEGV.
             with mlx_io_lock:
                 batch_response = self._batch_gen.next()
-            logger.debug("[STEP_ONCE] _next() returned %d responses", len(batch_response) if batch_response else 0)
+            logger.debug(
+                "[STEP_ONCE] _next() returned %d responses",
+                len(batch_response) if batch_response else 0,
+            )
         except MemoryError as e:
             logger.error(f"OOM during batch generation step: {e}")
             self._batch_gen = None
@@ -1753,13 +1764,13 @@ class BlockPoolBatchEngine:
 
         if use_kv_cache:
             # Production mode: use real MLX KVCache objects
-            import mlx.core as mx  # noqa: PLC0415
-            from mlx_lm.models.cache import KVCache, QuantizedKVCache  # noqa: PLC0415
+            import mlx.core as mx
+            from mlx_lm.models.cache import KVCache, QuantizedKVCache
         else:
             # Test mode: use tuples (FakeBatchGenerator expects tuples)
-            mx = None  # type: ignore[assignment]
-            KVCache = None  # type: ignore[assignment]  # noqa: N806
-            QuantizedKVCache = None  # type: ignore[assignment]  # noqa: N806
+            mx = None
+            KVCache = None
+            QuantizedKVCache = None
 
         cache: list[Any] = []
         deferred_eval: list[Any] = []  # Collect tensors for single batched mx.eval
@@ -1885,7 +1896,7 @@ class BlockPoolBatchEngine:
             token_sequence: Full token sequence (prompt + generated) for prefix matching
             prompt_text: Raw prompt text for character-level prefix matching
         """
-        import mlx.core as mx  # noqa: PLC0415
+        import mlx.core as mx
 
         if uid not in self._active_requests:
             raise GenerationError(f"UID {uid} not found in active requests")
@@ -1929,7 +1940,7 @@ class BlockPoolBatchEngine:
 
                 quantized_cache = []
                 deferred_quant_eval: list[Any] = []
-                for layer_id, (k, v) in enumerate(cache):
+                for _layer_id, (k, v) in enumerate(cache):
                     if k is None:
                         quantized_cache.append((None, None))
                         continue

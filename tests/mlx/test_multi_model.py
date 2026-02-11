@@ -20,10 +20,9 @@ REQUIRES: Apple Silicon, dangerouslyDisableSandbox: true
 import tempfile
 from pathlib import Path
 
+import mlx.core as mx
 import numpy as np
 import pytest
-
-import mlx.core as mx
 
 from agent_memory.adapters.outbound.mlx_spec_extractor import get_extractor
 from agent_memory.adapters.outbound.safetensors_cache_adapter import SafetensorsCacheAdapter
@@ -48,23 +47,30 @@ EXPECTED_SPECS = {
 @pytest.fixture(scope="module")
 def gemma3_model():
     from mlx_lm import load
+
     return load(MODEL_IDS["gemma3"])
 
 
 @pytest.fixture(scope="module")
 def gpt_oss_model():
     from mlx_lm import load
+
     return load(MODEL_IDS["gpt_oss"])
 
 
 @pytest.fixture(scope="module")
 def smollm_model():
     from mlx_lm import load
+
     return load(MODEL_IDS["smollm"])
 
 
 def _make_kv_blocks_for_spec(
-    spec, n_layers_to_test=2, seq_len=16, kv_bits=4, group_size=64,
+    spec,
+    n_layers_to_test=2,
+    seq_len=16,
+    kv_bits=4,
+    group_size=64,
 ):
     """Create KV blocks matching a model's actual spec.
 
@@ -78,12 +84,8 @@ def _make_kv_blocks_for_spec(
     blocks: dict[int, list[KVBlock]] = {}
 
     for layer_id in range(min(n_layers_to_test, spec.n_layers)):
-        k_float = mx.random.normal(
-            (1, spec.n_kv_heads, seq_len, spec.head_dim)
-        ).astype(mx.float16)
-        v_float = mx.random.normal(
-            (1, spec.n_kv_heads, seq_len, spec.head_dim)
-        ).astype(mx.float16)
+        k_float = mx.random.normal((1, spec.n_kv_heads, seq_len, spec.head_dim)).astype(mx.float16)
+        v_float = mx.random.normal((1, spec.n_kv_heads, seq_len, spec.head_dim)).astype(mx.float16)
         mx.eval(k_float, v_float)
 
         if kv_bits is not None:
@@ -138,7 +140,9 @@ class TestSmolLMSpecExtraction:
         with tempfile.TemporaryDirectory() as tmpdir:
             adapter = SafetensorsCacheAdapter(Path(tmpdir))
             original = _make_kv_blocks_for_spec(
-                spec, n_layers_to_test=3, kv_bits=kv_bits,
+                spec,
+                n_layers_to_test=3,
+                kv_bits=kv_bits,
             )
 
             path = adapter.save("smollm_agent", original, {"model_id": "SmolLM2"})
@@ -204,7 +208,10 @@ class TestGemma3SpecExtraction:
         with tempfile.TemporaryDirectory() as tmpdir:
             adapter = SafetensorsCacheAdapter(Path(tmpdir))
             original = _make_kv_blocks_for_spec(
-                spec, n_layers_to_test=2, seq_len=32, kv_bits=kv_bits,
+                spec,
+                n_layers_to_test=2,
+                seq_len=32,
+                kv_bits=kv_bits,
             )
 
             path = adapter.save("gemma3_agent", original, {"model_id": "gemma-3-12b"})
@@ -225,7 +232,10 @@ class TestGemma3SpecExtraction:
         with tempfile.TemporaryDirectory() as tmpdir:
             adapter = SafetensorsCacheAdapter(Path(tmpdir))
             original = _make_kv_blocks_for_spec(
-                spec, n_layers_to_test=2, seq_len=16, kv_bits=4,
+                spec,
+                n_layers_to_test=2,
+                seq_len=16,
+                kv_bits=4,
             )
 
             orig_k_w = np.array(original.blocks[0][0].layer_data["k"][0])
@@ -235,7 +245,8 @@ class TestGemma3SpecExtraction:
 
             loaded_k_w = np.array(loaded_blocks[0][0].layer_data["k"][0])
             np.testing.assert_array_equal(
-                orig_k_w, loaded_k_w,
+                orig_k_w,
+                loaded_k_w,
                 err_msg="Gemma 3 Q4 weights not bit-identical after round-trip",
             )
 
@@ -246,9 +257,9 @@ class TestGemma3SpecExtraction:
 
         # FP16 memory per block per layer
         fp16_expected = 2 * spec.n_kv_heads * spec.head_dim * spec.block_tokens * 2
-        k_float = mx.random.normal(
-            (1, spec.n_kv_heads, spec.block_tokens, spec.head_dim)
-        ).astype(mx.float16)
+        k_float = mx.random.normal((1, spec.n_kv_heads, spec.block_tokens, spec.head_dim)).astype(
+            mx.float16
+        )
         mx.eval(k_float)
         fp16_actual = k_float.nbytes * 2  # K+V
         assert fp16_actual == fp16_expected, (
@@ -259,13 +270,12 @@ class TestGemma3SpecExtraction:
         elements_per_kv = spec.n_kv_heads * spec.head_dim * spec.block_tokens
         q4_weight_bytes = (elements_per_kv * 2 * 4) // 8
         import math
+
         groups = math.ceil(elements_per_kv / 64) * 2
         q4_overhead = groups * 4  # 2 bytes scales + 2 bytes biases per group
         q4_expected = q4_weight_bytes + q4_overhead
         q4_ratio = q4_expected / fp16_expected
-        assert 0.25 <= q4_ratio <= 0.30, (
-            f"Q4/FP16 ratio {q4_ratio:.4f} outside 25-30% range"
-        )
+        assert 0.25 <= q4_ratio <= 0.30, f"Q4/FP16 ratio {q4_ratio:.4f} outside 25-30% range"
 
 
 class TestGptOssSpecExtraction:
@@ -292,7 +302,10 @@ class TestGptOssSpecExtraction:
         with tempfile.TemporaryDirectory() as tmpdir:
             adapter = SafetensorsCacheAdapter(Path(tmpdir))
             original = _make_kv_blocks_for_spec(
-                spec, n_layers_to_test=2, seq_len=16, kv_bits=kv_bits,
+                spec,
+                n_layers_to_test=2,
+                seq_len=16,
+                kv_bits=kv_bits,
             )
 
             if kv_bits is not None:
@@ -306,7 +319,8 @@ class TestGptOssSpecExtraction:
             if kv_bits is not None:
                 loaded_k_w = np.array(loaded_blocks[0][0].layer_data["k"][0])
                 np.testing.assert_array_equal(
-                    orig_k_w, loaded_k_w,
+                    orig_k_w,
+                    loaded_k_w,
                     err_msg=f"GPT-OSS-20B Q{kv_bits} weights not bit-identical after round-trip",
                 )
 

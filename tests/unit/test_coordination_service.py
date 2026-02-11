@@ -289,8 +289,7 @@ class TestBuildAgentPrompt:
         messages = service.build_agent_prompt(directive, agent_role)
 
         bob_messages = [
-            m for m in messages
-            if m["role"] == "user" and "Hello from Bob" in m.get("content", "")
+            m for m in messages if m["role"] == "user" and "Hello from Bob" in m.get("content", "")
         ]
         assert len(bob_messages) == 1
         assert "Bob: Hello from Bob" in bob_messages[0]["content"]
@@ -454,7 +453,9 @@ class TestStreamCleanedDelta:
         raw_deltas = [
             StreamDelta(text="Hello", token_count=1, finish_reason=None),
             StreamDelta(text="Hello world", token_count=2, finish_reason=None),
-            StreamDelta(text="Hello world! Extra junk Bob: ...", token_count=5, finish_reason="stop"),
+            StreamDelta(
+                text="Hello world! Extra junk Bob: ...", token_count=5, finish_reason="stop"
+            ),
         ]
         cleaned_delta = StreamDelta(
             text="Hello world!",  # Cleaned version (junk stripped)
@@ -548,18 +549,13 @@ class TestCleanAgentResponse:
         assert result == "Just the answer"
 
     def test_gpt_oss_multiple_final_uses_last(self) -> None:
-        text = (
-            "<|channel|>final<|message|>first<|end|>"
-            "<|channel|>final<|message|>second<|end|>"
-        )
+        text = "<|channel|>final<|message|>first<|end|><|channel|>final<|message|>second<|end|>"
         result = CoordinationService._clean_agent_response(text)
         assert result == "second"
 
     # Special token stripping
     def test_strip_special_tokens(self) -> None:
-        result = CoordinationService._clean_agent_response(
-            "<|endoftext|>Hello<|pad|>"
-        )
+        result = CoordinationService._clean_agent_response("<|endoftext|>Hello<|pad|>")
         assert result == "Hello"
 
     def test_strip_bare_assistant_marker(self) -> None:
@@ -599,15 +595,11 @@ class TestCleanAgentResponse:
 
     # Turn cue stripping
     def test_strip_respond_now_cue(self) -> None:
-        result = CoordinationService._clean_agent_response(
-            "[Danny, respond now.] I think so"
-        )
+        result = CoordinationService._clean_agent_response("[Danny, respond now.] I think so")
         assert result == "I think so"
 
     def test_strip_what_do_you_say_cue(self) -> None:
-        result = CoordinationService._clean_agent_response(
-            "Danny, what do you say? I agree"
-        )
+        result = CoordinationService._clean_agent_response("Danny, what do you say? I agree")
         assert result == "I agree"
 
     # Instruction fragment stripping
@@ -631,9 +623,7 @@ class TestCleanAgentResponse:
         assert result == "I agree with the proposal."
 
     def test_truncate_at_system_continuation(self) -> None:
-        result = CoordinationService._clean_agent_response(
-            "Good point.\nSystem: new instruction"
-        )
+        result = CoordinationService._clean_agent_response("Good point.\nSystem: new instruction")
         assert result == "Good point."
 
     def test_truncate_at_agent_name(self) -> None:
@@ -651,9 +641,7 @@ class TestCleanAgentResponse:
 
     def test_no_truncate_at_position_zero(self) -> None:
         """Markers at position 0 (no leading newline) are not stop markers."""
-        result = CoordinationService._clean_agent_response(
-            "User: this is the actual content"
-        )
+        result = CoordinationService._clean_agent_response("User: this is the actual content")
         assert result == "this is the actual content"
 
     def test_truncate_at_gemma_markers(self) -> None:
@@ -664,9 +652,7 @@ class TestCleanAgentResponse:
 
     # Whitespace cleanup
     def test_collapse_multiple_newlines(self) -> None:
-        result = CoordinationService._clean_agent_response(
-            "Line one.\n\n\n\nLine two."
-        )
+        result = CoordinationService._clean_agent_response("Line one.\n\n\n\nLine two.")
         assert result == "Line one.\n\nLine two."
 
     # Combined artifacts
@@ -718,7 +704,7 @@ class TestMergeConsecutiveMessages:
         ]
         result = service._merge_consecutive_messages(msgs)
         assert len(result) == 1
-        assert "Alice: Hi\nBob: Hello\n[Carol, respond now.]" == result[0]["content"]
+        assert result[0]["content"] == "Alice: Hi\nBob: Hello\n[Carol, respond now.]"
 
     def test_consecutive_assistant_merged(self, service: CoordinationService) -> None:
         msgs = [
@@ -766,7 +752,8 @@ class TestResolveCacheKey:
         assert key == f"coord_{session.session_id}_a"
 
     async def test_persistent_prefix_with_permanent_agent(
-        self, service: CoordinationService,
+        self,
+        service: CoordinationService,
     ) -> None:
         agents = [
             AgentRole(
@@ -868,9 +855,7 @@ class TestAddWhisper:
         service.add_whisper(session.session_id, "b", "a", "reply")
 
         # Same channel (a < b alphabetically → "a_b")
-        whisper_channels = [
-            c for c in session.channels.values() if c.channel_type == "whisper"
-        ]
+        whisper_channels = [c for c in session.channels.values() if c.channel_type == "whisper"]
         assert len(whisper_channels) == 1
         assert len(whisper_channels[0].messages) == 2
 
@@ -889,9 +874,7 @@ class TestAddWhisper:
         assert "c" in msg.visible_to
         assert "b" not in msg.visible_to
 
-    async def test_whisper_nonexistent_session_raises(
-        self, service: CoordinationService
-    ) -> None:
+    async def test_whisper_nonexistent_session_raises(self, service: CoordinationService) -> None:
         with pytest.raises(SessionNotFoundError):
             service.add_whisper("nonexistent", "a", "b", "hello")
 
@@ -900,7 +883,6 @@ class TestAddWhisper:
 
 
 class TestGetGenerationMaxTokens:
-
     def test_default_returns_200(self, mock_scheduler, mock_cache_store, mock_engine) -> None:
         svc = CoordinationService(
             scheduler=mock_scheduler,
@@ -933,9 +915,7 @@ class TestDeepSeekPaths:
 
         adapter = ChatTemplateAdapter()
         # Mock tokenizer to have a DeepSeek chat template
-        mock_engine.tokenizer.chat_template = (
-            "template with 'User: ' and 'Assistant: ' labels"
-        )
+        mock_engine.tokenizer.chat_template = "template with 'User: ' and 'Assistant: ' labels"
         return CoordinationService(
             scheduler=mock_scheduler,
             cache_store=mock_cache_store,
@@ -991,9 +971,7 @@ class TestDeepSeekPaths:
             initial_prompt="Topic",
         )
         # Add a prior message from Alice
-        public_channel = next(
-            c for c in session.channels.values() if c.channel_type == "public"
-        )
+        public_channel = next(c for c in session.channels.values() if c.channel_type == "public")
         public_channel.add_message(sender_id="a", content="I think so", turn_number=1)
 
         directive = deepseek_service.get_next_turn(session.session_id)
@@ -1005,9 +983,7 @@ class TestDeepSeekPaths:
         primer_msgs = [m for m in assistant_msgs if "I'm Alice" in m["content"]]
         assert len(primer_msgs) == 0
 
-    async def test_build_prompt_standard_has_respond_cue(
-        self, service, sample_agents
-    ) -> None:
+    async def test_build_prompt_standard_has_respond_cue(self, service, sample_agents) -> None:
         session = await service.create_session(
             topology=Topology.TURN_BY_TURN,
             debate_format=DebateFormat.FREE_FORM,
@@ -1027,10 +1003,7 @@ class TestDeepSeekPaths:
 
 
 class TestUpdateEngine:
-
-    def test_updates_engine_reference(
-        self, mock_cache_store, mock_engine
-    ) -> None:
+    def test_updates_engine_reference(self, mock_cache_store, mock_engine) -> None:
         scheduler = MagicMock()  # Sync mock — update_engine is not async
         svc = CoordinationService(
             scheduler=scheduler,
@@ -1042,9 +1015,7 @@ class TestUpdateEngine:
         assert svc._engine is new_engine
         scheduler.update_engine.assert_called_once_with(new_engine)
 
-    def test_updates_engine_no_scheduler(
-        self, mock_cache_store, mock_engine
-    ) -> None:
+    def test_updates_engine_no_scheduler(self, mock_cache_store, mock_engine) -> None:
         svc = CoordinationService(
             scheduler=None,
             cache_store=mock_cache_store,
@@ -1059,13 +1030,10 @@ class TestUpdateEngine:
 
 
 class TestListSessions:
-
     async def test_empty_initially(self, service: CoordinationService) -> None:
         assert service.list_sessions() == []
 
-    async def test_returns_all_sessions(
-        self, service: CoordinationService, sample_agents
-    ) -> None:
+    async def test_returns_all_sessions(self, service: CoordinationService, sample_agents) -> None:
         await service.create_session(
             topology=Topology.TURN_BY_TURN,
             debate_format=DebateFormat.FREE_FORM,
@@ -1085,29 +1053,20 @@ class TestListSessions:
 
 
 class TestDebateStyleHint:
-
     def test_devils_advocate_critic(self) -> None:
-        hint = CoordinationService._debate_style_hint(
-            DebateFormat.DEVILS_ADVOCATE, "critic"
-        )
+        hint = CoordinationService._debate_style_hint(DebateFormat.DEVILS_ADVOCATE, "critic")
         assert "challenge" in hint.lower() or "weakness" in hint.lower()
 
     def test_devils_advocate_non_critic(self) -> None:
-        hint = CoordinationService._debate_style_hint(
-            DebateFormat.DEVILS_ADVOCATE, "participant"
-        )
+        hint = CoordinationService._debate_style_hint(DebateFormat.DEVILS_ADVOCATE, "participant")
         assert hint == ""
 
     def test_parliamentary(self) -> None:
-        hint = CoordinationService._debate_style_hint(
-            DebateFormat.PARLIAMENTARY, "participant"
-        )
+        hint = CoordinationService._debate_style_hint(DebateFormat.PARLIAMENTARY, "participant")
         assert "formal" in hint.lower()
 
     def test_free_form_returns_empty(self) -> None:
-        hint = CoordinationService._debate_style_hint(
-            DebateFormat.FREE_FORM, "participant"
-        )
+        hint = CoordinationService._debate_style_hint(DebateFormat.FREE_FORM, "participant")
         assert hint == ""
 
 
@@ -1138,8 +1097,7 @@ class TestTokenizeChatMessages:
         def apply_side_effect(msgs, **kwargs):
             if kwargs.get("tokenize", True):
                 return [10, 20, 30]
-            else:
-                return "formatted text"
+            return "formatted text"
 
         mock_engine.tokenizer.apply_chat_template.side_effect = apply_side_effect
 
@@ -1149,9 +1107,7 @@ class TestTokenizeChatMessages:
             engine=mock_engine,
             chat_template=adapter,
         )
-        tokens, text = svc._tokenize_chat_messages(
-            [{"role": "user", "content": "Hi"}]
-        )
+        tokens, text = svc._tokenize_chat_messages([{"role": "user", "content": "Hi"}])
         assert tokens == [10, 20, 30]
         assert text == "formatted text"
 
@@ -1166,8 +1122,7 @@ class TestTokenizeChatMessages:
         def apply_side_effect(msgs, **kwargs):
             if kwargs.get("tokenize", True):
                 return [10, 20]
-            else:
-                return "text ending with Assistant:"
+            return "text ending with Assistant:"
 
         mock_engine.tokenizer.apply_chat_template.side_effect = apply_side_effect
         mock_engine.tokenizer.encode.return_value = [99, 98]
@@ -1202,9 +1157,7 @@ class TestTokenizeChatMessages:
             engine=mock_engine,
             chat_template=adapter,
         )
-        tokens, text = svc._tokenize_chat_messages(
-            [{"role": "user", "content": "Hello"}]
-        )
+        tokens, text = svc._tokenize_chat_messages([{"role": "user", "content": "Hello"}])
         assert tokens == [1, 2]
 
 
@@ -1214,9 +1167,7 @@ class TestTokenizeChatMessages:
 class TestExecuteTurnStream:
     """Tests for the streaming execute_turn_stream path."""
 
-    async def test_stream_yields_deltas(
-        self, mock_cache_store, mock_engine
-    ) -> None:
+    async def test_stream_yields_deltas(self, mock_cache_store, mock_engine) -> None:
         from agent_memory.domain.value_objects import StreamDelta
 
         mock_engine.tokenizer.chat_template = None

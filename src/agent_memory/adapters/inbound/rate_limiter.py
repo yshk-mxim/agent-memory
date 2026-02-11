@@ -11,6 +11,7 @@ import logging
 import time
 from collections import defaultdict, deque
 from collections.abc import Callable
+from typing import Any
 
 from fastapi import Request, Response, status
 from fastapi.responses import JSONResponse
@@ -35,7 +36,7 @@ class RateLimiter(BaseHTTPMiddleware):
 
     def __init__(
         self,
-        app,
+        app: Any,
         requests_per_minute_per_agent: int = 60,
         requests_per_minute_global: int = 1000,
         window_size_seconds: int = 60,

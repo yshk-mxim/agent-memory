@@ -37,9 +37,7 @@ def _make_engine(model, tokenizer, spec, total_blocks=400):
 class TestConcurrentInference:
     """Test multiple agents submitting simultaneously with real MLX."""
 
-    def test_three_agents_concurrent(
-        self, real_model_and_tokenizer, real_spec
-    ) -> None:
+    def test_three_agents_concurrent(self, real_model_and_tokenizer, real_spec) -> None:
         """Three agents submit different prompts and all get completions."""
         model, tokenizer = real_model_and_tokenizer
         engine = _make_engine(model, tokenizer, real_spec)
@@ -57,9 +55,7 @@ class TestConcurrentInference:
             formatted = tokenizer.apply_chat_template(
                 messages, tokenize=False, add_generation_prompt=True
             )
-            uid = engine.submit(
-                agent_id=agent_id, prompt=formatted, max_tokens=20
-            )
+            uid = engine.submit(agent_id=agent_id, prompt=formatted, max_tokens=20)
             uids.append(uid)
 
         assert len(uids) == 3
@@ -68,9 +64,7 @@ class TestConcurrentInference:
         for result in engine.step():
             completions[result.uid] = result
 
-        assert len(completions) == 3, (
-            f"Expected 3 completions, got {len(completions)}"
-        )
+        assert len(completions) == 3, f"Expected 3 completions, got {len(completions)}"
         for uid in uids:
             assert uid in completions
             c = completions[uid]
@@ -78,18 +72,14 @@ class TestConcurrentInference:
             assert c.token_count > 0
             assert c.blocks is not None
 
-    def test_sequential_agents_reuse_pool(
-        self, real_model_and_tokenizer, real_spec
-    ) -> None:
+    def test_sequential_agents_reuse_pool(self, real_model_and_tokenizer, real_spec) -> None:
         """Sequential agent requests reuse freed blocks from pool."""
         model, tokenizer = real_model_and_tokenizer
         engine = _make_engine(model, tokenizer, real_spec)
 
         all_completions = []
         for i in range(3):
-            uid = engine.submit(
-                agent_id=f"seq_agent_{i}", prompt="Hi", max_tokens=10
-            )
+            uid = engine.submit(agent_id=f"seq_agent_{i}", prompt="Hi", max_tokens=10)
             for result in engine.step():
                 if result.uid == uid:
                     all_completions.append(result)
@@ -182,16 +172,12 @@ class TestCacheLifecycle:
 class TestStreamingGeneration:
     """Test token-by-token streaming with real MLX."""
 
-    def test_step_once_yields_tokens(
-        self, real_model_and_tokenizer, real_spec
-    ) -> None:
+    def test_step_once_yields_tokens(self, real_model_and_tokenizer, real_spec) -> None:
         """step_once() produces individual tokens until completion."""
         model, tokenizer = real_model_and_tokenizer
         engine = _make_engine(model, tokenizer, real_spec)
 
-        engine.submit(
-            agent_id="stream_agent", prompt="Count: 1 2 3", max_tokens=15
-        )
+        engine.submit(agent_id="stream_agent", prompt="Count: 1 2 3", max_tokens=15)
 
         tokens_seen = 0
         max_iters = 50
@@ -244,15 +230,11 @@ class TestCoordinationWithRealEngine:
         from agent_memory.domain.coordination import AgentRole
 
         return [
-            AgentRole(
-                agent_id=aid, display_name=name, system_prompt=prompt
-            )
+            AgentRole(agent_id=aid, display_name=name, system_prompt=prompt)
             for aid, name, prompt in pairs
         ]
 
-    def test_two_turn_coordination(
-        self, real_model_and_tokenizer, real_spec, cache_dir
-    ) -> None:
+    def test_two_turn_coordination(self, real_model_and_tokenizer, real_spec, cache_dir) -> None:
         """Create session, execute 2 turns, verify responses are non-empty."""
         from agent_memory.domain.coordination import (
             DebateFormat,
@@ -264,31 +246,31 @@ class TestCoordinationWithRealEngine:
         engine = _make_engine(model, tokenizer, real_spec)
         service = self._make_service(engine, cache_dir, real_spec)
 
-        agents = self._make_agents([
-            ("a1", "Agent1", "You are Agent1. Be brief."),
-            ("a2", "Agent2", "You are Agent2. Be brief."),
-        ])
+        agents = self._make_agents(
+            [
+                ("a1", "Agent1", "You are Agent1. Be brief."),
+                ("a2", "Agent2", "You are Agent2. Be brief."),
+            ]
+        )
 
         loop = asyncio.new_event_loop()
         try:
-            session = loop.run_until_complete(service.create_session(
-                topology=Topology.ROUND_ROBIN,
-                debate_format=DebateFormat.FREE_FORM,
-                decision_mode=DecisionMode.NONE,
-                agents=agents,
-                initial_prompt="Hello, let's discuss testing.",
-                max_turns=2,
-            ))
-
-            msg1 = loop.run_until_complete(
-                service.execute_turn(session.session_id)
+            session = loop.run_until_complete(
+                service.create_session(
+                    topology=Topology.ROUND_ROBIN,
+                    debate_format=DebateFormat.FREE_FORM,
+                    decision_mode=DecisionMode.NONE,
+                    agents=agents,
+                    initial_prompt="Hello, let's discuss testing.",
+                    max_turns=2,
+                )
             )
+
+            msg1 = loop.run_until_complete(service.execute_turn(session.session_id))
             assert msg1 is not None
             assert len(msg1.content) > 0, "Turn 1 produced empty content"
 
-            msg2 = loop.run_until_complete(
-                service.execute_turn(session.session_id)
-            )
+            msg2 = loop.run_until_complete(service.execute_turn(session.session_id))
             assert msg2 is not None
             assert len(msg2.content) > 0, "Turn 2 produced empty content"
         finally:
@@ -308,28 +290,28 @@ class TestCoordinationWithRealEngine:
         engine = _make_engine(model, tokenizer, real_spec)
         service = self._make_service(engine, cache_dir, real_spec)
 
-        agents = self._make_agents([
-            ("alice", "Alice", "You are Alice. Respond briefly."),
-            ("bob", "Bob", "You are Bob. Respond briefly."),
-        ])
+        agents = self._make_agents(
+            [
+                ("alice", "Alice", "You are Alice. Respond briefly."),
+                ("bob", "Bob", "You are Bob. Respond briefly."),
+            ]
+        )
 
         loop = asyncio.new_event_loop()
         try:
-            session = loop.run_until_complete(service.create_session(
-                topology=Topology.ROUND_ROBIN,
-                debate_format=DebateFormat.FREE_FORM,
-                decision_mode=DecisionMode.NONE,
-                agents=agents,
-                initial_prompt="Introduce yourselves.",
-                max_turns=2,
-            ))
+            session = loop.run_until_complete(
+                service.create_session(
+                    topology=Topology.ROUND_ROBIN,
+                    debate_format=DebateFormat.FREE_FORM,
+                    decision_mode=DecisionMode.NONE,
+                    agents=agents,
+                    initial_prompt="Introduce yourselves.",
+                    max_turns=2,
+                )
+            )
 
-            msg1 = loop.run_until_complete(
-                service.execute_turn(session.session_id)
-            )
-            msg2 = loop.run_until_complete(
-                service.execute_turn(session.session_id)
-            )
+            msg1 = loop.run_until_complete(service.execute_turn(session.session_id))
+            msg2 = loop.run_until_complete(service.execute_turn(session.session_id))
 
             for msg in [msg1, msg2]:
                 assert "User:" not in msg.content
@@ -342,9 +324,7 @@ class TestCoordinationWithRealEngine:
 class TestGenerationTiming:
     """Basic performance sanity checks with real MLX."""
 
-    def test_generation_completes_within_timeout(
-        self, real_model_and_tokenizer, real_spec
-    ) -> None:
+    def test_generation_completes_within_timeout(self, real_model_and_tokenizer, real_spec) -> None:
         """Single generation should complete in under 30 seconds."""
         model, tokenizer = real_model_and_tokenizer
         engine = _make_engine(model, tokenizer, real_spec)

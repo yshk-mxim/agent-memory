@@ -28,28 +28,26 @@ import asyncio
 import json
 import platform
 import subprocess
+
+# Reuse infrastructure from openai_benchmark
+import sys
 import time
-from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 import httpx
 
-# Reuse infrastructure from openai_benchmark
-import sys
 sys.path.insert(0, str(Path(__file__).parent))
 
 from openai_benchmark import (
-    OpenAIStreamingClient,
-    OpenAIRequestClient,
-    OpenAIPromptFactory,
-    ScenarioResult,
-    ServerManager,
-    compute_stats,
     OPENAI_BENCH_ENV,
     PORT,
-    PADDING_TEXT,
+    OpenAIPromptFactory,
+    OpenAIRequestClient,
+    OpenAIStreamingClient,
+    ScenarioResult,
+    ServerManager,
 )
 
 RESULTS_DIR = Path(__file__).parent / "results"
@@ -63,10 +61,14 @@ OUTPUT_TOKENS = 64
 
 def _git_sha() -> str:
     try:
-        return subprocess.check_output(
-            ["git", "rev-parse", "--short", "HEAD"],
-            stderr=subprocess.DEVNULL,
-        ).decode().strip()
+        return (
+            subprocess.check_output(
+                ["git", "rev-parse", "--short", "HEAD"],
+                stderr=subprocess.DEVNULL,
+            )
+            .decode()
+            .strip()
+        )
     except Exception:
         return "unknown"
 
@@ -107,8 +109,12 @@ async def _wait_for_server(base_url: str, timeout: float = 300) -> bool:
 # Core benchmark functions
 # ---------------------------------------------------------------------------
 
+
 async def run_streaming_cold(
-    base_url: str, context_tokens: int, output_tokens: int, run_id: str,
+    base_url: str,
+    context_tokens: int,
+    output_tokens: int,
+    run_id: str,
 ) -> dict[str, Any]:
     """Cold start with streaming — measures TTFT + decode TPS."""
     client = OpenAIStreamingClient(base_url)
@@ -119,14 +125,18 @@ async def run_streaming_cold(
     r = await client.send_and_measure(body, session_id=sid)
     await _delete_agent(base_url, f"oai_{sid}")
     return {
-        "mode": "streaming", "cache_state": "cold",
+        "mode": "streaming",
+        "cache_state": "cold",
         "context_tokens": context_tokens,
         **_result_dict(r),
     }
 
 
 async def run_nonstreaming_cold(
-    base_url: str, context_tokens: int, output_tokens: int, run_id: str,
+    base_url: str,
+    context_tokens: int,
+    output_tokens: int,
+    run_id: str,
 ) -> dict[str, Any]:
     """Cold start without streaming — measures E2E only."""
     client = OpenAIRequestClient(base_url)
@@ -136,14 +146,18 @@ async def run_nonstreaming_cold(
     r = await client.send_and_measure(body, session_id=sid)
     await _delete_agent(base_url, f"oai_{sid}")
     return {
-        "mode": "non-streaming", "cache_state": "cold",
+        "mode": "non-streaming",
+        "cache_state": "cold",
         "context_tokens": context_tokens,
         **_result_dict(r),
     }
 
 
 async def run_streaming_warm(
-    base_url: str, context_tokens: int, output_tokens: int, run_id: str,
+    base_url: str,
+    context_tokens: int,
+    output_tokens: int,
+    run_id: str,
 ) -> dict[str, Any]:
     """Warm cache with streaming — prime then measure with stream.
 
@@ -170,14 +184,18 @@ async def run_streaming_warm(
     # Full cleanup after measurement
     await _delete_agent(base_url, f"oai_{sid}")
     return {
-        "mode": "streaming", "cache_state": "warm",
+        "mode": "streaming",
+        "cache_state": "warm",
         "context_tokens": context_tokens,
         **_result_dict(r),
     }
 
 
 async def run_nonstreaming_warm(
-    base_url: str, context_tokens: int, output_tokens: int, run_id: str,
+    base_url: str,
+    context_tokens: int,
+    output_tokens: int,
+    run_id: str,
 ) -> dict[str, Any]:
     """Warm cache without streaming — prime then measure.
 
@@ -202,14 +220,18 @@ async def run_nonstreaming_warm(
     # Full cleanup after measurement
     await _delete_agent(base_url, f"oai_{sid}")
     return {
-        "mode": "non-streaming", "cache_state": "warm",
+        "mode": "non-streaming",
+        "cache_state": "warm",
         "context_tokens": context_tokens,
         **_result_dict(r),
     }
 
 
 async def run_streaming_hot(
-    base_url: str, context_tokens: int, output_tokens: int, run_id: str,
+    base_url: str,
+    context_tokens: int,
+    output_tokens: int,
+    run_id: str,
 ) -> dict[str, Any]:
     """Hot (multi-turn extend) with streaming — 3 turns, measure 3rd."""
     prime_client = OpenAIRequestClient(base_url)
@@ -224,7 +246,8 @@ async def run_streaming_hot(
 
     # Turn 2 (extend)
     followup1 = factory.build_followup(
-        body["messages"], r1.raw_text if hasattr(r1, "raw_text") else "I see.",
+        body["messages"],
+        r1.raw_text if hasattr(r1, "raw_text") else "I see.",
         output_tokens,
     )
     await prime_client.send_and_measure(followup1, session_id=sid)
@@ -232,21 +255,26 @@ async def run_streaming_hot(
 
     # Turn 3 (hot, streaming measurement)
     followup2 = factory.build_followup(
-        followup1["messages"], "Understood.",
+        followup1["messages"],
+        "Understood.",
         output_tokens,
     )
     followup2["stream"] = True
     r = await measure_client.send_and_measure(followup2, session_id=sid)
     await _delete_agent(base_url, f"oai_{sid}")
     return {
-        "mode": "streaming", "cache_state": "hot",
+        "mode": "streaming",
+        "cache_state": "hot",
         "context_tokens": context_tokens,
         **_result_dict(r),
     }
 
 
 async def run_nonstreaming_hot(
-    base_url: str, context_tokens: int, output_tokens: int, run_id: str,
+    base_url: str,
+    context_tokens: int,
+    output_tokens: int,
+    run_id: str,
 ) -> dict[str, Any]:
     """Hot (multi-turn extend) without streaming — 3 turns, measure 3rd."""
     client = OpenAIRequestClient(base_url)
@@ -260,7 +288,8 @@ async def run_nonstreaming_hot(
 
     # Turn 2
     followup1 = factory.build_followup(
-        body["messages"], r1.raw_text if hasattr(r1, "raw_text") else "I see.",
+        body["messages"],
+        r1.raw_text if hasattr(r1, "raw_text") else "I see.",
         output_tokens,
     )
     await client.send_and_measure(followup1, session_id=sid)
@@ -268,20 +297,25 @@ async def run_nonstreaming_hot(
 
     # Turn 3
     followup2 = factory.build_followup(
-        followup1["messages"], "Understood.",
+        followup1["messages"],
+        "Understood.",
         output_tokens,
     )
     r = await client.send_and_measure(followup2, session_id=sid)
     await _delete_agent(base_url, f"oai_{sid}")
     return {
-        "mode": "non-streaming", "cache_state": "hot",
+        "mode": "non-streaming",
+        "cache_state": "hot",
         "context_tokens": context_tokens,
         **_result_dict(r),
     }
 
 
 async def run_concurrent_pair(
-    base_url: str, context_tokens: int, output_tokens: int, run_id: str,
+    base_url: str,
+    context_tokens: int,
+    output_tokens: int,
+    run_id: str,
     streaming: bool = False,
 ) -> dict[str, Any]:
     """Two concurrent requests (batch=2) — streaming or non-streaming."""
@@ -319,7 +353,8 @@ async def run_concurrent_pair(
     system_tps = total_output / (wall_ms / 1000) if wall_ms > 0 else 0
 
     return {
-        "mode": mode_label, "cache_state": "concurrent_2x",
+        "mode": mode_label,
+        "cache_state": "concurrent_2x",
         "context_tokens": context_tokens,
         "wall_ms": round(wall_ms, 1),
         "avg_e2e_ms": round(avg_e2e, 1),
@@ -347,6 +382,7 @@ def _result_dict(r: ScenarioResult) -> dict[str, Any]:
 # Main sweep
 # ---------------------------------------------------------------------------
 
+
 async def run_sweep(
     base_url: str,
     contexts: list[int],
@@ -356,9 +392,8 @@ async def run_sweep(
     external: bool = False,
 ) -> dict[str, Any]:
     """Run the full streaming benchmark sweep."""
-
     all_results: list[dict[str, Any]] = []
-    timestamp = datetime.now(timezone.utc).isoformat()
+    timestamp = datetime.now(UTC).isoformat()
 
     test_functions = {
         ("streaming", "cold"): run_streaming_cold,
@@ -370,9 +405,9 @@ async def run_sweep(
     }
 
     for batch_size in batch_sizes:
-        print(f"\n{'='*60}")
+        print(f"\n{'=' * 60}")
         print(f"  BATCH SIZE = {batch_size}")
-        print(f"{'='*60}")
+        print(f"{'=' * 60}")
 
         for ctx in sorted(contexts):
             print(f"\n--- Context: {ctx} tokens ---")
@@ -384,7 +419,7 @@ async def run_sweep(
                 for run_i in range(runs):
                     run_id = f"b{batch_size}_r{run_i}_{int(time.time())}"
                     try:
-                        print(f"  {label} run {run_i+1}/{runs}...", end=" ", flush=True)
+                        print(f"  {label} run {run_i + 1}/{runs}...", end=" ", flush=True)
                         r = await func(base_url, ctx, output_tokens, run_id)
                         r["batch_size"] = batch_size
                         r["run"] = run_i
@@ -395,11 +430,16 @@ async def run_sweep(
                         print(f"E2E={e2e:.0f}ms TTFT={ttft:.0f}ms TPS={tps:.1f}")
                     except Exception as e:
                         print(f"ERROR: {e}")
-                        results_for_scenario.append({
-                            "mode": mode, "cache_state": cache_state,
-                            "context_tokens": ctx, "batch_size": batch_size,
-                            "run": run_i, "error": str(e),
-                        })
+                        results_for_scenario.append(
+                            {
+                                "mode": mode,
+                                "cache_state": cache_state,
+                                "context_tokens": ctx,
+                                "batch_size": batch_size,
+                                "run": run_i,
+                                "error": str(e),
+                            }
+                        )
 
                 all_results.extend(results_for_scenario)
 
@@ -411,9 +451,13 @@ async def run_sweep(
                     for run_i in range(runs):
                         run_id = f"b{batch_size}_r{run_i}_{int(time.time())}"
                         try:
-                            print(f"  {label} run {run_i+1}/{runs}...", end=" ", flush=True)
+                            print(f"  {label} run {run_i + 1}/{runs}...", end=" ", flush=True)
                             r = await run_concurrent_pair(
-                                base_url, ctx, output_tokens, run_id, streaming=streaming,
+                                base_url,
+                                ctx,
+                                output_tokens,
+                                run_id,
+                                streaming=streaming,
                             )
                             r["batch_size"] = batch_size
                             r["run"] = run_i
@@ -423,14 +467,16 @@ async def run_sweep(
                             print(f"wall={wall:.0f}ms sysTPS={sys_tps:.1f}")
                         except Exception as e:
                             print(f"ERROR: {e}")
-                            all_results.append({
-                                "mode": mode_label,
-                                "cache_state": "concurrent_2x",
-                                "context_tokens": ctx,
-                                "batch_size": batch_size,
-                                "run": run_i,
-                                "error": str(e),
-                            })
+                            all_results.append(
+                                {
+                                    "mode": mode_label,
+                                    "cache_state": "concurrent_2x",
+                                    "context_tokens": ctx,
+                                    "batch_size": batch_size,
+                                    "run": run_i,
+                                    "error": str(e),
+                                }
+                            )
 
     # Query server for model identity
     model_id = "unknown"
@@ -481,9 +527,9 @@ def print_summary(data: dict[str, Any]) -> None:
         print("\nNo successful results to summarize.")
         return
 
-    print(f"\n{'='*80}")
+    print(f"\n{'=' * 80}")
     print("  STREAMING BENCHMARK SUMMARY")
-    print(f"{'='*80}")
+    print(f"{'=' * 80}")
 
     # Group by (batch_size, context_tokens, cache_state)
     groups: dict[tuple, list[dict]] = {}
@@ -506,18 +552,22 @@ def print_summary(data: dict[str, Any]) -> None:
             ns_e2e = sum(e["e2e_ms"] for e in nonstreaming) / len(nonstreaming)
 
             overhead = ((s_e2e - ns_e2e) / ns_e2e * 100) if ns_e2e > 0 else 0
-            print(f"\n  batch={bs} ctx={ctx:>5} {cs:>5}: "
-                  f"stream E2E={s_e2e:>7.0f}ms TTFT={s_ttft:>6.0f}ms TPS={s_tps:>5.1f} | "
-                  f"non-stream E2E={ns_e2e:>7.0f}ms | "
-                  f"overhead={overhead:>+.1f}%")
+            print(
+                f"\n  batch={bs} ctx={ctx:>5} {cs:>5}: "
+                f"stream E2E={s_e2e:>7.0f}ms TTFT={s_ttft:>6.0f}ms TPS={s_tps:>5.1f} | "
+                f"non-stream E2E={ns_e2e:>7.0f}ms | "
+                f"overhead={overhead:>+.1f}%"
+            )
 
     # Concurrent summary
     concurrent = [r for r in results if r.get("cache_state") == "concurrent_2x"]
     if concurrent:
-        print(f"\n  --- Concurrent (batch=2) ---")
+        print("\n  --- Concurrent (batch=2) ---")
         for r in concurrent:
-            print(f"  ctx={r['context_tokens']:>5} {r['mode']:>14}: "
-                  f"wall={r['wall_ms']:>7.0f}ms sysTPS={r['system_tps']:>5.1f}")
+            print(
+                f"  ctx={r['context_tokens']:>5} {r['mode']:>14}: "
+                f"wall={r['wall_ms']:>7.0f}ms sysTPS={r['system_tps']:>5.1f}"
+            )
 
 
 async def main():

@@ -11,8 +11,6 @@ import tracemalloc
 from pathlib import Path
 from unittest.mock import MagicMock
 
-import pytest
-
 from agent_memory.domain.entities import AgentBlocks, KVBlock
 from agent_memory.domain.services import BlockPool
 from agent_memory.domain.value_objects import ModelCacheSpec
@@ -166,8 +164,7 @@ class TestAgentCacheStoreMemoryLeaks:
 
     def test_hot_cache_bounded_by_max(self) -> None:
         """Hot cache must not exceed max_hot_agents."""
-        from agent_memory.application.agent_cache_store import AgentCacheStore
-        from agent_memory.application.agent_cache_store import ModelTag
+        from agent_memory.application.agent_cache_store import AgentCacheStore, ModelTag
 
         tag = ModelTag(model_id="test", n_layers=2, n_kv_heads=4, head_dim=64, block_tokens=256)
         store = AgentCacheStore(
@@ -186,8 +183,7 @@ class TestAgentCacheStoreMemoryLeaks:
 
     def test_delete_removes_from_hot_cache(self) -> None:
         """Deleting an agent should remove it from hot cache."""
-        from agent_memory.application.agent_cache_store import AgentCacheStore
-        from agent_memory.application.agent_cache_store import ModelTag
+        from agent_memory.application.agent_cache_store import AgentCacheStore, ModelTag
 
         tag = ModelTag(model_id="test", n_layers=2, n_kv_heads=4, head_dim=64, block_tokens=256)
         store = AgentCacheStore(
@@ -209,8 +205,7 @@ class TestAgentCacheStoreMemoryLeaks:
 
     def test_evict_all_drains_hot_cache(self) -> None:
         """evict_all_to_disk should leave hot cache empty."""
-        from agent_memory.application.agent_cache_store import AgentCacheStore
-        from agent_memory.application.agent_cache_store import ModelTag
+        from agent_memory.application.agent_cache_store import AgentCacheStore, ModelTag
 
         tag = ModelTag(model_id="test", n_layers=2, n_kv_heads=4, head_dim=64, block_tokens=256)
         mock_adapter = MagicMock()

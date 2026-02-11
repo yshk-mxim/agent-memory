@@ -777,6 +777,6 @@ class TestBlockPoolO1Timing:
 
         assert ratio < 5.0, (
             f"Scaling ratio {ratio:.2f}x suggests O(n) not O(1). "
-            f"100-op mean={mean_100*1000:.4f}ms, "
-            f"10000-op mean={mean_10000*1000:.4f}ms"
+            f"100-op mean={mean_100 * 1000:.4f}ms, "
+            f"10000-op mean={mean_10000 * 1000:.4f}ms"
         )

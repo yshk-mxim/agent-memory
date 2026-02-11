@@ -57,12 +57,12 @@ def tokenize_with_chat_template(
             # Only merge "user" role, NOT "assistant" — assistant messages
             # are the agent's own voice and must remain separate.
             chat_template = getattr(tokenizer, "chat_template", "") or ""
-            is_deepseek = ("'User: '" in chat_template and "'Assistant: '" in chat_template)
-            is_gemma = ("<start_of_turn>" in chat_template and "<end_of_turn>" in chat_template)
+            is_deepseek = "'User: '" in chat_template and "'Assistant: '" in chat_template
+            is_gemma = "<start_of_turn>" in chat_template and "<end_of_turn>" in chat_template
 
             messages_for_template = chat_messages
             if (is_deepseek or is_gemma) and chat_messages:
-                merged = []
+                merged: list[dict[str, str]] = []
                 for msg in chat_messages:
                     if not merged:
                         merged.append(dict(msg))
@@ -97,15 +97,26 @@ def tokenize_with_chat_template(
             # to ensure prompt_text matches tokens for cache prefix matching
             template_kwargs_text = template_kwargs.copy()
             template_kwargs_text["tokenize"] = False
-            templated_text = tokenizer.apply_chat_template(messages_for_template, **template_kwargs_text)
+            templated_text = tokenizer.apply_chat_template(
+                messages_for_template, **template_kwargs_text
+            )
 
             tokens = tokenizer.apply_chat_template(messages_for_template, **template_kwargs)
-            logger.info(f"Template result: tokens_type={type(tokens).__name__}, tokens_is_list={isinstance(tokens, list)}, text_type={type(templated_text).__name__}, text_is_str={isinstance(templated_text, str)}")
+            logger.info(
+                "Template result: tokens_type=%s, tokens_is_list=%s, text_type=%s, text_is_str=%s",
+                type(tokens).__name__,
+                isinstance(tokens, list),
+                type(templated_text).__name__,
+                isinstance(templated_text, str),
+            )
             if isinstance(tokens, list) and isinstance(templated_text, str):
                 logger.info(f"Template applied: {len(tokens)} tokens, {len(templated_text)} chars")
                 return tokens, templated_text
-            else:
-                logger.warning(f"Template check failed: returning fallback (tokens={type(tokens).__name__}, text={type(templated_text).__name__})")
+            logger.warning(
+                "Template check failed: returning fallback (tokens=%s, text=%s)",
+                type(tokens).__name__,
+                type(templated_text).__name__,
+            )
         except Exception as e:
             logger.warning(f"Chat template exception: {e}, falling back to raw text tokenization")
     return tokenizer.encode(fallback_text), fallback_text

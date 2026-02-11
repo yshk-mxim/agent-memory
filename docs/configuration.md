@@ -1,4 +1,3 @@
-```markdown
 # Configuration Guide
 
 agent-memory uses environment variables for configuration. All settings can be specified via:
@@ -275,4 +274,3 @@ python -m agent_memory.entrypoints.cli config --show
 - [User Guide](user-guide.md) - Usage examples
 - [Adding Models](developer/adding-models.md) - Adding new models
 - [Deployment Guide](deployment.md) - Production deployment
-```

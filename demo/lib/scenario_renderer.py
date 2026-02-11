@@ -26,11 +26,16 @@ def _truncate_at_stop_markers(text: str, agent_names: list[str]) -> str:
     # Standard markers that indicate fake turn continuation
     # Synced with coordination_service.py:912-918
     stop_markers = [
-        "\nUser:", "\nuser:",
-        "\nYou:", "\nyou:",
-        "\nSystem:", "\nsystem:",
-        "\nAssistant:", "\nassistant:",
-        "\n<start_of_turn>", "\n<end_of_turn>",  # Gemma3 turn markers
+        "\nUser:",
+        "\nuser:",
+        "\nYou:",
+        "\nyou:",
+        "\nSystem:",
+        "\nsystem:",
+        "\nAssistant:",
+        "\nassistant:",
+        "\n<start_of_turn>",
+        "\n<end_of_turn>",  # Gemma3 turn markers
     ]
     # Add agent names as stop markers
     for name in agent_names:
@@ -49,6 +54,8 @@ def _truncate_at_stop_markers(text: str, agent_names: list[str]) -> str:
     text = re.sub(r"^(?:Assistant|User|System):\s*", "", text.strip())
     return text
 
+
+from agent_memory.domain.scenario import PhaseSpec, ScenarioSpec
 from demo.lib import api_client
 from demo.lib.control_bar import render_round_controls
 from demo.lib.message_timeline import build_agent_colors, render_timeline
@@ -57,7 +64,6 @@ from demo.lib.template_resolver import (
     has_template_refs,
     resolve_template,
 )
-from agent_memory.domain.scenario import PhaseSpec, ScenarioSpec
 
 logger = logging.getLogger(__name__)
 
@@ -402,9 +408,7 @@ class ScenarioRenderer:
                 return False
 
         # Prior phase dependencies (permanent agents with prior history)
-        phase_idx = next(
-            (i for i, p in enumerate(self.spec.phases) if p.name == phase.name), 0
-        )
+        phase_idx = next((i for i, p in enumerate(self.spec.phases) if p.name == phase.name), 0)
         for agent_key in phase.agents:
             agent = self.spec.agents.get(agent_key)
             if not agent or agent.lifecycle != "permanent":
@@ -441,9 +445,7 @@ class ScenarioRenderer:
         """Generate a stable agent_id from scenario + agent key."""
         return f"scn_{self.spec.id}_{agent_key}"
 
-    def _collect_agent_prior_messages(
-        self, agent_key: str, phase_idx: int
-    ) -> list[dict[str, str]]:
+    def _collect_agent_prior_messages(self, agent_key: str, phase_idx: int) -> list[dict[str, str]]:
         """Collect all messages from prior phases where this agent participated."""
         sid = self.spec.id
         agent_msgs: list[dict[str, str]] = []
@@ -451,9 +453,7 @@ class ScenarioRenderer:
         for prior_phase in self.spec.phases[:phase_idx]:
             if agent_key not in prior_phase.agents:
                 continue
-            stored = st.session_state.get(
-                _phase_key(sid, prior_phase.name, "messages"), []
-            )
+            stored = st.session_state.get(_phase_key(sid, prior_phase.name, "messages"), [])
             for msg in stored:
                 sender_name = msg.get("sender_name", "")
                 content = msg.get("content", "")
@@ -468,17 +468,17 @@ class ScenarioRenderer:
                         if sender_key
                         else msg.get("sender_id", "system")
                     )
-                agent_msgs.append({
-                    "sender_id": sender_id,
-                    "sender_name": sender_name,
-                    "content": content,
-                })
+                agent_msgs.append(
+                    {
+                        "sender_id": sender_id,
+                        "sender_name": sender_name,
+                        "content": content,
+                    }
+                )
 
         return agent_msgs
 
-    def _collect_prior_messages(
-        self, phase: PhaseSpec
-    ) -> dict[str, list[dict[str, str]]]:
+    def _collect_prior_messages(self, phase: PhaseSpec) -> dict[str, list[dict[str, str]]]:
         """Collect prior phase messages for each permanent agent.
 
         Enables KV cache prefix matching: the prompt in Phase N starts with
@@ -486,9 +486,7 @@ class ScenarioRenderer:
         of reprocessing from scratch.
         """
         prior: dict[str, list[dict[str, str]]] = {}
-        phase_idx = next(
-            (i for i, p in enumerate(self.spec.phases) if p.name == phase.name), 0
-        )
+        phase_idx = next((i for i, p in enumerate(self.spec.phases) if p.name == phase.name), 0)
 
         for agent_key in phase.agents:
             agent = self.spec.agents.get(agent_key)
@@ -516,13 +514,15 @@ class ScenarioRenderer:
             agent = self.spec.agents.get(agent_key)
             if not agent:
                 continue
-            configs.append({
-                "agent_id": self._stable_agent_id(agent_key),
-                "display_name": agent.display_name,
-                "role": agent.role,
-                "system_prompt": agent.system_prompt,
-                "lifecycle": agent.lifecycle,
-            })
+            configs.append(
+                {
+                    "agent_id": self._stable_agent_id(agent_key),
+                    "display_name": agent.display_name,
+                    "role": agent.role,
+                    "system_prompt": agent.system_prompt,
+                    "lifecycle": agent.lifecycle,
+                }
+            )
         return configs
 
     def _resolve_per_agent_prompts(
@@ -552,11 +552,15 @@ class ScenarioRenderer:
         initial_prompt = phase.initial_prompt
         if has_template_refs(phase.initial_prompt_template):
             initial_prompt = resolve_template(
-                phase.initial_prompt_template, phase_messages, agent_names,
+                phase.initial_prompt_template,
+                phase_messages,
+                agent_names,
             )
 
         per_agent_prompts = self._resolve_per_agent_prompts(
-            phase, phase_messages, agent_names,
+            phase,
+            phase_messages,
+            agent_names,
         )
         agent_configs = self._build_phase_agent_configs(phase)
         prior_agent_messages = self._collect_prior_messages(phase)

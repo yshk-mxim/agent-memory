@@ -16,8 +16,7 @@ REQUIRES: Apple Silicon, dangerouslyDisableSandbox: true
 """
 
 import pytest
-
-from mlx_lm import load, generate
+from mlx_lm import generate, load
 from mlx_lm.sample_utils import make_sampler
 
 pytestmark = pytest.mark.integration

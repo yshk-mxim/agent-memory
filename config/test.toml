@@ -5,7 +5,7 @@
 model_id = "mlx-community/SmolLM2-135M-Instruct-4bit"  # Fast lightweight model for tests
 max_batch_size = 3
 prefill_step_size = 128
-kv_bits = null  # No quantization in tests (simpler)
+kv_bits = 0  # 0 = no quantization in tests (simpler)
 cache_budget_mb = 512  # Small budget for fast tests
 
 [agent]

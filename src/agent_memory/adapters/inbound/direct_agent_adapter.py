@@ -1,3 +1,4 @@
+# mypy: disable-error-code="no-untyped-def"
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 Yakov Shkolnikov and contributors
 """Direct Agent API adapter (POST /v1/agents/*).

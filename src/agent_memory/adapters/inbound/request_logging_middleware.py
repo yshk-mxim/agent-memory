@@ -7,6 +7,7 @@ Logs all HTTP requests with timing, status, and contextual information.
 
 import time
 from collections.abc import Callable
+from typing import Any
 
 import structlog
 from fastapi import Request, Response
@@ -28,7 +29,7 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
         app.add_middleware(RequestLoggingMiddleware)
     """
 
-    def __init__(self, app, skip_paths: set[str] | None = None):
+    def __init__(self, app: Any, skip_paths: set[str] | None = None):
         """Initialize request logging middleware.
 
         Args:

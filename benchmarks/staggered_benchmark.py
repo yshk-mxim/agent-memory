@@ -26,27 +26,27 @@ import argparse
 import asyncio
 import json
 import platform
-import subprocess
-import time
-from dataclasses import dataclass
-from datetime import datetime, timezone
-from pathlib import Path
-from typing import Any
 import statistics
-
-import httpx
+import subprocess
 
 # Reuse infrastructure
 import sys
+import time
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
+
+import httpx
+
 sys.path.insert(0, str(Path(__file__).parent))
 
 from openai_benchmark import (
-    OpenAIStreamingClient,
-    OpenAIPromptFactory,
-    ScenarioResult,
-    ServerManager,
     OPENAI_BENCH_ENV,
     PORT,
+    OpenAIPromptFactory,
+    OpenAIStreamingClient,
+    ServerManager,
 )
 
 RESULTS_DIR = Path(__file__).parent / "results"
@@ -58,10 +58,14 @@ DEFAULT_STAGGER_DELAY = 2.0  # seconds
 
 def _git_sha() -> str:
     try:
-        return subprocess.check_output(
-            ["git", "rev-parse", "--short", "HEAD"],
-            stderr=subprocess.DEVNULL,
-        ).decode().strip()
+        return (
+            subprocess.check_output(
+                ["git", "rev-parse", "--short", "HEAD"],
+                stderr=subprocess.DEVNULL,
+            )
+            .decode()
+            .strip()
+        )
     except Exception:
         return "unknown"
 
@@ -92,6 +96,7 @@ async def _wait_for_server(base_url: str, timeout: float = 300) -> bool:
 @dataclass
 class StaggeredResult:
     """Result from a staggered benchmark run."""
+
     mode: str  # "sequential" or "batched"
     run_id: int
     user_a_ttft_ms: float
@@ -241,9 +246,9 @@ async def run_benchmark(
     sequential_results = []
     batched_results = []
 
-    print(f"\n{'='*80}")
-    print(f"Staggered Arrivals Benchmark")
-    print(f"{'='*80}")
+    print(f"\n{'=' * 80}")
+    print("Staggered Arrivals Benchmark")
+    print(f"{'=' * 80}")
     print(f"Context: {context_tokens} tokens")
     print(f"Output: {output_tokens} tokens")
     print(f"Stagger delay: {stagger_delay}s")
@@ -253,7 +258,7 @@ async def run_benchmark(
     # Run sequential tests
     print("Running sequential tests (User A completes, then User B starts)...")
     for i in range(runs):
-        print(f"  Run {i+1}/{runs}...", end=" ", flush=True)
+        print(f"  Run {i + 1}/{runs}...", end=" ", flush=True)
         result = await run_sequential(base_url, context_tokens, output_tokens, i)
         sequential_results.append(result)
         if result.error:
@@ -265,7 +270,7 @@ async def run_benchmark(
     # Run batched tests
     print("\nRunning batched tests (User B joins while User A is running)...")
     for i in range(runs):
-        print(f"  Run {i+1}/{runs}...", end=" ", flush=True)
+        print(f"  Run {i + 1}/{runs}...", end=" ", flush=True)
         result = await run_batched(base_url, context_tokens, output_tokens, stagger_delay, i)
         batched_results.append(result)
         if result.error:
@@ -287,9 +292,10 @@ async def run_benchmark(
             "total_wall_time_ms_median": statistics.median(r.total_wall_time_ms for r in results),
             "system_tps_median": statistics.median(r.system_tps for r in results),
             "user_b_speedup": (
-                statistics.median(r.user_b_e2e_ms for r in sequential_results) /
-                statistics.median(r.user_b_e2e_ms for r in batched_results)
-                if batched_results else 0
+                statistics.median(r.user_b_e2e_ms for r in sequential_results)
+                / statistics.median(r.user_b_e2e_ms for r in batched_results)
+                if batched_results
+                else 0
             ),
         }
 
@@ -297,12 +303,12 @@ async def run_benchmark(
     batch_stats = compute_stats(batched_results)
 
     # Print summary
-    print(f"\n{'='*80}")
+    print(f"\n{'=' * 80}")
     print("RESULTS SUMMARY (medians)")
-    print(f"{'='*80}")
+    print(f"{'=' * 80}")
 
     if seq_stats:
-        print(f"\nSequential:")
+        print("\nSequential:")
         print(f"  User A TTFT: {seq_stats['user_a_ttft_ms_median']:.0f}ms")
         print(f"  User A E2E:  {seq_stats['user_a_e2e_ms_median']:.0f}ms")
         print(f"  User B TTFT: {seq_stats['user_b_ttft_ms_median']:.0f}ms")
@@ -311,7 +317,7 @@ async def run_benchmark(
         print(f"  System TPS:  {seq_stats['system_tps_median']:.1f} tok/s")
 
     if batch_stats:
-        print(f"\nBatched:")
+        print("\nBatched:")
         print(f"  User A TTFT: {batch_stats['user_a_ttft_ms_median']:.0f}ms")
         print(f"  User A E2E:  {batch_stats['user_a_e2e_ms_median']:.0f}ms")
         print(f"  User B TTFT: {batch_stats['user_b_ttft_ms_median']:.0f}ms")
@@ -320,11 +326,17 @@ async def run_benchmark(
         print(f"  System TPS:  {batch_stats['system_tps_median']:.1f} tok/s")
 
     if seq_stats and batch_stats:
-        speedup = batch_stats['user_b_speedup']
+        speedup = batch_stats["user_b_speedup"]
         print(f"\nUser B Speedup (batched vs sequential): {speedup:.2f}x")
-        wall_speedup = seq_stats['total_wall_time_ms_median'] / batch_stats['total_wall_time_ms_median']
+        wall_speedup = (
+            seq_stats["total_wall_time_ms_median"] / batch_stats["total_wall_time_ms_median"]
+        )
         print(f"Total Wall Time Speedup: {wall_speedup:.2f}x")
-        tps_gain = (batch_stats['system_tps_median'] - seq_stats['system_tps_median']) / seq_stats['system_tps_median'] * 100
+        tps_gain = (
+            (batch_stats["system_tps_median"] - seq_stats["system_tps_median"])
+            / seq_stats["system_tps_median"]
+            * 100
+        )
         print(f"System Throughput Gain: {tps_gain:+.1f}%")
 
     # Return full results
@@ -341,7 +353,7 @@ async def run_benchmark(
 
     return {
         "benchmark": "staggered_arrivals",
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
         "model_id": model_id,
         "git_sha": _git_sha(),
         "system": {

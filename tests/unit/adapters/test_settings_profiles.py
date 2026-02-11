@@ -2,14 +2,12 @@
 # Copyright (c) 2026 Yakov Shkolnikov and contributors
 """Coverage tests for settings.py — _find_model_profile_path, load_model_profile, validators."""
 
-from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
 from agent_memory.adapters.config.settings import (
     MLXSettings,
-    Settings,
     _find_model_profile_path,
     get_settings,
     load_model_profile,
@@ -47,6 +45,7 @@ class TestFindModelProfilePath:
 
         # Patch the function to use our tmp dir
         import agent_memory.adapters.config.settings as settings_mod
+
         original_func = settings_mod._find_model_profile_path
 
         def patched_find(model_id):
@@ -177,6 +176,7 @@ class TestMLXSettingsValidators:
 class TestSettingsSingleton:
     def test_get_settings_returns_same(self):
         import agent_memory.adapters.config.settings as mod
+
         mod._settings = None
         s1 = get_settings()
         s2 = get_settings()
@@ -184,6 +184,7 @@ class TestSettingsSingleton:
 
     def test_reload_settings_creates_fresh(self):
         import agent_memory.adapters.config.settings as mod
+
         mod._settings = None
         s1 = get_settings()
         s2 = reload_settings()

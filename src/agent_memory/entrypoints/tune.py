@@ -18,7 +18,7 @@ import logging
 import platform
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -65,8 +65,6 @@ def _run_tune(
         "SEMANTIC_SERVER_LOG_LEVEL": "WARNING",
         "SEMANTIC_API_KEY": "",
     }
-
-    results: dict[str, Any] = {}
 
     async def measure(
         env: dict[str, str],
@@ -322,14 +320,14 @@ def _run_tune(
     base_profile: dict[str, Any] = {}
     for f in existing_profile.glob("*.toml"):
         if "tuned" not in f.stem:
-            with open(f, "rb") as fh:
+            with f.open("rb") as fh:
                 base_profile = tomllib.load(fh)
             break
 
     # Build TOML content
     lines = [
         "# Auto-tuned configuration",
-        f"# Generated: {datetime.now(timezone.utc).isoformat()}",
+        f"# Generated: {datetime.now(UTC).isoformat()}",
         f"# Hardware: {platform.machine()} / {platform.system()} {platform.release()}",
         f"# Mode: {'quick' if quick else 'full'}",
         "",
@@ -353,10 +351,18 @@ def _run_tune(
         "evict_to_disk = true",
         "",
         "[thresholds]",
-        f"long_context_threshold = {base_profile.get('thresholds', {}).get('long_context_threshold', 4000)}",
-        f"high_batch_threshold = {base_profile.get('thresholds', {}).get('high_batch_threshold', 3)}",
-        f"memory_pressure_mb = {base_profile.get('thresholds', {}).get('memory_pressure_mb', 12000)}",
-        f"min_cache_benefit_ratio = {base_profile.get('thresholds', {}).get('min_cache_benefit_ratio', 0.8)}",
+        "long_context_threshold = {}".format(
+            base_profile.get("thresholds", {}).get("long_context_threshold", 4000)
+        ),
+        "high_batch_threshold = {}".format(
+            base_profile.get("thresholds", {}).get("high_batch_threshold", 3)
+        ),
+        "memory_pressure_mb = {}".format(
+            base_profile.get("thresholds", {}).get("memory_pressure_mb", 12000)
+        ),
+        "min_cache_benefit_ratio = {}".format(
+            base_profile.get("thresholds", {}).get("min_cache_benefit_ratio", 0.8)
+        ),
         "",
         "[tuning_results]",
         f"avg_decode_tps = {optimal.get('avg_decode_tps', 0):.1f}",
@@ -364,7 +370,7 @@ def _run_tune(
         f"best_batch_size = {optimal.get('max_batch_size', 2)}",
     ]
 
-    with open(output_path, "w") as f:
+    with output_path.open("w") as f:
         f.write("\n".join(lines) + "\n")
 
     typer.echo(f"\n{'=' * 60}")

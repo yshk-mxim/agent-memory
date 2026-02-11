@@ -97,7 +97,7 @@ class ChatTemplateAdapter:
 
     @staticmethod
     def _is_deepseek_format(chat_template: str) -> bool:
-        """Check if template uses DeepSeek format (User:/Assistant: labels).
+        r"""Check if template uses DeepSeek format (User:/Assistant: labels).
 
         DeepSeek-Coder-V2 uses simple role labels like:
           'User: ' + content + '\n\n'
@@ -107,4 +107,4 @@ class ChatTemplateAdapter:
         the model, causing Chinese generation or immediate EOS.
         """
         # Check for the specific DeepSeek pattern with proper quotes
-        return ("'User: '" in chat_template and "'Assistant: '" in chat_template)
+        return "'User: '" in chat_template and "'Assistant: '" in chat_template

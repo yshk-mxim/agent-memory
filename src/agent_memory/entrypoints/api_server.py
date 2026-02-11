@@ -7,6 +7,7 @@ middleware, error handlers, and route registration.
 """
 
 from contextlib import asynccontextmanager
+from dataclasses import replace
 from pathlib import Path
 
 import structlog
@@ -17,20 +18,21 @@ from fastapi.responses import JSONResponse
 from mlx_lm import load
 from prometheus_client import generate_latest
 
-import agent_memory.adapters.outbound.mlx_quantized_extensions  # noqa: F401, E402
-import agent_memory.adapters.outbound.mlx_sink_compat  # noqa: F401, E402
-
+import agent_memory.adapters.outbound.mlx_quantized_extensions
+import agent_memory.adapters.outbound.mlx_sink_compat  # noqa: F401
 from agent_memory.adapters.config.logging import configure_logging
 from agent_memory.adapters.config.settings import get_settings
-from agent_memory.adapters.inbound.anthropic_adapter import router as anthropic_router
-from agent_memory.adapters.inbound.auth_middleware import AuthenticationMiddleware
-from agent_memory.adapters.inbound.coordination_adapter import router as coordination_router
 from agent_memory.adapters.inbound.admin_api import (
     get_old_engine,
     get_orchestrator,
     get_registry,
+)
+from agent_memory.adapters.inbound.admin_api import (
     router as admin_router,
 )
+from agent_memory.adapters.inbound.anthropic_adapter import router as anthropic_router
+from agent_memory.adapters.inbound.auth_middleware import AuthenticationMiddleware
+from agent_memory.adapters.inbound.coordination_adapter import router as coordination_router
 from agent_memory.adapters.inbound.direct_agent_adapter import router as direct_router
 from agent_memory.adapters.inbound.metrics import agents_active, pool_utilization_ratio, registry
 from agent_memory.adapters.inbound.metrics_middleware import RequestMetricsMiddleware
@@ -40,9 +42,9 @@ from agent_memory.adapters.inbound.request_id_middleware import RequestIDMiddlew
 from agent_memory.adapters.inbound.request_logging_middleware import RequestLoggingMiddleware
 from agent_memory.adapters.outbound.chat_template_adapter import ChatTemplateAdapter
 from agent_memory.adapters.outbound.mlx_cache_adapter import MLXCacheAdapter
+from agent_memory.adapters.outbound.mlx_model_loader import MLXModelLoader
 from agent_memory.adapters.outbound.mlx_spec_extractor import get_extractor
 from agent_memory.adapters.outbound.safetensors_cache_adapter import SafetensorsCacheAdapter
-from agent_memory.adapters.outbound.mlx_model_loader import MLXModelLoader
 from agent_memory.application.agent_cache_store import AgentCacheStore, ModelTag
 from agent_memory.application.batch_engine import BlockPoolBatchEngine
 from agent_memory.application.coordination_service import CoordinationService
@@ -77,9 +79,9 @@ class AppState:
         self.cache_store: AgentCacheStore | None = None
         self.mlx_adapter: MLXCacheAdapter | None = None
         self.cache_adapter: SafetensorsCacheAdapter | None = None
-        self.scheduler: "ConcurrentScheduler | None" = None
+        self.scheduler: ConcurrentScheduler | None = None
         self.prefix_cache: SharedPrefixCache | None = None
-        self.coordination_service: "CoordinationService | None" = None
+        self.coordination_service: CoordinationService | None = None
         self.model_registry: ModelRegistry | None = None
         self.model_swap_orchestrator: ModelSwapOrchestrator | None = None
 
@@ -126,8 +128,6 @@ def _load_model_and_extract_spec(settings):
 
     spec_extractor = get_extractor()
     base_spec: ModelCacheSpec = spec_extractor.extract_spec(model)
-
-    from dataclasses import replace
 
     model_spec = replace(
         base_spec,
@@ -286,6 +286,7 @@ async def lifespan(app: FastAPI):
     try:
         # Apply fused Q4 attention patch (must happen before model forward pass)
         from agent_memory.adapters.outbound.mlx_fused_attention import apply_fused_attention_patch
+
         apply_fused_attention_patch()
 
         # Let MLX keep its default buffer cache — disabling it with
@@ -419,6 +420,7 @@ async def lifespan(app: FastAPI):
         logger.info("releasing_gpu_memory")
         try:
             import gc
+
             import mlx.core as mx
 
             # 1. Shut down batch engine (clears internal model/tokenizer refs)
@@ -550,7 +552,9 @@ def _register_health_endpoints(app: FastAPI):
 
         # Update metrics
         pool_utilization_ratio.set(utilization)
-        cache_store = app.state.agent_memory.cache_store if hasattr(app.state, "agent_memory") else None
+        cache_store = (
+            app.state.agent_memory.cache_store if hasattr(app.state, "agent_memory") else None
+        )
         if cache_store:
             agents_active.set(len(cache_store._hot_cache))
 
@@ -681,21 +685,18 @@ def _get_semantic_error_details(exc: SemanticError) -> tuple[int, str]:
     # Map specific error types to appropriate HTTP status codes
     if isinstance(exc, PoolExhaustedError):
         return status.HTTP_503_SERVICE_UNAVAILABLE, "overloaded_error"
-    elif isinstance(exc, AgentNotFoundError):
+    if isinstance(exc, AgentNotFoundError):
         return status.HTTP_404_NOT_FOUND, "not_found_error"
-    elif isinstance(exc, InvalidRequestError):
+    if isinstance(exc, InvalidRequestError):
         return status.HTTP_400_BAD_REQUEST, "invalid_request_error"
-    elif isinstance(exc, CacheCorruptionError):
+    if isinstance(exc, (CacheCorruptionError, CachePersistenceError)):
         return status.HTTP_500_INTERNAL_SERVER_ERROR, "api_error"
-    elif isinstance(exc, CachePersistenceError):
-        return status.HTTP_500_INTERNAL_SERVER_ERROR, "api_error"
-    elif isinstance(exc, IncompatibleCacheError):
+    if isinstance(exc, IncompatibleCacheError):
         return status.HTTP_409_CONFLICT, "invalid_request_error"
-    elif isinstance(exc, GenerationError):
+    if isinstance(exc, GenerationError):
         return status.HTTP_500_INTERNAL_SERVER_ERROR, "api_error"
-    else:
-        # Default for unknown SemanticError subclasses
-        return status.HTTP_400_BAD_REQUEST, "invalid_request_error"
+    # Default for unknown SemanticError subclasses
+    return status.HTTP_400_BAD_REQUEST, "invalid_request_error"
 
 
 def _register_error_handlers(app: FastAPI):

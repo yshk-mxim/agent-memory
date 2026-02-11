@@ -1,3 +1,4 @@
+# mypy: disable-error-code="union-attr,arg-type,attr-defined,no-untyped-def"
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 Yakov Shkolnikov and contributors
 """Anthropic Messages API adapter (POST /v1/messages).
@@ -448,7 +449,7 @@ async def stream_generation(  # noqa: C901, PLR0912
         }
 
 
-async def stream_generation_via_scheduler(  # noqa: C901, PLR0912
+async def stream_generation_via_scheduler(
     request_body: MessagesRequest,
     scheduler: Any,
     cache_store: Any,
@@ -529,10 +530,7 @@ async def stream_generation_via_scheduler(  # noqa: C901, PLR0912
             if delta.finish_reason is not None:
                 final_text = delta.text
                 final_token_count = delta.token_count
-                if delta.finish_reason == "stop":
-                    final_finish_reason = "end_turn"
-                else:
-                    final_finish_reason = "max_tokens"
+                final_finish_reason = "end_turn" if delta.finish_reason == "stop" else "max_tokens"
 
         yield {
             "event": "content_block_stop",

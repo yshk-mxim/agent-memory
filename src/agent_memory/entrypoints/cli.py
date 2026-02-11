@@ -161,6 +161,7 @@ def serve(
     # Enable faster GPU↔CPU synchronization for Metal.
     # Reduces per-token sync fence overhead during decode.
     import os
+
     os.environ.setdefault("MLX_METAL_FAST_SYNCH", "1")
 
     # Create FastAPI app

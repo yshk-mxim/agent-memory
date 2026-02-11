@@ -2,7 +2,6 @@
 # Copyright (c) 2026 Yakov Shkolnikov and contributors
 """Unit tests for SharedPrefixCache."""
 
-
 from agent_memory.application.shared_prefix_cache import SharedPrefixCache
 
 

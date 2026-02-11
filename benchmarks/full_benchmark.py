@@ -45,7 +45,7 @@ import statistics
 import subprocess
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -56,6 +56,10 @@ import httpx
 # ---------------------------------------------------------------------------
 sys.path.insert(0, str(Path(__file__).parent))
 
+from capability_benchmark import (
+    ScenarioResult,
+    ServerManager,
+)
 from openai_benchmark import (
     OPENAI_BENCH_ENV,
     PADDING_TEXT,
@@ -63,16 +67,11 @@ from openai_benchmark import (
     OpenAIRequestClient,
     OpenAIStreamingClient,
 )
-from capability_benchmark import (
-    ScenarioResult,
-    ServerManager,
-    compute_stats,
-)
+from staggered_benchmark import StaggeredResult
 from streaming_benchmark import (
     _delete_agent,
     _wait_for_server,
 )
-from staggered_benchmark import StaggeredResult
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -96,10 +95,12 @@ OUTPUT_TOKENS = 64
 DEFAULT_PASSES = 3
 DEFAULT_PORT = 8399
 MAX_COOLDOWN_SECONDS = 240  # Safety cap
-MIN_COOLDOWN_SECONDS = 10   # Minimum to let caches flush
+MIN_COOLDOWN_SECONDS = 10  # Minimum to let caches flush
 COOLDOWN_POLL_INTERVAL = 5  # Seconds between thermal checks
 WARMUP_SETTLE_SECONDS = 30
-THROTTLE_TPS_TOLERANCE = 0.20  # 20% tolerance for TPS recovery (sustained inference drops ~15% from peak)
+THROTTLE_TPS_TOLERANCE = (
+    0.20  # 20% tolerance for TPS recovery (sustained inference drops ~15% from peak)
+)
 STAGGER_DELAY = 2.0
 STAGGER_CONTEXT = 4096  # Paper uses 4K context for staggered arrivals (Figure 3)
 # T=0.0 greedy (argmax): fully deterministic, no seed needed.
@@ -116,8 +117,8 @@ ADMIN_KEY = "benchmark"
 # for intermediate tensors.  DeepSeek-Coder-V2-Lite has 64-expert MoE layers
 # that need significant intermediate memory during forward pass.
 MODEL_CACHE_BUDGET: dict[str, int] = {
-    "gemma": 8192,      # default
-    "deepseek": 4096,   # reduced — MoE intermediates need headroom
+    "gemma": 8192,  # default
+    "deepseek": 4096,  # reduced — MoE intermediates need headroom
 }
 
 # ---------------------------------------------------------------------------
@@ -138,9 +139,7 @@ def load_corpus() -> str:
     return PADDING_TEXT * 5000
 
 
-def build_messages(
-    corpus: str, target_tokens: int, offset: int = 0
-) -> list[dict[str, str]]:
+def build_messages(corpus: str, target_tokens: int, offset: int = 0) -> list[dict[str, str]]:
     """Build prompt from diverse corpus text at the target token count.
 
     Each measurement uses a different offset into the corpus to prevent
@@ -187,7 +186,10 @@ def get_system_memory_free_pct() -> int:
     try:
         result = subprocess.run(
             ["memory_pressure"],
-            capture_output=True, text=True, timeout=10,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=10,
         )
         for line in result.stdout.split("\n"):
             if "free percentage" in line:
@@ -227,7 +229,7 @@ def check_memory_pressure(min_free_pct: int = 20, max_wait: int = 300) -> bool:
 
     pct = get_system_memory_free_pct()
     print(f"  WARNING: Memory still {pct}% free after {max_wait}s wait")
-    print(f"  Consider rebooting if model loading fails (Metal OOM)")
+    print("  Consider rebooting if model loading fails (Metal OOM)")
     return False
 
 
@@ -251,13 +253,15 @@ def build_server_env(model_id: str, model_key: str = "") -> dict[str, str]:
     """
     env = dict(OPENAI_BENCH_ENV)
     cache_budget = MODEL_CACHE_BUDGET.get(model_key, 8192)
-    env.update({
-        "SEMANTIC_MLX_MODEL_ID": model_id,
-        "SEMANTIC_MLX_MAX_BATCH_SIZE": "2",
-        "SEMANTIC_MLX_SCHEDULER_ENABLED": "true",
-        "SEMANTIC_ADMIN_KEY": ADMIN_KEY,
-        "SEMANTIC_MLX_CACHE_BUDGET_MB": str(cache_budget),
-    })
+    env.update(
+        {
+            "SEMANTIC_MLX_MODEL_ID": model_id,
+            "SEMANTIC_MLX_MAX_BATCH_SIZE": "2",
+            "SEMANTIC_MLX_SCHEDULER_ENABLED": "true",
+            "SEMANTIC_ADMIN_KEY": ADMIN_KEY,
+            "SEMANTIC_MLX_CACHE_BUDGET_MB": str(cache_budget),
+        }
+    )
     return env
 
 
@@ -267,7 +271,9 @@ def build_server_env(model_id: str, model_key: str = "") -> dict[str, str]:
 
 
 def check_structural(
-    raw_output: str, output_tokens: int, expected_tokens: int = OUTPUT_TOKENS,
+    raw_output: str,
+    output_tokens: int,
+    expected_tokens: int = OUTPUT_TOKENS,
 ) -> list[str]:
     """Fast structural checks on generated output."""
     issues = []
@@ -304,13 +310,9 @@ def check_semantic(raw_output: str, prompt_context: str) -> dict[str, Any]:
     return {
         "relevance_score": round(overlap / max(len(output_words), 1), 3),
         "output_word_count": len(output_words_list),
-        "unique_word_ratio": round(
-            len(output_words) / max(len(output_words_list), 1), 3
-        ),
+        "unique_word_ratio": round(len(output_words) / max(len(output_words_list), 1), 3),
         "has_punctuation": any(c in raw_output for c in ".!?,;:"),
-        "starts_with_capital": (
-            raw_output.strip()[:1].isupper() if raw_output.strip() else False
-        ),
+        "starts_with_capital": (raw_output.strip()[:1].isupper() if raw_output.strip() else False),
     }
 
 
@@ -332,7 +334,6 @@ async def clear_all_caches(base_url: str) -> dict[str, Any]:
         except Exception as e:
             print(f"    WARN: clear_all_caches failed: {e}")
     return {}
-
 
 
 async def get_agent_stats(base_url: str) -> dict[str, Any]:
@@ -402,14 +403,17 @@ def kill_all_servers() -> None:
             # Use pgrep to get PIDs, then kill selectively
             result = subprocess.run(
                 ["pgrep", "-f", pattern],
-                capture_output=True, text=True, timeout=5,
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=5,
             )
             if result.stdout.strip():
                 for pid in result.stdout.strip().split("\n"):
                     pid = pid.strip()
                     if pid.isdigit() and pid not in safe_pids:
                         cmd = ["kill", pid] if not signal else ["kill", signal, pid]
-                        subprocess.run(cmd, capture_output=True, timeout=5)
+                        subprocess.run(cmd, check=False, capture_output=True, timeout=5)
         except Exception:
             pass
 
@@ -428,6 +432,7 @@ def kill_all_servers() -> None:
         try:
             result = subprocess.run(
                 ["lsof", "-ti", f":{port}"],
+                check=False,
                 capture_output=True,
                 text=True,
                 timeout=5,
@@ -438,6 +443,7 @@ def kill_all_servers() -> None:
                     if pid.isdigit() and pid not in safe_pids:
                         subprocess.run(
                             ["kill", "-9", pid],
+                            check=False,
                             capture_output=True,
                             timeout=5,
                         )
@@ -469,9 +475,7 @@ def get_thermal_state() -> int:
         objc.objc_msgSend.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
 
         NSProcessInfo = objc.objc_getClass(b"NSProcessInfo")
-        info = objc.objc_msgSend(
-            NSProcessInfo, objc.sel_registerName(b"processInfo")
-        )
+        info = objc.objc_msgSend(NSProcessInfo, objc.sel_registerName(b"processInfo"))
 
         send_long = objc.objc_msgSend
         send_long.restype = ctypes.c_long
@@ -653,11 +657,13 @@ class ManagedServer:
             print(f"  FATAL: Server died {self._restart_count} times, giving up")
             if pct >= 0 and pct < 20:
                 print(f"  System memory: {pct}% free — likely Metal OOM.")
-                print(f"  Reboot recommended to reclaim wired GPU memory.")
+                print("  Reboot recommended to reclaim wired GPU memory.")
             return False
 
         self._restart_count += 1
-        print(f"  SERVER CRASHED — restarting (attempt {self._restart_count}/{self.max_restarts})...")
+        print(
+            f"  SERVER CRASHED — restarting (attempt {self._restart_count}/{self.max_restarts})..."
+        )
 
         try:
             self._server.stop()
@@ -837,9 +843,7 @@ async def measure_hot(
         await asyncio.sleep(0.3)
 
         # Turn 3: hot measurement
-        followup2 = factory.build_followup(
-            followup1["messages"], "Understood.", output_tokens
-        )
+        followup2 = factory.build_followup(followup1["messages"], "Understood.", output_tokens)
         followup2["stream"] = mode == "streaming"
         followup2["temperature"] = TEMPERATURE
 
@@ -980,7 +984,7 @@ async def measure_concurrent(
         "cache_size_mb": stats.get("total_cache_size_mb", 0),
         "peak_memory_mb": mem.get("peak_memory_mb", 0),
         "error": None,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
     }
 
 
@@ -1170,7 +1174,7 @@ def _build_record(
         "quality_structural": struct_issues,
         "quality_semantic": sem_check,
         "error": r.error,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
     }
 
 
@@ -1206,7 +1210,7 @@ def _error_record(
         "pool_utilization_pct": 0,
         "cache_size_mb": 0,
         "error": error,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
     }
 
 
@@ -1217,10 +1221,14 @@ def _error_record(
 
 def _git_sha() -> str:
     try:
-        return subprocess.check_output(
-            ["git", "rev-parse", "--short", "HEAD"],
-            stderr=subprocess.DEVNULL,
-        ).decode().strip()
+        return (
+            subprocess.check_output(
+                ["git", "rev-parse", "--short", "HEAD"],
+                stderr=subprocess.DEVNULL,
+            )
+            .decode()
+            .strip()
+        )
     except Exception:
         return "unknown"
 
@@ -1231,7 +1239,7 @@ def make_result_doc(model_id: str, env: dict[str, str]) -> dict[str, Any]:
         "metadata": {
             "benchmark": "full",
             "git_sha": _git_sha(),
-            "timestamp_start": datetime.now(timezone.utc).isoformat(),
+            "timestamp_start": datetime.now(UTC).isoformat(),
             "timestamp_end": "",
             "machine": {
                 "os": platform.system(),
@@ -1291,8 +1299,10 @@ def load_resume(paths: list[Path]) -> set[str]:
             if not s.get("error"):
                 completed.add(key)
         n_total = len(doc.get("measurements", [])) + len(doc.get("staggered", []))
-        print(f"  Loaded {path.name}: {n_total} records, "
-              f"{n_skip_quality} quality failures will be re-run")
+        print(
+            f"  Loaded {path.name}: {n_total} records, "
+            f"{n_skip_quality} quality failures will be re-run"
+        )
     return completed
 
 
@@ -1307,7 +1317,8 @@ def _measurement_key(m: dict) -> str:
 def _measurement_config_key(m: dict) -> str:
     """Config-level key for merging (strips timestamp from pass_id).
 
-    pass_id is like 'p0_1770614494' — we only want 'p0' for dedup."""
+    pass_id is like 'p0_1770614494' — we only want 'p0' for dedup.
+    """
     pass_id = str(m.get("pass_id", ""))
     pass_prefix = pass_id.split("_")[0] if "_" in pass_id else pass_id
     return (
@@ -1352,9 +1363,7 @@ def merge_result_files(paths: list[Path], output: Path) -> None:
         for s in doc.get("staggered", []):
             key = f"staggered_{s.get('stagger_mode', '')}_{s.get('pass_id', '')}"
             existing = all_staggered.get(key)
-            if existing is None:
-                all_staggered[key] = s
-            elif not s.get("error") and existing.get("error"):
+            if existing is None or (not s.get("error") and existing.get("error")):
                 all_staggered[key] = s
 
     merged = {
@@ -1363,10 +1372,12 @@ def merge_result_files(paths: list[Path], output: Path) -> None:
         "staggered": list(all_staggered.values()),
         "quality_summary": {
             "total": len(all_measurements) + len(all_staggered),
-            "passed": sum(1 for m in all_measurements.values()
-                         if m.get("quality_ok") and not m.get("error")),
-            "failed": sum(1 for m in all_measurements.values()
-                         if not m.get("quality_ok") or m.get("error")),
+            "passed": sum(
+                1 for m in all_measurements.values() if m.get("quality_ok") and not m.get("error")
+            ),
+            "failed": sum(
+                1 for m in all_measurements.values() if not m.get("quality_ok") or m.get("error")
+            ),
         },
     }
 
@@ -1377,8 +1388,10 @@ def merge_result_files(paths: list[Path], output: Path) -> None:
     n_meas = len(merged["measurements"])
     n_stag = len(merged["staggered"])
     n_ok = merged["quality_summary"]["passed"]
-    print(f"  Merged {len(paths)} files -> {output.name}: "
-          f"{n_meas} measurements + {n_stag} staggered ({n_ok} quality_ok)")
+    print(
+        f"  Merged {len(paths)} files -> {output.name}: "
+        f"{n_meas} measurements + {n_stag} staggered ({n_ok} quality_ok)"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1426,16 +1439,15 @@ async def warmup(base_url: str, corpus: str) -> float:
 
 def print_table1(measurements: list[dict], model_id: str) -> None:
     """Print Table 1: TTFT (ms) — streaming, batch=1."""
-    print(f"\n{'='*70}")
+    print(f"\n{'=' * 70}")
     print(f"Table 1: TTFT (ms) — streaming, batch=1 — {model_id}")
-    print(f"{'='*70}")
+    print(f"{'=' * 70}")
 
     # Filter: streaming, batch=1
     data = [
-        m for m in measurements
-        if m.get("mode") == "streaming"
-        and m.get("batch_size") == 1
-        and not m.get("error")
+        m
+        for m in measurements
+        if m.get("mode") == "streaming" and m.get("batch_size") == 1 and not m.get("error")
     ]
 
     contexts = sorted(set(m["context_tokens"] for m in data))
@@ -1485,12 +1497,13 @@ def print_table2(measurements: list[dict], model_id: str) -> None:
     requests.  This measures the batching benefit without confounding
     server configuration differences.
     """
-    print(f"\n{'='*70}")
+    print(f"\n{'=' * 70}")
     print(f"Table 2: Single vs concurrent — 1K cold — {model_id}")
-    print(f"{'='*70}")
+    print(f"{'=' * 70}")
 
     b1 = [
-        m for m in measurements
+        m
+        for m in measurements
         if m.get("batch_size") == 1
         and m.get("context_tokens") == 1024
         and m.get("cache_state") == "cold"
@@ -1498,7 +1511,8 @@ def print_table2(measurements: list[dict], model_id: str) -> None:
         and not m.get("error")
     ]
     b2 = [
-        m for m in measurements
+        m
+        for m in measurements
         if m.get("batch_size") == 2
         and m.get("context_tokens") == 1024
         and m.get("cache_state") == "cold"
@@ -1515,7 +1529,7 @@ def print_table2(measurements: list[dict], model_id: str) -> None:
     print("-" * 52)
     print(f"{'Per-agent TPS':<24} {b1_tps:>12.1f} {b2_per_tps:>14.1f}")
     print(f"{'System TPS':<24} {b1_tps:>12.1f} {b2_sys_tps:>14.1f}")
-    print(f"{'Total time':<24} {b1_e2e/1000:>11.2f}s {b2_wall/1000:>13.2f}s")
+    print(f"{'Total time':<24} {b1_e2e / 1000:>11.2f}s {b2_wall / 1000:>13.2f}s")
     speedup = b1_e2e / b2_wall if b2_wall > 0 else 0
     print(f"{'Speedup':<24} {'1.0x':>12} {speedup:>13.2f}x")
 
@@ -1529,9 +1543,9 @@ def print_figure3(staggered: list[dict], model_id: str) -> None:
     start is ``A_e2e + B_ttft``.  In batched mode User B arrives after a short
     stagger delay and overlaps with A, so its wait is ``delay + B_ttft``.
     """
-    print(f"\n{'='*70}")
+    print(f"\n{'=' * 70}")
     print(f"Figure 3: Staggered arrivals — 4K context — {model_id}")
-    print(f"{'='*70}")
+    print(f"{'=' * 70}")
 
     seq = [s for s in staggered if s.get("stagger_mode") == "sequential" and not s.get("error")]
     bat = [s for s in staggered if s.get("stagger_mode") == "batched" and not s.get("error")]
@@ -1568,7 +1582,7 @@ def print_figure3(staggered: list[dict], model_id: str) -> None:
         bat_med = statistics.median(bat_vals)
         speedup = seq_med / bat_med if bat_med > 0 else 0
         sp_str = f"{speedup:.2f}x" if speedup > 0 else ""
-        print(f"{label:<30} {seq_med/1000:>11.1f}s {bat_med/1000:>11.1f}s {sp_str:>10}")
+        print(f"{label:<30} {seq_med / 1000:>11.1f}s {bat_med / 1000:>11.1f}s {sp_str:>10}")
 
     seq_sys = statistics.median([s["system_tps"] for s in seq])
     bat_sys = statistics.median([s["system_tps"] for s in bat])
@@ -1604,11 +1618,10 @@ async def run_model(
     caches are flushed via admin API + filesystem cleanup.  The server is
     stopped at the end so the model is offloaded before the next model starts.
     """
-
-    print(f"\n{'#'*70}")
+    print(f"\n{'#' * 70}")
     print(f"  MODEL: {model_id}")
     print(f"  Passes: {passes}, Contexts: {contexts}")
-    print(f"{'#'*70}")
+    print(f"{'#' * 70}")
 
     # Pre-flight memory pressure check
     check_memory_pressure(min_free_pct=15, max_wait=300)
@@ -1621,7 +1634,7 @@ async def run_model(
     env = build_server_env(model_id, model_key=model_key)
     doc = make_result_doc(model_id, env)
 
-    print(f"\n--- Starting server (scheduler=on, max_batch=2) ---")
+    print("\n--- Starting server (scheduler=on, max_batch=2) ---")
     server = ManagedServer(port, env)
     server.start()
 
@@ -1642,7 +1655,7 @@ async def run_model(
     # BATCH=1 PHASE — single requests on the shared scheduler-enabled server.
     # The scheduler handles one request at a time with no measurable overhead.
     # -----------------------------------------------------------------------
-    print(f"\n--- BATCH=1 PHASE (single requests, same server) ---")
+    print("\n--- BATCH=1 PHASE (single requests, same server) ---")
 
     for cache_state in CACHE_STATES:
         for mode in MODES:
@@ -1674,8 +1687,13 @@ async def run_model(
                     measurement_index += 1
 
                     record = await measure_funcs[cache_state](
-                        server.base_url, ctx, OUTPUT_TOKENS, mode,
-                        run_id, corpus, corpus_offset,
+                        server.base_url,
+                        ctx,
+                        OUTPUT_TOKENS,
+                        mode,
+                        run_id,
+                        corpus,
+                        corpus_offset,
                     )
                     record["model_id"] = model_id
                     record["thermal_state_before"] = thermal_name
@@ -1691,7 +1709,17 @@ async def run_model(
 
                         # Check if error looks like server crash
                         err = record["error"].lower()
-                        if any(w in err for w in ("connect", "refused", "reset", "broken", "peer closed", "incomplete")):
+                        if any(
+                            w in err
+                            for w in (
+                                "connect",
+                                "refused",
+                                "reset",
+                                "broken",
+                                "peer closed",
+                                "incomplete",
+                            )
+                        ):
                             if not await server.ensure_alive_async():
                                 print("  Server unrecoverable, skipping remaining batch=1")
                                 break
@@ -1700,7 +1728,9 @@ async def run_model(
                         tps = record.get("decode_tps", 0)
                         qok = record.get("quality_ok", False)
                         therm_tag = f" T:{thermal_after_name}" if thermal_after >= 1 else ""
-                        print(f"TTFT={ttft:.0f}ms TPS={tps:.1f} Q={'OK' if qok else 'WARN'}{therm_tag}")
+                        print(
+                            f"TTFT={ttft:.0f}ms TPS={tps:.1f} Q={'OK' if qok else 'WARN'}{therm_tag}"
+                        )
                         doc["quality_summary"]["passed"] += 1
 
                     doc["quality_summary"]["total"] += 1
@@ -1709,7 +1739,9 @@ async def run_model(
 
                     # Adaptive cooldown
                     cd_secs = await adaptive_cooldown(
-                        server.base_url, corpus, baseline_tps,
+                        server.base_url,
+                        corpus,
+                        baseline_tps,
                     )
                     record["cooldown_actual_s"] = round(cd_secs, 1)
                     gc.collect()
@@ -1723,7 +1755,7 @@ async def run_model(
     # crashes fixed by commits 04c814d, 50a4388, b2d5617, 320d25e.
     batch2_contexts = [c for c in contexts if c <= 16384]
 
-    print(f"\n--- BATCH=2 PHASE (concurrent requests, same server) ---")
+    print("\n--- BATCH=2 PHASE (concurrent requests, same server) ---")
 
     for cache_state in CACHE_STATES:
         for mode in MODES:
@@ -1737,7 +1769,9 @@ async def run_model(
                         continue
 
                     if not await server.ensure_alive_async():
-                        print(f"  SKIP (server dead): batch2/{cache_state}/{mode}/{ctx}/pass{pass_id}")
+                        print(
+                            f"  SKIP (server dead): batch2/{cache_state}/{mode}/{ctx}/pass{pass_id}"
+                        )
                         continue
 
                     thermal_before = get_thermal_state()
@@ -1752,8 +1786,14 @@ async def run_model(
                     measurement_index += 1
 
                     record = await measure_concurrent(
-                        server.base_url, ctx, OUTPUT_TOKENS, mode,
-                        cache_state, run_id, corpus, corpus_offset,
+                        server.base_url,
+                        ctx,
+                        OUTPUT_TOKENS,
+                        mode,
+                        cache_state,
+                        run_id,
+                        corpus,
+                        corpus_offset,
                     )
                     record["model_id"] = model_id
                     record["thermal_state_before"] = thermal_name
@@ -1765,7 +1805,17 @@ async def run_model(
                         print(f"ERROR: {record['error'][:80]}")
                         doc["quality_summary"]["failed"] += 1
                         err = record["error"].lower()
-                        if any(w in err for w in ("connect", "refused", "reset", "broken", "peer closed", "incomplete")):
+                        if any(
+                            w in err
+                            for w in (
+                                "connect",
+                                "refused",
+                                "reset",
+                                "broken",
+                                "peer closed",
+                                "incomplete",
+                            )
+                        ):
                             if not await server.ensure_alive_async():
                                 break
                     else:
@@ -1780,7 +1830,9 @@ async def run_model(
                     save_results(doc, result_path)
 
                     cd_secs = await adaptive_cooldown(
-                        server.base_url, corpus, baseline_tps,
+                        server.base_url,
+                        corpus,
+                        baseline_tps,
                     )
                     record["cooldown_actual_s"] = round(cd_secs, 1)
                     gc.collect()
@@ -1788,7 +1840,7 @@ async def run_model(
     # -----------------------------------------------------------------------
     # STAGGERED PHASE (same server — no restart)
     # -----------------------------------------------------------------------
-    print(f"\n--- STAGGERED PHASE (same server) ---")
+    print("\n--- STAGGERED PHASE (same server) ---")
 
     for stagger_mode in ["sequential", "batched"]:
         for pass_id in range(passes):
@@ -1819,17 +1871,25 @@ async def run_model(
                 if stagger_mode == "sequential":
                     sr = await asyncio.wait_for(
                         staggered_run_sequential(
-                            server.base_url, STAGGER_CONTEXT, OUTPUT_TOKENS, pass_id,
-                            corpus, stagger_offset,
+                            server.base_url,
+                            STAGGER_CONTEXT,
+                            OUTPUT_TOKENS,
+                            pass_id,
+                            corpus,
+                            stagger_offset,
                         ),
                         timeout=STAGGER_TIMEOUT,
                     )
                 else:
                     sr = await asyncio.wait_for(
                         staggered_run_batched(
-                            server.base_url, STAGGER_CONTEXT, OUTPUT_TOKENS,
-                            STAGGER_DELAY, pass_id,
-                            corpus, stagger_offset,
+                            server.base_url,
+                            STAGGER_CONTEXT,
+                            OUTPUT_TOKENS,
+                            STAGGER_DELAY,
+                            pass_id,
+                            corpus,
+                            stagger_offset,
                         ),
                         timeout=STAGGER_TIMEOUT,
                     )
@@ -1850,7 +1910,7 @@ async def run_model(
                     "system_tps": round(sr.system_tps, 1),
                     "thermal_state_before": thermal_name,
                     "error": sr.error or None,
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "timestamp": datetime.now(UTC).isoformat(),
                 }
 
                 thermal_after = get_thermal_state()
@@ -1872,10 +1932,13 @@ async def run_model(
                     "stagger_mode": stagger_mode,
                     "thermal_state_before": thermal_name,
                     "error": str(e),
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "timestamp": datetime.now(UTC).isoformat(),
                 }
                 err_str = str(e).lower()
-                if any(w in err_str for w in ("connect", "refused", "reset", "broken", "peer closed", "incomplete")):
+                if any(
+                    w in err_str
+                    for w in ("connect", "refused", "reset", "broken", "peer closed", "incomplete")
+                ):
                     if not await server.ensure_alive_async():
                         break
 
@@ -1883,7 +1946,9 @@ async def run_model(
             save_results(doc, result_path)
 
             cd_secs = await adaptive_cooldown(
-                server.base_url, corpus, baseline_tps,
+                server.base_url,
+                corpus,
+                baseline_tps,
             )
             stag_record["cooldown_actual_s"] = round(cd_secs, 1)
             gc.collect()
@@ -1897,7 +1962,7 @@ async def run_model(
     # -----------------------------------------------------------------------
     # Print paper tables
     # -----------------------------------------------------------------------
-    doc["metadata"]["timestamp_end"] = datetime.now(timezone.utc).isoformat()
+    doc["metadata"]["timestamp_end"] = datetime.now(UTC).isoformat()
     save_results(doc, result_path)
 
     print_table1(doc["measurements"], model_id)
@@ -1918,45 +1983,61 @@ async def run_model(
 async def main() -> int:
     global MAX_COOLDOWN_SECONDS
 
-    parser = argparse.ArgumentParser(
-        description="Full benchmark suite for agent-memory"
-    )
+    parser = argparse.ArgumentParser(description="Full benchmark suite for agent-memory")
     parser.add_argument(
-        "--quick", action="store_true",
+        "--quick",
+        action="store_true",
         help="Quick mode: 1 pass, contexts 1K/4K/16K",
     )
     parser.add_argument(
-        "--models", type=str, default="all",
+        "--models",
+        type=str,
+        default="all",
         choices=["all", "gemma", "deepseek"],
         help="Which model(s) to benchmark",
     )
     parser.add_argument(
-        "--resume", type=str, default=None,
+        "--resume",
+        type=str,
+        default=None,
         help="Resume from checkpoint JSON file(s), comma-separated",
     )
     parser.add_argument(
-        "--port", type=int, default=DEFAULT_PORT,
+        "--port",
+        type=int,
+        default=DEFAULT_PORT,
         help=f"Server port (default: {DEFAULT_PORT})",
     )
     parser.add_argument(
-        "--passes", type=int, default=None,
+        "--passes",
+        type=int,
+        default=None,
         help=f"Override pass count (default: {DEFAULT_PASSES})",
     )
     parser.add_argument(
-        "--cooldown", type=int, default=None,
+        "--cooldown",
+        type=int,
+        default=None,
         help=f"Override max cooldown seconds (default: {MAX_COOLDOWN_SECONDS})",
     )
     parser.add_argument(
-        "--contexts", type=int, nargs="+", default=None,
+        "--contexts",
+        type=int,
+        nargs="+",
+        default=None,
         help="Override context sizes (e.g., --contexts 4096)",
     )
     parser.add_argument(
-        "--merge", type=str, default=None,
+        "--merge",
+        type=str,
+        default=None,
         help="Merge result files (comma-separated) into one. "
-             "Use with --output to set destination path.",
+        "Use with --output to set destination path.",
     )
     parser.add_argument(
-        "--output", type=str, default=None,
+        "--output",
+        type=str,
+        default=None,
         help="Output path for --merge",
     )
     args = parser.parse_args()
@@ -1997,7 +2078,7 @@ async def main() -> int:
     # Load corpus
     print("Loading prefill corpus...")
     corpus = load_corpus()
-    print(f"  Corpus size: {len(corpus):,} chars ({len(corpus)//4:,} est. tokens)")
+    print(f"  Corpus size: {len(corpus):,} chars ({len(corpus) // 4:,} est. tokens)")
 
     # Phase 0: preparation
     print("\n--- PHASE 0: PREPARATION ---")
@@ -2014,8 +2095,14 @@ async def main() -> int:
         result_path = RESULTS_DIR / f"full_{model_slug}_{timestamp}.json"
 
         await run_model(
-            model_key, model_id, args.port, passes, contexts,
-            corpus, resume_keys, result_path,
+            model_key,
+            model_id,
+            args.port,
+            passes,
+            contexts,
+            corpus,
+            resume_keys,
+            result_path,
         )
 
         print(f"\nResults saved: {result_path}")
@@ -2024,7 +2111,7 @@ async def main() -> int:
         # shutdown path (batch_engine.shutdown + model_registry.unload_model).
         # Brief cooldown + memory check before loading next model.
         if len(model_list) > 1 and model_key != model_list[-1][0]:
-            print(f"\nModel offloaded. Cooldown 60s before next model...")
+            print("\nModel offloaded. Cooldown 60s before next model...")
             clean_cache_files()
             gc.collect()
             await asyncio.sleep(60)
@@ -2032,9 +2119,9 @@ async def main() -> int:
 
     elapsed = time.time() - total_start
     hours = elapsed / 3600
-    print(f"\n{'='*70}")
+    print(f"\n{'=' * 70}")
     print(f"BENCHMARK COMPLETE — {hours:.1f} hours total")
-    print(f"{'='*70}")
+    print(f"{'=' * 70}")
 
     return 0
 

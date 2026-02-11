@@ -22,7 +22,7 @@ DEFAULT_DIRS = ["src/", "tests/", "benchmarks/", "demo/", "scripts/"]
 def _has_header(path: Path) -> bool:
     """Return True if the file already contains the SPDX marker in the first 5 lines."""
     try:
-        with open(path, "r", encoding="utf-8") as f:
+        with open(path, encoding="utf-8") as f:
             for i, line in enumerate(f):
                 if i >= 5:
                     break
@@ -35,7 +35,7 @@ def _has_header(path: Path) -> bool:
 
 def _add_header(path: Path) -> None:
     """Insert the SPDX header into *path*, respecting a shebang if present."""
-    with open(path, "r", encoding="utf-8") as f:
+    with open(path, encoding="utf-8") as f:
         content = f.read()
 
     lines = content.splitlines(keepends=True)
@@ -63,9 +63,7 @@ def _collect_py_files(directories: list[str]) -> list[Path]:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(
-        description="Add SPDX copyright headers to Python files."
-    )
+    parser = argparse.ArgumentParser(description="Add SPDX copyright headers to Python files.")
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument(
         "--check",

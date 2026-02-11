@@ -1,3 +1,4 @@
+# mypy: disable-error-code="attr-defined,return-value"
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 Yakov Shkolnikov and contributors
 r"""OpenAI Chat Completions API adapter (POST /v1/chat/completions).
@@ -235,7 +236,7 @@ def openai_messages_to_chat_dicts(  # noqa: C901, PLR0912
     return result
 
 
-async def _stream_via_scheduler(  # noqa: C901, PLR0912
+async def _stream_via_scheduler(
     request_body: ChatCompletionsRequest,
     batch_engine: Any,
     cache_store: Any,
@@ -582,9 +583,7 @@ async def stream_chat_completion(  # noqa: C901, PLR0912, PLR0915
         # Yield [DONE] marker
         yield {"data": "[DONE]"}
 
-        logger.info(
-            f"Streaming complete: {comp_tokens} tokens, finish_reason={finish_reason}"
-        )
+        logger.info(f"Streaming complete: {comp_tokens} tokens, finish_reason={finish_reason}")
 
     except asyncio.CancelledError:
         # Client disconnected mid-stream - clean up gracefully

@@ -223,7 +223,11 @@ class TestHasTemplateRefsProperty:
     @given(phase=_WORD, agent=_WORD, prefix=st.text(max_size=30), suffix=st.text(max_size=30))
     @settings(max_examples=100)
     def test_true_when_pattern_present(
-        self, phase: str, agent: str, prefix: str, suffix: str,
+        self,
+        phase: str,
+        agent: str,
+        prefix: str,
+        suffix: str,
     ) -> None:
         template = f"{prefix}${{{phase}.messages[{agent}]}}{suffix}"
         assert has_template_refs(template) is True
@@ -262,7 +266,10 @@ class TestInteractionEdgeRoundTrip:
     )
     @settings(max_examples=100)
     def test_edge_survives_pydantic_round_trip(
-        self, from_agent: str, to_agent: str, channel: str,
+        self,
+        from_agent: str,
+        to_agent: str,
+        channel: str,
     ) -> None:
         model = InteractionEdgeModel(
             from_agent=from_agent,

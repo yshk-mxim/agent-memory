@@ -89,7 +89,6 @@ def _setup_mlx_mocks(monkeypatch):
 
 
 class TestApplyFusedAttentionPatch:
-
     def test_disabled_by_env_var(self, monkeypatch) -> None:
         """SEMANTIC_DISABLE_FUSED_ATTN=1 → returns False, sets _patched."""
         monkeypatch.setenv("SEMANTIC_DISABLE_FUSED_ATTN", "1")
@@ -111,7 +110,9 @@ class TestApplyFusedAttentionPatch:
         mod = _import_fused()
 
         # Patch the import to fail
-        original_import = __builtins__.__import__ if hasattr(__builtins__, '__import__') else __import__
+        original_import = (
+            __builtins__.__import__ if hasattr(__builtins__, "__import__") else __import__
+        )
 
         def failing_import(name, *args, **kwargs):
             if name in ("mlx.core", "mlx"):
@@ -211,8 +212,13 @@ class TestApplyFusedAttentionPatch:
 
         # Call with non-standard group_size — should delegate to original
         patched_fn(
-            queries, q_keys, q_values, scale=0.1, mask=None,
-            group_size=128, bits=4,
+            queries,
+            q_keys,
+            q_values,
+            scale=0.1,
+            mask=None,
+            group_size=128,
+            bits=4,
         )
         mocks["original_sdpa"].assert_called_once()
 
@@ -221,7 +227,6 @@ class TestApplyFusedAttentionPatch:
 
 
 class TestMetalDecodeControl:
-
     def test_metal_decode_disabled_by_default(self, monkeypatch) -> None:
         """Without SEMANTIC_ENABLE_METAL_DECODE, _metal_decode_disabled is True."""
         monkeypatch.delenv("SEMANTIC_ENABLE_METAL_DECODE", raising=False)

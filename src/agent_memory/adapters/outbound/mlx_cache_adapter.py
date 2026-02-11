@@ -1,3 +1,4 @@
+# mypy: disable-error-code="assignment,unused-ignore"
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 Yakov Shkolnikov and contributors
 """MLX cache operations adapter."""
@@ -188,8 +189,10 @@ class MLXCacheAdapter:
         Args:
             model: MLX model instance
             stop_tokens: Set of token IDs to stop generation
-            kv_bits: KV cache quantization bits (4 or 8, None = FP16) - stored but not used by BatchGenerator
-            kv_group_size: Quantization group size - stored but not used by BatchGenerator
+            kv_bits: KV cache quantization bits (4 or 8, None = FP16) -
+                stored but not used by BatchGenerator
+            kv_group_size: Quantization group size -
+                stored but not used by BatchGenerator
 
         Returns:
             BatchGenerator instance

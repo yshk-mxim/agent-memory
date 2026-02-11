@@ -1,3 +1,4 @@
+# mypy: disable-error-code="no-untyped-def,call-arg,no-untyped-call"
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 Yakov Shkolnikov and contributors
 """Fused Q4 attention monkeypatch for MLX.
@@ -66,6 +67,7 @@ def apply_fused_attention_patch() -> bool:
             return _compiled_cache[n_repeats]
 
         if n_repeats > 1:
+
             @partial(mx.compile, shapeless=False)
             def _inner(queries, k0, k1, k2, v0, v1, v2, scale_arr, mask):
                 # B is always 1 here — batch was split by caller
@@ -82,7 +84,13 @@ def apply_fused_attention_patch() -> bool:
                 v1_ = mx.expand_dims(v1, axis=-3)
                 v2_ = mx.expand_dims(v2, axis=-3)
                 scores = mx.quantized_matmul(
-                    queries, k0_, k1_, k2_, transpose=True, group_size=64, bits=4,
+                    queries,
+                    k0_,
+                    k1_,
+                    k2_,
+                    transpose=True,
+                    group_size=64,
+                    bits=4,
                 )
                 if mask is not None:
                     if mask.dtype == mx.bool_:
@@ -91,15 +99,28 @@ def apply_fused_attention_patch() -> bool:
                         scores = scores + mask
                 scores = mx.softmax(scores, axis=-1, precise=True)
                 out = mx.quantized_matmul(
-                    scores, v0_, v1_, v2_, transpose=False, group_size=64, bits=4,
+                    scores,
+                    v0_,
+                    v1_,
+                    v2_,
+                    transpose=False,
+                    group_size=64,
+                    bits=4,
                 )
                 return mx.reshape(out, (1, n_q_heads, L, -1))
         else:
+
             @partial(mx.compile, shapeless=True)
             def _inner(queries, k0, k1, k2, v0, v1, v2, scale_arr, mask):
                 queries = queries * scale_arr
                 scores = mx.quantized_matmul(
-                    queries, k0, k1, k2, transpose=True, group_size=64, bits=4,
+                    queries,
+                    k0,
+                    k1,
+                    k2,
+                    transpose=True,
+                    group_size=64,
+                    bits=4,
                 )
                 if mask is not None:
                     if mask.dtype == mx.bool_:
@@ -108,7 +129,13 @@ def apply_fused_attention_patch() -> bool:
                         scores = scores + mask
                 scores = mx.softmax(scores, axis=-1, precise=True)
                 return mx.quantized_matmul(
-                    scores, v0, v1, v2, transpose=False, group_size=64, bits=4,
+                    scores,
+                    v0,
+                    v1,
+                    v2,
+                    transpose=False,
+                    group_size=64,
+                    bits=4,
                 )
 
         _compiled_cache[n_repeats] = _inner
@@ -136,9 +163,13 @@ def apply_fused_attention_patch() -> bool:
         # For non-Q4 or non-group64, fall back to original
         if group_size != 64 or bits != 4:
             return _original_q4_sdpa(
-                queries, q_keys, q_values,
-                scale=scale, mask=mask,
-                group_size=group_size, bits=bits,
+                queries,
+                q_keys,
+                q_values,
+                scale=scale,
+                mask=mask,
+                group_size=group_size,
+                bits=bits,
             )
 
         B = queries.shape[0]
@@ -156,21 +187,33 @@ def apply_fused_attention_patch() -> bool:
         scale_arr = mx.array(scale, dtype=queries.dtype)
         parts = []
         for i in range(B):
-            q_i = queries[i:i+1]
-            k_i = tuple(k[i:i+1] for k in q_keys)
-            v_i = tuple(v[i:i+1] for v in q_values)
-            m_i = mask[i:i+1] if mask is not None else None
-            parts.append(compiled_fn(
-                q_i, k_i[0], k_i[1], k_i[2],
-                v_i[0], v_i[1], v_i[2], scale_arr, m_i,
-            ))
+            q_i = queries[i : i + 1]
+            k_i = tuple(k[i : i + 1] for k in q_keys)
+            v_i = tuple(v[i : i + 1] for v in q_values)
+            m_i = mask[i : i + 1] if mask is not None else None
+            parts.append(
+                compiled_fn(
+                    q_i,
+                    k_i[0],
+                    k_i[1],
+                    k_i[2],
+                    v_i[0],
+                    v_i[1],
+                    v_i[2],
+                    scale_arr,
+                    m_i,
+                )
+            )
         return mx.concatenate(parts, axis=0)
 
     # --- Metal kernel for L=1 decode ---
     _decode_kernel_cache: dict[tuple, Any] = {}
 
     def _get_or_create_decode_kernel(
-        n_q_heads: int, n_kv_heads: int, k_dim: int, v_dim: int,
+        n_q_heads: int,
+        n_kv_heads: int,
+        k_dim: int,
+        v_dim: int,
     ):
         """Create (or retrieve cached) Metal kernel for this model geometry."""
         key = (n_q_heads, n_kv_heads, k_dim, v_dim)
@@ -187,9 +230,10 @@ def apply_fused_attention_patch() -> bool:
         # Dimension-parallel: each thread handles K_DIM/32 and V_DIM/32 dims
         if k_dim % threads != 0 or v_dim % threads != 0:
             logger.warning(
-                "Fused decode kernel requires k_dim=%d and v_dim=%d "
-                "divisible by %d — skipping",
-                k_dim, v_dim, threads,
+                "Fused decode kernel requires k_dim=%d and v_dim=%d divisible by %d — skipping",
+                k_dim,
+                v_dim,
+                threads,
             )
             _decode_kernel_cache[key] = None
             return None
@@ -203,7 +247,8 @@ def apply_fused_attention_patch() -> bool:
             logger.warning(
                 "Fused decode kernel needs %d bytes threadgroup memory "
                 "(limit 32768) for k_dim=%d — skipping",
-                tg_bytes, k_dim,
+                tg_bytes,
+                k_dim,
             )
             _decode_kernel_cache[key] = None
             return None
@@ -318,8 +363,17 @@ inline float dequant4(
         try:
             kernel = mx.fast.metal_kernel(
                 name=f"fused_q4_decode_{k_dim}_{v_dim}_{n_kv_heads}",
-                input_names=["queries", "k_w", "k_s", "k_b",
-                             "v_w", "v_s", "v_b", "params", "scale_in"],
+                input_names=[
+                    "queries",
+                    "k_w",
+                    "k_s",
+                    "k_b",
+                    "v_w",
+                    "v_s",
+                    "v_b",
+                    "params",
+                    "scale_in",
+                ],
                 output_names=["output"],
                 source=source,
                 header=header,
@@ -328,7 +382,10 @@ inline float dequant4(
             _decode_kernel_cache[key] = kernel
             logger.info(
                 "Created fused Q4 decode kernel: k_dim=%d, v_dim=%d, heads=%d/%d",
-                k_dim, v_dim, n_q_heads, n_kv_heads,
+                k_dim,
+                v_dim,
+                n_q_heads,
+                n_kv_heads,
             )
             return kernel
         except Exception as e:
@@ -406,12 +463,24 @@ inline float dequant4(
         """Fused Q4 SDPA: Metal kernel for decode, compiled for prefill."""
         if not _metal_decode_disabled:
             result = _try_metal_decode(
-                queries, q_keys, q_values, scale, mask, group_size, bits,
+                queries,
+                q_keys,
+                q_values,
+                scale,
+                mask,
+                group_size,
+                bits,
             )
             if result is not None:
                 return result
         return _fused_q4_sdpa(
-            queries, q_keys, q_values, scale, mask, group_size, bits,
+            queries,
+            q_keys,
+            q_values,
+            scale,
+            mask,
+            group_size,
+            bits,
         )
 
     # Apply the SDPA monkeypatch
@@ -431,7 +500,9 @@ inline float dequant4(
                 return x + y
             bound = mx.finfo(mx.float16).max
             return mx.clip(
-                x.astype(mx.float32) + y.astype(mx.float32), -bound, bound,
+                x.astype(mx.float32) + y.astype(mx.float32),
+                -bound,
+                bound,
             ).astype(mx.float16)
 
         gemma3_text_module.clip_residual = _uncompiled_clip_residual

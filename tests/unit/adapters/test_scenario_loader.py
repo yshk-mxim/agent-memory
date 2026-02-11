@@ -49,6 +49,7 @@ def _write_yaml(path: Path, data: object) -> Path:
 # load_scenario: real YAML files
 # ---------------------------------------------------------------------------
 
+
 class TestLoadScenarioRealFiles:
     def test_gossip_yaml(self):
         spec = load_scenario(DEMO_DIR / "gossip.yaml")
@@ -112,6 +113,7 @@ class TestLoadScenarioRealFiles:
 # load_scenario: temp YAML (minimal valid)
 # ---------------------------------------------------------------------------
 
+
 class TestLoadScenarioTempFile:
     def test_minimal_valid_scenario(self, tmp_path: Path):
         yaml_path = _write_yaml(tmp_path / "minimal.yaml", MINIMAL_YAML)
@@ -159,6 +161,7 @@ class TestLoadScenarioTempFile:
 # ---------------------------------------------------------------------------
 # load_scenario: invalid inputs
 # ---------------------------------------------------------------------------
+
 
 class TestLoadScenarioInvalid:
     def test_nonexistent_file_raises_file_not_found(self):
@@ -228,6 +231,7 @@ class TestLoadScenarioInvalid:
 # discover_scenarios: real directory
 # ---------------------------------------------------------------------------
 
+
 class TestDiscoverScenariosRealDir:
     def test_finds_demo_scenarios(self):
         scenarios = discover_scenarios(DEMO_DIR)
@@ -249,6 +253,7 @@ class TestDiscoverScenariosRealDir:
 # ---------------------------------------------------------------------------
 # discover_scenarios: temp directories
 # ---------------------------------------------------------------------------
+
 
 class TestDiscoverScenariosTempDir:
     def test_empty_directory(self, tmp_path: Path):

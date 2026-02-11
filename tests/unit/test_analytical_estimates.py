@@ -161,9 +161,7 @@ class TestQ4FP16Ratio:
 
         # For bits=4, group_size=64: ratio ≈ (0.5 + 4/64) / 2 = 0.28125
         # Allow tolerance for models where elements_per_kv isn't divisible by group_size
-        assert 0.25 <= ratio <= 0.30, (
-            f"Q4/FP16 ratio {ratio:.4f} outside expected 25-30% range"
-        )
+        assert 0.25 <= ratio <= 0.30, f"Q4/FP16 ratio {ratio:.4f} outside expected 25-30% range"
 
     def test_ratio_formula_derivation(self) -> None:
         """Verify the analytical ratio formula: (bits/8 + 4/group_size) / 2."""
@@ -178,8 +176,13 @@ class TestQ4FP16Ratio:
         # Cross-validate with Gemma 3 (large enough that rounding is negligible)
         q4 = GEMMA3_SPEC.bytes_per_block_per_layer()
         fp16_spec = ModelCacheSpec(
-            n_layers=48, n_kv_heads=8, head_dim=256, block_tokens=256,
-            layer_types=["global"] * 48, kv_bits=None, kv_group_size=64,
+            n_layers=48,
+            n_kv_heads=8,
+            head_dim=256,
+            block_tokens=256,
+            layer_types=["global"] * 48,
+            kv_bits=None,
+            kv_group_size=64,
         )
         fp16 = fp16_spec.bytes_per_block_per_layer()
         actual_ratio = q4 / fp16

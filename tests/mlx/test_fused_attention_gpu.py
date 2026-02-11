@@ -712,8 +712,13 @@ class TestPatchedDispatch:
         )
 
         result = sdpa(
-            queries, q_keys, q_values, scale=0.088, mask=None,
-            group_size=128, bits=4,
+            queries,
+            q_keys,
+            q_values,
+            scale=0.088,
+            mask=None,
+            group_size=128,
+            bits=4,
         )
         mx.eval(result)
 

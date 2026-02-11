@@ -159,9 +159,7 @@ class TestErrorResponses:
         assert resp.status_code == 404
 
     def test_delete_not_found_404(self, client, mock_service):
-        mock_service.delete_session = AsyncMock(
-            side_effect=SessionNotFoundError("gone")
-        )
+        mock_service.delete_session = AsyncMock(side_effect=SessionNotFoundError("gone"))
         resp = client.delete("/v1/coordination/sessions/missing")
         assert resp.status_code == 404
 

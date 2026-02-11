@@ -175,9 +175,7 @@ class TestAuthBeforeHandler:
 class TestMiddlewareChainOrder:
     """Verify middleware effects are layered correctly."""
 
-    def test_rate_limit_response_has_request_id_and_timing(
-        self, test_app, _rate_limit_low
-    ) -> None:
+    def test_rate_limit_response_has_request_id_and_timing(self, test_app, _rate_limit_low) -> None:
         """Rate-limited responses should still have RequestID and timing headers."""
         client = TestClient(test_app, raise_server_exceptions=False)
         # Exhaust rate limit

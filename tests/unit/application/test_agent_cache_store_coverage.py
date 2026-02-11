@@ -5,9 +5,7 @@ flush_dirty, _scan_cache_directory, delete, invalidate_hot, evict_all_to_disk,
 _load_from_disk error paths, CacheMetrics.
 """
 
-import json
-from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -18,7 +16,6 @@ from agent_memory.application.agent_cache_store import (
     ModelTag,
 )
 from agent_memory.domain.entities import AgentBlocks, KVBlock
-from agent_memory.domain.errors import InvalidRequestError
 
 pytestmark = pytest.mark.unit
 
@@ -26,6 +23,7 @@ pytestmark = pytest.mark.unit
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_tag(**overrides):
     defaults = dict(

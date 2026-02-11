@@ -2,7 +2,6 @@
 # Copyright (c) 2026 Yakov Shkolnikov and contributors
 """Unit tests for PrefillState."""
 
-
 from agent_memory.application.prefill_state import PrefillState
 
 

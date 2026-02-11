@@ -15,9 +15,7 @@ from agent_memory.adapters.inbound.coordination_adapter import (
     stream_round_events,
     stream_turn_events,
 )
-from agent_memory.adapters.inbound.coordination_models import VoteRequest
 from agent_memory.domain.coordination import (
-    AgentLifecycle,
     AgentRole,
     Channel,
     ChannelMessage,
@@ -188,7 +186,7 @@ class TestStreamRoundEvents:
     async def test_coordination_error(self, mock_service):
         async def failing_stream(session_id):
             raise CoordinationError("round failed")
-            yield  # Make it a generator  # noqa: E501, RUF028
+            yield  # Make it a generator
 
         mock_service.execute_round_stream = failing_stream
 
@@ -201,7 +199,7 @@ class TestStreamRoundEvents:
     async def test_empty_stream(self, mock_service):
         async def empty_stream(session_id):
             return
-            yield  # noqa: E501, RUF028
+            yield
 
         mock_service.execute_round_stream = empty_stream
 
@@ -279,9 +277,7 @@ class TestDeleteSession:
         assert resp.status_code == 204
 
     def test_not_found(self, client, mock_service):
-        mock_service.delete_session = AsyncMock(
-            side_effect=SessionNotFoundError("not found")
-        )
+        mock_service.delete_session = AsyncMock(side_effect=SessionNotFoundError("not found"))
         resp = client.delete("/v1/coordination/sessions/missing")
         assert resp.status_code == 404
 
@@ -308,9 +304,7 @@ class TestExecuteTurn:
         assert data["message"]["content"] == "Hello"
 
     def test_error(self, client, mock_service):
-        mock_service.execute_turn = AsyncMock(
-            side_effect=CoordinationError("turn error")
-        )
+        mock_service.execute_turn = AsyncMock(side_effect=CoordinationError("turn error"))
         resp = client.post("/v1/coordination/sessions/sess_1/turn")
         assert resp.status_code == 400
 
@@ -332,9 +326,7 @@ class TestExecuteRound:
         assert len(data["messages"]) == 1
 
     def test_error(self, client, mock_service):
-        mock_service.execute_round = AsyncMock(
-            side_effect=CoordinationError("round error")
-        )
+        mock_service.execute_round = AsyncMock(side_effect=CoordinationError("round error"))
         resp = client.post("/v1/coordination/sessions/sess_1/round")
         assert resp.status_code == 400
 
@@ -388,9 +380,7 @@ class TestSubmitVote:
 class TestGetMessages:
     def test_normal_public_messages(self, client, mock_service):
         session = mock_service.get_session.return_value
-        public_channel = next(
-            c for c in session.channels.values() if c.channel_type == "public"
-        )
+        public_channel = next(c for c in session.channels.values() if c.channel_type == "public")
         public_channel.add_message(sender_id="a", content="Hello", turn_number=0)
         public_channel.add_message(sender_id="b", content="Hi", turn_number=1)
 
@@ -401,9 +391,7 @@ class TestGetMessages:
 
     def test_private_messages_filtered(self, client, mock_service):
         session = mock_service.get_session.return_value
-        public_channel = next(
-            c for c in session.channels.values() if c.channel_type == "public"
-        )
+        public_channel = next(c for c in session.channels.values() if c.channel_type == "public")
         public_channel.add_message(sender_id="a", content="Public", turn_number=0)
         public_channel.add_message(
             sender_id="system",
@@ -429,12 +417,8 @@ class TestGetMessages:
 
     def test_agent_not_in_session(self, client, mock_service):
         session = mock_service.get_session.return_value
-        public_channel = next(
-            c for c in session.channels.values() if c.channel_type == "public"
-        )
-        public_channel.add_message(
-            sender_id="unknown_agent", content="From unknown", turn_number=0
-        )
+        public_channel = next(c for c in session.channels.values() if c.channel_type == "public")
+        public_channel.add_message(sender_id="unknown_agent", content="From unknown", turn_number=0)
 
         resp = client.get("/v1/coordination/sessions/sess_1/messages")
         assert resp.status_code == 200

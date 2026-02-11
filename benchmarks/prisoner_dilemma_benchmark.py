@@ -34,8 +34,8 @@ import statistics
 import subprocess
 import sys
 import time
-from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -73,7 +73,7 @@ AGENTS: dict[str, dict[str, str]] = {
         "role": "participant",
         "system_prompt": (
             "You are a scared dockworker, 34, first time inside. Your wife Maria and two kids need you home. "
-            "You speak rough, working-class. Say \"damn\", \"hell\", \"man\" naturally. "
+            'You speak rough, working-class. Say "damn", "hell", "man" naturally. '
             "You are torn between loyalty and survival. Ten years terrifies you. "
             "You want to believe people keep their word but you know the world does not work that way. "
             "Never speak in a formal or polite way. Sound like a real person under pressure. Under 3 sentences."
@@ -85,7 +85,7 @@ AGENTS: dict[str, dict[str, str]] = {
         "role": "participant",
         "system_prompt": (
             "You are a two-time felon, 41, who has done hard time before. You know every con in the book. "
-            "You speak street -- blunt, sarcastic, suspicious. Say \"hell\", \"damn\", \"man\" naturally. "
+            'You speak street -- blunt, sarcastic, suspicious. Say "hell", "damn", "man" naturally. '
             "You trust nobody. Last time you trusted a partner he flipped on you and you did 6 years. "
             "You will always choose what gets YOU the least time, no matter what you promised anyone. "
             "Never speak in a formal or polite way. Sound like a real convict. Under 3 sentences."
@@ -243,10 +243,14 @@ class BenchmarkRun:
 def _git_sha() -> str:
     """Get short git SHA for reproducibility."""
     try:
-        return subprocess.check_output(
-            ["git", "rev-parse", "--short", "HEAD"],
-            stderr=subprocess.DEVNULL,
-        ).decode().strip()
+        return (
+            subprocess.check_output(
+                ["git", "rev-parse", "--short", "HEAD"],
+                stderr=subprocess.DEVNULL,
+            )
+            .decode()
+            .strip()
+        )
     except Exception:
         return "unknown"
 
@@ -302,10 +306,12 @@ def _clear_all_caches(base_url: str, admin_key: str) -> bool:
             if resp.status_code == 200:
                 data = resp.json()
                 total = data.get("hot_cleared", 0) + data.get("disk_cleared", 0)
-                print(f"    Cleared {total} cache entries "
-                      f"(hot={data.get('hot_cleared', 0)}, "
-                      f"disk={data.get('disk_cleared', 0)}, "
-                      f"pool={data.get('pool_cleared', 0)})")
+                print(
+                    f"    Cleared {total} cache entries "
+                    f"(hot={data.get('hot_cleared', 0)}, "
+                    f"disk={data.get('disk_cleared', 0)}, "
+                    f"pool={data.get('pool_cleared', 0)})"
+                )
                 return True
             print(f"    Cache clear failed: HTTP {resp.status_code}")
             return False
@@ -346,9 +352,7 @@ def _get_scenario_agents(base_url: str) -> list[dict[str, Any]]:
     return [a for a in all_agents if a.get("agent_id", "").startswith(prefix)]
 
 
-def _get_session_messages(
-    base_url: str, session_id: str
-) -> list[dict[str, Any]]:
+def _get_session_messages(base_url: str, session_id: str) -> list[dict[str, Any]]:
     """Get all messages from a coordination session."""
     try:
         with httpx.Client(timeout=10.0) as client:
@@ -373,13 +377,15 @@ def _build_agent_configs(phase: dict[str, Any]) -> list[dict[str, Any]]:
     configs = []
     for agent_key in phase["agents"]:
         agent = AGENTS[agent_key]
-        configs.append({
-            "agent_id": _stable_agent_id(agent_key),
-            "display_name": agent["display_name"],
-            "role": agent["role"],
-            "system_prompt": agent["system_prompt"],
-            "lifecycle": agent["lifecycle"],
-        })
+        configs.append(
+            {
+                "agent_id": _stable_agent_id(agent_key),
+                "display_name": agent["display_name"],
+                "role": agent["role"],
+                "system_prompt": agent["system_prompt"],
+                "lifecycle": agent["lifecycle"],
+            }
+        )
     return configs
 
 
@@ -425,14 +431,17 @@ def _collect_prior_messages(
                             sender_key = k
                             break
                     sender_id = (
-                        _stable_agent_id(sender_key) if sender_key
+                        _stable_agent_id(sender_key)
+                        if sender_key
                         else msg.get("sender_id", "system")
                     )
-                agent_msgs.append({
-                    "sender_id": sender_id,
-                    "sender_name": sender_name,
-                    "content": content,
-                })
+                agent_msgs.append(
+                    {
+                        "sender_id": sender_id,
+                        "sender_name": sender_name,
+                        "content": content,
+                    }
+                )
 
         if agent_msgs:
             prior[agent_id] = agent_msgs
@@ -484,9 +493,7 @@ def _create_phase_session(
 # ---------------------------------------------------------------------------
 
 
-def _stream_turn(
-    base_url: str, session_id: str
-) -> TurnMeasurement | None:
+def _stream_turn(base_url: str, session_id: str) -> TurnMeasurement | None:
     """Execute one streamed turn, measuring TTFT and total time.
 
     Streams POST /v1/coordination/sessions/{id}/turn/stream and parses SSE
@@ -503,36 +510,38 @@ def _stream_turn(
     t_start = time.perf_counter()
 
     try:
-        with httpx.Client(timeout=180.0) as client:
-            with client.stream(
+        with (
+            httpx.Client(timeout=180.0) as client,
+            client.stream(
                 "POST",
                 f"{base_url}/v1/coordination/sessions/{session_id}/turn/stream",
-            ) as resp:
-                if resp.status_code != 200:
-                    print(f"    Stream failed: HTTP {resp.status_code}")
-                    return None
+            ) as resp,
+        ):
+            if resp.status_code != 200:
+                print(f"    Stream failed: HTTP {resp.status_code}")
+                return None
 
-                for line in resp.iter_lines():
-                    if line.startswith("event: "):
-                        event_type = line[7:]
-                    elif line.startswith("data: "):
-                        try:
-                            data = json.loads(line[6:])
-                        except json.JSONDecodeError:
-                            continue
+            for line in resp.iter_lines():
+                if line.startswith("event: "):
+                    event_type = line[7:]
+                elif line.startswith("data: "):
+                    try:
+                        data = json.loads(line[6:])
+                    except json.JSONDecodeError:
+                        continue
 
-                        if event_type == "turn_start":
-                            agent_id = data.get("agent_id", "")
-                            agent_name = data.get("agent_name", "")
-                            turn_index = data.get("turn", -1)
-                        elif event_type == "token":
-                            if first_token_time is None:
-                                first_token_time = time.perf_counter()
-                        elif event_type == "turn_complete":
-                            content = data.get("content", "")
-                        elif event_type == "error":
-                            print(f"    Stream error: {data.get('error', '?')}")
-                            return None
+                    if event_type == "turn_start":
+                        agent_id = data.get("agent_id", "")
+                        agent_name = data.get("agent_name", "")
+                        turn_index = data.get("turn", -1)
+                    elif event_type == "token":
+                        if first_token_time is None:
+                            first_token_time = time.perf_counter()
+                    elif event_type == "turn_complete":
+                        content = data.get("content", "")
+                    elif event_type == "error":
+                        print(f"    Stream error: {data.get('error', '?')}")
+                        return None
 
     except httpx.HTTPError as e:
         print(f"    Stream connection error: {e}")
@@ -567,8 +576,10 @@ def _run_phase(
     total_turns = phase["rounds"] * len(phase["agents"])
 
     print(f"\n  Phase {phase_index + 1}/{len(PHASES)}: {phase['label']}")
-    print(f"    Agents: {', '.join(phase['agents'])} | "
-          f"Rounds: {phase['rounds']} | Turns: {total_turns}")
+    print(
+        f"    Agents: {', '.join(phase['agents'])} | "
+        f"Rounds: {phase['rounds']} | Turns: {total_turns}"
+    )
 
     # Check if any agents have prior messages
     prior = _collect_prior_messages(phase_index, phase_messages)
@@ -604,11 +615,13 @@ def _run_phase(
 
         turns.append(measurement)
         preview = measurement.content_preview[:50].replace("\n", " ")
-        print(f"    Turn {turn_i + 1}/{total_turns}: "
-              f"{measurement.agent_name:>8} | "
-              f"TTFT={measurement.ttft_ms:>7.0f}ms | "
-              f"Total={measurement.total_ms:>7.0f}ms | "
-              f"\"{preview}...\"")
+        print(
+            f"    Turn {turn_i + 1}/{total_turns}: "
+            f"{measurement.agent_name:>8} | "
+            f"TTFT={measurement.ttft_ms:>7.0f}ms | "
+            f"Total={measurement.total_ms:>7.0f}ms | "
+            f'"{preview}..."'
+        )
 
     phase_wall_ms = (time.perf_counter() - t_phase_start) * 1000 + creation_ms
 
@@ -634,9 +647,11 @@ def _run_phase(
         agent_cache_snapshot=agent_snapshot,
     )
 
-    print(f"    Phase complete: wall={phase_wall_ms:.0f}ms, "
-          f"avg_ttft={avg_ttft:.0f}ms, "
-          f"cached_agents={len(agent_snapshot)}")
+    print(
+        f"    Phase complete: wall={phase_wall_ms:.0f}ms, "
+        f"avg_ttft={avg_ttft:.0f}ms, "
+        f"cached_agents={len(agent_snapshot)}"
+    )
 
     return result
 
@@ -671,8 +686,9 @@ def run_cold_baseline(base_url: str, admin_key: str) -> BenchmarkRun:
         run.total_turns += len(measurement.turns)
 
     run.total_wall_ms = round((time.perf_counter() - t_total_start) * 1000, 1)
-    print(f"\n  Cold baseline complete: total_wall={run.total_wall_ms:.0f}ms, "
-          f"turns={run.total_turns}")
+    print(
+        f"\n  Cold baseline complete: total_wall={run.total_wall_ms:.0f}ms, turns={run.total_turns}"
+    )
     return run
 
 
@@ -702,8 +718,10 @@ def run_persistent(base_url: str, admin_key: str) -> BenchmarkRun:
         run.total_turns += len(measurement.turns)
 
     run.total_wall_ms = round((time.perf_counter() - t_total_start) * 1000, 1)
-    print(f"\n  Persistent mode complete: total_wall={run.total_wall_ms:.0f}ms, "
-          f"turns={run.total_turns}")
+    print(
+        f"\n  Persistent mode complete: total_wall={run.total_wall_ms:.0f}ms, "
+        f"turns={run.total_turns}"
+    )
     return run
 
 
@@ -770,10 +788,12 @@ def print_summary(cold: BenchmarkRun | None, persistent: BenchmarkRun | None) ->
         ratio = cold_total / pers_total
         pct = ((cold_total - pers_total) / cold_total) * 100
         total_speedup = f"{ratio:.2f}x ({pct:+.0f}%)"
-    print(f"  {'TOTAL':<25} | "
-          f"{'':>10} {cold_total:>9.0f}ms | "
-          f"{'':>10} {pers_total:>9.0f}ms | "
-          f"{'':>12} {total_speedup:>12}")
+    print(
+        f"  {'TOTAL':<25} | "
+        f"{'':>10} {cold_total:>9.0f}ms | "
+        f"{'':>10} {pers_total:>9.0f}ms | "
+        f"{'':>12} {total_speedup:>12}"
+    )
 
     # Agent cache growth (from persistent run)
     if persistent and persistent.phases:
@@ -788,9 +808,11 @@ def print_summary(cold: BenchmarkRun | None, persistent: BenchmarkRun | None) ->
                 tier = a.get("tier", "?")
                 tokens = a.get("tokens", 0)
                 agents_str += f"{short_id}({tier},{tokens}tok) "
-            print(f"  {phase_m.phase_label:<25} | "
-                  f"{len(phase_m.agent_cache_snapshot):>7} | "
-                  f"{agents_str.strip()}")
+            print(
+                f"  {phase_m.phase_label:<25} | "
+                f"{len(phase_m.agent_cache_snapshot):>7} | "
+                f"{agents_str.strip()}"
+            )
 
     print()
 
@@ -839,7 +861,7 @@ def save_results(
 
     output: dict[str, Any] = {
         "benchmark": "prisoner_dilemma_cache_persistence",
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
         "model_id": model_id,
         "git_sha": _git_sha(),
         "platform": platform.platform(),
@@ -869,17 +891,12 @@ def save_results(
                 "persistent_wall_ms": p_phase.wall_ms,
             }
             if c_phase.avg_ttft_ms > 0 and p_phase.avg_ttft_ms > 0:
-                entry["ttft_speedup"] = round(
-                    c_phase.avg_ttft_ms / p_phase.avg_ttft_ms, 3
-                )
+                entry["ttft_speedup"] = round(c_phase.avg_ttft_ms / p_phase.avg_ttft_ms, 3)
                 entry["ttft_reduction_pct"] = round(
-                    ((c_phase.avg_ttft_ms - p_phase.avg_ttft_ms)
-                     / c_phase.avg_ttft_ms) * 100, 1
+                    ((c_phase.avg_ttft_ms - p_phase.avg_ttft_ms) / c_phase.avg_ttft_ms) * 100, 1
                 )
             if c_phase.wall_ms > 0 and p_phase.wall_ms > 0:
-                entry["wall_speedup"] = round(
-                    c_phase.wall_ms / p_phase.wall_ms, 3
-                )
+                entry["wall_speedup"] = round(c_phase.wall_ms / p_phase.wall_ms, 3)
             comparison.append(entry)
         output["comparison"] = comparison
 
@@ -930,7 +947,7 @@ def main() -> None:
     print(f"Checking server at {base_url}...")
     if not _check_server_ready(base_url):
         print("ERROR: Server is not ready. Start with:")
-        print(f"  python -m agent_memory.entrypoints.cli serve --port 8000")
+        print("  python -m agent_memory.entrypoints.cli serve --port 8000")
         sys.exit(1)
 
     model_id = _detect_model(base_url)
@@ -944,7 +961,7 @@ def main() -> None:
         print("Done.")
         return
 
-    print(f"\nBenchmark: Prisoner's Dilemma Cross-Phase Cache Persistence")
+    print("\nBenchmark: Prisoner's Dilemma Cross-Phase Cache Persistence")
     print(f"Mode: {args.mode}")
     print(f"Phases: {len(PHASES)}")
     total_turns = sum(p["rounds"] * len(p["agents"]) for p in PHASES)

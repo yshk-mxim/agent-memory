@@ -24,6 +24,10 @@ logger = logging.getLogger(__name__)
 MIN_CHUNK_DEFAULT = 512
 MAX_CHUNK_DEFAULT = 4096
 
+SMALL_CACHE_THRESHOLD = 2000
+MEDIUM_CACHE_THRESHOLD = 8000
+LARGE_CACHE_THRESHOLD = 20000
+
 
 def adaptive_chunk_size(
     cache_pos: int,
@@ -35,14 +39,13 @@ def adaptive_chunk_size(
     Larger chunks when cache is small (fast), smaller when large
     (memory-efficient).
     """
-    if cache_pos < 2000:
+    if cache_pos < SMALL_CACHE_THRESHOLD:
         return max_chunk
-    elif cache_pos < 8000:
+    if cache_pos < MEDIUM_CACHE_THRESHOLD:
         return max(min_chunk, max_chunk // 2)
-    elif cache_pos < 20000:
+    if cache_pos < LARGE_CACHE_THRESHOLD:
         return max(min_chunk, max_chunk // 4)
-    else:
-        return min_chunk
+    return min_chunk
 
 
 class MLXPrefillAdapter:

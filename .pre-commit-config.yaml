@@ -5,6 +5,7 @@ repos:
       - id: trailing-whitespace
       - id: end-of-file-fixer
       - id: check-yaml
+        args: ['--unsafe']  # mkdocs.yml uses Python constructor tags
       - id: check-toml
       - id: check-merge-conflict
       - id: debug-statements
@@ -23,12 +24,12 @@ repos:
     hooks:
       - id: gitleaks  # Secret detection (API keys, tokens)
 
-  - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.19.1
+  - repo: local
     hooks:
       - id: mypy
-        additional_dependencies:
-          - types-requests
-          - pydantic>=2.12.0
-        args: [--explicit-package-bases, --ignore-missing-imports]
-        exclude: ^tests/
+        name: mypy
+        entry: mypy --explicit-package-bases --ignore-missing-imports
+        language: system
+        types: [python]
+        files: ^src/
+        exclude: ^src/agent_memory/entrypoints/

@@ -88,7 +88,9 @@ class TestBlockPoolBatchEngineIntegration:
         assert completion.token_count > 0, "Should have tokens"
         assert completion.blocks.total_tokens > 0, "Should have blocks"
 
-    @pytest.mark.skip(reason="Cache reconstruction needs KVCache objects from reconstructed tensors")
+    @pytest.mark.skip(
+        reason="Cache reconstruction needs KVCache objects from reconstructed tensors"
+    )
     def test_single_agent_with_cache_resume(self, engine, pool) -> None:
         """Should resume generation from cached state.
 

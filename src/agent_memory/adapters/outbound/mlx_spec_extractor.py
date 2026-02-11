@@ -1,3 +1,4 @@
+# mypy: disable-error-code="no-untyped-call"
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 Yakov Shkolnikov and contributors
 """MLX model specification extraction adapter."""
@@ -128,8 +129,8 @@ class MLXModelSpecExtractor:
         """
         for path in [
             lambda m: m.language_model.model.layers,  # Gemma 3 (nested)
-            lambda m: m.model.layers,                  # Standard models
-            lambda m: m.layers,                        # Direct layer access
+            lambda m: m.model.layers,  # Standard models
+            lambda m: m.layers,  # Direct layer access
         ]:
             try:
                 layers = path(model)
@@ -140,8 +141,6 @@ class MLXModelSpecExtractor:
                     continue
 
                 # DeepSeek V2 MLA: K and V have different dimensions.
-                # K = concat(k_nope[qk_nope_head_dim], k_pe[qk_rope_head_dim])
-                # V = values[v_head_dim]
                 qk_nope = getattr(attn, "qk_nope_head_dim", None)
                 qk_rope = getattr(attn, "qk_rope_head_dim", None)
                 v_dim = getattr(attn, "v_head_dim", None)

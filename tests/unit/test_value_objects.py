@@ -474,42 +474,60 @@ class TestModelCacheSpecNewValidations:
     def test_reject_zero_n_layers(self) -> None:
         with pytest.raises(ModelSpecValidationError, match="n_layers must be > 0"):
             ModelCacheSpec(
-                n_layers=0, n_kv_heads=4, head_dim=64, block_tokens=256,
+                n_layers=0,
+                n_kv_heads=4,
+                head_dim=64,
+                block_tokens=256,
                 layer_types=[],
             )
 
     def test_reject_negative_n_layers(self) -> None:
         with pytest.raises(ModelSpecValidationError, match="n_layers must be > 0"):
             ModelCacheSpec(
-                n_layers=-1, n_kv_heads=4, head_dim=64, block_tokens=256,
+                n_layers=-1,
+                n_kv_heads=4,
+                head_dim=64,
+                block_tokens=256,
                 layer_types=[],
             )
 
     def test_reject_zero_n_kv_heads(self) -> None:
         with pytest.raises(ModelSpecValidationError, match="n_kv_heads must be > 0"):
             ModelCacheSpec(
-                n_layers=12, n_kv_heads=0, head_dim=64, block_tokens=256,
+                n_layers=12,
+                n_kv_heads=0,
+                head_dim=64,
+                block_tokens=256,
                 layer_types=["global"] * 12,
             )
 
     def test_reject_zero_head_dim(self) -> None:
         with pytest.raises(ModelSpecValidationError, match="head_dim must be > 0"):
             ModelCacheSpec(
-                n_layers=12, n_kv_heads=4, head_dim=0, block_tokens=256,
+                n_layers=12,
+                n_kv_heads=4,
+                head_dim=0,
+                block_tokens=256,
                 layer_types=["global"] * 12,
             )
 
     def test_reject_zero_block_tokens(self) -> None:
         with pytest.raises(ModelSpecValidationError, match="block_tokens must be > 0"):
             ModelCacheSpec(
-                n_layers=12, n_kv_heads=4, head_dim=64, block_tokens=0,
+                n_layers=12,
+                n_kv_heads=4,
+                head_dim=64,
+                block_tokens=0,
                 layer_types=["global"] * 12,
             )
 
     def test_reject_non_power_of_2_group_size(self) -> None:
         with pytest.raises(ModelSpecValidationError, match="power of 2"):
             ModelCacheSpec(
-                n_layers=12, n_kv_heads=4, head_dim=64, block_tokens=256,
+                n_layers=12,
+                n_kv_heads=4,
+                head_dim=64,
+                block_tokens=256,
                 layer_types=["global"] * 12,
                 kv_bits=4,
                 kv_group_size=100,
@@ -518,7 +536,10 @@ class TestModelCacheSpecNewValidations:
     def test_accept_power_of_2_group_sizes(self) -> None:
         for gs in [1, 2, 4, 8, 16, 32, 64, 128]:
             spec = ModelCacheSpec(
-                n_layers=12, n_kv_heads=4, head_dim=64, block_tokens=256,
+                n_layers=12,
+                n_kv_heads=4,
+                head_dim=64,
+                block_tokens=256,
                 layer_types=["global"] * 12,
                 kv_bits=4,
                 kv_group_size=gs,
@@ -528,7 +549,10 @@ class TestModelCacheSpecNewValidations:
     def test_reject_invalid_kv_bits(self) -> None:
         with pytest.raises(ModelSpecValidationError, match="kv_bits must be one of"):
             ModelCacheSpec(
-                n_layers=12, n_kv_heads=4, head_dim=64, block_tokens=256,
+                n_layers=12,
+                n_kv_heads=4,
+                head_dim=64,
+                block_tokens=256,
                 layer_types=["global"] * 12,
                 kv_bits=6,
             )
@@ -538,8 +562,11 @@ class TestModelCacheSpecNewValidations:
     def test_v_head_dim_defaults_to_head_dim(self) -> None:
         """v_head_dim=None means symmetric K=V=head_dim."""
         spec = ModelCacheSpec(
-            n_layers=27, n_kv_heads=16, head_dim=192,
-            block_tokens=128, layer_types=["global"] * 27,
+            n_layers=27,
+            n_kv_heads=16,
+            head_dim=192,
+            block_tokens=128,
+            layer_types=["global"] * 27,
         )
         assert spec.v_head_dim is None
         assert spec.effective_v_head_dim == 192
@@ -547,8 +574,11 @@ class TestModelCacheSpecNewValidations:
     def test_asymmetric_kv_dims(self) -> None:
         """DeepSeek V2 MLA: K=192, V=128."""
         spec = ModelCacheSpec(
-            n_layers=27, n_kv_heads=16, head_dim=192,
-            block_tokens=128, layer_types=["global"] * 27,
+            n_layers=27,
+            n_kv_heads=16,
+            head_dim=192,
+            block_tokens=128,
+            layer_types=["global"] * 27,
             v_head_dim=128,
         )
         assert spec.head_dim == 192
@@ -558,9 +588,13 @@ class TestModelCacheSpecNewValidations:
     def test_bytes_per_block_asymmetric_fp16(self) -> None:
         """Asymmetric K/V should compute correct FP16 memory."""
         spec = ModelCacheSpec(
-            n_layers=27, n_kv_heads=16, head_dim=192,
-            block_tokens=128, layer_types=["global"] * 27,
-            kv_bits=None, v_head_dim=128,
+            n_layers=27,
+            n_kv_heads=16,
+            head_dim=192,
+            block_tokens=128,
+            layer_types=["global"] * 27,
+            kv_bits=None,
+            v_head_dim=128,
         )
         # K: 16*192*128 = 393,216 elements
         # V: 16*128*128 = 262,144 elements
@@ -570,9 +604,14 @@ class TestModelCacheSpecNewValidations:
     def test_bytes_per_block_asymmetric_q4(self) -> None:
         """Asymmetric K/V should compute correct Q4 memory."""
         spec = ModelCacheSpec(
-            n_layers=27, n_kv_heads=16, head_dim=192,
-            block_tokens=128, layer_types=["global"] * 27,
-            kv_bits=4, kv_group_size=64, v_head_dim=128,
+            n_layers=27,
+            n_kv_heads=16,
+            head_dim=192,
+            block_tokens=128,
+            layer_types=["global"] * 27,
+            kv_bits=4,
+            kv_group_size=64,
+            v_head_dim=128,
         )
         # K elements: 16*192*128 = 393,216
         # V elements: 16*128*128 = 262,144
@@ -586,21 +625,33 @@ class TestModelCacheSpecNewValidations:
     def test_bytes_per_block_symmetric_unchanged(self) -> None:
         """Symmetric K=V should give same result as before (no v_head_dim)."""
         spec_old = ModelCacheSpec(
-            n_layers=27, n_kv_heads=16, head_dim=128,
-            block_tokens=128, layer_types=["global"] * 27,
-            kv_bits=4, kv_group_size=64,
+            n_layers=27,
+            n_kv_heads=16,
+            head_dim=128,
+            block_tokens=128,
+            layer_types=["global"] * 27,
+            kv_bits=4,
+            kv_group_size=64,
         )
         spec_explicit = ModelCacheSpec(
-            n_layers=27, n_kv_heads=16, head_dim=128,
-            block_tokens=128, layer_types=["global"] * 27,
-            kv_bits=4, kv_group_size=64, v_head_dim=128,
+            n_layers=27,
+            n_kv_heads=16,
+            head_dim=128,
+            block_tokens=128,
+            layer_types=["global"] * 27,
+            kv_bits=4,
+            kv_group_size=64,
+            v_head_dim=128,
         )
         assert spec_old.bytes_per_block_per_layer() == spec_explicit.bytes_per_block_per_layer()
 
     def test_reject_invalid_v_head_dim(self) -> None:
         with pytest.raises(ModelSpecValidationError, match="v_head_dim must be > 0"):
             ModelCacheSpec(
-                n_layers=12, n_kv_heads=4, head_dim=128,
-                block_tokens=128, layer_types=["global"] * 12,
+                n_layers=12,
+                n_kv_heads=4,
+                head_dim=128,
+                block_tokens=128,
+                layer_types=["global"] * 12,
                 v_head_dim=0,
             )

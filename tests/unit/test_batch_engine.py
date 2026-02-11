@@ -765,12 +765,14 @@ class NeverFinishingBatchGenerator:
         """Always returns non-empty responses that never finish."""
         responses = []
         for uid in self._sequences:
-            responses.append(FakeResponse(
-                uid=uid,
-                token=999,
-                finish_reason=None,  # Never finishes
-                prompt_cache=None,
-            ))
+            responses.append(
+                FakeResponse(
+                    uid=uid,
+                    token=999,
+                    finish_reason=None,  # Never finishes
+                    prompt_cache=None,
+                )
+            )
         return responses
 
     def remove(self, uid):

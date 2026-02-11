@@ -36,12 +36,11 @@ import subprocess
 import sys
 import time
 from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 import httpx
-
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -72,7 +71,13 @@ EXPERT_KEYWORDS: dict[str, list[str]] = {
     "hypothesis_testing": ["hypothesis", "null", "test", "significance", "p-value"],
     "markov_chain": ["markov", "state", "transition", "probability", "chain"],
     "monte_carlo": ["monte carlo", "simulation", "random", "sampling", "estimate"],
-    "principal_component_analysis": ["principal", "component", "variance", "dimension", "eigenvalue"],
+    "principal_component_analysis": [
+        "principal",
+        "component",
+        "variance",
+        "dimension",
+        "eigenvalue",
+    ],
     "time_series": ["time series", "forecast", "trend", "seasonal", "autoregressive"],
     "maximum_likelihood": ["likelihood", "estimator", "parameter", "maximum", "mle"],
     "anova": ["variance", "anova", "group", "factor", "mean"],
@@ -115,15 +120,17 @@ TEMPERATURE = 0.3
 # Data classes
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class TimingRecord:
     """Single API call timing measurement."""
+
     agent_name: str
-    phase: str          # "prime", "query", "repeat", "synthesis"
-    ttft_ms: float      # Time to first token (streaming)
-    e2e_ms: float       # Total end-to-end time
+    phase: str  # "prime", "query", "repeat", "synthesis"
+    ttft_ms: float  # Time to first token (streaming)
+    e2e_ms: float  # Total end-to-end time
     output_tokens: int  # Approximate output token count
-    cache_state: str    # "cold", "warm", "hot"
+    cache_state: str  # "cold", "warm", "hot"
     query: str = ""
     error: str | None = None
 
@@ -131,6 +138,7 @@ class TimingRecord:
 @dataclass
 class QualityScore:
     """Semantic quality check for a response."""
+
     agent_name: str
     phase: str
     non_empty: bool
@@ -142,12 +150,18 @@ class QualityScore:
 
     @property
     def passed(self) -> bool:
-        return self.non_empty and self.sufficient_length and self.no_repetition and self.keyword_relevance
+        return (
+            self.non_empty
+            and self.sufficient_length
+            and self.no_repetition
+            and self.keyword_relevance
+        )
 
 
 @dataclass
 class BenchmarkResults:
     """Complete benchmark results."""
+
     model_id: str
     timestamp: str
     git_sha: str
@@ -164,12 +178,17 @@ class BenchmarkResults:
 # Utility functions
 # ---------------------------------------------------------------------------
 
+
 def _git_sha() -> str:
     try:
-        return subprocess.check_output(
-            ["git", "rev-parse", "--short", "HEAD"],
-            stderr=subprocess.DEVNULL,
-        ).decode().strip()
+        return (
+            subprocess.check_output(
+                ["git", "rev-parse", "--short", "HEAD"],
+                stderr=subprocess.DEVNULL,
+            )
+            .decode()
+            .strip()
+        )
     except Exception:
         return "unknown"
 
@@ -191,7 +210,7 @@ def check_quality(text: str, agent_name: str, phase: str) -> QualityScore:
     if len(text) > 60:
         # Check for any 20-char substring appearing 3+ times
         for i in range(len(text) - 60):
-            substr = text[i:i + 20]
+            substr = text[i : i + 20]
             if text.count(substr) >= 3:
                 no_repetition = False
                 break
@@ -217,6 +236,7 @@ def check_quality(text: str, agent_name: str, phase: str) -> QualityScore:
 # ---------------------------------------------------------------------------
 # Article download
 # ---------------------------------------------------------------------------
+
 
 async def download_article(title: str, filename: str) -> str:
     """Download a Wikipedia article and cache locally.
@@ -251,7 +271,12 @@ async def download_article(title: str, filename: str) -> str:
 
         # Attempt 1: full extract
         try:
-            resp = await client.get(full_url, headers={"User-Agent": "AgentMemoryBenchmark/1.0 (https://github.com/yshk-mxim/agent-memory; academic-research; python-httpx)"})
+            resp = await client.get(
+                full_url,
+                headers={
+                    "User-Agent": "AgentMemoryBenchmark/1.0 (https://github.com/yshk-mxim/agent-memory; academic-research; python-httpx)"
+                },
+            )
             if resp.status_code == 200:
                 data = resp.json()
                 pages = data.get("query", {}).get("pages", {})
@@ -267,7 +292,9 @@ async def download_article(title: str, filename: str) -> str:
             try:
                 resp = await client.get(
                     summary_url,
-                    headers={"User-Agent": "AgentMemoryBenchmark/1.0 (https://github.com/yshk-mxim/agent-memory; academic-research; python-httpx)"},
+                    headers={
+                        "User-Agent": "AgentMemoryBenchmark/1.0 (https://github.com/yshk-mxim/agent-memory; academic-research; python-httpx)"
+                    },
                 )
                 if resp.status_code == 200:
                     data = resp.json()
@@ -325,6 +352,7 @@ async def download_all_articles(skip_download: bool = False) -> dict[str, str]:
 # ---------------------------------------------------------------------------
 # Server interaction
 # ---------------------------------------------------------------------------
+
 
 async def check_server_ready(base_url: str, timeout: float = 10.0) -> bool:
     """Check if the server is ready."""
@@ -384,6 +412,7 @@ async def delete_agent(base_url: str, agent_id: str, evict_only: bool = False) -
 # ---------------------------------------------------------------------------
 # Streaming chat completion
 # ---------------------------------------------------------------------------
+
 
 async def stream_chat_completion(
     base_url: str,
@@ -466,9 +495,7 @@ async def stream_chat_completion(
                             # Extract usage from final chunk
                             chunk_usage = parsed.get("usage", {})
                             if chunk_usage:
-                                output_tokens = chunk_usage.get(
-                                    "completion_tokens", output_tokens
-                                )
+                                output_tokens = chunk_usage.get("completion_tokens", output_tokens)
 
                             choices = parsed.get("choices", [])
                             if not choices:
@@ -520,6 +547,7 @@ async def stream_chat_completion(
 # Benchmark phases
 # ---------------------------------------------------------------------------
 
+
 async def phase1_priming(
     base_url: str,
     articles: dict[str, str],
@@ -560,7 +588,9 @@ async def phase1_priming(
 
         print(f"  Priming {expert_name}...", end=" ", flush=True)
         text, timing = await stream_chat_completion(
-            base_url, messages, session_id,
+            base_url,
+            messages,
+            session_id,
             max_tokens=MAX_TOKENS_PRIME,
             verbose=verbose,
         )
@@ -642,7 +672,9 @@ async def phase2_queries(
 
             print(f"    -> {expert_name}...", end=" ", flush=True)
             text, timing = await stream_chat_completion(
-                base_url, messages, session_id,
+                base_url,
+                messages,
+                session_id,
                 max_tokens=MAX_TOKENS_QUERY,
                 verbose=verbose,
             )
@@ -693,9 +725,11 @@ async def phase2_queries(
                 },
             ]
 
-            print(f"    -> reporter (synthesis)...", end=" ", flush=True)
+            print("    -> reporter (synthesis)...", end=" ", flush=True)
             synth_text, synthesis_timing = await stream_chat_completion(
-                base_url, synthesis_messages, reporter_session,
+                base_url,
+                synthesis_messages,
+                reporter_session,
                 max_tokens=MAX_TOKENS_SYNTHESIS,
                 verbose=verbose,
             )
@@ -763,7 +797,9 @@ async def phase3_repeated(
 
         print(f"  Re-querying {expert_name}...", end=" ", flush=True)
         text, timing = await stream_chat_completion(
-            base_url, messages, session_id,
+            base_url,
+            messages,
+            session_id,
             max_tokens=MAX_TOKENS_QUERY,
             verbose=verbose,
         )
@@ -790,6 +826,7 @@ async def phase3_repeated(
 # ---------------------------------------------------------------------------
 # Summary and output
 # ---------------------------------------------------------------------------
+
 
 def compute_summary(
     prime_results: list[tuple[TimingRecord, QualityScore]],
@@ -861,9 +898,8 @@ def compute_summary(
         },
         "phase2_queries": {
             "query_count": len(QUERIES),
-            "expert_calls": len(query_ttfts) + sum(
-                1 for et, _, _ in query_results for t in et if t.error
-            ),
+            "expert_calls": len(query_ttfts)
+            + sum(1 for et, _, _ in query_results for t in et if t.error),
             "errors": sum(1 for et, _, _ in query_results for t in et if t.error),
             "ttft_avg_ms": round(avg(query_ttfts), 1),
             "ttft_median_ms": round(median(query_ttfts), 1),
@@ -906,7 +942,9 @@ def print_summary_table(summary: dict[str, Any]) -> None:
     p3 = summary["phase3_repeated"]
     sp = summary["speedup"]
 
-    print(f"\n{'Phase':<25} {'TTFT avg':>10} {'TTFT med':>10} {'TTFT min':>10} {'TTFT max':>10} {'E2E avg':>10}")
+    print(
+        f"\n{'Phase':<25} {'TTFT avg':>10} {'TTFT med':>10} {'TTFT min':>10} {'TTFT max':>10} {'E2E avg':>10}"
+    )
     print("-" * 78)
     print(
         f"{'1. Priming (cold)':<25} "
@@ -971,9 +1009,7 @@ def print_per_expert_table(
     """Print per-expert timing breakdown."""
     print(f"\n{'Per-Expert TTFT Breakdown':<40}")
     print("=" * 70)
-    print(
-        f"{'Expert':<30} {'Cold (P1)':>12} {'Warm (P2)':>12} {'Hot (P3)':>12}"
-    )
+    print(f"{'Expert':<30} {'Cold (P1)':>12} {'Warm (P2)':>12} {'Hot (P3)':>12}")
     print("-" * 70)
 
     # Index query timings by expert name
@@ -991,7 +1027,9 @@ def print_per_expert_table(
 
     for t_prime, _ in prime_results:
         name = t_prime.agent_name
-        cold_str = f"{t_prime.ttft_ms:.0f}ms" if not t_prime.error and t_prime.ttft_ms > 0 else "ERR"
+        cold_str = (
+            f"{t_prime.ttft_ms:.0f}ms" if not t_prime.error and t_prime.ttft_ms > 0 else "ERR"
+        )
 
         query_vals = query_ttft_by_expert.get(name, [])
         if query_vals:
@@ -1011,6 +1049,7 @@ def print_per_expert_table(
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
+
 
 async def run_benchmark(args: argparse.Namespace) -> None:
     """Run the full benchmark."""
@@ -1062,68 +1101,100 @@ async def run_benchmark(args: argparse.Namespace) -> None:
     all_quality: list[dict[str, Any]] = []
 
     for t, q in prime_results:
-        all_timings.append({
-            "agent_name": t.agent_name, "phase": t.phase,
-            "ttft_ms": round(t.ttft_ms, 1), "e2e_ms": round(t.e2e_ms, 1),
-            "output_tokens": t.output_tokens, "cache_state": t.cache_state,
-            "query": t.query, "error": t.error,
-        })
-        all_quality.append({
-            "agent_name": q.agent_name, "phase": q.phase,
-            "passed": q.passed, "non_empty": q.non_empty,
-            "sufficient_length": q.sufficient_length,
-            "no_repetition": q.no_repetition,
-            "keyword_relevance": q.keyword_relevance,
-            "keyword_matches": q.keyword_matches,
-            "text_length": q.text_length,
-        })
-
-    for expert_timings, expert_qualities, synth_timing in query_results:
-        for t in expert_timings:
-            all_timings.append({
-                "agent_name": t.agent_name, "phase": t.phase,
-                "ttft_ms": round(t.ttft_ms, 1), "e2e_ms": round(t.e2e_ms, 1),
-                "output_tokens": t.output_tokens, "cache_state": t.cache_state,
-                "query": t.query, "error": t.error,
-            })
-        for q in expert_qualities:
-            all_quality.append({
-                "agent_name": q.agent_name, "phase": q.phase,
-                "passed": q.passed, "non_empty": q.non_empty,
+        all_timings.append(
+            {
+                "agent_name": t.agent_name,
+                "phase": t.phase,
+                "ttft_ms": round(t.ttft_ms, 1),
+                "e2e_ms": round(t.e2e_ms, 1),
+                "output_tokens": t.output_tokens,
+                "cache_state": t.cache_state,
+                "query": t.query,
+                "error": t.error,
+            }
+        )
+        all_quality.append(
+            {
+                "agent_name": q.agent_name,
+                "phase": q.phase,
+                "passed": q.passed,
+                "non_empty": q.non_empty,
                 "sufficient_length": q.sufficient_length,
                 "no_repetition": q.no_repetition,
                 "keyword_relevance": q.keyword_relevance,
                 "keyword_matches": q.keyword_matches,
                 "text_length": q.text_length,
-            })
+            }
+        )
+
+    for expert_timings, expert_qualities, synth_timing in query_results:
+        for t in expert_timings:
+            all_timings.append(
+                {
+                    "agent_name": t.agent_name,
+                    "phase": t.phase,
+                    "ttft_ms": round(t.ttft_ms, 1),
+                    "e2e_ms": round(t.e2e_ms, 1),
+                    "output_tokens": t.output_tokens,
+                    "cache_state": t.cache_state,
+                    "query": t.query,
+                    "error": t.error,
+                }
+            )
+        for q in expert_qualities:
+            all_quality.append(
+                {
+                    "agent_name": q.agent_name,
+                    "phase": q.phase,
+                    "passed": q.passed,
+                    "non_empty": q.non_empty,
+                    "sufficient_length": q.sufficient_length,
+                    "no_repetition": q.no_repetition,
+                    "keyword_relevance": q.keyword_relevance,
+                    "keyword_matches": q.keyword_matches,
+                    "text_length": q.text_length,
+                }
+            )
         if synth_timing:
-            all_timings.append({
-                "agent_name": synth_timing.agent_name,
-                "phase": synth_timing.phase,
-                "ttft_ms": round(synth_timing.ttft_ms, 1),
-                "e2e_ms": round(synth_timing.e2e_ms, 1),
-                "output_tokens": synth_timing.output_tokens,
-                "cache_state": synth_timing.cache_state,
-                "query": synth_timing.query,
-                "error": synth_timing.error,
-            })
+            all_timings.append(
+                {
+                    "agent_name": synth_timing.agent_name,
+                    "phase": synth_timing.phase,
+                    "ttft_ms": round(synth_timing.ttft_ms, 1),
+                    "e2e_ms": round(synth_timing.e2e_ms, 1),
+                    "output_tokens": synth_timing.output_tokens,
+                    "cache_state": synth_timing.cache_state,
+                    "query": synth_timing.query,
+                    "error": synth_timing.error,
+                }
+            )
 
     for t, q in repeat_results:
-        all_timings.append({
-            "agent_name": t.agent_name, "phase": t.phase,
-            "ttft_ms": round(t.ttft_ms, 1), "e2e_ms": round(t.e2e_ms, 1),
-            "output_tokens": t.output_tokens, "cache_state": t.cache_state,
-            "query": t.query, "error": t.error,
-        })
-        all_quality.append({
-            "agent_name": q.agent_name, "phase": q.phase,
-            "passed": q.passed, "non_empty": q.non_empty,
-            "sufficient_length": q.sufficient_length,
-            "no_repetition": q.no_repetition,
-            "keyword_relevance": q.keyword_relevance,
-            "keyword_matches": q.keyword_matches,
-            "text_length": q.text_length,
-        })
+        all_timings.append(
+            {
+                "agent_name": t.agent_name,
+                "phase": t.phase,
+                "ttft_ms": round(t.ttft_ms, 1),
+                "e2e_ms": round(t.e2e_ms, 1),
+                "output_tokens": t.output_tokens,
+                "cache_state": t.cache_state,
+                "query": t.query,
+                "error": t.error,
+            }
+        )
+        all_quality.append(
+            {
+                "agent_name": q.agent_name,
+                "phase": q.phase,
+                "passed": q.passed,
+                "non_empty": q.non_empty,
+                "sufficient_length": q.sufficient_length,
+                "no_repetition": q.no_repetition,
+                "keyword_relevance": q.keyword_relevance,
+                "keyword_matches": q.keyword_matches,
+                "text_length": q.text_length,
+            }
+        )
 
     # Save results
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -1132,7 +1203,7 @@ async def run_benchmark(args: argparse.Namespace) -> None:
 
     results = BenchmarkResults(
         model_id=model_id,
-        timestamp=datetime.now(timezone.utc).isoformat(),
+        timestamp=datetime.now(UTC).isoformat(),
         git_sha=_git_sha(),
         server_port=args.port,
         expert_count=len(EXPERT_AGENTS),
@@ -1156,15 +1227,19 @@ def main() -> None:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
-        "--port", type=int, default=8000,
+        "--port",
+        type=int,
+        default=8000,
         help="Server port (default: 8000)",
     )
     parser.add_argument(
-        "--skip-download", action="store_true",
+        "--skip-download",
+        action="store_true",
         help="Use cached articles only (don't download from Wikipedia)",
     )
     parser.add_argument(
-        "--verbose", action="store_true",
+        "--verbose",
+        action="store_true",
         help="Print response previews and debug info",
     )
     args = parser.parse_args()

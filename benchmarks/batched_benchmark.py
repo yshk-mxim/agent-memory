@@ -1,7 +1,6 @@
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 Yakov Shkolnikov and contributors
-"""
-Batched vs Sequential Benchmark
+"""Batched vs Sequential Benchmark
 
 Compares performance of:
 1. Sequential: 5 agents × 1 request each, processed one at a time
@@ -14,12 +13,12 @@ Measures:
 """
 
 import asyncio
-import time
-import httpx
-from typing import List, Tuple
 import logging
+import time
 
-logging.basicConfig(level=logging.INFO, format='%(message)s')
+import httpx
+
+logging.basicConfig(level=logging.INFO, format="%(message)s")
 logger = logging.getLogger(__name__)
 
 
@@ -38,12 +37,8 @@ class BatchedBenchmark:
         print("=" * 70 + "\n")
 
     async def run_single_request(
-        self,
-        client: httpx.AsyncClient,
-        agent_id: int,
-        system_prompt: str,
-        question: str
-    ) -> Tuple[float, dict]:
+        self, client: httpx.AsyncClient, agent_id: int, system_prompt: str, question: str
+    ) -> tuple[float, dict]:
         """Run a single request and return (latency, result)."""
         start = time.time()
 
@@ -54,9 +49,9 @@ class BatchedBenchmark:
                 "system": system_prompt,
                 "messages": [{"role": "user", "content": question}],
                 "max_tokens": self.tokens_per_request,
-                "stream": False
+                "stream": False,
             },
-            timeout=60.0
+            timeout=60.0,
         )
 
         latency = time.time() - start
@@ -82,13 +77,11 @@ class BatchedBenchmark:
                 system_prompt = f"You are agent {i}, a concise technical expert."
                 question = f"What is feature {i} of MLX?"
 
-                latency, result = await self.run_single_request(
-                    client, i, system_prompt, question
-                )
+                latency, result = await self.run_single_request(client, i, system_prompt, question)
 
                 latencies.append(latency)
-                total_tokens_in += result['usage']['input_tokens']
-                total_tokens_out += result['usage']['output_tokens']
+                total_tokens_in += result["usage"]["input_tokens"]
+                total_tokens_out += result["usage"]["output_tokens"]
 
                 print(f"  Agent {i}: {latency:.2f}s ({result['usage']['output_tokens']} tokens)")
 
@@ -100,13 +93,13 @@ class BatchedBenchmark:
             print(f"  Avg latency: {sum(latencies) / len(latencies):.2f}s")
 
             return {
-                'mode': 'sequential',
-                'total_time': total_time,
-                'tokens_in': total_tokens_in,
-                'tokens_out': total_tokens_out,
-                'throughput': total_tokens_out / total_time,
-                'avg_latency': sum(latencies) / len(latencies),
-                'latencies': latencies
+                "mode": "sequential",
+                "total_time": total_time,
+                "tokens_in": total_tokens_in,
+                "tokens_out": total_tokens_out,
+                "throughput": total_tokens_out / total_time,
+                "avg_latency": sum(latencies) / len(latencies),
+                "latencies": latencies,
             }
 
     async def benchmark_batched(self) -> dict:
@@ -134,8 +127,8 @@ class BatchedBenchmark:
             latencies = [r[0] for r in results]
             responses = [r[1] for r in results]
 
-            total_tokens_in = sum(r['usage']['input_tokens'] for r in responses)
-            total_tokens_out = sum(r['usage']['output_tokens'] for r in responses)
+            total_tokens_in = sum(r["usage"]["input_tokens"] for r in responses)
+            total_tokens_out = sum(r["usage"]["output_tokens"] for r in responses)
 
             for i, (latency, response) in enumerate(results):
                 print(f"  Agent {i}: {latency:.2f}s ({response['usage']['output_tokens']} tokens)")
@@ -146,13 +139,13 @@ class BatchedBenchmark:
             print(f"  Avg latency: {sum(latencies) / len(latencies):.2f}s")
 
             return {
-                'mode': 'batched',
-                'total_time': total_time,
-                'tokens_in': total_tokens_in,
-                'tokens_out': total_tokens_out,
-                'throughput': total_tokens_out / total_time,
-                'avg_latency': sum(latencies) / len(latencies),
-                'latencies': latencies
+                "mode": "batched",
+                "total_time": total_time,
+                "tokens_in": total_tokens_in,
+                "tokens_out": total_tokens_out,
+                "throughput": total_tokens_out / total_time,
+                "avg_latency": sum(latencies) / len(latencies),
+                "latencies": latencies,
             }
 
     async def run_comparison(self):
@@ -182,23 +175,24 @@ class BatchedBenchmark:
         # Comparison
         self.print_header("Comparison")
 
-        speedup = seq_results['total_time'] / batch_results['total_time']
+        speedup = seq_results["total_time"] / batch_results["total_time"]
         throughput_improvement = (
-            (batch_results['throughput'] - seq_results['throughput'])
-            / seq_results['throughput'] * 100
+            (batch_results["throughput"] - seq_results["throughput"])
+            / seq_results["throughput"]
+            * 100
         )
 
-        print(f"Sequential:")
+        print("Sequential:")
         print(f"  Total time: {seq_results['total_time']:.2f}s")
         print(f"  Throughput: {seq_results['throughput']:.2f} tokens/sec")
         print(f"  Avg latency: {seq_results['avg_latency']:.2f}s\n")
 
-        print(f"Batched:")
+        print("Batched:")
         print(f"  Total time: {batch_results['total_time']:.2f}s")
         print(f"  Throughput: {batch_results['throughput']:.2f} tokens/sec")
         print(f"  Avg latency: {batch_results['avg_latency']:.2f}s\n")
 
-        print(f"Improvement:")
+        print("Improvement:")
         print(f"  Speedup: {speedup:.2f}× faster")
         print(f"  Throughput: +{throughput_improvement:.1f}%")
         print(f"  Time saved: {seq_results['total_time'] - batch_results['total_time']:.2f}s")

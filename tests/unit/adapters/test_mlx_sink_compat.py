@@ -86,28 +86,52 @@ class TestPatchedSDPALogic:
             if hasattr(cache, "bits"):
                 if sinks is not None:
                     k_fp = mx.dequantize(
-                        keys[0], scales=keys[1], biases=keys[2],
-                        group_size=cache.group_size, bits=cache.bits,
+                        keys[0],
+                        scales=keys[1],
+                        biases=keys[2],
+                        group_size=cache.group_size,
+                        bits=cache.bits,
                     )
                     v_fp = mx.dequantize(
-                        values[0], scales=values[1], biases=values[2],
-                        group_size=cache.group_size, bits=cache.bits,
+                        values[0],
+                        scales=values[1],
+                        biases=values[2],
+                        group_size=cache.group_size,
+                        bits=cache.bits,
                     )
                     return mx.fast.scaled_dot_product_attention(
-                        queries, k_fp, v_fp, scale=scale, mask=mask, sinks=sinks,
+                        queries,
+                        k_fp,
+                        v_fp,
+                        scale=scale,
+                        mask=mask,
+                        sinks=sinks,
                     )
                 return quantized_scaled_dot_product_attention(
-                    queries, keys, values, scale=scale, mask=mask,
-                    group_size=cache.group_size, bits=cache.bits,
+                    queries,
+                    keys,
+                    values,
+                    scale=scale,
+                    mask=mask,
+                    group_size=cache.group_size,
+                    bits=cache.bits,
                 )
             return mx.fast.scaled_dot_product_attention(
-                queries, keys, values, scale=scale, mask=mask, sinks=sinks,
+                queries,
+                keys,
+                values,
+                scale=scale,
+                mask=mask,
+                sinks=sinks,
             )
 
         return _patched_sdpa
 
     def test_quantized_no_sinks_uses_quantized_sdpa(
-        self, patched_sdpa, mock_mx, mock_quantized_sdpa,
+        self,
+        patched_sdpa,
+        mock_mx,
+        mock_quantized_sdpa,
     ) -> None:
         """Q4 cache + no sinks -> quantized SDPA kernel (no dequantize)."""
         cache = SimpleNamespace(bits=4, group_size=64)
@@ -124,7 +148,10 @@ class TestPatchedSDPALogic:
         mock_mx.fast.scaled_dot_product_attention.assert_not_called()
 
     def test_quantized_with_sinks_dequantizes_and_uses_fp16_sdpa(
-        self, patched_sdpa, mock_mx, mock_quantized_sdpa,
+        self,
+        patched_sdpa,
+        mock_mx,
+        mock_quantized_sdpa,
     ) -> None:
         """Q4 cache + sinks -> dequantize K/V to FP16, use standard SDPA."""
         cache = SimpleNamespace(bits=4, group_size=64)
@@ -148,7 +175,10 @@ class TestPatchedSDPALogic:
         mock_quantized_sdpa.assert_not_called()
 
     def test_fp16_cache_no_sinks_uses_standard_sdpa(
-        self, patched_sdpa, mock_mx, mock_quantized_sdpa,
+        self,
+        patched_sdpa,
+        mock_mx,
+        mock_quantized_sdpa,
     ) -> None:
         """FP16 cache (no .bits) + no sinks -> standard SDPA."""
         cache = SimpleNamespace()  # No bits attribute
@@ -165,22 +195,33 @@ class TestPatchedSDPALogic:
         mock_mx.dequantize.assert_not_called()
 
     def test_fp16_cache_with_sinks_passes_sinks_through(
-        self, patched_sdpa, mock_mx, mock_quantized_sdpa,
+        self,
+        patched_sdpa,
+        mock_mx,
+        mock_quantized_sdpa,
     ) -> None:
         """FP16 cache + sinks -> standard SDPA with sinks parameter."""
         cache = SimpleNamespace()
         sinks = MagicMock()
 
         patched_sdpa(
-            MagicMock(), MagicMock(), MagicMock(), cache,
-            scale=1.0, mask=MagicMock(), sinks=sinks,
+            MagicMock(),
+            MagicMock(),
+            MagicMock(),
+            cache,
+            scale=1.0,
+            mask=MagicMock(),
+            sinks=sinks,
         )
 
         sdpa_call = mock_mx.fast.scaled_dot_product_attention.call_args
         assert sdpa_call.kwargs["sinks"] is sinks
 
     def test_dequantize_receives_correct_components(
-        self, patched_sdpa, mock_mx, mock_quantized_sdpa,
+        self,
+        patched_sdpa,
+        mock_mx,
+        mock_quantized_sdpa,
     ) -> None:
         """Dequantize is called with correct K/V components from cache tuple."""
         cache = SimpleNamespace(bits=4, group_size=64)
@@ -207,7 +248,10 @@ class TestPatchedSDPALogic:
         assert v_call.kwargs["biases"] == "v_biases"
 
     def test_quantized_sdpa_receives_correct_params(
-        self, patched_sdpa, mock_mx, mock_quantized_sdpa,
+        self,
+        patched_sdpa,
+        mock_mx,
+        mock_quantized_sdpa,
     ) -> None:
         """Quantized SDPA receives group_size and bits from cache."""
         cache = SimpleNamespace(bits=4, group_size=64)

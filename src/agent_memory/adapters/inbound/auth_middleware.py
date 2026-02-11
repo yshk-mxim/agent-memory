@@ -10,7 +10,7 @@ import logging
 import os
 import secrets
 from collections.abc import Callable
-from typing import ClassVar
+from typing import Any, ClassVar
 
 from fastapi import Request, Response, status
 from fastapi.responses import JSONResponse
@@ -38,7 +38,7 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
         "/openapi.json",
     }
 
-    def __init__(self, app):
+    def __init__(self, app: Any):
         """Initialize authentication middleware.
 
         Args:
@@ -126,20 +126,17 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
             if self._auth_disabled:
                 logger.debug(f"{request.method} {request.url.path} - Auth disabled")
                 return await call_next(request)
-            else:
-                logger.error(
-                    f"{request.method} {request.url.path} - Auth required but not configured"
-                )
-                return JSONResponse(
-                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                    content={
-                        "error": {
-                            "type": "configuration_error",
-                            "message": "Authentication required but not configured. "
-                            "Set ANTHROPIC_API_KEY or remove SEMANTIC_AUTH_DISABLED=false.",
-                        }
-                    },
-                )
+            logger.error(f"{request.method} {request.url.path} - Auth required but not configured")
+            return JSONResponse(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                content={
+                    "error": {
+                        "type": "configuration_error",
+                        "message": "Authentication required but not configured. "
+                        "Set ANTHROPIC_API_KEY or remove SEMANTIC_AUTH_DISABLED=false.",
+                    }
+                },
+            )
 
         # Extract API key from header
         api_key = request.headers.get("x-api-key")
@@ -178,7 +175,7 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
         return await call_next(request)
 
 
-def create_auth_middleware() -> AuthenticationMiddleware:
+def create_auth_middleware() -> type[AuthenticationMiddleware]:
     """Factory function for creating authentication middleware.
 
     Returns:

@@ -3,8 +3,9 @@
 """Shared chat completion logic used by OpenAI API and Coordination."""
 
 import asyncio
-import structlog
 from typing import Any
+
+import structlog
 
 from agent_memory.application.tokenization import tokenize_with_chat_template
 
@@ -96,10 +97,14 @@ async def generate_chat_completion(
         if hasattr(tokens, "ids"):
             tokens = list(tokens.ids)
         tokens = list(tokens) + suffix_tokens
-        logger.info(f"Injected generation prefix '{generation_prefix}' (+{len(suffix_tokens)} tokens)")
+        logger.info(
+            f"Injected generation prefix '{generation_prefix}' (+{len(suffix_tokens)} tokens)"
+        )
 
     logger.debug(f"Tokenized {len(messages)} messages → {len(tokens)} tokens")
-    logger.info(f"Using templated text: {len(templated_text)} chars vs fallback {len(prompt)} chars")
+    logger.info(
+        f"Using templated text: {len(templated_text)} chars vs fallback {len(prompt)} chars"
+    )
 
     # Load cached blocks
     cached_blocks = cache_store.load(agent_id)

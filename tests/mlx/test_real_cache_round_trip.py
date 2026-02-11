@@ -9,10 +9,9 @@ Run: pytest tests/mlx/test_real_cache_round_trip.py -v -x --timeout=180
 REQUIRES: Apple Silicon, dangerouslyDisableSandbox: true
 """
 
+import mlx.core as mx
 import numpy as np
 import pytest
-
-import mlx.core as mx
 
 from agent_memory.adapters.outbound.safetensors_cache_adapter import SafetensorsCacheAdapter
 from agent_memory.domain.entities import AgentBlocks, KVBlock
@@ -90,7 +89,10 @@ class TestQ4FormatPreservation:
 
         # Build blocks with real Q4 data (2 layers for speed)
         original = _build_real_q4_blocks(
-            n_layers=2, n_kv_heads=4, head_dim=64, seq_len=32,
+            n_layers=2,
+            n_kv_heads=4,
+            head_dim=64,
+            seq_len=32,
         )
 
         # Capture original numpy arrays (before save)
@@ -152,27 +154,33 @@ class TestQ4FormatPreservation:
             loaded_v_b = np.array(v_b)
 
             np.testing.assert_array_equal(
-                original_arrays[f"L{layer_id}_K_w"], loaded_k_w,
+                original_arrays[f"L{layer_id}_K_w"],
+                loaded_k_w,
                 err_msg=f"Layer {layer_id} K weights not bit-identical",
             )
             np.testing.assert_array_equal(
-                original_arrays[f"L{layer_id}_K_s"], loaded_k_s,
+                original_arrays[f"L{layer_id}_K_s"],
+                loaded_k_s,
                 err_msg=f"Layer {layer_id} K scales not bit-identical",
             )
             np.testing.assert_array_equal(
-                original_arrays[f"L{layer_id}_K_b"], loaded_k_b,
+                original_arrays[f"L{layer_id}_K_b"],
+                loaded_k_b,
                 err_msg=f"Layer {layer_id} K biases not bit-identical",
             )
             np.testing.assert_array_equal(
-                original_arrays[f"L{layer_id}_V_w"], loaded_v_w,
+                original_arrays[f"L{layer_id}_V_w"],
+                loaded_v_w,
                 err_msg=f"Layer {layer_id} V weights not bit-identical",
             )
             np.testing.assert_array_equal(
-                original_arrays[f"L{layer_id}_V_s"], loaded_v_s,
+                original_arrays[f"L{layer_id}_V_s"],
+                loaded_v_s,
                 err_msg=f"Layer {layer_id} V scales not bit-identical",
             )
             np.testing.assert_array_equal(
-                original_arrays[f"L{layer_id}_V_b"], loaded_v_b,
+                original_arrays[f"L{layer_id}_V_b"],
+                loaded_v_b,
                 err_msg=f"Layer {layer_id} V biases not bit-identical",
             )
 
@@ -192,12 +200,17 @@ class TestQ4FormatPreservation:
 
         # Save → load
         block = KVBlock(
-            block_id=0, layer_id=0, token_count=16,
+            block_id=0,
+            layer_id=0,
+            token_count=16,
             layer_data={"k": (w, s, b), "v": (w, s, b)},
         )
         blocks = AgentBlocks(
-            agent_id="test", blocks={0: [block]}, total_tokens=16,
-            token_sequence=[1, 2, 3], prompt_text="test",
+            agent_id="test",
+            blocks={0: [block]},
+            total_tokens=16,
+            token_sequence=[1, 2, 3],
+            prompt_text="test",
         )
         path = adapter.save("test", blocks, {"model_id": "test"})
         loaded_blocks, _ = adapter.load(path)
@@ -205,15 +218,19 @@ class TestQ4FormatPreservation:
         # Dequantize loaded
         k_loaded = loaded_blocks[0][0].layer_data["k"]
         loaded_dequant = mx.dequantize(
-            k_loaded[0], k_loaded[1], k_loaded[2],
-            group_size=KV_GROUP_SIZE, bits=KV_BITS,
+            k_loaded[0],
+            k_loaded[1],
+            k_loaded[2],
+            group_size=KV_GROUP_SIZE,
+            bits=KV_BITS,
         )
         mx.eval(loaded_dequant)
         loaded_np = np.array(loaded_dequant)
 
         # Must be IDENTICAL (deterministic Q4 → FP16 conversion)
         np.testing.assert_array_equal(
-            original_np, loaded_np,
+            original_np,
+            loaded_np,
             err_msg="Dequantized values differ after round-trip",
         )
 
@@ -222,7 +239,10 @@ class TestQ4FormatPreservation:
         adapter = SafetensorsCacheAdapter(cache_dir)
 
         original = _build_real_q4_blocks(
-            n_layers=1, n_kv_heads=4, head_dim=64, seq_len=16,
+            n_layers=1,
+            n_kv_heads=4,
+            head_dim=64,
+            seq_len=16,
         )
 
         # First round-trip
@@ -250,14 +270,16 @@ class TestQ4FormatPreservation:
             k1_w = np.array(b1.layer_data["k"][0])
             k2_w = np.array(b2.layer_data["k"][0])
             np.testing.assert_array_equal(
-                k1_w, k2_w,
+                k1_w,
+                k2_w,
                 err_msg=f"Layer {layer_id}: K weights differ after double round-trip",
             )
 
             v1_s = np.array(b1.layer_data["v"][1])
             v2_s = np.array(b2.layer_data["v"][1])
             np.testing.assert_array_equal(
-                v1_s, v2_s,
+                v1_s,
+                v2_s,
                 err_msg=f"Layer {layer_id}: V scales differ after double round-trip",
             )
 
@@ -319,7 +341,10 @@ class TestBfloat16Q4Preservation:
         adapter = SafetensorsCacheAdapter(cache_dir)
 
         original = _build_bfloat16_q4_blocks(
-            n_layers=2, n_kv_heads=4, head_dim=64, seq_len=32,
+            n_layers=2,
+            n_kv_heads=4,
+            head_dim=64,
+            seq_len=32,
         )
 
         # Capture original arrays (before save) via float32 for bfloat16 comparison
@@ -330,8 +355,8 @@ class TestBfloat16Q4Preservation:
             v_w, v_s, v_b = block.layer_data["v"]
 
             # Verify source scales/biases are bfloat16
-            assert k_s.dtype == mx.bfloat16, f"Source K scales should be bfloat16"
-            assert k_b.dtype == mx.bfloat16, f"Source K biases should be bfloat16"
+            assert k_s.dtype == mx.bfloat16, "Source K scales should be bfloat16"
+            assert k_b.dtype == mx.bfloat16, "Source K biases should be bfloat16"
 
             original_arrays[f"L{layer_id}_K_w"] = np.array(k_w)
             # Compare bfloat16 via float32 (numpy doesn't have native bfloat16)
@@ -378,27 +403,33 @@ class TestBfloat16Q4Preservation:
             loaded_v_b = np.array(v_b.astype(mx.float32))
 
             np.testing.assert_array_equal(
-                original_arrays[f"L{layer_id}_K_w"], loaded_k_w,
+                original_arrays[f"L{layer_id}_K_w"],
+                loaded_k_w,
                 err_msg=f"Layer {layer_id} K weights not bit-identical",
             )
             np.testing.assert_array_equal(
-                original_arrays[f"L{layer_id}_K_s"], loaded_k_s,
+                original_arrays[f"L{layer_id}_K_s"],
+                loaded_k_s,
                 err_msg=f"Layer {layer_id} K scales not bit-identical",
             )
             np.testing.assert_array_equal(
-                original_arrays[f"L{layer_id}_K_b"], loaded_k_b,
+                original_arrays[f"L{layer_id}_K_b"],
+                loaded_k_b,
                 err_msg=f"Layer {layer_id} K biases not bit-identical",
             )
             np.testing.assert_array_equal(
-                original_arrays[f"L{layer_id}_V_w"], loaded_v_w,
+                original_arrays[f"L{layer_id}_V_w"],
+                loaded_v_w,
                 err_msg=f"Layer {layer_id} V weights not bit-identical",
             )
             np.testing.assert_array_equal(
-                original_arrays[f"L{layer_id}_V_s"], loaded_v_s,
+                original_arrays[f"L{layer_id}_V_s"],
+                loaded_v_s,
                 err_msg=f"Layer {layer_id} V scales not bit-identical",
             )
             np.testing.assert_array_equal(
-                original_arrays[f"L{layer_id}_V_b"], loaded_v_b,
+                original_arrays[f"L{layer_id}_V_b"],
+                loaded_v_b,
                 err_msg=f"Layer {layer_id} V biases not bit-identical",
             )
 
@@ -418,12 +449,17 @@ class TestBfloat16Q4Preservation:
 
         # Save → load
         block = KVBlock(
-            block_id=0, layer_id=0, token_count=16,
+            block_id=0,
+            layer_id=0,
+            token_count=16,
             layer_data={"k": (w, s, b), "v": (w, s, b)},
         )
         blocks = AgentBlocks(
-            agent_id="bf16_dequant", blocks={0: [block]}, total_tokens=16,
-            token_sequence=[1, 2, 3], prompt_text="test",
+            agent_id="bf16_dequant",
+            blocks={0: [block]},
+            total_tokens=16,
+            token_sequence=[1, 2, 3],
+            prompt_text="test",
         )
         path = adapter.save("bf16_dequant", blocks, {"model_id": "test"})
         loaded_blocks, _ = adapter.load(path)
@@ -431,14 +467,18 @@ class TestBfloat16Q4Preservation:
         # Dequantize loaded
         k_loaded = loaded_blocks[0][0].layer_data["k"]
         loaded_dequant = mx.dequantize(
-            k_loaded[0], k_loaded[1], k_loaded[2],
-            group_size=KV_GROUP_SIZE, bits=KV_BITS,
+            k_loaded[0],
+            k_loaded[1],
+            k_loaded[2],
+            group_size=KV_GROUP_SIZE,
+            bits=KV_BITS,
         )
         mx.eval(loaded_dequant)
         loaded_np = np.array(loaded_dequant.astype(mx.float32))
 
         np.testing.assert_array_equal(
-            original_np, loaded_np,
+            original_np,
+            loaded_np,
             err_msg="bfloat16 dequantized values differ after round-trip",
         )
 
@@ -480,8 +520,7 @@ class TestRealModelInference:
 
         alpha_chars = sum(1 for c in result if c.isalpha())
         assert alpha_chars > 5, (
-            f"Generated text has only {alpha_chars} alphabetic chars, "
-            f"likely garbage: {result!r}"
+            f"Generated text has only {alpha_chars} alphabetic chars, likely garbage: {result!r}"
         )
         assert len(result) > 5, f"Response too short: {result!r}"
         assert len(result) < 5000, f"Response unreasonably long: {len(result)} chars"
@@ -490,9 +529,7 @@ class TestRealModelInference:
 class TestRealBatchEngineEndToEnd:
     """End-to-end batch engine test with real model."""
 
-    def test_submit_and_step_produces_completion(
-        self, real_model_and_tokenizer, real_spec
-    ) -> None:
+    def test_submit_and_step_produces_completion(self, real_model_and_tokenizer, real_spec) -> None:
         """Full engine pipeline: submit → step → completion with real tokens."""
         from agent_memory.adapters.outbound.mlx_cache_adapter import MLXCacheAdapter
         from agent_memory.application.batch_engine import BlockPoolBatchEngine
@@ -517,15 +554,13 @@ class TestRealBatchEngineEndToEnd:
         assert len(completions) == 1, f"Expected 1 completion, got {len(completions)}"
         c = completions[0]
         assert c.uid == uid
-        assert len(c.text) > 0, f"Empty text from real model"
+        assert len(c.text) > 0, "Empty text from real model"
         assert c.finish_reason in ("stop", "length")
         assert c.token_count > 0
         assert c.blocks is not None
         assert c.blocks.total_tokens > 0
 
-    def test_extracted_cache_is_q4_quantized(
-        self, real_model_and_tokenizer, real_spec
-    ) -> None:
+    def test_extracted_cache_is_q4_quantized(self, real_model_and_tokenizer, real_spec) -> None:
         """Cache extracted after real inference should be Q4 quantized."""
         from agent_memory.adapters.outbound.mlx_cache_adapter import MLXCacheAdapter
         from agent_memory.application.batch_engine import BlockPoolBatchEngine
@@ -584,9 +619,7 @@ class TestRealBatchEngineEndToEnd:
             "Cache extraction may not be quantizing correctly."
         )
 
-    def test_cache_persist_and_reload(
-        self, real_model_and_tokenizer, real_spec, cache_dir
-    ) -> None:
+    def test_cache_persist_and_reload(self, real_model_and_tokenizer, real_spec, cache_dir) -> None:
         """Full pipeline: infer → extract Q4 → save to disk → load → verify."""
         from agent_memory.adapters.outbound.mlx_cache_adapter import MLXCacheAdapter
         from agent_memory.adapters.outbound.safetensors_cache_adapter import SafetensorsCacheAdapter

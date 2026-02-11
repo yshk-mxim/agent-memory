@@ -40,13 +40,12 @@ def render_message(
 
     if sender_id == "system":
         return  # System messages are injected context, not dialogue
-    else:
-        color = agent_colors.get(sender_name, "#888888")
-        st.markdown(
-            f'<span style="color:{color}; font-weight:bold;">'
-            f"[Turn {turn}] {sender_name}:</span> {content}",
-            unsafe_allow_html=True,
-        )
+    color = agent_colors.get(sender_name, "#888888")
+    st.markdown(
+        f'<span style="color:{color}; font-weight:bold;">'
+        f"[Turn {turn}] {sender_name}:</span> {content}",
+        unsafe_allow_html=True,
+    )
 
 
 def render_timeline(

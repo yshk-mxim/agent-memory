@@ -31,6 +31,7 @@ pytestmark = pytest.mark.unit
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _minimal_agent(**overrides: object) -> dict:
     base = {"display_name": "Alice"}
     base.update(overrides)
@@ -57,6 +58,7 @@ def _minimal_scenario(**overrides: object) -> dict:
 # ---------------------------------------------------------------------------
 # AgentSpecModel
 # ---------------------------------------------------------------------------
+
 
 class TestAgentSpecModel:
     def test_valid_defaults(self):
@@ -100,9 +102,7 @@ class TestAgentSpecModel:
         with pytest.raises(ValidationError, match="role"):
             AgentSpecModel(display_name="A", role=bad_role)
 
-    @pytest.mark.parametrize(
-        "role", ["participant", "observer", "narrator", "judge", "moderator"]
-    )
+    @pytest.mark.parametrize("role", ["participant", "observer", "narrator", "judge", "moderator"])
     def test_valid_roles(self, role: str):
         model = AgentSpecModel(display_name="A", role=role)
         assert model.role == role
@@ -125,15 +125,14 @@ class TestAgentSpecModel:
 # InteractionEdgeModel
 # ---------------------------------------------------------------------------
 
+
 class TestInteractionEdgeModel:
     def test_valid_defaults(self):
         model = InteractionEdgeModel(from_agent="a", to_agent="b")
         assert model.channel == "public"
 
     def test_to_domain_round_trip(self):
-        model = InteractionEdgeModel(
-            from_agent="alice", to_agent="bob", channel="whisper"
-        )
+        model = InteractionEdgeModel(from_agent="alice", to_agent="bob", channel="whisper")
         domain = model.to_domain()
         assert isinstance(domain, InteractionEdge)
         assert domain.from_agent == "alice"
@@ -142,9 +141,7 @@ class TestInteractionEdgeModel:
 
     @pytest.mark.parametrize("channel", ["public", "whisper", "observe"])
     def test_valid_channels(self, channel: str):
-        model = InteractionEdgeModel(
-            from_agent="a", to_agent="b", channel=channel
-        )
+        model = InteractionEdgeModel(from_agent="a", to_agent="b", channel=channel)
         assert model.channel == channel
 
     @pytest.mark.parametrize("bad_ch", ["private", "broadcast", "Public", ""])
@@ -156,6 +153,7 @@ class TestInteractionEdgeModel:
 # ---------------------------------------------------------------------------
 # PhaseSpecModel
 # ---------------------------------------------------------------------------
+
 
 class TestPhaseSpecModel:
     def test_valid_with_defaults(self):
@@ -178,9 +176,7 @@ class TestPhaseSpecModel:
             max_turns=10,
             auto_rounds=5,
             interactions=[
-                InteractionEdgeModel(
-                    from_agent="alice", to_agent="bob", channel="whisper"
-                )
+                InteractionEdgeModel(from_agent="alice", to_agent="bob", channel="whisper")
             ],
         )
         domain = model.to_domain()
@@ -268,6 +264,7 @@ class TestPhaseSpecModel:
 # OutcomeRuleModel
 # ---------------------------------------------------------------------------
 
+
 class TestOutcomeRuleModel:
     def test_valid_with_defaults(self):
         model = OutcomeRuleModel(type="summary")
@@ -313,6 +310,7 @@ class TestOutcomeRuleModel:
 # PayoffMatrixModel
 # ---------------------------------------------------------------------------
 
+
 class TestPayoffMatrixModel:
     def test_valid_construction(self):
         model = PayoffMatrixModel(
@@ -344,6 +342,7 @@ class TestPayoffMatrixModel:
 # ---------------------------------------------------------------------------
 # UIHintsModel
 # ---------------------------------------------------------------------------
+
 
 class TestUIHintsModel:
     def test_defaults(self):
@@ -417,6 +416,7 @@ class TestUIHintsModel:
 # ScenarioSpecModel
 # ---------------------------------------------------------------------------
 
+
 class TestScenarioSpecModel:
     def test_valid_minimal(self):
         model = ScenarioSpecModel(**_minimal_scenario())
@@ -464,9 +464,7 @@ class TestScenarioSpecModel:
 
     # --- ID validation ---
 
-    @pytest.mark.parametrize(
-        "bad_id", ["", "A", "1start", "has space", "UPPER", "a" * 51]
-    )
+    @pytest.mark.parametrize("bad_id", ["", "A", "1start", "has space", "UPPER", "a" * 51])
     def test_invalid_id_rejected(self, bad_id: str):
         with pytest.raises(ValidationError, match="id"):
             ScenarioSpecModel(**_minimal_scenario(id=bad_id))
@@ -523,9 +521,7 @@ class TestScenarioSpecModel:
     # --- Cross-validation: phase agent refs ---
 
     def test_phase_referencing_nonexistent_agent_rejected(self):
-        data = _minimal_scenario(
-            phases=[_minimal_phase(agents=["alice", "bob"])]
-        )
+        data = _minimal_scenario(phases=[_minimal_phase(agents=["alice", "bob"])])
         with pytest.raises(ValidationError, match=r"bob.*not found in agents"):
             ScenarioSpecModel(**data)
 
@@ -556,9 +552,7 @@ class TestScenarioSpecModel:
         assert len(model.phases) == 3
 
     def test_cross_validation_error_message_lists_available_keys(self):
-        data = _minimal_scenario(
-            phases=[_minimal_phase(agents=["ghost"])]
-        )
+        data = _minimal_scenario(phases=[_minimal_phase(agents=["ghost"])])
         with pytest.raises(ValidationError, match="Available:"):
             ScenarioSpecModel(**data)
 

@@ -13,9 +13,7 @@ from agent_memory.domain.coordination import (
     DecisionMode,
     Topology,
 )
-from agent_memory.domain.errors import CoordinationError
 from agent_memory.domain.value_objects import CompletedGeneration, StreamDelta
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -122,8 +120,11 @@ class TestTurnStreaming:
     async def test_direct_fallback(self, mock_engine, mock_cache_store, agents):
         """No scheduler → uses _generate_direct."""
         completion = CompletedGeneration(
-            uid="uid_1", text="Direct answer", blocks=None,
-            finish_reason="stop", token_count=2,
+            uid="uid_1",
+            text="Direct answer",
+            blocks=None,
+            finish_reason="stop",
+            token_count=2,
         )
         mock_engine.submit.return_value = "uid_1"
         mock_engine.step.return_value = [completion]

@@ -31,6 +31,7 @@ pytestmark = pytest.mark.integration
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_spec(n_layers: int = 4) -> ModelCacheSpec:
     return ModelCacheSpec(
         n_layers=n_layers,
@@ -61,7 +62,9 @@ def _make_q4_numpy_arrays(
     Shape: (1, n_kv_heads, seq_len, head_dim // 8) for weights.
     """
     packed_dim = head_dim // 8
-    weights = np.random.randint(0, 2**32, size=(1, n_kv_heads, seq_len, packed_dim), dtype=np.uint32)
+    weights = np.random.randint(
+        0, 2**32, size=(1, n_kv_heads, seq_len, packed_dim), dtype=np.uint32
+    )
     n_groups = head_dim // group_size
     scales = np.random.randn(1, n_kv_heads, seq_len, n_groups).astype(np.float16)
     biases = np.random.randn(1, n_kv_heads, seq_len, n_groups).astype(np.float16)
@@ -126,6 +129,7 @@ class InMemoryAdapter:
 # ---------------------------------------------------------------------------
 # Test 3.0b: Safetensors numpy round-trip (bit-identical)
 # ---------------------------------------------------------------------------
+
 
 class TestSafetensorsNumpyRoundTrip:
     """Verify safetensors save_file/load_file preserves arrays exactly."""
@@ -227,6 +231,7 @@ class TestSafetensorsNumpyRoundTrip:
 # Test 3.0c: Q4 Format Preservation
 # ---------------------------------------------------------------------------
 
+
 class TestQ4FormatPreservation:
     """Verify Q4 quantized data stays Q4 through the safetensors pipeline."""
 
@@ -295,6 +300,7 @@ class TestQ4FormatPreservation:
 # ---------------------------------------------------------------------------
 # Test 3.0d: Character-Level Prefix Match Round-Trip
 # ---------------------------------------------------------------------------
+
 
 class TestCharacterPrefixRoundTrip:
     """Verify prompt_text is preserved through AgentCacheStore save → load."""
@@ -451,6 +457,7 @@ class TestCharacterPrefixRoundTrip:
 # ---------------------------------------------------------------------------
 # Test 3.0e: Token Sequence Fidelity
 # ---------------------------------------------------------------------------
+
 
 class TestTokenSequenceFidelity:
     """Verify token_sequence is preserved exactly through save → load."""
@@ -616,6 +623,7 @@ class TestTokenSequenceFidelity:
 # ---------------------------------------------------------------------------
 # Test 3.0a: AgentCacheStore save → evict → load → compare
 # ---------------------------------------------------------------------------
+
 
 class TestAgentCacheStoreRoundTrip:
     """Full AgentCacheStore round-trip: save → evict → load → compare."""

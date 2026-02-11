@@ -37,7 +37,6 @@ def _make_registry(mock_loader, mock_extractor):
 
 
 class TestModelRegistryLifecycle:
-
     def test_init_creates_empty_registry(self, mock_loader, mock_extractor):
         registry = _make_registry(mock_loader, mock_extractor)
 

@@ -26,8 +26,8 @@ import signal
 import subprocess
 import sys
 import time
-from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from dataclasses import asdict, dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -36,6 +36,7 @@ import httpx
 # ---------------------------------------------------------------------------
 # Data classes
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class ScenarioResult:
@@ -75,6 +76,7 @@ class ScenarioStats:
 # ---------------------------------------------------------------------------
 # Statistics
 # ---------------------------------------------------------------------------
+
 
 def percentile(values: list[float], pct: float) -> float:
     """Compute percentile using linear interpolation."""
@@ -134,9 +136,7 @@ class PromptFactory:
         content = (self._padding * repeats)[:chars_needed]
         return [{"role": "user", "content": content}]
 
-    def build_request(
-        self, target_tokens: int, max_tokens: int = 128
-    ) -> dict:
+    def build_request(self, target_tokens: int, max_tokens: int = 128) -> dict:
         """Build full Anthropic API request body."""
         return {
             "model": "default",
@@ -173,6 +173,7 @@ class PromptFactory:
 # ---------------------------------------------------------------------------
 # Request client (non-streaming — server generates all tokens before response)
 # ---------------------------------------------------------------------------
+
 
 class RequestClient:
     """Async HTTP client that measures E2E latency from non-streaming requests.
@@ -266,6 +267,7 @@ class RequestClient:
 # Memory probe
 # ---------------------------------------------------------------------------
 
+
 class MemoryProbe:
     """Query /debug/memory endpoint."""
 
@@ -284,6 +286,7 @@ class MemoryProbe:
 # Server manager
 # ---------------------------------------------------------------------------
 
+
 class ServerManager:
     """Start/stop agent-memory server subprocess."""
 
@@ -301,9 +304,14 @@ class ServerManager:
 
         self.proc = subprocess.Popen(
             [
-                sys.executable, "-m", "agent_memory.entrypoints.cli", "serve",
-                "--port", str(self.port),
-                "--log-level", "WARNING",
+                sys.executable,
+                "-m",
+                "agent_memory.entrypoints.cli",
+                "serve",
+                "--port",
+                str(self.port),
+                "--log-level",
+                "WARNING",
             ],
             env=env,
             stdout=subprocess.PIPE,
@@ -386,6 +394,7 @@ PRESSURE_SIZES = [32000, 48000, 64000]
 # Benchmark suite
 # ---------------------------------------------------------------------------
 
+
 class BenchmarkSuite:
     """Orchestrates all benchmark scenarios across server configs."""
 
@@ -428,7 +437,7 @@ class BenchmarkSuite:
         except Exception:
             sha = "unknown"
         return {
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "model_id": "mlx-community/DeepSeek-Coder-V2-Lite-Instruct-4bit-mlx",
             "machine": {
                 "os": platform.system(),
@@ -473,8 +482,12 @@ class BenchmarkSuite:
         # Compute stats for key metrics
         stats: dict[str, Any] = {}
         for metric in [
-            "ttft_ms", "e2e_ms", "itl_mean_ms", "tpot_ms",
-            "decode_tps", "overall_tps",
+            "ttft_ms",
+            "e2e_ms",
+            "itl_mean_ms",
+            "tpot_ms",
+            "decode_tps",
+            "overall_tps",
         ]:
             values = [r[metric] for r in runs_data if not r.get("error")]
             stats[metric] = compute_stats(values)
@@ -504,12 +517,8 @@ class BenchmarkSuite:
             for tokens in warmup_sizes:
                 label = f"{tokens // 1000}K"
                 print(f"[WARMUP] Sending {label}-token request...")
-                body = self.prompt.build_request(
-                    target_tokens=tokens, max_tokens=16
-                )
-                result = await client.send_and_measure(
-                    body, session_id=f"warmup_{tokens}"
-                )
+                body = self.prompt.build_request(target_tokens=tokens, max_tokens=16)
+                result = await client.send_and_measure(body, session_id=f"warmup_{tokens}")
                 if result.error:
                     print(f"[WARMUP] {label} failed: {result.error[:120]}")
                     break
@@ -529,9 +538,7 @@ class BenchmarkSuite:
             # Clear warmup caches
             async with httpx.AsyncClient(timeout=10.0) as c:
                 for tokens in warmup_sizes:
-                    await c.delete(
-                        f"{self.base_url}/v1/agents/sess_warmup_{tokens}"
-                    )
+                    await c.delete(f"{self.base_url}/v1/agents/sess_warmup_{tokens}")
 
             mem_after = await self.memory.snapshot()
             active = mem_after.get("active_memory_mb", 0)
@@ -592,9 +599,7 @@ class BenchmarkSuite:
             if warm:
                 print(f"  [{scenario_name}] Priming cache...")
                 try:
-                    prime_result = await sse.send_and_measure(
-                        body, session_id=sid
-                    )
+                    prime_result = await sse.send_and_measure(body, session_id=sid)
                 except (httpx.ConnectError, httpx.RemoteProtocolError) as e:
                     print(f"  [{scenario_name}] PRIME CRASHED: {type(e).__name__}")
                     return results
@@ -612,9 +617,7 @@ class BenchmarkSuite:
             if not warm:
                 print(f"  [{scenario_name}] Warmup run...")
                 try:
-                    await sse.send_and_measure(
-                        body, session_id=f"{sid}_warmup"
-                    )
+                    await sse.send_and_measure(body, session_id=f"{sid}_warmup")
                 except (httpx.ConnectError, httpx.RemoteProtocolError) as e:
                     print(f"  [{scenario_name}] WARMUP CRASHED: {type(e).__name__}")
                     return results
@@ -683,9 +686,7 @@ class BenchmarkSuite:
                 t_wall_start = time.perf_counter()
 
                 coros = [
-                    sse.send_and_measure(
-                        body, session_id=f"{scenario_name}_r{run_i}_c{j}"
-                    )
+                    sse.send_and_measure(body, session_id=f"{scenario_name}_r{run_i}_c{j}")
                     for j in range(n_concurrent)
                 ]
                 try:
@@ -723,9 +724,7 @@ class BenchmarkSuite:
 
     # --- Interleave stall test ---
 
-    async def _run_interleave_stall(
-        self, config_name: str
-    ) -> list[ScenarioResult]:
+    async def _run_interleave_stall(self, config_name: str) -> list[ScenarioResult]:
         """Send A(2K) then B(8K) 0.5s later. Measure A's ITL stability."""
         scenario_name = "interleave_stall"
         if self._is_completed(config_name, scenario_name):
@@ -741,15 +740,11 @@ class BenchmarkSuite:
 
             for run_i in range(self.runs):
                 task_a = asyncio.create_task(
-                    sse.send_and_measure(
-                        body_a, session_id=f"stall_a_{run_i}"
-                    )
+                    sse.send_and_measure(body_a, session_id=f"stall_a_{run_i}")
                 )
                 await asyncio.sleep(0.5)  # Let A begin decoding
                 task_b = asyncio.create_task(
-                    sse.send_and_measure(
-                        body_b, session_id=f"stall_b_{run_i}"
-                    )
+                    sse.send_and_measure(body_b, session_id=f"stall_b_{run_i}")
                 )
                 try:
                     result_a, result_b = await asyncio.gather(task_a, task_b)
@@ -776,9 +771,7 @@ class BenchmarkSuite:
 
     # --- Config runners ---
 
-    async def run_config(
-        self, config_name: str, env: dict[str, str]
-    ) -> None:
+    async def run_config(self, config_name: str, env: dict[str, str]) -> None:
         """Run all scenarios for a given config."""
         sizes = CONTEXT_SIZES
         if self.quick:
@@ -802,9 +795,7 @@ class BenchmarkSuite:
         for label, tokens in sizes.items():
             scenario_name = f"warm_{label}"
             sid = f"bench_{scenario_name}"
-            await self._run_scenario(
-                config_name, scenario_name, tokens, warm=True
-            )
+            await self._run_scenario(config_name, scenario_name, tokens, warm=True)
             await self._cleanup_scenario_caches(scenario_name, sid, warm=True)
             if not self.server.is_alive():
                 print(f"  [!] Server crashed — skipping remaining {config_name} scenarios")
@@ -828,9 +819,7 @@ class BenchmarkSuite:
         for label, tokens in [("medium", 2000), ("long", 8000)]:
             scenario = f"chunked_{label}"
             await self._run_scenario("single", scenario, tokens)
-            await self._cleanup_scenario_caches(
-                scenario, f"bench_{scenario}"
-            )
+            await self._cleanup_scenario_caches(scenario, f"bench_{scenario}")
             if not self.server.is_alive():
                 return
 
@@ -839,9 +828,7 @@ class BenchmarkSuite:
         for label, tokens in [("medium", 2000), ("long", 8000)]:
             scenario = f"unchunked_{label}"
             await self._run_scenario("unchunked", scenario, tokens)
-            await self._cleanup_scenario_caches(
-                scenario, f"bench_{scenario}"
-            )
+            await self._cleanup_scenario_caches(scenario, f"bench_{scenario}")
             if not self.server.is_alive():
                 return
 
@@ -865,9 +852,7 @@ class BenchmarkSuite:
                 except Exception:
                     mem_before = {}
                 try:
-                    result = await sse.send_and_measure(
-                        body, session_id=f"pressure_{tokens}"
-                    )
+                    result = await sse.send_and_measure(body, session_id=f"pressure_{tokens}")
                 except (httpx.ConnectError, httpx.RemoteProtocolError) as e:
                     print(f"  [{scenario}] SERVER CRASHED: {type(e).__name__}")
                     break
@@ -940,9 +925,7 @@ class BenchmarkSuite:
 
         # Config C: Unchunked (only 32K comparison)
         if not self.quick:
-            print(
-                "[CONFIG C] Starting server (unchunked, chunked_prefill=disabled)..."
-            )
+            print("[CONFIG C] Starting server (unchunked, chunked_prefill=disabled)...")
             self.server.start(CONFIG_C)
             try:
                 sse = RequestClient(self.base_url)
@@ -1030,7 +1013,9 @@ class BenchmarkSuite:
                 f"{'med(ms)':>9} │ {'(ms)':>7} │ "
                 f"{'(tok/s)':>7} │ {'(tok)':>6} │ {'Mem(MB)':>8}"
             )
-            print(f"{'─' * 22}┼{'─' * 8}┼{'─' * 8}┼{'─' * 11}┼{'─' * 9}┼{'─' * 9}┼{'─' * 8}┼{'─' * 10}")
+            print(
+                f"{'─' * 22}┼{'─' * 8}┼{'─' * 8}┼{'─' * 11}┼{'─' * 9}┼{'─' * 9}┼{'─' * 8}┼{'─' * 10}"
+            )
 
             for sc_name, sc_data in scenarios.items():
                 stats = sc_data.get("stats", {})
@@ -1079,47 +1064,32 @@ class BenchmarkSuite:
             active = r.get("memory_after_mb", 0)
             err = r.get("error")
             st = "ERR" if err else "OK"
-            print(
-                f"{tokens:>14,} │ {ttft:>10,.0f} │ "
-                f"{peak:>14,.0f} │ {active:>12,.0f} │ {st:>8}"
-            )
+            print(f"{tokens:>14,} │ {ttft:>10,.0f} │ {peak:>14,.0f} │ {active:>12,.0f} │ {st:>8}")
 
 
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Capability benchmark suite for agent-memory server"
     )
+    parser.add_argument("--quick", action="store_true", help="Quick mode: 1 run, skip xl/pressure")
     parser.add_argument(
-        "--quick", action="store_true",
-        help="Quick mode: 1 run, skip xl/pressure"
+        "--config", choices=["single", "batched", "unchunked"], help="Run only a specific config"
     )
     parser.add_argument(
-        "--config", choices=["single", "batched", "unchunked"],
-        help="Run only a specific config"
+        "--pressure-only", action="store_true", help="Run only memory pressure tests"
     )
     parser.add_argument(
-        "--pressure-only", action="store_true",
-        help="Run only memory pressure tests"
+        "--runs", type=int, default=3, help="Number of runs per scenario (default: 3)"
     )
+    parser.add_argument("--port", type=int, default=8399, help="Server port (default: 8399)")
+    parser.add_argument("--output", type=str, default=None, help="Output JSON file path")
     parser.add_argument(
-        "--runs", type=int, default=3,
-        help="Number of runs per scenario (default: 3)"
-    )
-    parser.add_argument(
-        "--port", type=int, default=8399,
-        help="Server port (default: 8399)"
-    )
-    parser.add_argument(
-        "--output", type=str, default=None,
-        help="Output JSON file path"
-    )
-    parser.add_argument(
-        "--resume", type=str, default=None,
-        help="Resume from a previous results JSON file"
+        "--resume", type=str, default=None, help="Resume from a previous results JSON file"
     )
     args = parser.parse_args()
 

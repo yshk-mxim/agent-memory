@@ -104,9 +104,11 @@ def benchmark_memory_methods():
 
     # Calculate lock overhead vs baseline
     used_overhead = ((used_memory_per_call - total_memory_per_call) / total_memory_per_call) * 100
-    available_overhead = ((available_memory_per_call - total_memory_per_call) / total_memory_per_call) * 100
+    available_overhead = (
+        (available_memory_per_call - total_memory_per_call) / total_memory_per_call
+    ) * 100
 
-    print(f"\nLock overhead:")
+    print("\nLock overhead:")
     print(f"  used_memory():      +{used_overhead:.1f}% vs baseline")
     print(f"  available_memory(): +{available_overhead:.1f}% vs baseline")
 
@@ -118,11 +120,10 @@ def benchmark_memory_methods():
         print("\nLock overhead is well within <1ms requirement.")
         print("Thread-safe memory tracking has minimal performance impact.")
         return True
-    else:
-        print("❌ NEW-2 BENCHMARK: FAIL")
-        print("=" * 50)
-        print("\nLock overhead exceeds 1ms requirement!")
-        return False
+    print("❌ NEW-2 BENCHMARK: FAIL")
+    print("=" * 50)
+    print("\nLock overhead exceeds 1ms requirement!")
+    return False
 
 
 if __name__ == "__main__":

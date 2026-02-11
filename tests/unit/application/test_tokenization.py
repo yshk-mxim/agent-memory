@@ -29,11 +29,11 @@ def _make_tokenizer(
     tok.encode.return_value = [99, 98, 97]  # fallback tokens
 
     if chat_template is not None and apply_result_tokens is not None:
+
         def side_effect(messages, **kwargs):
             if kwargs.get("tokenize", True):
                 return apply_result_tokens
-            else:
-                return apply_result_text or "templated text"
+            return apply_result_text or "templated text"
 
         tok.apply_chat_template.side_effect = side_effect
 
@@ -44,7 +44,6 @@ def _make_tokenizer(
 
 
 class TestIsGptOssTokenizer:
-
     def test_harmony_format_detected(self) -> None:
         tok = _make_tokenizer("<|channel|>reasoning<|start|>template")
         assert _is_gpt_oss_tokenizer(tok) is True
@@ -70,7 +69,6 @@ class TestIsGptOssTokenizer:
 
 
 class TestTokenizeWithChatTemplate:
-
     def test_no_chat_template_uses_fallback(self) -> None:
         tok = _make_tokenizer(None)
         tokens, text = tokenize_with_chat_template(
@@ -173,7 +171,7 @@ class TestTokenizeWithChatTemplate:
         call_args = tok.apply_chat_template.call_args_list[0]
         passed_messages = call_args[0][0]
         assert len(passed_messages) == 1
-        assert "A\nB" == passed_messages[0]["content"]
+        assert passed_messages[0]["content"] == "A\nB"
 
     def test_deepseek_no_system_merge(self) -> None:
         """DeepSeek does NOT merge system into user (only Gemma does)."""
@@ -225,8 +223,7 @@ class TestTokenizeWithChatTemplate:
         def side_effect(messages, **kwargs):
             if kwargs.get("tokenize", True):
                 return "not a list"  # invalid token result
-            else:
-                return "templated text"
+            return "templated text"
 
         tok.apply_chat_template.side_effect = side_effect
         tok.encode.return_value = [99]
@@ -245,8 +242,7 @@ class TestTokenizeWithChatTemplate:
         def side_effect(messages, **kwargs):
             if kwargs.get("tokenize", True):
                 return [1, 2, 3]
-            else:
-                return [1, 2, 3]  # not a string
+            return [1, 2, 3]  # not a string
 
         tok.apply_chat_template.side_effect = side_effect
         tok.encode.return_value = [99]

@@ -590,12 +590,16 @@ class TestAgentCacheStorePrefixMatching:
 
             block = KVBlock(block_id=0, layer_id=0, token_count=256, layer_data="fake")
             blocks_a = AgentBlocks(
-                agent_id="agent_1", blocks={0: [block]},
-                total_tokens=256, token_sequence=[1, 2],
+                agent_id="agent_1",
+                blocks={0: [block]},
+                total_tokens=256,
+                token_sequence=[1, 2],
             )
             blocks_b = AgentBlocks(
-                agent_id="agent_2", blocks={0: [block]},
-                total_tokens=256, token_sequence=[1, 2, 3, 4],
+                agent_id="agent_2",
+                blocks={0: [block]},
+                total_tokens=256,
+                token_sequence=[1, 2, 3, 4],
             )
 
             store.save("agent_1", blocks_a)
@@ -632,7 +636,8 @@ class TestLRUEvictionWithNAgents:
 
             for name in ["A", "B", "C"]:
                 blocks = AgentBlocks(
-                    agent_id=name, blocks={0: [self._make_block()]},
+                    agent_id=name,
+                    blocks={0: [self._make_block()]},
                     total_tokens=256,
                 )
                 store.save(name, blocks)
@@ -642,7 +647,8 @@ class TestLRUEvictionWithNAgents:
 
             # Add D — triggers eviction of A (oldest)
             blocks_d = AgentBlocks(
-                agent_id="D", blocks={0: [self._make_block()]},
+                agent_id="D",
+                blocks={0: [self._make_block()]},
                 total_tokens=256,
             )
             store.save("D", blocks_d)
@@ -665,7 +671,8 @@ class TestLRUEvictionWithNAgents:
 
             for name in ["A", "B", "C"]:
                 blocks = AgentBlocks(
-                    agent_id=name, blocks={0: [self._make_block()]},
+                    agent_id=name,
+                    blocks={0: [self._make_block()]},
                     total_tokens=256,
                 )
                 store.save(name, blocks)
@@ -679,7 +686,8 @@ class TestLRUEvictionWithNAgents:
 
             # Add D — should evict B (now the oldest, since A was re-promoted)
             blocks_d = AgentBlocks(
-                agent_id="D", blocks={0: [self._make_block()]},
+                agent_id="D",
+                blocks={0: [self._make_block()]},
                 total_tokens=256,
             )
             store.save("D", blocks_d)
@@ -702,7 +710,8 @@ class TestLRUEvictionWithNAgents:
 
             for i in range(10):
                 blocks = AgentBlocks(
-                    agent_id=f"agent_{i}", blocks={0: [self._make_block()]},
+                    agent_id=f"agent_{i}",
+                    blocks={0: [self._make_block()]},
                     total_tokens=256,
                 )
                 store.save(f"agent_{i}", blocks)
@@ -726,7 +735,8 @@ class TestLRUEvictionWithNAgents:
 
             for i in range(5):
                 blocks = AgentBlocks(
-                    agent_id=f"agent_{i}", blocks={0: [self._make_block()]},
+                    agent_id=f"agent_{i}",
+                    blocks={0: [self._make_block()]},
                     total_tokens=256,
                 )
                 store.save(f"agent_{i}", blocks)

@@ -13,6 +13,7 @@ stdlib and typing imports.
 
 from dataclasses import dataclass, field
 from enum import Enum
+from typing import Any
 from uuid import uuid4
 
 
@@ -107,7 +108,7 @@ class ChannelMessage:
     turn_number: int
     visible_to: frozenset[str] = field(default_factory=frozenset)
     is_interrupted: bool = False
-    metadata: dict = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass

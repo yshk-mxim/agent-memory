@@ -30,9 +30,10 @@ def _make_tokenizer(chat_template: str | None = None) -> MagicMock:
 
 
 class TestIsDeepSeek:
-
     def test_deepseek_template_detected(self, adapter: ChatTemplateAdapter) -> None:
-        tok = _make_tokenizer("{% if 'User: ' in message %}some 'User: ' and 'Assistant: ' template{% endif %}")
+        tok = _make_tokenizer(
+            "{% if 'User: ' in message %}some 'User: ' and 'Assistant: ' template{% endif %}"
+        )
         assert adapter.is_deepseek(tok) is True
 
     def test_gemma_template_not_deepseek(self, adapter: ChatTemplateAdapter) -> None:
@@ -56,7 +57,6 @@ class TestIsDeepSeek:
 
 
 class TestNeedsMessageMerging:
-
     def test_llama_header_detected(self, adapter: ChatTemplateAdapter) -> None:
         tok = _make_tokenizer("<|start_header_id|>system<|end_header_id|>")
         assert adapter.needs_message_merging(tok) is True
@@ -90,7 +90,6 @@ class TestNeedsMessageMerging:
 
 
 class TestGetTemplateKwargs:
-
     def test_base_kwargs_always_present(self, adapter: ChatTemplateAdapter) -> None:
         tok = _make_tokenizer("{{message}}")
         kwargs = adapter.get_template_kwargs(tok)
@@ -114,7 +113,6 @@ class TestGetTemplateKwargs:
 
 
 class TestStaticHelpers:
-
     def test_is_harmony_format_true(self) -> None:
         assert ChatTemplateAdapter._is_harmony_format("<|channel|>r<|start|>") is True
 

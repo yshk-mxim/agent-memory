@@ -370,7 +370,9 @@ class AgentCacheStore:
                         return entry.blocks
 
                 # Blocks were cleared - fall through to disk load
-                logger.debug(f"Hot cache entry for {agent_id} has cleared blocks, reloading from disk")
+                logger.debug(
+                    f"Hot cache entry for {agent_id} has cleared blocks, reloading from disk"
+                )
 
             # Check warm tier (disk)
             if agent_id in self._warm_cache:
@@ -408,7 +410,13 @@ class AgentCacheStore:
             # This ensures warm cache test can reload from disk
             if agent_id in self._hot_cache:
                 entry = self._hot_cache[agent_id]
-                logger.debug(f"[DELETE] agent={agent_id}, dirty={entry.dirty}, blocks={'None' if entry.blocks is None else 'present'}, keep_disk={keep_disk}")
+                logger.debug(
+                    "[DELETE] agent=%s, dirty=%s, blocks=%s, keep_disk=%s",
+                    agent_id,
+                    entry.dirty,
+                    "None" if entry.blocks is None else "present",
+                    keep_disk,
+                )
                 if entry.dirty and entry.blocks is not None:
                     self._save_to_disk(agent_id)
                     logger.debug(f"Flushed dirty cache to disk before eviction: {agent_id}")
@@ -621,6 +629,7 @@ class AgentCacheStore:
         # Without this, warm cache tests may read incomplete/corrupt data
         if cache_path.exists():
             import os
+
             try:
                 # Force OS to flush file buffers to physical disk
                 fd = os.open(cache_path, os.O_RDONLY)
@@ -688,11 +697,15 @@ class AgentCacheStore:
 
             # Validate model tag compatibility
             saved_v_head_dim_raw = metadata.get("v_head_dim")
-            saved_v_head_dim = int(saved_v_head_dim_raw) if saved_v_head_dim_raw is not None else None
+            saved_v_head_dim = (
+                int(saved_v_head_dim_raw) if saved_v_head_dim_raw is not None else None
+            )
             saved_kv_bits_raw = metadata.get("kv_bits")
             saved_kv_bits = int(saved_kv_bits_raw) if saved_kv_bits_raw is not None else None
             saved_kv_group_size_raw = metadata.get("kv_group_size")
-            saved_kv_group_size = int(saved_kv_group_size_raw) if saved_kv_group_size_raw is not None else None
+            saved_kv_group_size = (
+                int(saved_kv_group_size_raw) if saved_kv_group_size_raw is not None else None
+            )
             saved_tag = ModelTag(
                 model_id=str(metadata.get("model_id", "")),
                 n_layers=int(metadata.get("n_layers", 0)),
@@ -742,7 +755,7 @@ class AgentCacheStore:
 
             return blocks
 
-        except (OSError, IOError) as e:
+        except OSError as e:
             logger.warning(f"Failed to load cache for {agent_id} from {cache_path}: {e}")
             return None
         except (ValueError, KeyError) as e:
@@ -784,16 +797,18 @@ class AgentCacheStore:
                 if cache_path.exists():
                     file_size = cache_path.stat().st_size
 
-                result.append({
-                    "agent_id": agent_id,
-                    "tier": "hot",
-                    "tokens": tokens,
-                    "last_accessed": entry.last_accessed,
-                    "access_count": entry.access_count,
-                    "dirty": entry.dirty,
-                    "model_id": entry.model_tag.model_id,
-                    "file_size_bytes": file_size,
-                })
+                result.append(
+                    {
+                        "agent_id": agent_id,
+                        "tier": "hot",
+                        "tokens": tokens,
+                        "last_accessed": entry.last_accessed,
+                        "access_count": entry.access_count,
+                        "dirty": entry.dirty,
+                        "model_id": entry.model_tag.model_id,
+                        "file_size_bytes": file_size,
+                    }
+                )
 
             # Warm tier agents (on disk, not in memory)
             warm_ids = set(self._warm_cache.keys()) - set(self._hot_cache.keys())
@@ -803,16 +818,18 @@ class AgentCacheStore:
                 if cache_path.exists():
                     file_size = cache_path.stat().st_size
 
-                result.append({
-                    "agent_id": agent_id,
-                    "tier": "warm",
-                    "tokens": 0,  # Unknown without loading
-                    "last_accessed": 0.0,
-                    "access_count": 0,
-                    "dirty": False,
-                    "model_id": self.model_tag.model_id,
-                    "file_size_bytes": file_size,
-                })
+                result.append(
+                    {
+                        "agent_id": agent_id,
+                        "tier": "warm",
+                        "tokens": 0,  # Unknown without loading
+                        "last_accessed": 0.0,
+                        "access_count": 0,
+                        "dirty": False,
+                        "model_id": self.model_tag.model_id,
+                        "file_size_bytes": file_size,
+                    }
+                )
 
             return result
 

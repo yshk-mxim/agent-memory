@@ -17,8 +17,7 @@ REQUIRES: Apple Silicon, dangerouslyDisableSandbox: true
 """
 
 import pytest
-
-from mlx_lm import load, generate
+from mlx_lm import generate, load
 from mlx_lm.sample_utils import make_sampler
 
 pytestmark = pytest.mark.integration
@@ -91,9 +90,26 @@ class TestInstructionFollowing:
         result = _gen(model, tokenizer, "List three colors.", max_tokens=60)
 
         known_colors = {
-            "red", "blue", "green", "yellow", "orange", "purple", "pink",
-            "black", "white", "brown", "gray", "grey", "violet", "cyan",
-            "magenta", "indigo", "gold", "silver", "crimson", "scarlet",
+            "red",
+            "blue",
+            "green",
+            "yellow",
+            "orange",
+            "purple",
+            "pink",
+            "black",
+            "white",
+            "brown",
+            "gray",
+            "grey",
+            "violet",
+            "cyan",
+            "magenta",
+            "indigo",
+            "gold",
+            "silver",
+            "crimson",
+            "scarlet",
         }
         result_lower = result.lower()
         matches = [c for c in known_colors if c in result_lower]
@@ -149,6 +165,4 @@ class TestOutputFormats:
         common_words = {"the", "a", "is", "an", "it", "and", "of", "to", "in", "for", "cat"}
         result_words = set(result.lower().split())
         matches = result_words & common_words
-        assert len(matches) >= 1, (
-            f"Expected common English words in: {result!r}"
-        )
+        assert len(matches) >= 1, f"Expected common English words in: {result!r}"

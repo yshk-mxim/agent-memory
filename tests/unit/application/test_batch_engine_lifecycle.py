@@ -73,7 +73,9 @@ class TestBatchEngineDrain:
 
         # Manually inject an active request to simulate in-flight work
         # Format: (agent_id, generated_tokens, detokenizer, prompt_tokens, prompt_text)
-        engine._active_requests = {"uid_123": ("agent_1", [42, 43, 44], mock_tokenizer, [1, 2, 3], "test prompt")}
+        engine._active_requests = {
+            "uid_123": ("agent_1", [42, 43, 44], mock_tokenizer, [1, 2, 3], "test prompt")
+        }
 
         # Create a mock batch generator that finishes the request on second next() call
         mock_batch_gen = MagicMock()

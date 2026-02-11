@@ -75,7 +75,6 @@ def sample_agents():
 
 
 class TestSessionLifecycle:
-
     @pytest.mark.asyncio
     async def test_create_and_execute_turn(self, service, sample_agents) -> None:
         """Create session → execute_turn → message recorded in channel."""
@@ -103,9 +102,7 @@ class TestSessionLifecycle:
         assert "regulation" in message.content
 
         # Message should be recorded in public channel
-        public = next(
-            c for c in session.channels.values() if c.channel_type == "public"
-        )
+        public = next(c for c in session.channels.values() if c.channel_type == "public")
         agent_msgs = [m for m in public.messages if m.sender_id != "system"]
         assert len(agent_msgs) == 1
 
@@ -166,7 +163,6 @@ class TestSessionLifecycle:
 
 
 class TestPersistentCacheHandling:
-
     @pytest.mark.asyncio
     async def test_persistent_agents_use_persist_key(
         self, mock_scheduler, mock_cache_store, mock_engine
@@ -243,9 +239,7 @@ class TestPersistentCacheHandling:
         await svc.delete_session(session.session_id)
 
         # Only ephemeral (prisoner) should be deleted, not persistent (warden)
-        deleted_keys = [
-            call.args[0] for call in mock_cache_store.delete.call_args_list
-        ]
+        deleted_keys = [call.args[0] for call in mock_cache_store.delete.call_args_list]
         assert len(deleted_keys) == 1
         assert "prisoner" in deleted_keys[0]
         assert not any("warden" in k for k in deleted_keys)
@@ -269,8 +263,6 @@ class TestPersistentCacheHandling:
         count = svc.delete_persistent_caches("pd_game")
 
         assert count == 2
-        deleted_keys = [
-            call.args[0] for call in mock_cache_store.delete.call_args_list
-        ]
+        deleted_keys = [call.args[0] for call in mock_cache_store.delete.call_args_list]
         assert "persist_pd_game_warden" in deleted_keys
         assert "persist_pd_game_prisoner" in deleted_keys

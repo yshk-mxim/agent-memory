@@ -1,7 +1,7 @@
 # Domain API
 
-> **Status**: Auto-generated documentation in progress
+> **Status**: Auto-generated documentation planned
 
-Domain types API documentation will be auto-generated via mkdocstrings in Sprint 7.
+Domain types documentation will be auto-generated via mkdocstrings.
 
 For now, see [API Reference](../api-reference.md).

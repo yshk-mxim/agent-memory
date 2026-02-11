@@ -1,3 +1,4 @@
+# mypy: disable-error-code="assignment"
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 Yakov Shkolnikov and contributors
 """ConcurrentScheduler: interleaves chunked prefill with decode steps.
@@ -358,7 +359,7 @@ class ConcurrentScheduler:
         except Exception as exc:
             logger.exception("[SCHEDULER] Decode step failed")
             # Reject all in-flight requests to avoid infinite loop
-            for uid, req in list(self._uid_to_request.items()):
+            for _uid, req in list(self._uid_to_request.items()):
                 self._reject_request(req, exc)
             self._uid_to_request.clear()
             return
@@ -385,14 +386,13 @@ class ConcurrentScheduler:
                 # Resolve future (used by submit_and_wait, ignored if streaming)
                 if result.completion is not None:
                     self._resolve_future(req, result.completion)
-            else:
-                # In-progress token — only push to streaming queues
-                if req.token_queue is not None:
-                    delta = StreamDelta(
-                        text=result.text,
-                        token_count=result.token_count,
-                    )
-                    req.loop.call_soon_threadsafe(req.token_queue.put_nowait, delta)
+            # In-progress token — only push to streaming queues
+            elif req.token_queue is not None:
+                delta = StreamDelta(
+                    text=result.text,
+                    token_count=result.token_count,
+                )
+                req.loop.call_soon_threadsafe(req.token_queue.put_nowait, delta)
 
     def _process_one_chunk(self) -> None:
         """Process one prefill chunk, round-robin across queued sequences.

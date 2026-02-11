@@ -20,14 +20,12 @@ from __future__ import annotations
 import argparse
 import ast
 import json
-import os
 import re
 import sys
 import textwrap
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Iterator
 
 
 class Severity(Enum):
@@ -94,6 +92,7 @@ class Report:
 # File collection
 # ---------------------------------------------------------------------------
 
+
 def collect_python_files(directories: list[str]) -> list[Path]:
     """Recursively collect all .py files from the given directories."""
     files: list[Path] = []
@@ -117,8 +116,8 @@ def collect_python_files(directories: list[str]) -> list[Path]:
 
 _NUMBERED_COMMENT_RE = re.compile(
     r"#\s*(?:"
-    r"\d+\.\s"          # "# 1. ", "# 2. "
-    r"|Step\s+\d+"      # "# Step 1", "# Step 2"
+    r"\d+\.\s"  # "# 1. ", "# 2. "
+    r"|Step\s+\d+"  # "# Step 1", "# Step 2"
     r")",
     re.IGNORECASE,
 )
@@ -140,6 +139,7 @@ def check_numbered_comments(filepath: str, lines: list[str], report: Report) -> 
 # ---------------------------------------------------------------------------
 # Check 2: Docstring longer than body
 # ---------------------------------------------------------------------------
+
 
 def _count_docstring_lines(node: ast.FunctionDef | ast.AsyncFunctionDef) -> int:
     """Return the number of lines in the function's docstring, or 0."""
@@ -175,9 +175,7 @@ def _function_body_lines(node: ast.FunctionDef | ast.AsyncFunctionDef) -> int:
     return max(total_body_lines - ds_lines, 0)
 
 
-def check_docstring_longer_than_body(
-    filepath: str, tree: ast.Module, report: Report
-) -> None:
+def check_docstring_longer_than_body(filepath: str, tree: ast.Module, report: Report) -> None:
     for node in ast.walk(tree):
         if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             continue
@@ -249,17 +247,13 @@ _GENERIC_NAMES = {"data", "result", "temp", "item", "obj"}
 # Matches standalone assignments like "data = ..." but not "self.data =",
 # "result_list =", "my_data =", etc.
 _GENERIC_VAR_RE = re.compile(
-    r"(?<![.\w])"           # Not preceded by dot or word char
-    r"(?P<name>"
-    + "|".join(_GENERIC_NAMES)
-    + r")"
-    r"\s*=[^=]"             # Assignment (not ==)
+    r"(?<![.\w])"  # Not preceded by dot or word char
+    r"(?P<name>" + "|".join(_GENERIC_NAMES) + r")"
+    r"\s*=[^=]"  # Assignment (not ==)
 )
 
 
-def check_generic_variable_names(
-    filepath: str, lines: list[str], report: Report
-) -> None:
+def check_generic_variable_names(filepath: str, lines: list[str], report: Report) -> None:
     for i, line in enumerate(lines, start=1):
         stripped = line.lstrip()
         # Skip comments and blank lines
@@ -283,6 +277,7 @@ def check_generic_variable_names(
 # ---------------------------------------------------------------------------
 # Check 5: Placeholder code
 # ---------------------------------------------------------------------------
+
 
 def check_placeholder_code(
     filepath: str, tree: ast.Module, lines: list[str], report: Report
@@ -325,7 +320,7 @@ def check_placeholder_code(
 
     # 5b: NotImplementedError("Sprint...")
     for i, line in enumerate(lines, start=1):
-        if 'NotImplementedError' in line and 'Sprint' in line:
+        if "NotImplementedError" in line and "Sprint" in line:
             report.add(
                 file=filepath,
                 line=i,
@@ -357,17 +352,14 @@ def _is_inside_protocol(tree: ast.Module, func_node: ast.AST) -> bool:
 # Check 6: Silent exception swallowing
 # ---------------------------------------------------------------------------
 
-def check_silent_exception_swallowing(
-    filepath: str, tree: ast.Module, report: Report
-) -> None:
+
+def check_silent_exception_swallowing(filepath: str, tree: ast.Module, report: Report) -> None:
     for node in ast.walk(tree):
         if not isinstance(node, ast.ExceptHandler):
             continue
         # Bare except (type is None) or except Exception
         is_bare = node.type is None
-        is_exception = (
-            isinstance(node.type, ast.Name) and node.type.id == "Exception"
-        )
+        is_exception = isinstance(node.type, ast.Name) and node.type.id == "Exception"
         if not (is_bare or is_exception):
             continue
 
@@ -399,6 +391,7 @@ def check_silent_exception_swallowing(
 # Check 7: Runtime imports (imports inside function bodies)
 # ---------------------------------------------------------------------------
 
+
 def check_runtime_imports(filepath: str, tree: ast.Module, report: Report) -> None:
     for node in ast.walk(tree):
         if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -415,10 +408,7 @@ def check_runtime_imports(filepath: str, tree: ast.Module, report: Report) -> No
                     line=child.lineno,
                     severity=Severity.INFO,
                     check="runtime-import",
-                    message=(
-                        f"Import inside function '{node.name}': "
-                        f"{', '.join(modules)}"
-                    ),
+                    message=(f"Import inside function '{node.name}': {', '.join(modules)}"),
                 )
 
 
@@ -444,8 +434,7 @@ def check_god_methods(filepath: str, tree: ast.Module, report: Report) -> None:
                 severity=Severity.INFO,
                 check="god-method",
                 message=(
-                    f"Function '{node.name}' is {length} lines "
-                    f"(threshold: {_GOD_METHOD_THRESHOLD})"
+                    f"Function '{node.name}' is {length} lines (threshold: {_GOD_METHOD_THRESHOLD})"
                 ),
             )
 
@@ -471,10 +460,10 @@ _STALE_BRANDING_EXCLUDE = re.compile(
     r"|SEMANTIC_ENABLE_"
     r"|SEMANTIC_LOG_"
     r"|SEMANTIC_DEBUG"
-    r"|['\"]SEMANTIC_"       # Quoted env var names
+    r"|['\"]SEMANTIC_"  # Quoted env var names
     r"|os\.environ.*SEMANTIC_"
     r"|os\.getenv.*SEMANTIC_"
-    r"|settings\.semantic"   # Settings attribute access
+    r"|settings\.semantic"  # Settings attribute access
     r")"
 )
 
@@ -499,6 +488,7 @@ def check_stale_branding(filepath: str, lines: list[str], report: Report) -> Non
 # ---------------------------------------------------------------------------
 # Main analysis driver
 # ---------------------------------------------------------------------------
+
 
 def analyze_file(filepath: Path, report: Report) -> None:
     """Run all checks on a single Python file."""
@@ -581,6 +571,7 @@ def print_summary_table(report_dict: dict) -> None:
 # ---------------------------------------------------------------------------
 # CLI entry point
 # ---------------------------------------------------------------------------
+
 
 def main() -> int:
     parser = argparse.ArgumentParser(

@@ -2,7 +2,6 @@
 # Copyright (c) 2026 Yakov Shkolnikov and contributors
 """Unit tests for structured logging configuration."""
 
-
 import pytest
 import structlog
 

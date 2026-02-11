@@ -259,9 +259,7 @@ class TestCoordinationSession:
 
         assert session.get_next_speaker() is None
 
-    def test_advance_turn(
-        self, agents: list[AgentRole], public_channel: Channel
-    ) -> None:
+    def test_advance_turn(self, agents: list[AgentRole], public_channel: Channel) -> None:
         session = CoordinationSession(
             session_id="s1",
             topology=Topology.TURN_BY_TURN,

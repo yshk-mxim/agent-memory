@@ -33,7 +33,6 @@ pytestmark = pytest.mark.unit
 
 
 class TestAgentRoleConfig:
-
     def test_valid_minimal(self) -> None:
         cfg = AgentRoleConfig(display_name="Alice")
         assert cfg.display_name == "Alice"
@@ -90,7 +89,6 @@ class TestAgentRoleConfig:
 
 
 class TestCreateSessionRequest:
-
     def test_valid_minimal(self) -> None:
         req = CreateSessionRequest(
             agents=[AgentRoleConfig(display_name="Alice")],
@@ -155,7 +153,6 @@ class TestCreateSessionRequest:
 
 
 class TestWhisperRequest:
-
     def test_valid(self) -> None:
         req = WhisperRequest(
             from_agent_id="a",
@@ -190,7 +187,6 @@ class TestWhisperRequest:
 
 
 class TestVoteRequest:
-
     def test_valid_with_ranking(self) -> None:
         req = VoteRequest(
             agent_id="a",
@@ -209,7 +205,6 @@ class TestVoteRequest:
 
 
 class TestResponseModels:
-
     def test_create_session_response(self) -> None:
         resp = CreateSessionResponse(
             session_id="s1",
@@ -255,28 +250,42 @@ class TestResponseModels:
 
     def test_execute_turn_response(self) -> None:
         msg = ChannelMessageResponse(
-            message_id="m1", sender_id="a", sender_name="Alice",
-            content="Hello", turn_number=1, channel_type="public",
+            message_id="m1",
+            sender_id="a",
+            sender_name="Alice",
+            content="Hello",
+            turn_number=1,
+            channel_type="public",
         )
         status = SessionStatusResponse(
-            session_id="s1", current_turn=1, is_active=True,
-            next_speaker="b", agent_states=[],
+            session_id="s1",
+            current_turn=1,
+            is_active=True,
+            next_speaker="b",
+            agent_states=[],
         )
         resp = ExecuteTurnResponse(message=msg, session_status=status)
         assert resp.message.message_id == "m1"
 
     def test_execute_round_response(self) -> None:
         status = SessionStatusResponse(
-            session_id="s1", current_turn=3, is_active=True,
-            next_speaker=None, agent_states=[],
+            session_id="s1",
+            current_turn=3,
+            is_active=True,
+            next_speaker=None,
+            agent_states=[],
         )
         resp = ExecuteRoundResponse(messages=[], session_status=status)
         assert resp.messages == []
 
     def test_whisper_response(self) -> None:
         msg = ChannelMessageResponse(
-            message_id="m1", sender_id="a", sender_name="Alice",
-            content="psst", turn_number=1, channel_type="whisper",
+            message_id="m1",
+            sender_id="a",
+            sender_name="Alice",
+            content="psst",
+            turn_number=1,
+            channel_type="whisper",
         )
         resp = WhisperResponse(message=msg)
         assert resp.message.channel_type == "whisper"

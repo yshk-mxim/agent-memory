@@ -8,7 +8,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
-from fastapi import FastAPI, status
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 # Must mock MLX before importing admin_api (same pattern as test_admin_api.py)

@@ -22,6 +22,7 @@ pytestmark = [pytest.mark.unit, pytest.mark.filterwarnings("ignore::ResourceWarn
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_engine():
     engine = MagicMock()
     engine.has_active_batch.return_value = False
@@ -174,7 +175,9 @@ class TestPromoteWaiting:
         sched = _make_scheduler(max_batch_size=2)
         sched._engine.submit.side_effect = [f"uid_{i}" for i in range(5)]
         for i in range(3):
-            sched._waiting_queue.append(_make_request(agent_id=f"a{i}", n_tokens=10, loop=event_loop))
+            sched._waiting_queue.append(
+                _make_request(agent_id=f"a{i}", n_tokens=10, loop=event_loop)
+            )
 
         promoted = sched._promote_waiting()
         assert promoted == 2
@@ -266,8 +269,11 @@ class TestRunDecodeStep:
         sched._uid_to_request["uid_0"] = req
 
         result = StepOneResult(
-            uid="uid_0", text="Done", token_count=5,
-            finish_reason="stop", completion=completion,
+            uid="uid_0",
+            text="Done",
+            token_count=5,
+            finish_reason="stop",
+            completion=completion,
         )
         engine.step_once.return_value = [result]
 

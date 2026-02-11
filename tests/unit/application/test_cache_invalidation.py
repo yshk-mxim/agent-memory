@@ -211,7 +211,15 @@ class TestModelTagCompatibility:
 
     def test_identical_specs_are_compatible(self):
         """Identical specs are compatible."""
-        tag = ModelTag(model_id="model-a", n_layers=24, n_kv_heads=8, head_dim=128, block_tokens=16, kv_bits=4, kv_group_size=64)
+        tag = ModelTag(
+            model_id="model-a",
+            n_layers=24,
+            n_kv_heads=8,
+            head_dim=128,
+            block_tokens=16,
+            kv_bits=4,
+            kv_group_size=64,
+        )
         spec = ModelCacheSpec(
             n_layers=24, n_kv_heads=8, head_dim=128, block_tokens=16, layer_types=["global"] * 24
         )
@@ -220,7 +228,15 @@ class TestModelTagCompatibility:
 
     def test_different_n_layers_incompatible(self):
         """Different n_layers makes caches incompatible."""
-        tag = ModelTag(model_id="model-a", n_layers=24, n_kv_heads=8, head_dim=128, block_tokens=16, kv_bits=4, kv_group_size=64)
+        tag = ModelTag(
+            model_id="model-a",
+            n_layers=24,
+            n_kv_heads=8,
+            head_dim=128,
+            block_tokens=16,
+            kv_bits=4,
+            kv_group_size=64,
+        )
         spec = ModelCacheSpec(
             n_layers=32,  # Different
             n_kv_heads=8,
@@ -233,7 +249,15 @@ class TestModelTagCompatibility:
 
     def test_different_n_kv_heads_incompatible(self):
         """Different n_kv_heads makes caches incompatible."""
-        tag = ModelTag(model_id="model-a", n_layers=24, n_kv_heads=8, head_dim=128, block_tokens=16, kv_bits=4, kv_group_size=64)
+        tag = ModelTag(
+            model_id="model-a",
+            n_layers=24,
+            n_kv_heads=8,
+            head_dim=128,
+            block_tokens=16,
+            kv_bits=4,
+            kv_group_size=64,
+        )
         spec = ModelCacheSpec(
             n_layers=24,
             n_kv_heads=16,  # Different
@@ -246,7 +270,15 @@ class TestModelTagCompatibility:
 
     def test_different_head_dim_incompatible(self):
         """Different head_dim makes caches incompatible."""
-        tag = ModelTag(model_id="model-a", n_layers=24, n_kv_heads=8, head_dim=128, block_tokens=16, kv_bits=4, kv_group_size=64)
+        tag = ModelTag(
+            model_id="model-a",
+            n_layers=24,
+            n_kv_heads=8,
+            head_dim=128,
+            block_tokens=16,
+            kv_bits=4,
+            kv_group_size=64,
+        )
         spec = ModelCacheSpec(
             n_layers=24,
             n_kv_heads=8,
@@ -259,7 +291,15 @@ class TestModelTagCompatibility:
 
     def test_different_block_tokens_incompatible(self):
         """Different block_tokens makes caches incompatible."""
-        tag = ModelTag(model_id="model-a", n_layers=24, n_kv_heads=8, head_dim=128, block_tokens=16, kv_bits=4, kv_group_size=64)
+        tag = ModelTag(
+            model_id="model-a",
+            n_layers=24,
+            n_kv_heads=8,
+            head_dim=128,
+            block_tokens=16,
+            kv_bits=4,
+            kv_group_size=64,
+        )
         spec = ModelCacheSpec(
             n_layers=24,
             n_kv_heads=8,
@@ -273,7 +313,13 @@ class TestModelTagCompatibility:
     def test_model_id_difference_does_not_affect_compatibility(self):
         """Model ID difference doesn't affect compatibility (only spec matters)."""
         tag = ModelTag(
-            model_id="gemma-3-12b-v1", n_layers=24, n_kv_heads=8, head_dim=128, block_tokens=16, kv_bits=4, kv_group_size=64
+            model_id="gemma-3-12b-v1",
+            n_layers=24,
+            n_kv_heads=8,
+            head_dim=128,
+            block_tokens=16,
+            kv_bits=4,
+            kv_group_size=64,
         )
         spec = ModelCacheSpec(
             n_layers=24, n_kv_heads=8, head_dim=128, block_tokens=16, layer_types=["global"] * 24
@@ -292,9 +338,7 @@ class TestDiskLoadRejectsIncompatible:
 
         if adapter is None:
             adapter = Mock()
-            adapter.save.side_effect = (
-                lambda aid, blocks, metadata: tmp_path / f"{aid}.safetensors"
-            )
+            adapter.save.side_effect = lambda aid, blocks, metadata: tmp_path / f"{aid}.safetensors"
 
         store = AgentCacheStore(
             cache_dir=tmp_path,
@@ -318,7 +362,11 @@ class TestDiskLoadRejectsIncompatible:
         from pathlib import Path
 
         original_tag = ModelTag(
-            model_id="model", n_layers=24, n_kv_heads=8, head_dim=128, block_tokens=16,
+            model_id="model",
+            n_layers=24,
+            n_kv_heads=8,
+            head_dim=128,
+            block_tokens=16,
         )
 
         # Create an in-memory adapter that returns metadata with original tag
@@ -341,7 +389,11 @@ class TestDiskLoadRejectsIncompatible:
 
         # Change to model with different n_layers
         store.model_tag = ModelTag(
-            model_id="model", n_layers=32, n_kv_heads=8, head_dim=128, block_tokens=16,
+            model_id="model",
+            n_layers=32,
+            n_kv_heads=8,
+            head_dim=128,
+            block_tokens=16,
         )
         assert store.load("agent_1") is None
 
@@ -350,7 +402,11 @@ class TestDiskLoadRejectsIncompatible:
         from pathlib import Path
 
         original_tag = ModelTag(
-            model_id="model", n_layers=24, n_kv_heads=8, head_dim=128, block_tokens=16,
+            model_id="model",
+            n_layers=24,
+            n_kv_heads=8,
+            head_dim=128,
+            block_tokens=16,
         )
 
         saved_data = {}
@@ -371,7 +427,11 @@ class TestDiskLoadRejectsIncompatible:
         store.invalidate_hot("agent_1")
 
         store.model_tag = ModelTag(
-            model_id="model", n_layers=24, n_kv_heads=16, head_dim=128, block_tokens=16,
+            model_id="model",
+            n_layers=24,
+            n_kv_heads=16,
+            head_dim=128,
+            block_tokens=16,
         )
         assert store.load("agent_1") is None
 
@@ -380,7 +440,11 @@ class TestDiskLoadRejectsIncompatible:
         from pathlib import Path
 
         original_tag = ModelTag(
-            model_id="model", n_layers=24, n_kv_heads=8, head_dim=128, block_tokens=16,
+            model_id="model",
+            n_layers=24,
+            n_kv_heads=8,
+            head_dim=128,
+            block_tokens=16,
         )
 
         saved_data = {}
@@ -401,7 +465,11 @@ class TestDiskLoadRejectsIncompatible:
         store.invalidate_hot("agent_1")
 
         store.model_tag = ModelTag(
-            model_id="model", n_layers=24, n_kv_heads=8, head_dim=256, block_tokens=16,
+            model_id="model",
+            n_layers=24,
+            n_kv_heads=8,
+            head_dim=256,
+            block_tokens=16,
         )
         assert store.load("agent_1") is None
 
@@ -410,7 +478,11 @@ class TestDiskLoadRejectsIncompatible:
         from pathlib import Path
 
         original_tag = ModelTag(
-            model_id="model", n_layers=24, n_kv_heads=8, head_dim=128, block_tokens=16,
+            model_id="model",
+            n_layers=24,
+            n_kv_heads=8,
+            head_dim=128,
+            block_tokens=16,
         )
 
         saved_data = {}
@@ -431,7 +503,11 @@ class TestDiskLoadRejectsIncompatible:
         store.invalidate_hot("agent_1")
 
         store.model_tag = ModelTag(
-            model_id="model", n_layers=24, n_kv_heads=8, head_dim=128, block_tokens=32,
+            model_id="model",
+            n_layers=24,
+            n_kv_heads=8,
+            head_dim=128,
+            block_tokens=32,
         )
         assert store.load("agent_1") is None
 
@@ -442,7 +518,11 @@ class TestInvalidateHot:
     def test_invalidate_hot_preserves_warm_tier(self, tmp_path):
         """invalidate_hot() removes from hot but keeps warm entry intact."""
         tag = ModelTag(
-            model_id="model", n_layers=24, n_kv_heads=8, head_dim=128, block_tokens=16,
+            model_id="model",
+            n_layers=24,
+            n_kv_heads=8,
+            head_dim=128,
+            block_tokens=16,
         )
         mock_adapter = Mock()
         mock_adapter.save.side_effect = (
@@ -481,10 +561,16 @@ class TestInvalidateHot:
     def test_invalidate_hot_noop_for_missing_agent(self, tmp_path):
         """invalidate_hot() on non-existent agent is a no-op."""
         tag = ModelTag(
-            model_id="model", n_layers=24, n_kv_heads=8, head_dim=128, block_tokens=16,
+            model_id="model",
+            n_layers=24,
+            n_kv_heads=8,
+            head_dim=128,
+            block_tokens=16,
         )
         store = AgentCacheStore(
-            cache_dir=tmp_path, max_hot_agents=5, model_tag=tag,
+            cache_dir=tmp_path,
+            max_hot_agents=5,
+            model_tag=tag,
         )
 
         # Should not raise

@@ -1,3 +1,4 @@
+# mypy: disable-error-code="attr-defined,arg-type"
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 Yakov Shkolnikov and contributors
 """Compatibility patch: quantized KV cache with attention sinks.
@@ -14,7 +15,6 @@ Applied on import. Import before first model inference.
 """
 
 import logging
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -39,8 +39,8 @@ def _apply_patch() -> None:
         values: mx.array | tuple,
         cache: object,
         scale: float,
-        mask: Optional[mx.array],
-        sinks: Optional[mx.array] = None,
+        mask: mx.array | None,
+        sinks: mx.array | None = None,
     ) -> mx.array:
         if hasattr(cache, "bits"):
             if sinks is not None:

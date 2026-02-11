@@ -64,7 +64,9 @@ class MLXSettings(BaseSettings):
         default=2048,
         ge=512,
         le=16384,
-        description="Minimum tokens to trigger chunked prefill (shorter prompts use standard prefill)",
+        description=(
+            "Minimum tokens to trigger chunked prefill (shorter prompts use standard prefill)"
+        ),
     )
 
     chunked_prefill_min_chunk: int = Field(
@@ -385,7 +387,8 @@ def _find_model_profile_path(model_id: str) -> Path | None:
         # Score by number of matching dash-separated parts
         stem_parts = set(stem.split("-"))
         overlap = len(slug_parts & stem_parts)
-        if overlap > best_score and overlap >= 3:
+        min_overlap = 3
+        if overlap > best_score and overlap >= min_overlap:
             best_score = overlap
             best_match = toml_file
 
@@ -422,7 +425,7 @@ def load_model_profile(
         _logger.debug(f"No model profile found for {model_id}")
         return {}
 
-    with open(path, "rb") as f:
+    with path.open("rb") as f:
         profile = tomllib.load(f)
 
     _logger.info(f"Loaded model profile from {path}")

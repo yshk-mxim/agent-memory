@@ -304,9 +304,7 @@ def render_agent_settings(agent_idx: int) -> None:
         )
 
 
-def _submit_agent_message(
-    prefix: str, sid: str, messages: list[dict], user_input: str
-) -> None:
+def _submit_agent_message(prefix: str, sid: str, messages: list[dict], user_input: str) -> None:
     """Validate context, add user message, and submit generation request."""
     max_context = st.session_state.get(f"{prefix}_max_context", DEFAULT_MAX_CONTEXT)
     est_tokens = estimate_token_count([*messages, {"role": "user", "content": user_input}])
@@ -512,6 +510,7 @@ def _render_model_info() -> None:
 def _render_model_switch(current_model_id: str) -> None:
     """Render model switch controls (requires admin key)."""
     import os
+
     from demo.lib import api_client
 
     admin_key = os.getenv("SEMANTIC_ADMIN_KEY", "")

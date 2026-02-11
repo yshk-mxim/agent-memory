@@ -13,10 +13,12 @@ import asyncio
 import re
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
+from typing import Any
 from uuid import uuid4
 
 import structlog
 
+from agent_memory.application.ports import ChatTemplatePort
 from agent_memory.domain.coordination import (
     AgentLifecycle,
     AgentRole,
@@ -32,8 +34,6 @@ from agent_memory.domain.coordination import (
 )
 from agent_memory.domain.errors import InvalidTurnError, SessionNotFoundError
 from agent_memory.domain.value_objects import StreamDelta
-
-from agent_memory.application.ports import ChatTemplatePort
 
 logger = structlog.get_logger(__name__)
 
@@ -59,9 +59,9 @@ class CoordinationService:
 
     def __init__(
         self,
-        scheduler,
-        cache_store,
-        engine,
+        scheduler: Any,
+        cache_store: Any,
+        engine: Any,
         reasoning_extra_tokens: int = 0,
         chat_template: ChatTemplatePort | None = None,
     ) -> None:
@@ -74,7 +74,7 @@ class CoordinationService:
         self._agent_name_registry: dict[str, str] = {}
         self._lock = asyncio.Lock()
 
-    def update_engine(self, new_engine) -> None:
+    def update_engine(self, new_engine: Any) -> None:
         """Update engine reference after model hot-swap.
 
         Called by admin API after model swap to ensure CoordinationService
@@ -472,8 +472,7 @@ class CoordinationService:
         if is_deepseek:
             # Check if this agent has any prior assistant messages in visible history
             has_prior_messages = any(
-                msg.sender_id == agent_role.agent_id
-                for msg in visible_messages
+                msg.sender_id == agent_role.agent_id for msg in visible_messages
             )
             if not has_prior_messages:
                 # First turn: Add identity-priming assistant message
@@ -504,10 +503,12 @@ class CoordinationService:
         if not is_deepseek:
             # Standard models: use explicit prompt
             prompt_text = f"[{agent_role.display_name}, respond now.]"
-            messages.append({
-                "role": "user",
-                "content": prompt_text,
-            })
+            messages.append(
+                {
+                    "role": "user",
+                    "content": prompt_text,
+                }
+            )
         # DeepSeek: No final cue message.
         # The DeepSeek template closes EVERY assistant message with <EOS>, so
         # an assistant message like "Name:" becomes a completed empty turn:
@@ -518,14 +519,12 @@ class CoordinationService:
         # where the agent's own prior messages appear as assistant role.
         # add_generation_prompt=True appends "Assistant:" for generation.
 
-        logger.debug(
-            f"agent={agent_role.agent_id} messages_count={len(messages)}"
-        )
-        for i, msg in enumerate(messages):
-            content_preview = msg["content"][:200] if len(msg["content"]) > 200 else msg["content"]
-            logger.debug(
-                f"  [{i}] role={msg['role']} content={repr(content_preview)}"
-            )
+        logger.debug(f"agent={agent_role.agent_id} messages_count={len(messages)}")
+        for i, chat_msg in enumerate(messages):
+            max_preview = 200
+            content = chat_msg["content"]
+            content_preview = content[:max_preview] if len(content) > max_preview else content
+            logger.debug(f"  [{i}] role={chat_msg['role']} content={content_preview!r}")
 
         return messages
 
@@ -655,6 +654,7 @@ class CoordinationService:
             )
             # Create a placeholder message for API response, but don't add to channel
             from agent_memory.domain.coordination import ChannelMessage
+
             message = ChannelMessage(
                 message_id="",
                 channel_id=public_channel.channel_id,
@@ -724,9 +724,12 @@ class CoordinationService:
         # Tokenize using model's chat template for proper turn boundaries
         logger.info("before_tokenize_call", num_messages=len(prompt_messages))
         prompt_tokens, prompt_text = self._tokenize_chat_messages(
-            prompt_messages, generation_prefix=gen_prefix,
+            prompt_messages,
+            generation_prefix=gen_prefix,
         )
-        logger.info("after_tokenize_call", num_tokens=len(prompt_tokens), prompt_text_len=len(prompt_text))
+        logger.info(
+            "after_tokenize_call", num_tokens=len(prompt_tokens), prompt_text_len=len(prompt_text)
+        )
 
         # Load agent's cache (persistent key for permanent agents)
         namespaced_agent_id = self._resolve_cache_key(session_id, directive.agent_id)
@@ -1007,7 +1010,7 @@ class CoordinationService:
         final_marker = "<|channel|>final<|message|>"
         if final_marker in text:
             last_idx = text.rfind(final_marker)
-            text = text[last_idx + len(final_marker):]
+            text = text[last_idx + len(final_marker) :]
             end_idx = text.find("<|end|>")
             if end_idx > 0:
                 text = text[:end_idx]
@@ -1024,7 +1027,7 @@ class CoordinationService:
         prefixes = ["Assistant", "System", "User", "You"]
         if sender_name:
             prefixes.append(re.escape(sender_name))
-        for name in (all_agent_names or []):
+        for name in all_agent_names or []:
             prefixes.append(re.escape(name))
         prefix_pattern = "|".join(dict.fromkeys(prefixes))  # dedupe, preserve order
         text = re.sub(rf"^(?:{prefix_pattern})(?:\s+said)?:\s?", "", text)
@@ -1048,11 +1051,16 @@ class CoordinationService:
 
         # Truncate at first sign of fake turn continuation
         stop_markers = [
-            "\nUser:", "\nuser:",
-            "\nYou:", "\nyou:",
-            "\nSystem:", "\nsystem:",
-            "\nAssistant:", "\nassistant:",
-            "\n<start_of_turn>", "\n<end_of_turn>",
+            "\nUser:",
+            "\nuser:",
+            "\nYou:",
+            "\nyou:",
+            "\nSystem:",
+            "\nsystem:",
+            "\nAssistant:",
+            "\nassistant:",
+            "\n<start_of_turn>",
+            "\n<end_of_turn>",
         ]
         # Add ALL agent names as stop markers (catches cross-agent generation)
         agent_names = set(all_agent_names or [])
@@ -1137,7 +1145,9 @@ class CoordinationService:
         return base_tokens + self._reasoning_extra_tokens
 
     def _tokenize_chat_messages(
-        self, messages: list[dict], generation_prefix: str | None = None,
+        self,
+        messages: list[dict],
+        generation_prefix: str | None = None,
     ) -> tuple[list[int], str]:
         """Tokenize using model's chat template for proper turn boundaries.
 
@@ -1161,7 +1171,10 @@ class CoordinationService:
 
         tokenizer = self._engine.tokenizer
 
-        has_template = hasattr(tokenizer, "apply_chat_template") and getattr(tokenizer, "chat_template", None) is not None
+        has_template = (
+            hasattr(tokenizer, "apply_chat_template")
+            and getattr(tokenizer, "chat_template", None) is not None
+        )
         logger.info("tokenize_debug_start", has_template=has_template)
 
         if hasattr(tokenizer, "apply_chat_template") and getattr(tokenizer, "chat_template", None):
@@ -1201,9 +1214,11 @@ class CoordinationService:
                     messages_for_template,
                     **template_kwargs_text,
                 )
-                logger.info("got_templated_text",
-                           text_type=type(templated_text).__name__,
-                           text_len=len(templated_text) if hasattr(templated_text, '__len__') else 0)
+                logger.info(
+                    "got_templated_text",
+                    text_type=type(templated_text).__name__,
+                    text_len=len(templated_text) if hasattr(templated_text, "__len__") else 0,
+                )
 
                 # Now tokenize the templated text
                 logger.info("before_tokenize", kwargs=template_kwargs)
@@ -1211,10 +1226,12 @@ class CoordinationService:
                     messages_for_template,
                     **template_kwargs,
                 )
-                logger.info("after_tokenize",
-                           tokens_type=type(tokens).__name__,
-                           is_list=isinstance(tokens, list),
-                           tokens_len=len(tokens) if hasattr(tokens, '__len__') else 0)
+                logger.info(
+                    "after_tokenize",
+                    tokens_type=type(tokens).__name__,
+                    is_list=isinstance(tokens, list),
+                    tokens_len=len(tokens) if hasattr(tokens, "__len__") else 0,
+                )
                 if isinstance(tokens, list):
                     # Inject generation prefix (DeepSeek identity, see option 3)
                     if (
@@ -1234,10 +1251,15 @@ class CoordinationService:
                             extra_tokens=len(suffix_tokens),
                         )
 
-                    logger.info("template_fix_applied",
-                        templated_text_len=len(templated_text) if isinstance(templated_text, str) else 0,
+                    logger.info(
+                        "template_fix_applied",
+                        templated_text_len=len(templated_text)
+                        if isinstance(templated_text, str)
+                        else 0,
                         tokens_count=len(tokens),
-                        preview=templated_text[:100] if isinstance(templated_text, str) else str(type(templated_text))
+                        preview=templated_text[:100]
+                        if isinstance(templated_text, str)
+                        else str(type(templated_text)),
                     )
                     # Return tokens AND the actual templated text (not raw message text)
                     return tokens, templated_text
@@ -1250,12 +1272,12 @@ class CoordinationService:
         self,
         agent_id: str,
         prompt_tokens: list[int],
-        cache,
+        cache: Any,
         max_tokens: int,
         temperature: float,
         top_p: float,
         top_k: int = 0,
-    ):
+    ) -> Any:
         """Generate text using batch engine directly (fallback when no scheduler).
 
         Args:

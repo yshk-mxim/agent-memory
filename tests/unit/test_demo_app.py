@@ -46,11 +46,12 @@ def _mock_streamlit():
         if len(args) == 1 and callable(args[0]) and not kwargs:
             # Direct decoration: @st.fragment
             return args[0]
-        else:
-            # Parametrized: @st.fragment(run_every=...)
-            def wrapper(func):
-                return func
-            return wrapper
+
+        # Parametrized: @st.fragment(run_every=...)
+        def wrapper(func):
+            return func
+
+        return wrapper
 
     mock_st.fragment = fragment_decorator
 
@@ -68,6 +69,7 @@ def _import_app():
     sys.modules.pop("demo.app", None)
     sys.modules.pop("demo", None)
     from demo import app
+
     return app
 
 
@@ -204,8 +206,11 @@ class TestNonStreamResponse:
 
         with patch("httpx.Client", return_value=mock_client):
             text, metrics = app.non_stream_response(
-                [{"role": "user", "content": "test"}], "session_1",
-                temperature=0.7, top_p=1.0, max_tokens=512,
+                [{"role": "user", "content": "test"}],
+                "session_1",
+                temperature=0.7,
+                top_p=1.0,
+                max_tokens=512,
             )
 
         assert "[Error: HTTP 500" in text
@@ -225,8 +230,11 @@ class TestNonStreamResponse:
         with patch("httpx.Client", return_value=mock_client):
             with pytest.raises(httpx.ConnectError):
                 app.non_stream_response(
-                    [{"role": "user", "content": "test"}], "session_1",
-                    temperature=0.7, top_p=1.0, max_tokens=512,
+                    [{"role": "user", "content": "test"}],
+                    "session_1",
+                    temperature=0.7,
+                    top_p=1.0,
+                    max_tokens=512,
                 )
 
 

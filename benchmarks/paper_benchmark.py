@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 Yakov Shkolnikov and contributors
-"""
-Paper Benchmark Suite - Replicates all benchmarks from the agent-memory paper.
+"""Paper Benchmark Suite - Replicates all benchmarks from the agent-memory paper.
 
 This script runs the complete benchmark suite as described in the paper:
 - Context lengths: 1K, 2K, 4K, 8K, 16K, 32K tokens
@@ -29,12 +28,10 @@ import os
 import signal
 import statistics
 import subprocess
-import sys
 import time
-from dataclasses import dataclass, asdict, field
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any
 
 import httpx
 
@@ -62,6 +59,7 @@ RESULTS_DIR = Path(__file__).parent / "results"
 @dataclass
 class BenchmarkResult:
     """Single benchmark measurement."""
+
     context_tokens: int
     cache_state: str  # cold, warm, hot
     run_id: int
@@ -77,6 +75,7 @@ class BenchmarkResult:
 @dataclass
 class AggregatedStats:
     """Statistics across multiple runs."""
+
     context_tokens: int
     cache_state: str
     n_runs: int
@@ -111,7 +110,10 @@ def build_messages(context_tokens: int) -> list[dict]:
     padding = generate_padding(context_tokens - 50)  # Reserve tokens for structure
     return [
         {"role": "system", "content": "You are a helpful assistant. Be concise."},
-        {"role": "user", "content": f"Here is some context:\n\n{padding}\n\nNow, briefly summarize what you understand."}
+        {
+            "role": "user",
+            "content": f"Here is some context:\n\n{padding}\n\nNow, briefly summarize what you understand.",
+        },
     ]
 
 
@@ -119,7 +121,7 @@ def build_followup(messages: list[dict], response: str, output_tokens: int) -> d
     """Build follow-up request for multi-turn."""
     new_messages = messages + [
         {"role": "assistant", "content": response},
-        {"role": "user", "content": "Please continue with more details."}
+        {"role": "user", "content": "Please continue with more details."},
     ]
     return {
         "model": "gemma",
@@ -253,16 +255,12 @@ def get_memory_usage() -> float:
     """Get current memory usage of agent-memory server process."""
     try:
         result = subprocess.run(
-            ["lsof", f"-ti:{SERVER_PORT}"],
-            capture_output=True,
-            text=True
+            ["lsof", f"-ti:{SERVER_PORT}"], check=False, capture_output=True, text=True
         )
         if result.stdout.strip():
-            pid = result.stdout.strip().split('\n')[0]
+            pid = result.stdout.strip().split("\n")[0]
             ps_result = subprocess.run(
-                ["ps", "-o", "rss=", "-p", pid],
-                capture_output=True,
-                text=True
+                ["ps", "-o", "rss=", "-p", pid], check=False, capture_output=True, text=True
             )
             if ps_result.stdout.strip():
                 return int(ps_result.stdout.strip()) / 1024  # Convert to MB
@@ -283,14 +281,16 @@ def get_cache_size() -> float:
 def kill_all_servers():
     """Kill any running agent-memory servers."""
     try:
-        subprocess.run(["pkill", "-9", "-f", "agent-memory serve"],
-                      capture_output=True, timeout=5)
+        subprocess.run(
+            ["pkill", "-9", "-f", "agent-memory serve"], check=False, capture_output=True, timeout=5
+        )
     except Exception:
         pass
     try:
-        result = subprocess.run(["lsof", f"-ti:{SERVER_PORT}"],
-                               capture_output=True, text=True)
-        for pid in result.stdout.strip().split('\n'):
+        result = subprocess.run(
+            ["lsof", f"-ti:{SERVER_PORT}"], check=False, capture_output=True, text=True
+        )
+        for pid in result.stdout.strip().split("\n"):
             if pid:
                 os.kill(int(pid), signal.SIGKILL)
     except Exception:
@@ -326,13 +326,13 @@ def start_server() -> subprocess.Popen:
         try:
             r = httpx.get(f"{BASE_URL}/health", timeout=2.0)
             if r.status_code == 200:
-                print(f"Server ready after {i+1} seconds")
+                print(f"Server ready after {i + 1} seconds")
                 return proc
         except Exception:
             pass
         time.sleep(1)
         if i % 10 == 9:
-            print(f"  Still waiting... ({i+1}s)")
+            print(f"  Still waiting... ({i + 1}s)")
 
     raise RuntimeError("Server failed to start within 120 seconds")
 
@@ -420,9 +420,7 @@ async def run_hot_benchmark(
 
     # Turn 2: Extend cache
     followup1 = build_followup(messages, response1, OUTPUT_TOKENS)
-    _, _, response2 = await client.send_non_streaming(
-        followup1["messages"], session_id
-    )
+    _, _, response2 = await client.send_non_streaming(followup1["messages"], session_id)
     await asyncio.sleep(0.5)
 
     # Turn 3: Hot measurement (cache fully in memory)
@@ -484,11 +482,15 @@ def verify_ordering(stats_by_context: dict[int, dict[str, AggregatedStats]]) -> 
 
         if cold and warm:
             if warm.ttft_median >= cold.ttft_median:
-                issues.append(f"Context {ctx}: warm TTFT ({warm.ttft_median:.0f}ms) >= cold ({cold.ttft_median:.0f}ms)")
+                issues.append(
+                    f"Context {ctx}: warm TTFT ({warm.ttft_median:.0f}ms) >= cold ({cold.ttft_median:.0f}ms)"
+                )
 
         if warm and hot:
             if hot.ttft_median >= warm.ttft_median:
-                issues.append(f"Context {ctx}: hot TTFT ({hot.ttft_median:.0f}ms) >= warm ({warm.ttft_median:.0f}ms)")
+                issues.append(
+                    f"Context {ctx}: hot TTFT ({hot.ttft_median:.0f}ms) >= warm ({warm.ttft_median:.0f}ms)"
+                )
 
         if cold and hot:
             if hot.ttft_median >= cold.ttft_median * 0.5:
@@ -501,26 +503,40 @@ def verify_ordering(stats_by_context: dict[int, dict[str, AggregatedStats]]) -> 
 def print_table(stats_list: list[AggregatedStats]):
     """Print results in table format."""
     print("\n" + "=" * 115)
-    print(f"{'Context':>8} {'State':>6} {'TTFT min':>10} {'TTFT med':>10} {'TTFT max':>10} "
-          f"{'E2E med':>10} {'Tokens':>8} {'TPS':>8} {'Memory':>10} {'Cache':>10}")
+    print(
+        f"{'Context':>8} {'State':>6} {'TTFT min':>10} {'TTFT med':>10} {'TTFT max':>10} "
+        f"{'E2E med':>10} {'Tokens':>8} {'TPS':>8} {'Memory':>10} {'Cache':>10}"
+    )
     print("=" * 115)
 
-    for s in sorted(stats_list, key=lambda x: (x.context_tokens,
-                                                {"cold": 0, "warm": 1, "hot": 2}.get(x.cache_state, 3))):
-        print(f"{s.context_tokens:>8} {s.cache_state:>6} {s.ttft_min:>10.0f} {s.ttft_median:>10.0f} "
-              f"{s.ttft_max:>10.0f} {s.e2e_median:>10.0f} {s.tokens_median:>8.0f} "
-              f"{s.decode_tps_mean:>8.1f} {s.memory_mb_mean:>10.0f} {s.cache_size_mb_mean:>10.1f}")
+    for s in sorted(
+        stats_list,
+        key=lambda x: (x.context_tokens, {"cold": 0, "warm": 1, "hot": 2}.get(x.cache_state, 3)),
+    ):
+        print(
+            f"{s.context_tokens:>8} {s.cache_state:>6} {s.ttft_min:>10.0f} {s.ttft_median:>10.0f} "
+            f"{s.ttft_max:>10.0f} {s.e2e_median:>10.0f} {s.tokens_median:>8.0f} "
+            f"{s.decode_tps_mean:>8.1f} {s.memory_mb_mean:>10.0f} {s.cache_size_mb_mean:>10.1f}"
+        )
     print("=" * 115)
 
 
 async def main():
     parser = argparse.ArgumentParser(description="Paper benchmark suite")
-    parser.add_argument("--runs", type=int, default=RUNS_PER_CONFIG,
-                       help=f"Runs per configuration (default: {RUNS_PER_CONFIG})")
-    parser.add_argument("--contexts", type=int, nargs="+", default=CONTEXT_LENGTHS,
-                       help=f"Context lengths to test (default: {CONTEXT_LENGTHS})")
-    parser.add_argument("--output", type=str, default=None,
-                       help="Output JSON file path")
+    parser.add_argument(
+        "--runs",
+        type=int,
+        default=RUNS_PER_CONFIG,
+        help=f"Runs per configuration (default: {RUNS_PER_CONFIG})",
+    )
+    parser.add_argument(
+        "--contexts",
+        type=int,
+        nargs="+",
+        default=CONTEXT_LENGTHS,
+        help=f"Context lengths to test (default: {CONTEXT_LENGTHS})",
+    )
+    parser.add_argument("--output", type=str, default=None, help="Output JSON file path")
     args = parser.parse_args()
 
     print("=" * 70)
@@ -550,9 +566,9 @@ async def main():
         stats_by_context: dict[int, dict[str, AggregatedStats]] = {}
 
         for context_tokens in args.contexts:
-            print(f"\n{'='*70}")
+            print(f"\n{'=' * 70}")
             print(f"CONTEXT: {context_tokens} tokens")
-            print(f"{'='*70}")
+            print(f"{'=' * 70}")
 
             stats_by_context[context_tokens] = {}
 
@@ -564,8 +580,10 @@ async def main():
                 result = await run_cold_benchmark(client, context_tokens, run_id)
                 cold_results.append(result)
                 all_results.append(result)
-                print(f"TTFT={result.ttft_ms:.0f}ms, E2E={result.e2e_ms:.0f}ms, "
-                      f"tokens={result.tokens_generated}")
+                print(
+                    f"TTFT={result.ttft_ms:.0f}ms, E2E={result.e2e_ms:.0f}ms, "
+                    f"tokens={result.tokens_generated}"
+                )
 
                 # Cooldown between runs
                 gc.collect()
@@ -573,8 +591,10 @@ async def main():
 
             cold_stats = compute_aggregate_stats(cold_results)
             stats_by_context[context_tokens]["cold"] = cold_stats
-            print(f"  Cold TTFT: {cold_stats.ttft_median:.0f}ms (median), "
-                  f"range [{cold_stats.ttft_min:.0f}, {cold_stats.ttft_max:.0f}]")
+            print(
+                f"  Cold TTFT: {cold_stats.ttft_median:.0f}ms (median), "
+                f"range [{cold_stats.ttft_min:.0f}, {cold_stats.ttft_max:.0f}]"
+            )
 
             # Run Warm benchmarks
             print(f"\n[WARM] Running {args.runs} iterations...")
@@ -584,16 +604,20 @@ async def main():
                 result = await run_warm_benchmark(client, context_tokens, run_id)
                 warm_results.append(result)
                 all_results.append(result)
-                print(f"TTFT={result.ttft_ms:.0f}ms, E2E={result.e2e_ms:.0f}ms, "
-                      f"tokens={result.tokens_generated}")
+                print(
+                    f"TTFT={result.ttft_ms:.0f}ms, E2E={result.e2e_ms:.0f}ms, "
+                    f"tokens={result.tokens_generated}"
+                )
 
                 gc.collect()
                 await asyncio.sleep(COOLDOWN_BETWEEN_RUNS)
 
             warm_stats = compute_aggregate_stats(warm_results)
             stats_by_context[context_tokens]["warm"] = warm_stats
-            print(f"  Warm TTFT: {warm_stats.ttft_median:.0f}ms (median), "
-                  f"range [{warm_stats.ttft_min:.0f}, {warm_stats.ttft_max:.0f}]")
+            print(
+                f"  Warm TTFT: {warm_stats.ttft_median:.0f}ms (median), "
+                f"range [{warm_stats.ttft_min:.0f}, {warm_stats.ttft_max:.0f}]"
+            )
 
             # Run Hot benchmarks
             print(f"\n[HOT] Running {args.runs} iterations...")
@@ -603,20 +627,28 @@ async def main():
                 result = await run_hot_benchmark(client, context_tokens, run_id)
                 hot_results.append(result)
                 all_results.append(result)
-                print(f"TTFT={result.ttft_ms:.0f}ms, E2E={result.e2e_ms:.0f}ms, "
-                      f"tokens={result.tokens_generated}")
+                print(
+                    f"TTFT={result.ttft_ms:.0f}ms, E2E={result.e2e_ms:.0f}ms, "
+                    f"tokens={result.tokens_generated}"
+                )
 
                 gc.collect()
                 await asyncio.sleep(COOLDOWN_BETWEEN_RUNS)
 
             hot_stats = compute_aggregate_stats(hot_results)
             stats_by_context[context_tokens]["hot"] = hot_stats
-            print(f"  Hot TTFT: {hot_stats.ttft_median:.0f}ms (median), "
-                  f"range [{hot_stats.ttft_min:.0f}, {hot_stats.ttft_max:.0f}]")
+            print(
+                f"  Hot TTFT: {hot_stats.ttft_median:.0f}ms (median), "
+                f"range [{hot_stats.ttft_min:.0f}, {hot_stats.ttft_max:.0f}]"
+            )
 
             # Verify ordering for this context
-            speedup_warm = cold_stats.ttft_median / warm_stats.ttft_median if warm_stats.ttft_median > 0 else 0
-            speedup_hot = cold_stats.ttft_median / hot_stats.ttft_median if hot_stats.ttft_median > 0 else 0
+            speedup_warm = (
+                cold_stats.ttft_median / warm_stats.ttft_median if warm_stats.ttft_median > 0 else 0
+            )
+            speedup_hot = (
+                cold_stats.ttft_median / hot_stats.ttft_median if hot_stats.ttft_median > 0 else 0
+            )
             print(f"\n  Speedups: warm={speedup_warm:.2f}x, hot={speedup_hot:.2f}x")
 
         await client.close()
@@ -668,7 +700,7 @@ async def main():
         print("=" * 70)
         print(f"{'Cache State':>12}", end="")
         for ctx in args.contexts:
-            print(f" {ctx//1024}K".rjust(8), end="")
+            print(f" {ctx // 1024}K".rjust(8), end="")
         print()
         print("-" * 70)
 

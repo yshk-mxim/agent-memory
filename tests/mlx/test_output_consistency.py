@@ -15,8 +15,7 @@ REQUIRES: Apple Silicon, dangerouslyDisableSandbox: true
 """
 
 import pytest
-
-from mlx_lm import load, generate
+from mlx_lm import generate, load
 from mlx_lm.sample_utils import make_sampler
 
 pytestmark = pytest.mark.integration
@@ -50,9 +49,7 @@ class TestDeterminism:
             result = _gen(model, tokenizer, "What is 2 + 2?", temp=0.0)
             results.append(result)
 
-        assert all(r == results[0] for r in results), (
-            f"T=0 should be deterministic, got: {results}"
-        )
+        assert all(r == results[0] for r in results), f"T=0 should be deterministic, got: {results}"
 
     def test_greedy_determinism_after_temp_switch(self, model_and_tokenizer) -> None:
         """T=0 output must be the same before and after using T>0."""

@@ -28,14 +28,12 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
-import math
-import os
 import platform
 import subprocess
 import sys
 import time
-from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from dataclasses import asdict, dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -84,6 +82,7 @@ BASE_ENV: dict[str, str] = {
 # Streaming client (for TTFT measurement)
 # ---------------------------------------------------------------------------
 
+
 class StreamingClient:
     """Async HTTP client that measures TTFT via SSE streaming."""
 
@@ -115,9 +114,7 @@ class StreamingClient:
         text = ""
 
         try:
-            async with httpx.AsyncClient(
-                timeout=httpx.Timeout(300.0)
-            ) as client:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(300.0)) as client:
                 async with client.stream(
                     "POST",
                     f"{self.base}/v1/messages",
@@ -137,9 +134,7 @@ class StreamingClient:
                     async for chunk in resp.aiter_text():
                         buffer += chunk.replace("\r\n", "\n")
                         while "\n\n" in buffer:
-                            event_str, buffer = buffer.split(
-                                "\n\n", 1
-                            )
+                            event_str, buffer = buffer.split("\n\n", 1)
                             event_type = None
                             event_data = None
                             for line in event_str.strip().split("\n"):
@@ -156,10 +151,7 @@ class StreamingClient:
                                 delta = parsed.get("delta", {})
                                 if delta.get("type") == "text_delta":
                                     if ttft == 0.0:
-                                        ttft = (
-                                            time.perf_counter()
-                                            - t_start
-                                        ) * 1000
+                                        ttft = (time.perf_counter() - t_start) * 1000
                                     delta_count += 1
                                     text += delta.get("text", "")
 
@@ -167,15 +159,9 @@ class StreamingClient:
                                 parsed = json.loads(event_data)
                                 msg = parsed.get("message", {})
                                 usage = msg.get("usage", {})
-                                input_tokens = usage.get(
-                                    "input_tokens", 0
-                                )
-                                cache_created = usage.get(
-                                    "cache_creation_input_tokens", 0
-                                )
-                                cache_read = usage.get(
-                                    "cache_read_input_tokens", 0
-                                )
+                                input_tokens = usage.get("input_tokens", 0)
+                                cache_created = usage.get("cache_creation_input_tokens", 0)
+                                cache_read = usage.get("cache_read_input_tokens", 0)
 
                             elif event_type == "message_delta":
                                 parsed = json.loads(event_data)
@@ -197,9 +183,7 @@ class StreamingClient:
         e2e_ms = (t_end - t_start) * 1000
         decode_ms = e2e_ms - ttft if ttft > 0 else e2e_ms
         decode_tps = (
-            (output_tokens / (decode_ms / 1000))
-            if decode_ms > 0 and output_tokens > 0
-            else 0
+            (output_tokens / (decode_ms / 1000)) if decode_ms > 0 and output_tokens > 0 else 0
         )
 
         return ScenarioResult(
@@ -207,9 +191,7 @@ class StreamingClient:
             config="",
             ttft_ms=ttft,
             e2e_ms=e2e_ms,
-            tpot_ms=(e2e_ms / output_tokens * 1000)
-            if output_tokens
-            else 0,
+            tpot_ms=(e2e_ms / output_tokens * 1000) if output_tokens else 0,
             decode_tps=decode_tps,
             overall_tps=decode_tps,
             output_tokens=output_tokens,
@@ -223,6 +205,7 @@ class StreamingClient:
 # ---------------------------------------------------------------------------
 # Experiment definitions
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class ExperimentScenario:
@@ -267,15 +250,17 @@ def build_experiments(quick: bool = False) -> dict[str, list[Experiment]]:
             )
             for tok in input_lengths
         ]
-        exp_a.append(Experiment(
-            name=f"A_step{step}",
-            description=f"Prefill step size = {step}",
-            env_overrides={
-                **BASE_ENV,
-                "SEMANTIC_MLX_PREFILL_STEP_SIZE": str(step),
-            },
-            scenarios=scenarios,
-        ))
+        exp_a.append(
+            Experiment(
+                name=f"A_step{step}",
+                description=f"Prefill step size = {step}",
+                env_overrides={
+                    **BASE_ENV,
+                    "SEMANTIC_MLX_PREFILL_STEP_SIZE": str(step),
+                },
+                scenarios=scenarios,
+            )
+        )
     experiments["A"] = exp_a
 
     # --- Experiment B: Chunked Prefill Tuning ---
@@ -299,16 +284,18 @@ def build_experiments(quick: bool = False) -> dict[str, list[Experiment]]:
                 )
                 for tok in long_inputs
             ]
-            exp_b.append(Experiment(
-                name=f"B_min{min_c}_max{max_c}",
-                description=f"Chunk bounds = [{min_c}, {max_c}]",
-                env_overrides={
-                    **BASE_ENV,
-                    "SEMANTIC_MLX_CHUNKED_PREFILL_MIN_CHUNK": str(min_c),
-                    "SEMANTIC_MLX_CHUNKED_PREFILL_MAX_CHUNK": str(max_c),
-                },
-                scenarios=scenarios,
-            ))
+            exp_b.append(
+                Experiment(
+                    name=f"B_min{min_c}_max{max_c}",
+                    description=f"Chunk bounds = [{min_c}, {max_c}]",
+                    env_overrides={
+                        **BASE_ENV,
+                        "SEMANTIC_MLX_CHUNKED_PREFILL_MIN_CHUNK": str(min_c),
+                        "SEMANTIC_MLX_CHUNKED_PREFILL_MAX_CHUNK": str(max_c),
+                    },
+                    scenarios=scenarios,
+                )
+            )
     experiments["B"] = exp_b
 
     # --- Experiment C: Batch Size vs Throughput ---
@@ -328,16 +315,18 @@ def build_experiments(quick: bool = False) -> dict[str, list[Experiment]]:
             )
             for tok in batch_inputs
         ]
-        exp_c.append(Experiment(
-            name=f"C_batch{bs}",
-            description=f"Batch size = {bs}",
-            env_overrides={
-                **BASE_ENV,
-                "SEMANTIC_MLX_MAX_BATCH_SIZE": str(bs),
-                "SEMANTIC_MLX_SCHEDULER_ENABLED": "true" if bs > 1 else "false",
-            },
-            scenarios=scenarios,
-        ))
+        exp_c.append(
+            Experiment(
+                name=f"C_batch{bs}",
+                description=f"Batch size = {bs}",
+                env_overrides={
+                    **BASE_ENV,
+                    "SEMANTIC_MLX_MAX_BATCH_SIZE": str(bs),
+                    "SEMANTIC_MLX_SCHEDULER_ENABLED": "true" if bs > 1 else "false",
+                },
+                scenarios=scenarios,
+            )
+        )
     experiments["C"] = exp_c
 
     # --- Experiment D: Batch Window Tuning ---
@@ -361,17 +350,19 @@ def build_experiments(quick: bool = False) -> dict[str, list[Experiment]]:
                 stagger_ms=w / 2,
             ),
         ]
-        exp_d.append(Experiment(
-            name=f"D_window{w}",
-            description=f"Batch window = {w}ms",
-            env_overrides={
-                **BASE_ENV,
-                "SEMANTIC_MLX_MAX_BATCH_SIZE": "2",
-                "SEMANTIC_MLX_SCHEDULER_ENABLED": "true",
-                "SEMANTIC_AGENT_BATCH_WINDOW_MS": str(w),
-            },
-            scenarios=scenarios,
-        ))
+        exp_d.append(
+            Experiment(
+                name=f"D_window{w}",
+                description=f"Batch window = {w}ms",
+                env_overrides={
+                    **BASE_ENV,
+                    "SEMANTIC_MLX_MAX_BATCH_SIZE": "2",
+                    "SEMANTIC_MLX_SCHEDULER_ENABLED": "true",
+                    "SEMANTIC_AGENT_BATCH_WINDOW_MS": str(w),
+                },
+                scenarios=scenarios,
+            )
+        )
     experiments["D"] = exp_d
 
     # --- Experiment E: Output Length Scaling ---
@@ -387,27 +378,33 @@ def build_experiments(quick: bool = False) -> dict[str, list[Experiment]]:
         )
         for out in output_lengths
     ]
-    experiments["E"] = [Experiment(
-        name="E_output_scaling",
-        description="Output length scaling",
-        env_overrides={**BASE_ENV},
-        scenarios=scenarios_e,
-    )]
+    experiments["E"] = [
+        Experiment(
+            name="E_output_scaling",
+            description="Output length scaling",
+            env_overrides={**BASE_ENV},
+            scenarios=scenarios_e,
+        )
+    ]
 
     # --- Experiment F: Cache Hit Ratio ---
-    experiments["F"] = [Experiment(
-        name="F_cache_ratio",
-        description="Cold/warm/hot cache ratios",
-        env_overrides={**BASE_ENV},
-        scenarios=[
-            ExperimentScenario(name="cold_only", target_tokens=2000),
-            ExperimentScenario(
-                name="warm_only", target_tokens=2000, warm=True,
-                session_id="cache_warm",
-            ),
-            ExperimentScenario(name="cold_warm_alt", target_tokens=2000),
-        ],
-    )]
+    experiments["F"] = [
+        Experiment(
+            name="F_cache_ratio",
+            description="Cold/warm/hot cache ratios",
+            env_overrides={**BASE_ENV},
+            scenarios=[
+                ExperimentScenario(name="cold_only", target_tokens=2000),
+                ExperimentScenario(
+                    name="warm_only",
+                    target_tokens=2000,
+                    warm=True,
+                    session_id="cache_warm",
+                ),
+                ExperimentScenario(name="cold_warm_alt", target_tokens=2000),
+            ],
+        )
+    ]
 
     # --- Experiment G: LRU Eviction Pressure ---
     agent_counts = [1, 3, 5, 10]
@@ -423,15 +420,17 @@ def build_experiments(quick: bool = False) -> dict[str, list[Experiment]]:
                 max_tokens=32,
             ),
         ]
-        exp_g.append(Experiment(
-            name=f"G_agents{n}",
-            description=f"Max agents = {n}",
-            env_overrides={
-                **BASE_ENV,
-                "SEMANTIC_AGENT_MAX_AGENTS_IN_MEMORY": str(n),
-            },
-            scenarios=scenarios,
-        ))
+        exp_g.append(
+            Experiment(
+                name=f"G_agents{n}",
+                description=f"Max agents = {n}",
+                env_overrides={
+                    **BASE_ENV,
+                    "SEMANTIC_AGENT_MAX_AGENTS_IN_MEMORY": str(n),
+                },
+                scenarios=scenarios,
+            )
+        )
     experiments["G"] = exp_g
 
     # --- Experiment H: Asymmetric Batch ---
@@ -447,16 +446,18 @@ def build_experiments(quick: bool = False) -> dict[str, list[Experiment]]:
         )
         for short, long in pairs
     ]
-    experiments["H"] = [Experiment(
-        name="H_asymmetric",
-        description="Asymmetric batch workloads",
-        env_overrides={
-            **BASE_ENV,
-            "SEMANTIC_MLX_MAX_BATCH_SIZE": "2",
-            "SEMANTIC_MLX_SCHEDULER_ENABLED": "true",
-        },
-        scenarios=scenarios_h,
-    )]
+    experiments["H"] = [
+        Experiment(
+            name="H_asymmetric",
+            description="Asymmetric batch workloads",
+            env_overrides={
+                **BASE_ENV,
+                "SEMANTIC_MLX_MAX_BATCH_SIZE": "2",
+                "SEMANTIC_MLX_SCHEDULER_ENABLED": "true",
+            },
+            scenarios=scenarios_h,
+        )
+    ]
 
     # --- Experiment I: KV Bits Comparison ---
     kv_configs = [("4", "Q4"), ("8", "Q8")]
@@ -481,12 +482,14 @@ def build_experiments(quick: bool = False) -> dict[str, list[Experiment]]:
             env["SEMANTIC_MLX_KV_BITS"] = bits_str
         else:
             env["SEMANTIC_MLX_KV_BITS"] = ""
-        exp_i.append(Experiment(
-            name=f"I_kv{label}",
-            description=f"KV bits = {label}",
-            env_overrides=env,
-            scenarios=scenarios,
-        ))
+        exp_i.append(
+            Experiment(
+                name=f"I_kv{label}",
+                description=f"KV bits = {label}",
+                env_overrides=env,
+                scenarios=scenarios,
+            )
+        )
     experiments["I"] = exp_i
 
     return experiments
@@ -495,6 +498,7 @@ def build_experiments(quick: bool = False) -> dict[str, list[Experiment]]:
 # ---------------------------------------------------------------------------
 # Profiling benchmark runner
 # ---------------------------------------------------------------------------
+
 
 class ProfilingBenchmark:
     """Orchestrates all profiling experiments."""
@@ -536,7 +540,7 @@ class ProfilingBenchmark:
         except Exception:
             sha = "unknown"
         return {
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "model_id": "mlx-community/DeepSeek-Coder-V2-Lite-Instruct-4bit-mlx",
             "machine": {
                 "os": platform.system(),
@@ -555,9 +559,7 @@ class ProfilingBenchmark:
     async def _delete_agent(self, session_id: str) -> None:
         async with httpx.AsyncClient(timeout=10.0) as c:
             try:
-                await c.delete(
-                    f"{self.base_url}/v1/agents/sess_{session_id}"
-                )
+                await c.delete(f"{self.base_url}/v1/agents/sess_{session_id}")
             except Exception:
                 pass
 
@@ -588,9 +590,7 @@ class ProfilingBenchmark:
         await self._delete_agent(sid)
 
         client = RequestClient(self.base_url)
-        body = self.prompt.build_request(
-            scenario.target_tokens, scenario.max_tokens
-        )
+        body = self.prompt.build_request(scenario.target_tokens, scenario.max_tokens)
 
         try:
             mem_before = await self.memory.snapshot()
@@ -606,9 +606,7 @@ class ProfilingBenchmark:
                         config="",
                         error=f"Prime failed: {prime.error}",
                     )
-                original_messages = self.prompt.build_messages(
-                    scenario.target_tokens
-                )
+                original_messages = self.prompt.build_messages(scenario.target_tokens)
                 body = self.prompt.build_followup_request(
                     original_messages,
                     prime.raw_output or "Understood.",
@@ -616,13 +614,9 @@ class ProfilingBenchmark:
                 )
 
             if scenario.concurrent > 1:
-                result = await self._run_concurrent(
-                    scenario, body, run_idx
-                )
+                result = await self._run_concurrent(scenario, body, run_idx)
             else:
-                result = await client.send_and_measure(
-                    body, session_id=sid
-                )
+                result = await client.send_and_measure(body, session_id=sid)
 
         except Exception as exc:
             return ScenarioResult(
@@ -681,9 +675,7 @@ class ProfilingBenchmark:
             )
 
         t_wall_start = time.perf_counter()
-        results = await asyncio.gather(
-            *[send_with_stagger(i) for i in range(n)]
-        )
+        results = await asyncio.gather(*[send_with_stagger(i) for i in range(n)])
         t_wall_end = time.perf_counter()
         wall_ms = (t_wall_end - t_wall_start) * 1000
 
@@ -704,9 +696,7 @@ class ProfilingBenchmark:
 
         # Cleanup concurrent sessions
         for i in range(n):
-            await self._delete_agent(
-                f"prof_{scenario.name}_r{run_idx}_c{i}"
-            )
+            await self._delete_agent(f"prof_{scenario.name}_r{run_idx}_c{i}")
 
         return main
 
@@ -730,13 +720,15 @@ class ProfilingBenchmark:
 
             cold_e2e = [r.e2e_ms for r in cold_results]
             cold_tps = [r.decode_tps for r in cold_results if r.decode_tps > 0]
-            results.append(ScenarioResult(
-                scenario="F_cold_only",
-                config=exp.name,
-                e2e_ms=sum(cold_e2e) / len(cold_e2e),
-                decode_tps=sum(cold_tps) / len(cold_tps) if cold_tps else 0,
-                output_tokens=sum(r.output_tokens for r in cold_results),
-            ))
+            results.append(
+                ScenarioResult(
+                    scenario="F_cold_only",
+                    config=exp.name,
+                    e2e_ms=sum(cold_e2e) / len(cold_e2e),
+                    decode_tps=sum(cold_tps) / len(cold_tps) if cold_tps else 0,
+                    output_tokens=sum(r.output_tokens for r in cold_results),
+                )
+            )
 
             # Scenario 2: 100% warm (same agent, multi-turn)
             sid = f"warm_only_{run_idx}"
@@ -753,20 +745,20 @@ class ProfilingBenchmark:
                         prime.raw_output or "Understood.",
                         OUTPUT_TOKENS,
                     )
-                    r = await client.send_and_measure(
-                        followup, session_id=sid
-                    )
+                    r = await client.send_and_measure(followup, session_id=sid)
                     warm_results.append(r)
 
                 warm_e2e = [r.e2e_ms for r in warm_results]
                 warm_tps = [r.decode_tps for r in warm_results if r.decode_tps > 0]
-                results.append(ScenarioResult(
-                    scenario="F_warm_only",
-                    config=exp.name,
-                    e2e_ms=sum(warm_e2e) / len(warm_e2e),
-                    decode_tps=sum(warm_tps) / len(warm_tps) if warm_tps else 0,
-                    output_tokens=sum(r.output_tokens for r in warm_results),
-                ))
+                results.append(
+                    ScenarioResult(
+                        scenario="F_warm_only",
+                        config=exp.name,
+                        e2e_ms=sum(warm_e2e) / len(warm_e2e),
+                        decode_tps=sum(warm_tps) / len(warm_tps) if warm_tps else 0,
+                        output_tokens=sum(r.output_tokens for r in warm_results),
+                    )
+                )
             await self._delete_agent(sid)
 
             # Scenario 3: Hot path (10 sequential turns)
@@ -779,31 +771,29 @@ class ProfilingBenchmark:
 
             for i in range(10):
                 if i == 0:
-                    r = await client.send_and_measure(
-                        body, session_id=sid
-                    )
+                    r = await client.send_and_measure(body, session_id=sid)
                 else:
                     followup = self.prompt.build_followup_request(
                         msgs,
                         prev_response or "Continue.",
                         16,
                     )
-                    r = await client.send_and_measure(
-                        followup, session_id=sid
-                    )
+                    r = await client.send_and_measure(followup, session_id=sid)
                 hot_results.append(r)
                 prev_response = r.raw_output or "Continue."
 
             hot_e2e = [r.e2e_ms for r in hot_results]
             hot_tps = [r.decode_tps for r in hot_results if r.decode_tps > 0]
-            results.append(ScenarioResult(
-                scenario="F_hot_path",
-                config=exp.name,
-                e2e_ms=sum(hot_e2e) / len(hot_e2e),
-                ttft_ms=hot_e2e[0] if hot_e2e else 0,
-                decode_tps=sum(hot_tps) / len(hot_tps) if hot_tps else 0,
-                output_tokens=sum(r.output_tokens for r in hot_results),
-            ))
+            results.append(
+                ScenarioResult(
+                    scenario="F_hot_path",
+                    config=exp.name,
+                    e2e_ms=sum(hot_e2e) / len(hot_e2e),
+                    ttft_ms=hot_e2e[0] if hot_e2e else 0,
+                    decode_tps=sum(hot_tps) / len(hot_tps) if hot_tps else 0,
+                    output_tokens=sum(r.output_tokens for r in hot_results),
+                )
+            )
             await self._delete_agent(sid)
 
         finally:
@@ -811,15 +801,9 @@ class ProfilingBenchmark:
 
         return results
 
-    async def _run_eviction_experiment(
-        self, exp: Experiment, run_idx: int
-    ) -> list[ScenarioResult]:
+    async def _run_eviction_experiment(self, exp: Experiment, run_idx: int) -> list[ScenarioResult]:
         """Special handler for Experiment G (LRU eviction)."""
-        max_agents = int(
-            exp.env_overrides.get(
-                "SEMANTIC_AGENT_MAX_AGENTS_IN_MEMORY", "5"
-            )
-        )
+        max_agents = int(exp.env_overrides.get("SEMANTIC_AGENT_MAX_AGENTS_IN_MEMORY", "5"))
         n_agents = max_agents + 2
         results: list[ScenarioResult] = []
         client = RequestClient(self.base_url)
@@ -833,11 +817,13 @@ class ProfilingBenchmark:
                 r = await client.send_and_measure(body, session_id=sid)
                 fill_times.append(r.e2e_ms)
 
-            results.append(ScenarioResult(
-                scenario=f"G_fill_{max_agents}",
-                config=exp.name,
-                e2e_ms=sum(fill_times) / len(fill_times),
-            ))
+            results.append(
+                ScenarioResult(
+                    scenario=f"G_fill_{max_agents}",
+                    config=exp.name,
+                    e2e_ms=sum(fill_times) / len(fill_times),
+                )
+            )
 
             try:
                 mem = await self.memory.snapshot()
@@ -851,18 +837,18 @@ class ProfilingBenchmark:
             for i in range(min(2, n_agents)):
                 sid = f"evict_{run_idx}_agent{i}"
                 msgs = self.prompt.build_messages(1000)
-                body = self.prompt.build_followup_request(
-                    msgs, "Previous response.", 32
-                )
+                body = self.prompt.build_followup_request(msgs, "Previous response.", 32)
                 r = await client.send_and_measure(body, session_id=sid)
                 reload_times.append(r.e2e_ms)
 
             if reload_times:
-                results.append(ScenarioResult(
-                    scenario=f"G_reload_{max_agents}",
-                    config=exp.name,
-                    e2e_ms=sum(reload_times) / len(reload_times),
-                ))
+                results.append(
+                    ScenarioResult(
+                        scenario=f"G_reload_{max_agents}",
+                        config=exp.name,
+                        e2e_ms=sum(reload_times) / len(reload_times),
+                    )
+                )
 
             # Cleanup
             for i in range(n_agents):
@@ -873,9 +859,7 @@ class ProfilingBenchmark:
 
         return results
 
-    async def run_experiment_group(
-        self, exp_key: str, exp_list: list[Experiment]
-    ) -> None:
+    async def run_experiment_group(self, exp_key: str, exp_list: list[Experiment]) -> None:
         """Run all sub-experiments for a given experiment key."""
         print(f"\n{'=' * 70}")
         print(f"  Experiment {exp_key}")
@@ -900,26 +884,17 @@ class ProfilingBenchmark:
                 # Special handlers for F and G
                 if exp_key == "F":
                     for run_i in range(self.runs):
-                        sub_results = (
-                            await self._run_cache_ratio_experiment(
-                                exp, run_i
-                            )
-                        )
+                        sub_results = await self._run_cache_ratio_experiment(exp, run_i)
                         for r in sub_results:
                             key = r.scenario
                             if key not in scenario_results:
                                 scenario_results[key] = {"runs": []}
                             scenario_results[key]["runs"].append(asdict(r))
-                            print(
-                                f"    {key} run {run_i + 1}: "
-                                f"E2E={r.e2e_ms:.0f}ms"
-                            )
+                            print(f"    {key} run {run_i + 1}: E2E={r.e2e_ms:.0f}ms")
 
                 elif exp_key == "G":
                     for run_i in range(self.runs):
-                        sub_results = (
-                            await self._run_eviction_experiment(exp, run_i)
-                        )
+                        sub_results = await self._run_eviction_experiment(exp, run_i)
                         for r in sub_results:
                             key = r.scenario
                             if key not in scenario_results:
@@ -950,24 +925,19 @@ class ProfilingBenchmark:
                             )
                             if r.error:
                                 status = f"ERR: {r.error[:60]}"
-                            print(
-                                f"    [{scenario.name}] "
-                                f"run {run_i + 1}/{self.runs} "
-                                f"{status}"
-                            )
+                            print(f"    [{scenario.name}] run {run_i + 1}/{self.runs} {status}")
 
                         # Compute stats
                         stats: dict[str, Any] = {}
                         for metric in [
-                            "ttft_ms", "e2e_ms", "tpot_ms",
-                            "decode_tps", "overall_tps",
+                            "ttft_ms",
+                            "e2e_ms",
+                            "tpot_ms",
+                            "decode_tps",
+                            "overall_tps",
                             "peak_memory_mb",
                         ]:
-                            values = [
-                                r[metric]
-                                for r in scenario_runs
-                                if not r.get("error")
-                            ]
+                            values = [r[metric] for r in scenario_runs if not r.get("error")]
                             stats[metric] = compute_stats(values)
 
                         scenario_results[scenario.name] = {
@@ -981,14 +951,14 @@ class ProfilingBenchmark:
                         runs = scenario_results[key]["runs"]
                         stats = {}
                         for metric in [
-                            "e2e_ms", "ttft_ms", "decode_tps",
-                            "overall_tps", "peak_memory_mb",
+                            "e2e_ms",
+                            "ttft_ms",
+                            "decode_tps",
+                            "overall_tps",
+                            "peak_memory_mb",
                             "output_tokens",
                         ]:
-                            values = [
-                                r.get(metric, 0) for r in runs
-                                if not r.get("error")
-                            ]
+                            values = [r.get(metric, 0) for r in runs if not r.get("error")]
                             stats[metric] = compute_stats(values)
                         scenario_results[key]["stats"] = stats
 
@@ -1005,9 +975,7 @@ class ProfilingBenchmark:
         self.results["experiments"][exp_key] = exp_results
         self._save()
 
-    async def run_all(
-        self, experiment_keys: list[str] | None = None
-    ) -> None:
+    async def run_all(self, experiment_keys: list[str] | None = None) -> None:
         """Run all or selected experiments."""
         all_experiments = build_experiments(self.quick)
 
@@ -1031,20 +999,12 @@ class ProfilingBenchmark:
         lines: list[str] = []
         lines.append("=" * 90)
         lines.append("  PROFILING BENCHMARK SUMMARY")
-        lines.append(
-            f"  Model: {self.results['metadata']['model_id']}"
-        )
-        lines.append(
-            f"  Date: {self.results['metadata']['timestamp']}"
-        )
-        lines.append(
-            f"  Runs per scenario: {self.runs}"
-        )
+        lines.append(f"  Model: {self.results['metadata']['model_id']}")
+        lines.append(f"  Date: {self.results['metadata']['timestamp']}")
+        lines.append(f"  Runs per scenario: {self.runs}")
         lines.append("=" * 90)
 
-        for exp_key, exp_data in sorted(
-            self.results.get("experiments", {}).items()
-        ):
+        for exp_key, exp_data in sorted(self.results.get("experiments", {}).items()):
             lines.append(f"\n{'─' * 90}")
             lines.append(f"  Experiment {exp_key}")
             lines.append(f"{'─' * 90}")
@@ -1052,13 +1012,7 @@ class ProfilingBenchmark:
             for exp_name, exp_info in sorted(exp_data.items()):
                 desc = exp_info.get("description", "")
                 lines.append(f"\n  {exp_name}: {desc}")
-                lines.append(
-                    f"  {'Scenario':<40} "
-                    f"{'TTFT':>8} "
-                    f"{'E2E':>8} "
-                    f"{'TPS':>7} "
-                    f"{'Peak MB':>8}"
-                )
+                lines.append(f"  {'Scenario':<40} {'TTFT':>8} {'E2E':>8} {'TPS':>7} {'Peak MB':>8}")
                 lines.append(f"  {'─' * 40} {'─' * 8} {'─' * 8} {'─' * 7} {'─' * 8}")
 
                 scenarios = exp_info.get("scenarios", {})
@@ -1069,11 +1023,7 @@ class ProfilingBenchmark:
                     tps = stats.get("decode_tps", {}).get("median", 0)
                     peak = stats.get("peak_memory_mb", {}).get("median", 0)
                     lines.append(
-                        f"  {sc_name:<40} "
-                        f"{ttft:>8.0f} "
-                        f"{e2e:>8.0f} "
-                        f"{tps:>7.1f} "
-                        f"{peak:>8.0f}"
+                        f"  {sc_name:<40} {ttft:>8.0f} {e2e:>8.0f} {tps:>7.1f} {peak:>8.0f}"
                     )
 
         # Find optimal per experiment
@@ -1087,22 +1037,15 @@ class ProfilingBenchmark:
             best_step = None
             best_ttft = float("inf")
             for exp_name, exp_info in exp_a.items():
-                for sc_name, sc_data in exp_info.get(
-                    "scenarios", {}
-                ).items():
+                for sc_name, sc_data in exp_info.get("scenarios", {}).items():
                     ttft_med = (
-                        sc_data.get("stats", {})
-                        .get("ttft_ms", {})
-                        .get("median", float("inf"))
+                        sc_data.get("stats", {}).get("ttft_ms", {}).get("median", float("inf"))
                     )
                     if ttft_med < best_ttft:
                         best_ttft = ttft_med
                         best_step = exp_name
             if best_step:
-                lines.append(
-                    f"  Prefill step: {best_step} "
-                    f"(TTFT={best_ttft:.0f}ms)"
-                )
+                lines.append(f"  Prefill step: {best_step} (TTFT={best_ttft:.0f}ms)")
 
         # Experiment C: best batch size
         exp_c = self.results.get("experiments", {}).get("C", {})
@@ -1110,22 +1053,13 @@ class ProfilingBenchmark:
             best_batch = None
             best_tps = 0.0
             for exp_name, exp_info in exp_c.items():
-                for sc_name, sc_data in exp_info.get(
-                    "scenarios", {}
-                ).items():
-                    tps_med = (
-                        sc_data.get("stats", {})
-                        .get("overall_tps", {})
-                        .get("median", 0)
-                    )
+                for sc_name, sc_data in exp_info.get("scenarios", {}).items():
+                    tps_med = sc_data.get("stats", {}).get("overall_tps", {}).get("median", 0)
                     if tps_med > best_tps:
                         best_tps = tps_med
                         best_batch = exp_name
             if best_batch:
-                lines.append(
-                    f"  Batch size: {best_batch} "
-                    f"(system TPS={best_tps:.1f})"
-                )
+                lines.append(f"  Batch size: {best_batch} (system TPS={best_tps:.1f})")
 
         summary = "\n".join(lines)
         with open(self.summary_path, "w") as f:
@@ -1136,6 +1070,7 @@ class ProfilingBenchmark:
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
+
 
 def main() -> None:
     parser = argparse.ArgumentParser(

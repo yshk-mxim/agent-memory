@@ -8,8 +8,6 @@ benchmark methodology is wrong (not testing true disk reload).
 """
 
 import pytest
-import time
-from pathlib import Path
 
 from agent_memory.application.agent_cache_store import AgentCacheStore
 from agent_memory.domain.entities import AgentBlocks, KVBlock
@@ -32,6 +30,7 @@ def cache_store(tmp_path):
 
     # Mock cache adapter
     from unittest.mock import MagicMock
+
     adapter = MagicMock()
     adapter.save.return_value = cache_dir / "test_agent.safetensors"
     adapter.load.return_value = AgentBlocks(

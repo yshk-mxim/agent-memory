@@ -233,9 +233,7 @@ class TestEffectiveChunkSizes:
             chunked_prefill_min_chunk=512,
             chunked_prefill_max_chunk=4096,
         )
-        config.set_batch_state(
-            active_batch=DEFAULT_HIGH_BATCH_THRESHOLD, queue_depth=0
-        )
+        config.set_batch_state(active_batch=DEFAULT_HIGH_BATCH_THRESHOLD, queue_depth=0)
         assert config.effective_chunk_sizes == (256, 2048)
 
     def test_normal_returns_baseline_chunks(self) -> None:

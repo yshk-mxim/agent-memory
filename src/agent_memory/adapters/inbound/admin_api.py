@@ -11,6 +11,7 @@ Authentication: Requires SEMANTIC_ADMIN_KEY header matching env var.
 """
 
 import asyncio
+import gc
 import logging
 import os
 import secrets
@@ -319,8 +320,6 @@ async def offload_model(
     Returns:
         OffloadModelResponse with status
     """
-    import gc
-
     try:
         model_id = registry.get_current_id()
         if model_id is None:
@@ -406,8 +405,6 @@ async def clear_all_caches(
     Returns:
         ClearCachesResponse with counts of cleared items
     """
-    import shutil
-
     try:
         hot_cleared = 0
         disk_cleared = 0
@@ -444,7 +441,10 @@ async def clear_all_caches(
             hot_cleared=hot_cleared,
             disk_cleared=disk_cleared,
             pool_cleared=pool_cleared,
-            message=f"Cleared {total} total items (hot: {hot_cleared}, disk: {disk_cleared}, pool: {pool_cleared})",
+            message=(
+                f"Cleared {total} total items"
+                f" (hot: {hot_cleared}, disk: {disk_cleared}, pool: {pool_cleared})"
+            ),
         )
 
     except Exception as e:
@@ -460,6 +460,7 @@ async def clear_all_caches(
 
 class SeedRequest(BaseModel):
     """Request to set the random seed."""
+
     seed: int = Field(..., description="Random seed value")
 
 
@@ -467,6 +468,7 @@ class SeedRequest(BaseModel):
 async def set_random_seed(body: SeedRequest) -> dict[str, Any]:
     """Set the MLX random seed for reproducibility testing."""
     import mlx.core as mx
+
     mx.random.seed(body.seed)
     logger.info(f"Random seed set to {body.seed}")
     return {"status": "ok", "seed": body.seed}

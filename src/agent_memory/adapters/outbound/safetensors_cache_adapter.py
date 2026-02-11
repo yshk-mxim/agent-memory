@@ -1,3 +1,4 @@
+# mypy: disable-error-code="union-attr,call-overload,attr-defined,assignment"
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 Yakov Shkolnikov and contributors
 """Safetensors cache persistence adapter.
@@ -37,7 +38,9 @@ class SafetensorsCacheAdapter:
             ) from e
 
         # Clean up orphan .tmp files from crashed saves (both old and new patterns)
-        for tmp_file in list(self.cache_dir.glob("*.tmp.safetensors")) + list(self.cache_dir.glob("*.safetensors.tmp")):
+        for tmp_file in list(self.cache_dir.glob("*.tmp.safetensors")) + list(
+            self.cache_dir.glob("*.safetensors.tmp")
+        ):
             try:
                 tmp_file.unlink()
                 logger.info(f"Cleaned up orphan tmp file: {tmp_file.name}")
@@ -288,16 +291,12 @@ class SafetensorsCacheAdapter:
                 k_weights = tensors_data[k_weights_key]
                 k_scales = tensors_data[f"L{layer_id}_B{block_idx}_K_scales"]
                 k_biases_key = f"L{layer_id}_B{block_idx}_K_biases"
-                k_biases = (
-                    tensors_data[k_biases_key] if k_biases_key in tensors_data else None
-                )
+                k_biases = tensors_data.get(k_biases_key)
 
                 v_weights = tensors_data[v_weights_key]
                 v_scales = tensors_data[f"L{layer_id}_B{block_idx}_V_scales"]
                 v_biases_key = f"L{layer_id}_B{block_idx}_V_biases"
-                v_biases = (
-                    tensors_data[v_biases_key] if v_biases_key in tensors_data else None
-                )
+                v_biases = tensors_data.get(v_biases_key)
 
                 # Store as quantized tuples (don't dequantize unless needed)
                 k_data = (k_weights, k_scales, k_biases)
@@ -323,8 +322,9 @@ class SafetensorsCacheAdapter:
 
                 token_count = k_data.shape[2] if len(k_data.shape) >= 3 else 0
 
-            # Use large multiplier to avoid ID collisions with many blocks
-            # 1_000_000 supports up to 1M blocks per layer (enough for 256M tokens at 256 tokens/block)
+            # Use large multiplier to avoid ID collisions with many blocks.
+            # 1_000_000 supports up to 1M blocks per layer
+            # (enough for 256M tokens at 256 tokens/block)
             block = KVBlock(
                 block_id=layer_id * 1_000_000 + block_idx,
                 layer_id=layer_id,
@@ -440,7 +440,7 @@ class SafetensorsCacheAdapter:
 
         try:
             # Read 8-byte header (little-endian uint64)
-            with open(cache_path, "rb") as f:
+            with cache_path.open("rb") as f:
                 header_size_bytes = f.read(8)
                 if len(header_size_bytes) < 8:
                     return None
@@ -470,7 +470,7 @@ class SafetensorsCacheAdapter:
                     "prompt_text": user_metadata.get("prompt_text", ""),
                 }
 
-        except (OSError, IOError, struct.error, json.JSONDecodeError, UnicodeDecodeError) as e:
+        except (OSError, struct.error, json.JSONDecodeError, UnicodeDecodeError) as e:
             logger.warning(f"Failed to read metadata for {agent_id}: {e}")
             return None
 

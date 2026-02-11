@@ -20,6 +20,7 @@ Routes:
 import json
 import logging
 from collections.abc import AsyncIterator
+from typing import Any
 from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, Request, status
@@ -429,7 +430,7 @@ async def execute_round(
         ) from e
 
 
-async def stream_turn_events(service, session_id: str) -> AsyncIterator[dict[str, str]]:
+async def stream_turn_events(service: Any, session_id: str) -> AsyncIterator[dict[str, str]]:
     """Generate SSE events for streaming a single turn.
 
     Yields:
@@ -497,7 +498,7 @@ async def stream_turn_events(service, session_id: str) -> AsyncIterator[dict[str
         }
 
 
-async def stream_round_events(service, session_id: str) -> AsyncIterator[dict[str, str]]:
+async def stream_round_events(service: Any, session_id: str) -> AsyncIterator[dict[str, str]]:
     """Generate SSE events for streaming a full round.
 
     Yields:
@@ -534,7 +535,7 @@ async def stream_round_events(service, session_id: str) -> AsyncIterator[dict[st
 async def execute_turn_stream(
     request: Request,
     session_id: str,
-):
+) -> EventSourceResponse:
     """Execute the next turn with Server-Sent Events streaming.
 
     Args:
@@ -552,7 +553,7 @@ async def execute_turn_stream(
 async def execute_round_stream(
     request: Request,
     session_id: str,
-):
+) -> EventSourceResponse:
     """Execute a full round with Server-Sent Events streaming.
 
     Args:

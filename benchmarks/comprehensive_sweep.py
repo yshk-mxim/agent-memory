@@ -32,30 +32,28 @@ import asyncio
 import json
 import platform
 import subprocess
-import time
-from dataclasses import asdict
-from datetime import datetime, timezone
-from pathlib import Path
-from typing import Any
-
-import httpx
 
 # ---------------------------------------------------------------------------
 # Reuse clients and helpers from openai_benchmark
 # ---------------------------------------------------------------------------
 import sys
+import time
+from dataclasses import asdict
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
+
+import httpx
+
 sys.path.insert(0, str(Path(__file__).parent))
 
 from openai_benchmark import (
-    OpenAIStreamingClient,
-    OpenAIRequestClient,
-    OpenAIPromptFactory,
-    ScenarioResult,
-    ServerManager,
-    compute_stats,
     OPENAI_BENCH_ENV,
     PORT,
-    PADDING_TEXT,
+    OpenAIPromptFactory,
+    OpenAIRequestClient,
+    OpenAIStreamingClient,
+    ServerManager,
 )
 
 RESULTS_DIR = Path(__file__).parent / "results"
@@ -70,10 +68,14 @@ PREALLOC_TOKENS = 64000
 
 def _git_sha() -> str:
     try:
-        return subprocess.check_output(
-            ["git", "rev-parse", "--short", "HEAD"],
-            stderr=subprocess.DEVNULL,
-        ).decode().strip()
+        return (
+            subprocess.check_output(
+                ["git", "rev-parse", "--short", "HEAD"],
+                stderr=subprocess.DEVNULL,
+            )
+            .decode()
+            .strip()
+        )
     except Exception:
         return "unknown"
 
@@ -81,6 +83,7 @@ def _git_sha() -> str:
 # ---------------------------------------------------------------------------
 # Preallocation: send a 64K token request to force GPU memory allocation
 # ---------------------------------------------------------------------------
+
 
 async def preallocate_cache(
     base_url: str,
@@ -100,7 +103,8 @@ async def preallocate_cache(
     async with httpx.AsyncClient(timeout=120.0) as client:
         try:
             r = await client.post(
-                f"{base_url}/v1/chat/completions", json=small_body,
+                f"{base_url}/v1/chat/completions",
+                json=small_body,
             )
             if r.status_code == 200:
                 print("  [PREALLOC] Model loaded OK")
@@ -127,7 +131,9 @@ async def preallocate_cache(
             )
             t1 = time.perf_counter()
             if resp.status_code == 200:
-                print(f"  [PREALLOC] Done in {(t1-t0)*1000:.0f}ms ({prealloc_tokens} tokens prefilled)")
+                print(
+                    f"  [PREALLOC] Done in {(t1 - t0) * 1000:.0f}ms ({prealloc_tokens} tokens prefilled)"
+                )
             else:
                 print(f"  [PREALLOC] Warning: status {resp.status_code} — {resp.text[:200]}")
         except Exception as e:
@@ -147,6 +153,7 @@ async def preallocate_cache(
 # ---------------------------------------------------------------------------
 # Individual test runners
 # ---------------------------------------------------------------------------
+
 
 async def run_cold(
     base_url: str,
@@ -322,10 +329,9 @@ async def run_concurrent(
 
     t_wall_start = time.perf_counter()
     try:
-        results = await asyncio.gather(*(
-            clients[j].send_and_measure(body, session_id=sids[j])
-            for j in range(n_concurrent)
-        ))
+        results = await asyncio.gather(
+            *(clients[j].send_and_measure(body, session_id=sids[j]) for j in range(n_concurrent))
+        )
     except Exception as e:
         for c in clients:
             await c.close()
@@ -368,6 +374,7 @@ async def run_concurrent(
 # Main sweep
 # ---------------------------------------------------------------------------
 
+
 async def run_sweep(
     base_url: str,
     model: str,
@@ -382,7 +389,7 @@ async def run_sweep(
 ) -> None:
     all_results: dict[str, Any] = {
         "metadata": {
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "server": label,
             "base_url": base_url,
             "model": model,
@@ -424,9 +431,9 @@ async def run_sweep(
     prealloc_done = False
     for batch_size in batch_sizes:
         batch_key = f"batch_{batch_size}"
-        print(f"\n{'='*80}")
+        print(f"\n{'=' * 80}")
         print(f"  BATCH SIZE = {batch_size}")
-        print(f"{'='*80}")
+        print(f"{'=' * 80}")
 
         server = None
         if not external:
@@ -469,8 +476,7 @@ async def run_sweep(
                 print("  [WARMUP] Done")
 
             batch_results: dict[str, Any] = (
-                all_results.get("sweeps", {}).get(batch_key, {})
-                if concurrent_only else {}
+                all_results.get("sweeps", {}).get(batch_key, {}) if concurrent_only else {}
             )
 
             # --- Single-request tests: cold, warm, hot ---
@@ -594,22 +600,22 @@ async def run_sweep(
 
     # --- Final summary ---
     save()
-    print(f"\n{'='*80}")
+    print(f"\n{'=' * 80}")
     print(f"  Sweep complete. Results saved to: {out_path}")
-    print(f"{'='*80}")
+    print(f"{'=' * 80}")
     _print_summary(all_results)
 
 
 def _print_summary(results: dict[str, Any]) -> None:
     """Print a concise summary table."""
-    print(f"\n{'='*100}")
-    print(f"  COMPREHENSIVE SWEEP SUMMARY")
-    print(f"{'='*100}")
+    print(f"\n{'=' * 100}")
+    print("  COMPREHENSIVE SWEEP SUMMARY")
+    print(f"{'=' * 100}")
 
     for batch_key, batch_data in sorted(results.get("sweeps", {}).items()):
         print(f"\n  --- {batch_key} ---")
         print(f"  {'Scenario':<35} {'TTFT':>8} {'E2E':>9} {'TPS':>8} {'Out':>6}")
-        print(f"  {'─'*35} {'─'*8} {'─'*9} {'─'*8} {'─'*6}")
+        print(f"  {'─' * 35} {'─' * 8} {'─' * 9} {'─' * 8} {'─' * 6}")
 
         for key, data in sorted(batch_data.items()):
             if data.get("error"):
@@ -638,24 +644,35 @@ def main() -> None:
     parser.add_argument("--label", type=str, default=None)
     parser.add_argument("--output", type=str, default=None)
     parser.add_argument(
-        "--batch-sizes", nargs="+", type=int, default=DEFAULT_BATCH_SIZES,
-        help="Batch sizes to test (default: 1 2 3)"
+        "--batch-sizes",
+        nargs="+",
+        type=int,
+        default=DEFAULT_BATCH_SIZES,
+        help="Batch sizes to test (default: 1 2 3)",
     )
     parser.add_argument(
-        "--contexts", nargs="+", type=int, default=DEFAULT_CONTEXTS,
-        help="Context token counts (default: 2000 5000 10000 25000 50000)"
+        "--contexts",
+        nargs="+",
+        type=int,
+        default=DEFAULT_CONTEXTS,
+        help="Context token counts (default: 2000 5000 10000 25000 50000)",
     )
     parser.add_argument(
-        "--outputs", nargs="+", type=int, default=DEFAULT_OUTPUTS,
-        help="Output token counts (default: 100 500 1000 5000)"
+        "--outputs",
+        nargs="+",
+        type=int,
+        default=DEFAULT_OUTPUTS,
+        help="Output token counts (default: 100 500 1000 5000)",
     )
     parser.add_argument(
-        "--concurrent-only", action="store_true",
-        help="Only run concurrent tests (skip single-request tests)"
+        "--concurrent-only",
+        action="store_true",
+        help="Only run concurrent tests (skip single-request tests)",
     )
     parser.add_argument(
-        "--prealloc-first-only", action="store_true",
-        help="64K prealloc only for first batch size, small warmup for rest"
+        "--prealloc-first-only",
+        action="store_true",
+        help="64K prealloc only for first batch size, small warmup for rest",
     )
 
     args = parser.parse_args()
@@ -664,18 +681,20 @@ def main() -> None:
     if label is None:
         label = "lmstudio" if args.external and "1234" in args.base_url else "semantic"
 
-    asyncio.run(run_sweep(
-        base_url=args.base_url,
-        model=args.model,
-        batch_sizes=args.batch_sizes,
-        contexts=args.contexts,
-        outputs=args.outputs,
-        external=args.external,
-        output_path=args.output,
-        label=label,
-        concurrent_only=args.concurrent_only,
-        prealloc_first_only=args.prealloc_first_only,
-    ))
+    asyncio.run(
+        run_sweep(
+            base_url=args.base_url,
+            model=args.model,
+            batch_sizes=args.batch_sizes,
+            contexts=args.contexts,
+            outputs=args.outputs,
+            external=args.external,
+            output_path=args.output,
+            label=label,
+            concurrent_only=args.concurrent_only,
+            prealloc_first_only=args.prealloc_first_only,
+        )
+    )
 
 
 if __name__ == "__main__":

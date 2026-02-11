@@ -31,14 +31,12 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
-import math
-import os
 import platform
 import subprocess
 import sys
 import time
-from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from dataclasses import asdict
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -47,11 +45,11 @@ import httpx
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from capability_benchmark import (
+    PADDING_TEXT,
     MemoryProbe,
     ScenarioResult,
     ServerManager,
     compute_stats,
-    PADDING_TEXT,
 )
 
 RESULTS_DIR = Path(__file__).resolve().parent / "results"
@@ -79,6 +77,7 @@ OPENAI_BENCH_ENV: dict[str, str] = {
 # Prompt factory (OpenAI format)
 # ---------------------------------------------------------------------------
 
+
 class OpenAIPromptFactory:
     """Build prompts in OpenAI chat format at target token counts."""
 
@@ -92,9 +91,7 @@ class OpenAIPromptFactory:
         content = (self._padding * repeats)[:chars_needed]
         return [{"role": "user", "content": content}]
 
-    def build_system_messages(
-        self, system_tokens: int, user_content: str
-    ) -> list[dict[str, str]]:
+    def build_system_messages(self, system_tokens: int, user_content: str) -> list[dict[str, str]]:
         chars_needed = max(system_tokens * 4, 100)
         repeats = (chars_needed // len(self._padding)) + 1
         sys_content = (self._padding * repeats)[:chars_needed]
@@ -103,9 +100,7 @@ class OpenAIPromptFactory:
             {"role": "user", "content": user_content},
         ]
 
-    def build_request(
-        self, target_tokens: int, max_tokens: int = OUTPUT_TOKENS
-    ) -> dict[str, Any]:
+    def build_request(self, target_tokens: int, max_tokens: int = OUTPUT_TOKENS) -> dict[str, Any]:
         return {
             "model": self._model,
             "messages": self.build_messages(target_tokens),
@@ -151,6 +146,7 @@ class OpenAIPromptFactory:
 # OpenAI request client (non-streaming)
 # ---------------------------------------------------------------------------
 
+
 class OpenAIRequestClient:
     """Non-streaming client for /v1/chat/completions with latency measurement."""
 
@@ -175,13 +171,12 @@ class OpenAIRequestClient:
 
         t_start = time.perf_counter()
         try:
-            resp = await self.client.post(
-                self.url, json=request_body, headers=headers
-            )
+            resp = await self.client.post(self.url, json=request_body, headers=headers)
         except Exception as exc:
             t_end = time.perf_counter()
             return ScenarioResult(
-                scenario="", config="",
+                scenario="",
+                config="",
                 e2e_ms=(t_end - t_start) * 1000,
                 error=str(exc),
             )
@@ -191,7 +186,8 @@ class OpenAIRequestClient:
 
         if resp.status_code != 200:
             return ScenarioResult(
-                scenario="", config="",
+                scenario="",
+                config="",
                 e2e_ms=e2e_s * 1000,
                 error=f"HTTP {resp.status_code}: {resp.text[:200]}",
             )
@@ -210,7 +206,8 @@ class OpenAIRequestClient:
         tps = (output_tokens / e2e_s) if e2e_s > 0 and output_tokens > 0 else 0
 
         return ScenarioResult(
-            scenario="", config="",
+            scenario="",
+            config="",
             e2e_ms=e2e_s * 1000,
             ttft_ms=e2e_s * 1000,
             tpot_ms=(e2e_s / output_tokens * 1000) if output_tokens else 0,
@@ -225,6 +222,7 @@ class OpenAIRequestClient:
 # ---------------------------------------------------------------------------
 # OpenAI streaming client (for TTFT measurement)
 # ---------------------------------------------------------------------------
+
 
 class OpenAIStreamingClient:
     """SSE streaming client for /v1/chat/completions with TTFT measurement."""
@@ -250,17 +248,18 @@ class OpenAIStreamingClient:
         delta_count = 0
 
         try:
-            async with httpx.AsyncClient(
-                timeout=httpx.Timeout(300.0)
-            ) as client:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(300.0)) as client:
                 async with client.stream(
-                    "POST", self.url,
-                    json=request_body, headers=headers,
+                    "POST",
+                    self.url,
+                    json=request_body,
+                    headers=headers,
                 ) as resp:
                     if resp.status_code != 200:
                         t_end = time.perf_counter()
                         return ScenarioResult(
-                            scenario="", config="",
+                            scenario="",
+                            config="",
                             e2e_ms=(t_end - t_start) * 1000,
                             error=f"HTTP {resp.status_code}",
                         )
@@ -287,9 +286,7 @@ class OpenAIStreamingClient:
                                     output_tokens = chunk_usage.get(
                                         "completion_tokens", output_tokens
                                     )
-                                    input_tokens = chunk_usage.get(
-                                        "prompt_tokens", input_tokens
-                                    )
+                                    input_tokens = chunk_usage.get("prompt_tokens", input_tokens)
 
                                 choices = parsed.get("choices", [])
                                 if not choices:
@@ -298,16 +295,15 @@ class OpenAIStreamingClient:
                                 content = delta.get("content", "")
                                 if content:
                                     if ttft == 0.0:
-                                        ttft = (
-                                            time.perf_counter() - t_start
-                                        ) * 1000
+                                        ttft = (time.perf_counter() - t_start) * 1000
                                     text += content
                                     delta_count += 1
 
         except Exception as exc:
             t_end = time.perf_counter()
             return ScenarioResult(
-                scenario="", config="",
+                scenario="",
+                config="",
                 e2e_ms=(t_end - t_start) * 1000,
                 error=str(exc),
             )
@@ -321,13 +317,12 @@ class OpenAIStreamingClient:
 
         decode_ms = e2e_ms - ttft if ttft > 0 else e2e_ms
         decode_tps = (
-            (output_tokens / (decode_ms / 1000))
-            if decode_ms > 0 and output_tokens > 0
-            else 0
+            (output_tokens / (decode_ms / 1000)) if decode_ms > 0 and output_tokens > 0 else 0
         )
 
         return ScenarioResult(
-            scenario="", config="",
+            scenario="",
+            config="",
             ttft_ms=ttft,
             e2e_ms=e2e_ms,
             tpot_ms=(decode_ms / output_tokens) if output_tokens else 0,
@@ -401,7 +396,7 @@ class OpenAIBenchmarkSuite:
         except Exception:
             sha = "unknown"
         return {
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "model_id": self.prompt._model,
             "server": self.server_label,
             "base_url": self.base_url,
@@ -445,9 +440,7 @@ class OpenAIBenchmarkSuite:
         except Exception:
             return {}
 
-    def _store_experiment(
-        self, name: str, scenarios: dict[str, Any]
-    ) -> None:
+    def _store_experiment(self, name: str, scenarios: dict[str, Any]) -> None:
         self.results["experiments"][name] = scenarios
         self._save()
 
@@ -461,10 +454,7 @@ class OpenAIBenchmarkSuite:
             if result.error:
                 print(f"  [WARMUP] Failed: {result.error[:100]}")
             else:
-                print(
-                    f"  [WARMUP] OK — E2E={result.e2e_ms:.0f}ms "
-                    f"TPS={result.decode_tps:.1f}"
-                )
+                print(f"  [WARMUP] OK — E2E={result.e2e_ms:.0f}ms TPS={result.decode_tps:.1f}")
         finally:
             await client.close()
         await asyncio.sleep(2)
@@ -562,14 +552,8 @@ class OpenAIBenchmarkSuite:
             await client.close()
 
         # Aggregate stats
-        cold_e2es = [
-            s["cold"]["e2e_ms"] for s in scenarios.values()
-            if not s["cold"].get("error")
-        ]
-        warm_e2es = [
-            s["warm"]["e2e_ms"] for s in scenarios.values()
-            if not s["warm"].get("error")
-        ]
+        cold_e2es = [s["cold"]["e2e_ms"] for s in scenarios.values() if not s["cold"].get("error")]
+        warm_e2es = [s["warm"]["e2e_ms"] for s in scenarios.values() if not s["warm"].get("error")]
         speedups = [s["speedup"] for s in scenarios.values() if s["speedup"] > 0]
 
         scenarios["stats"] = {
@@ -709,10 +693,7 @@ class OpenAIBenchmarkSuite:
         for i in range(self.runs):
             body = self.prompt.build_request(2000, OUTPUT_TOKENS)
 
-            clients = [
-                OpenAIRequestClient(self.base_url)
-                for _ in range(self.concurrency)
-            ]
+            clients = [OpenAIRequestClient(self.base_url) for _ in range(self.concurrency)]
 
             sids = [
                 f"concurrent_r{i}_c{j}" if self.context_mode == "session" else None
@@ -721,10 +702,12 @@ class OpenAIBenchmarkSuite:
 
             t_wall_start = time.perf_counter()
             try:
-                results = await asyncio.gather(*(
-                    clients[j].send_and_measure(body, session_id=sids[j])
-                    for j in range(self.concurrency)
-                ))
+                results = await asyncio.gather(
+                    *(
+                        clients[j].send_and_measure(body, session_id=sids[j])
+                        for j in range(self.concurrency)
+                    )
+                )
             except Exception as exc:
                 print(f"    run {i + 1}/{self.runs} ERROR: {exc}")
                 for c in clients:
@@ -759,8 +742,12 @@ class OpenAIBenchmarkSuite:
                     await self._delete_agent(f"oai_{sid}")
 
         # Aggregate stats
-        wall_vals = [s["wall_ms"] for s in scenarios.values() if isinstance(s, dict) and "wall_ms" in s]
-        tps_vals = [s["system_tps"] for s in scenarios.values() if isinstance(s, dict) and "system_tps" in s]
+        wall_vals = [
+            s["wall_ms"] for s in scenarios.values() if isinstance(s, dict) and "wall_ms" in s
+        ]
+        tps_vals = [
+            s["system_tps"] for s in scenarios.values() if isinstance(s, dict) and "system_tps" in s
+        ]
         scenarios["stats"] = {
             "wall_ms": compute_stats(wall_vals),
             "system_tps": compute_stats(tps_vals),
@@ -800,9 +787,7 @@ class OpenAIBenchmarkSuite:
                     rb = await client.send_and_measure(body_b)
 
                 print(
-                    f"    run {i + 1}/{self.runs} "
-                    f"A_E2E={ra.e2e_ms:.0f}ms "
-                    f"B_E2E={rb.e2e_ms:.0f}ms"
+                    f"    run {i + 1}/{self.runs} A_E2E={ra.e2e_ms:.0f}ms B_E2E={rb.e2e_ms:.0f}ms"
                 )
 
                 scenarios[f"prefix_r{i}"] = {
@@ -814,14 +799,14 @@ class OpenAIBenchmarkSuite:
 
         # Stats
         a_e2es = [
-            s["prompt_a"]["e2e_ms"] for s in scenarios.values()
-            if isinstance(s, dict) and "prompt_a" in s
-            and not s["prompt_a"].get("error")
+            s["prompt_a"]["e2e_ms"]
+            for s in scenarios.values()
+            if isinstance(s, dict) and "prompt_a" in s and not s["prompt_a"].get("error")
         ]
         b_e2es = [
-            s["prompt_b"]["e2e_ms"] for s in scenarios.values()
-            if isinstance(s, dict) and "prompt_b" in s
-            and not s["prompt_b"].get("error")
+            s["prompt_b"]["e2e_ms"]
+            for s in scenarios.values()
+            if isinstance(s, dict) and "prompt_b" in s and not s["prompt_b"].get("error")
         ]
         scenarios["stats"] = {
             "prompt_a_e2e_ms": compute_stats(a_e2es),
@@ -832,9 +817,7 @@ class OpenAIBenchmarkSuite:
 
     # --- Full suite ---
 
-    async def run_all(
-        self, experiments: list[int] | None = None
-    ) -> None:
+    async def run_all(self, experiments: list[int] | None = None) -> None:
         print(f"\nOpenAI Benchmark Suite ({self.server_label})")
         print(f"  Base URL: {self.base_url}")
         print(f"  Context mode: {self.context_mode}")
@@ -908,12 +891,14 @@ class OpenAIBenchmarkSuite:
             cold_med = stats.get("cold_e2e_ms", {}).get("median", 0)
             warm_med = stats.get("warm_e2e_ms", {}).get("median", 0)
             speedup_med = stats.get("speedup", {}).get("median", 0)
-            print(f"\n  Warm Cache: cold={cold_med:.0f}ms warm={warm_med:.0f}ms speedup={speedup_med:.1f}x")
+            print(
+                f"\n  Warm Cache: cold={cold_med:.0f}ms warm={warm_med:.0f}ms speedup={speedup_med:.1f}x"
+            )
 
         # Experiment 3: Multi-turn
         exp3 = self.results.get("experiments", {}).get("3_multi_turn", {})
         if exp3 and "stats" in exp3:
-            print(f"\n  Multi-turn:")
+            print("\n  Multi-turn:")
             for turn_name, turn_stats in sorted(exp3["stats"].items()):
                 e2e = turn_stats.get("e2e_ms", {}).get("median", 0)
                 tps = turn_stats.get("decode_tps", {}).get("median", 0)
@@ -946,9 +931,8 @@ class OpenAIBenchmarkSuite:
 # Comparison
 # ---------------------------------------------------------------------------
 
-def compare_results(
-    semantic_path: str, lmstudio_path: str
-) -> None:
+
+def compare_results(semantic_path: str, lmstudio_path: str) -> None:
     with open(semantic_path) as f:
         sem = json.load(f)
     with open(lmstudio_path) as f:
@@ -963,12 +947,7 @@ def compare_results(
     lms_cold = lms.get("experiments", {}).get("1_cold_start", {})
 
     if sem_cold and lms_cold:
-        print(
-            f"\n  {'Scenario':<20} │ "
-            f"{'Semantic':>24} │ "
-            f"{'LM Studio':>24} │ "
-            f"{'Delta':>8}"
-        )
+        print(f"\n  {'Scenario':<20} │ {'Semantic':>24} │ {'LM Studio':>24} │ {'Delta':>8}")
         print(
             f"  {'':20} │ "
             f"{'TTFT':>8} {'E2E':>7} {'TPS':>7} │ "
@@ -1011,12 +990,7 @@ def compare_results(
     lms_out = lms.get("experiments", {}).get("4_output_scaling", {})
 
     if sem_out and lms_out:
-        print(
-            f"\n  {'Output':<15} │ "
-            f"{'Semantic TPS':>12} │ "
-            f"{'LMStudio TPS':>12} │ "
-            f"{'Delta':>8}"
-        )
+        print(f"\n  {'Output':<15} │ {'Semantic TPS':>12} │ {'LMStudio TPS':>12} │ {'Delta':>8}")
         print(f"  {'─' * 15}┼{'─' * 14}┼{'─' * 14}┼{'─' * 10}")
 
         all_out = set(sem_out.keys()) | set(lms_out.keys())
@@ -1035,80 +1009,71 @@ def compare_results(
                 pct = ((s_tps - l_tps) / l_tps) * 100
                 delta = f"{pct:+.1f}%"
 
-            print(
-                f"  {name:<15} │ "
-                f"{s_tps:>12.1f} │ "
-                f"{l_tps:>12.1f} │ "
-                f"{delta:>8}"
-            )
+            print(f"  {name:<15} │ {s_tps:>12.1f} │ {l_tps:>12.1f} │ {delta:>8}")
 
 
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
 
+
 def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="OpenAI benchmark suite for /v1/chat/completions"
+    parser = argparse.ArgumentParser(description="OpenAI benchmark suite for /v1/chat/completions")
+    parser.add_argument(
+        "--base-url",
+        type=str,
+        default="http://127.0.0.1:8399",
+        help="Server base URL (default: http://127.0.0.1:8399)",
     )
     parser.add_argument(
-        "--base-url", type=str, default="http://127.0.0.1:8399",
-        help="Server base URL (default: http://127.0.0.1:8399)"
+        "--port", type=int, default=PORT, help=f"Server port for managed server (default: {PORT})"
     )
     parser.add_argument(
-        "--port", type=int, default=PORT,
-        help=f"Server port for managed server (default: {PORT})"
+        "--external", action="store_true", help="External server (don't manage lifecycle)"
     )
     parser.add_argument(
-        "--external", action="store_true",
-        help="External server (don't manage lifecycle)"
+        "--context-mode",
+        choices=["full", "session"],
+        default="full",
+        help="Context mode: full (stateless) or session (with X-Session-ID)",
     )
     parser.add_argument(
-        "--context-mode", choices=["full", "session"], default="full",
-        help="Context mode: full (stateless) or session (with X-Session-ID)"
+        "--runs",
+        type=int,
+        default=None,
+        help=f"Runs per scenario (default: {RUNS_DEFAULT}, quick: {RUNS_QUICK})",
+    )
+    parser.add_argument("--quick", action="store_true", help="Quick mode: fewer scenarios, 1 run")
+    parser.add_argument(
+        "--experiment",
+        nargs="+",
+        type=int,
+        choices=[1, 2, 3, 4, 5, 6],
+        help="Run specific experiments",
+    )
+    parser.add_argument("--output", type=str, default=None, help="Output JSON file path")
+    parser.add_argument(
+        "--label", type=str, default=None, help="Server label for results (default: auto-detect)"
     )
     parser.add_argument(
-        "--runs", type=int, default=None,
-        help=f"Runs per scenario (default: {RUNS_DEFAULT}, quick: {RUNS_QUICK})"
+        "--model",
+        type=str,
+        default="default",
+        help="Model name for /v1/chat/completions requests (default: 'default')",
     )
     parser.add_argument(
-        "--quick", action="store_true",
-        help="Quick mode: fewer scenarios, 1 run"
-    )
-    parser.add_argument(
-        "--experiment", nargs="+", type=int, choices=[1, 2, 3, 4, 5, 6],
-        help="Run specific experiments"
-    )
-    parser.add_argument(
-        "--output", type=str, default=None,
-        help="Output JSON file path"
-    )
-    parser.add_argument(
-        "--label", type=str, default=None,
-        help="Server label for results (default: auto-detect)"
-    )
-    parser.add_argument(
-        "--model", type=str, default="default",
-        help="Model name for /v1/chat/completions requests (default: 'default')"
-    )
-    parser.add_argument(
-        "--concurrency", type=int, default=2,
-        help="Number of concurrent requests for experiment 5 (default: 2)"
+        "--concurrency",
+        type=int,
+        default=2,
+        help="Number of concurrent requests for experiment 5 (default: 2)",
     )
 
     # Comparison mode
+    parser.add_argument("--compare", action="store_true", help="Compare two result files")
     parser.add_argument(
-        "--compare", action="store_true",
-        help="Compare two result files"
+        "--semantic-results", type=str, help="Path to agent-memory server results JSON"
     )
-    parser.add_argument(
-        "--semantic-results", type=str,
-        help="Path to agent-memory server results JSON"
-    )
-    parser.add_argument(
-        "--lmstudio-results", type=str,
-        help="Path to LM Studio results JSON"
-    )
+    parser.add_argument("--lmstudio-results", type=str, help="Path to LM Studio results JSON")
 
     args = parser.parse_args()
 

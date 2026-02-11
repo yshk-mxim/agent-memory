@@ -6,7 +6,7 @@ Verifies that model-specific template behavior (DeepSeek priming,
 Gemma message merging) flows correctly through the service layer.
 """
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -64,7 +64,6 @@ def mock_scheduler():
 
 
 class TestDeepSeekIntegration:
-
     @pytest.mark.asyncio
     async def test_deepseek_identity_primer_in_prompt(
         self, mock_cache_store, mock_scheduler
@@ -142,11 +141,8 @@ class TestDeepSeekIntegration:
 
 
 class TestGemmaIntegration:
-
     @pytest.mark.asyncio
-    async def test_gemma_standard_prompt_format(
-        self, mock_cache_store, mock_scheduler
-    ) -> None:
+    async def test_gemma_standard_prompt_format(self, mock_cache_store, mock_scheduler) -> None:
         """Gemma tokenizer → standard prompt with respond-now cue."""
         tok = _make_gemma_tokenizer()
         engine = MagicMock()
@@ -192,9 +188,7 @@ class TestGemmaIntegration:
         assert len(primer_msgs) == 0
 
     @pytest.mark.asyncio
-    async def test_gemma_message_merging_detected(
-        self, mock_cache_store, mock_scheduler
-    ) -> None:
+    async def test_gemma_message_merging_detected(self, mock_cache_store, mock_scheduler) -> None:
         """ChatTemplateAdapter correctly detects Gemma needs merging."""
         tok = _make_gemma_tokenizer()
         adapter = ChatTemplateAdapter()
@@ -206,11 +200,8 @@ class TestGemmaIntegration:
 
 
 class TestNoAdapter:
-
     @pytest.mark.asyncio
-    async def test_no_adapter_defaults_to_standard(
-        self, mock_cache_store, mock_scheduler
-    ) -> None:
+    async def test_no_adapter_defaults_to_standard(self, mock_cache_store, mock_scheduler) -> None:
         """Without chat_template adapter, service uses standard (non-DeepSeek) behavior."""
         engine = MagicMock()
         engine.tokenizer = MagicMock()

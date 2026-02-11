@@ -5,7 +5,6 @@
 Verifies that generate_chat_completion does not prematurely invalidate the hot cache.
 """
 
-import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -178,9 +177,7 @@ class TestDirectEnginePath:
     """Tests for the scheduler=None fallback path."""
 
     @pytest.mark.asyncio
-    async def test_direct_path_uses_engine(
-        self, mock_batch_engine, mock_cache_store
-    ) -> None:
+    async def test_direct_path_uses_engine(self, mock_batch_engine, mock_cache_store) -> None:
         """When scheduler is None, falls back to batch_engine.submit + step loop."""
         completion = MagicMock()
         completion.text = "Direct response"
@@ -235,9 +232,7 @@ class TestCacheBehavior:
     """Tests for cache load/save flow."""
 
     @pytest.mark.asyncio
-    async def test_cache_miss_proceeds(
-        self, mock_batch_engine, mock_scheduler
-    ) -> None:
+    async def test_cache_miss_proceeds(self, mock_batch_engine, mock_scheduler) -> None:
         """Cache miss (load returns None) still generates successfully."""
         store = MagicMock()
         store.load.return_value = None  # Cache miss

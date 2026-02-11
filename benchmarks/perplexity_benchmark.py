@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 Yakov Shkolnikov and contributors
-"""
-Perplexity benchmark: FP16 vs actual Q4 KV cache quality evaluation.
+"""Perplexity benchmark: FP16 vs actual Q4 KV cache quality evaluation.
 
 Measures perplexity on WikiText-2 test set to quantify Q4 KV cache
 quality loss. Uses actual QuantizedKVCache objects during model forward
@@ -29,25 +28,26 @@ Requirements:
 """
 
 import argparse
+import gc
 import json
 import math
-import gc
 import time
 from pathlib import Path
 
 import mlx.core as mx
-import mlx.nn as nn
+
+from mlx import nn
 
 # Model IDs
 GEMMA_MODEL_ID = "mlx-community/gemma-3-12b-it-4bit"
 DEEPSEEK_MODEL_ID = "mlx-community/DeepSeek-Coder-V2-Lite-Instruct-4bit-mlx"
 
 # Config — sized for 24 GB device
-WINDOW_SIZE = 512    # Tokens per evaluation window
-STRIDE = 256         # Non-overlapping portion per window
-MAX_TOKENS = 8192    # ~8K tokens total (safe for memory)
-GROUP_SIZE = 64      # Q4 quantization group size
-BITS = 4             # Quantization bits
+WINDOW_SIZE = 512  # Tokens per evaluation window
+STRIDE = 256  # Non-overlapping portion per window
+MAX_TOKENS = 8192  # ~8K tokens total (safe for memory)
+GROUP_SIZE = 64  # Q4 quantization group size
+BITS = 4  # Quantization bits
 
 
 def load_corpus():
@@ -60,6 +60,7 @@ def load_corpus():
 
     try:
         from datasets import load_dataset
+
         dataset = load_dataset("wikitext", "wikitext-2-raw-v1", split="test")
         text = "\n".join([line for line in dataset["text"] if line.strip()])
         print(f"Loaded WikiText-2: {len(text)} chars")
@@ -71,6 +72,7 @@ def load_corpus():
 def load_model_and_tokenizer(model_id: str):
     """Load model and tokenizer via mlx-lm."""
     from mlx_lm import load
+
     print(f"Loading model: {model_id}")
     t0 = time.time()
     model, tokenizer = load(model_id)
@@ -95,6 +97,7 @@ def evaluate_window_fp16(model, input_ids, n_layers):
     This is the reference for measuring Q4 degradation.
     """
     from mlx_lm.models.cache import KVCache
+
     caches = [KVCache() for _ in range(n_layers)]
     logits = model(input_ids, cache=caches)
     mx.eval(logits)
@@ -114,6 +117,7 @@ def evaluate_window_q4(model, input_ids, n_layers, group_size=64, bits=4):
     inference behavior.
     """
     from mlx_lm.models.cache import QuantizedKVCache
+
     caches = [QuantizedKVCache(group_size=group_size, bits=bits) for _ in range(n_layers)]
     logits = model(input_ids, cache=caches)
     mx.eval(logits)
@@ -124,11 +128,9 @@ def compute_ppl_from_logits(logits, tokens, count_start, count_end):
     """Compute log probability sum for a token range within the window."""
     log_probs = nn.log_softmax(logits[:, :-1, :], axis=-1)
     target_ids = mx.array(tokens[1:]).reshape(1, -1)
-    gathered = mx.take_along_axis(
-        log_probs,
-        mx.expand_dims(target_ids, axis=-1),
-        axis=-1
-    ).squeeze(-1)
+    gathered = mx.take_along_axis(log_probs, mx.expand_dims(target_ids, axis=-1), axis=-1).squeeze(
+        -1
+    )
     mx.eval(gathered)
 
     window_lp = gathered[0, count_start:count_end]
@@ -147,7 +149,7 @@ def run_perplexity(model, n_layers, tokens, mode="fp16"):
     t0 = time.time()
 
     for i in range(0, n_tokens - WINDOW_SIZE, STRIDE):
-        window = tokens[i:i + WINDOW_SIZE]
+        window = tokens[i : i + WINDOW_SIZE]
         input_ids = mx.array(window).reshape(1, -1)
 
         if mode == "fp16":
@@ -169,20 +171,23 @@ def run_perplexity(model, n_layers, tokens, mode="fp16"):
         if n_windows % 5 == 0:
             ppl_so_far = math.exp(-total_log_prob / max(total_counted, 1))
             elapsed = time.time() - t0
-            print(f"    Window {n_windows}, pos {i}/{n_tokens}, "
-                  f"PPL={ppl_so_far:.4f}, {elapsed:.1f}s")
+            print(
+                f"    Window {n_windows}, pos {i}/{n_tokens}, PPL={ppl_so_far:.4f}, {elapsed:.1f}s"
+            )
 
     elapsed = time.time() - t0
     ppl = math.exp(-total_log_prob / total_counted) if total_counted > 0 else float("inf")
-    print(f"  {mode.upper()} PPL = {ppl:.4f} ({total_counted} tokens, {n_windows} windows, {elapsed:.1f}s)")
+    print(
+        f"  {mode.upper()} PPL = {ppl:.4f} ({total_counted} tokens, {n_windows} windows, {elapsed:.1f}s)"
+    )
     return ppl, total_counted, elapsed
 
 
 def run_benchmark(model_id: str, model_name: str):
     """Run full FP16 vs Q4 comparison for one model."""
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"Perplexity Benchmark: {model_name}")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
 
     # Load corpus and tokenize
     text = load_corpus()
@@ -191,7 +196,7 @@ def run_benchmark(model_id: str, model_name: str):
     print(f"Tokenized: {len(tokens)} tokens, evaluating first {min(len(tokens), MAX_TOKENS)}")
 
     # FP16 baseline
-    print(f"\n--- FP16 KV Cache (baseline) ---")
+    print("\n--- FP16 KV Cache (baseline) ---")
     fp16_ppl, fp16_n, fp16_t = run_perplexity(model, n_layers, tokens, mode="fp16")
 
     # Q4 evaluation — actual QuantizedKVCache
@@ -202,14 +207,14 @@ def run_benchmark(model_id: str, model_name: str):
     delta = q4_ppl - fp16_ppl
     pct = (delta / fp16_ppl) * 100 if fp16_ppl > 0 else 0
 
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"RESULTS: {model_name}")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
     print(f"  FP16 PPL:    {fp16_ppl:.4f}")
     print(f"  Q4 PPL:      {q4_ppl:.4f}")
     print(f"  Delta:       {delta:+.4f} ({pct:+.2f}%)")
     print(f"  Tokens:      {fp16_n}")
-    print(f"  Method:      Actual QuantizedKVCache (not logit proxy)")
+    print("  Method:      Actual QuantizedKVCache (not logit proxy)")
 
     results = {
         "model_id": model_id,
@@ -252,10 +257,15 @@ def run_benchmark(model_id: str, model_name: str):
 def main():
     global MAX_TOKENS
     parser = argparse.ArgumentParser(description="FP16 vs Q4 KV cache perplexity benchmark")
-    parser.add_argument("--model", choices=["gemma", "deepseek", "all"], default="gemma",
-                        help="Which model to benchmark (default: gemma)")
-    parser.add_argument("--max-tokens", type=int, default=None,
-                        help="Override max tokens (default: 8192)")
+    parser.add_argument(
+        "--model",
+        choices=["gemma", "deepseek", "all"],
+        default="gemma",
+        help="Which model to benchmark (default: gemma)",
+    )
+    parser.add_argument(
+        "--max-tokens", type=int, default=None, help="Override max tokens (default: 8192)"
+    )
     args = parser.parse_args()
 
     if args.max_tokens:
@@ -273,14 +283,16 @@ def main():
 
     # Summary
     if all_results:
-        print(f"\n{'='*60}")
+        print(f"\n{'=' * 60}")
         print("SUMMARY")
-        print(f"{'='*60}")
+        print(f"{'=' * 60}")
         print(f"{'Model':<25} {'FP16':>8} {'Q4':>8} {'Delta':>8} Method")
         print("-" * 65)
         for r in all_results:
-            print(f"{r['model_name']:<25} {r['fp16_ppl']:>8.4f} {r['q4_ppl']:>8.4f} "
-                  f"{r['delta_ppl']:>+8.4f} {r['method']}")
+            print(
+                f"{r['model_name']:<25} {r['fp16_ppl']:>8.4f} {r['q4_ppl']:>8.4f} "
+                f"{r['delta_ppl']:>+8.4f} {r['method']}"
+            )
 
 
 if __name__ == "__main__":

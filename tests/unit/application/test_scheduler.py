@@ -513,9 +513,7 @@ class TestSchedulerWarmLargeDelta:
             async def run():
                 # Cache has 50 tokens, prompt has 500 tokens → delta = 450 > threshold
                 fake_cache = FakeAgentBlocks(total_tokens=50)
-                return await scheduler.submit_and_wait(
-                    "a1", list(range(500)), fake_cache, 10
-                )
+                return await scheduler.submit_and_wait("a1", list(range(500)), fake_cache, 10)
 
             with caplog.at_level(logging.WARNING):
                 run_async(run())
@@ -540,9 +538,7 @@ class TestSchedulerWarmLargeDelta:
             async def run():
                 # Cache has 40 tokens, prompt has 50 tokens → delta = 10 < threshold
                 fake_cache = FakeAgentBlocks(total_tokens=40)
-                return await scheduler.submit_and_wait(
-                    "a1", list(range(50)), fake_cache, 10
-                )
+                return await scheduler.submit_and_wait("a1", list(range(50)), fake_cache, 10)
 
             with caplog.at_level(logging.WARNING):
                 run_async(run())

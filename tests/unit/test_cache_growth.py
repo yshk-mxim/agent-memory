@@ -37,13 +37,13 @@ class TestBlockCountFromPromptLength:
     @pytest.mark.parametrize(
         "n_tokens, expected_blocks",
         [
-            (1, 1),          # 1 token needs 1 block
-            (256, 1),        # Exact block boundary
-            (257, 2),        # 1 past boundary needs 2 blocks
-            (512, 2),        # Exact 2 blocks
-            (1000, 4),       # ceil(1000/256) = 4
-            (2048, 8),       # Exact 8 blocks
-            (2049, 9),       # 1 past → 9 blocks
+            (1, 1),  # 1 token needs 1 block
+            (256, 1),  # Exact block boundary
+            (257, 2),  # 1 past boundary needs 2 blocks
+            (512, 2),  # Exact 2 blocks
+            (1000, 4),  # ceil(1000/256) = 4
+            (2048, 8),  # Exact 8 blocks
+            (2049, 9),  # 1 past → 9 blocks
         ],
     )
     def test_blocks_per_layer_matches_formula(
@@ -102,10 +102,10 @@ class TestCacheGrowthDuringGeneration:
     @pytest.mark.parametrize(
         "prompt_tokens, gen_tokens",
         [
-            (100, 200),   # 100→300: 1→2 blocks
-            (256, 1),     # 256→257: 1→2 blocks
-            (500, 500),   # 500→1000: 2→4 blocks
-            (1000, 1048), # 1000→2048: 4→8 blocks
+            (100, 200),  # 100→300: 1→2 blocks
+            (256, 1),  # 256→257: 1→2 blocks
+            (500, 500),  # 500→1000: 2→4 blocks
+            (1000, 1048),  # 1000→2048: 4→8 blocks
         ],
     )
     def test_parametrized_growth(

@@ -1,6 +1,6 @@
 # Quick Start
 
-Get Semantic running in 5 minutes.
+Get agent-memory running in 5 minutes.
 
 ## Prerequisites
 
@@ -23,7 +23,7 @@ pip install -e .
 
 ```bash
 # Check that all imports work
-python -c "from agent_memory.domain.services import BlockPool; print('✓ Semantic installed successfully')"
+python -c "from agent_memory.domain.services import BlockPool; print('✓ agent-memory installed successfully')"
 ```
 
 ## Run Tests
