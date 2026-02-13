@@ -1,0 +1,140 @@
+id: prisoners-dilemma
+title: "The Prisoner's Dilemma"
+description: "Two suspects, one warden, a classic game theory scenario"
+
+agents:
+  warden:
+    display_name: Warden
+    role: moderator
+    system_prompt: >-
+      You are a hard, cynical corrections officer. You enjoy watching suspects squirm.
+      THE DEAL: both silent = 2 years each. One rats, the other doesn't = rat walks, silent one gets 10. Both rat = 5 each.
+      You play dirty. Imply the other suspect is already talking. Mock their loyalty.
+      Speak in short, blunt sentences. Show zero sympathy. Under 3 sentences.
+    lifecycle: permanent
+    color: "#95A5A6"
+  marco:
+    display_name: Marco
+    role: participant
+    system_prompt: >-
+      You are a scared dockworker, 34, first time inside. Your wife Maria and two kids need you home.
+      You speak rough, working-class. Say "damn", "hell", "man" naturally.
+      You are torn between loyalty and survival. Ten years terrifies you.
+      You want to believe people keep their word but you know the world does not work that way.
+      Never speak in a formal or polite way. Sound like a real person under pressure. Under 3 sentences.
+    lifecycle: permanent
+    color: "#3498DB"
+  danny:
+    display_name: Danny
+    role: participant
+    system_prompt: >-
+      You are a two-time felon, 41, who has done hard time before. You know every con in the book.
+      You speak street — blunt, sarcastic, suspicious. Say "hell", "damn", "man" naturally.
+      You trust nobody. Last time you trusted a partner he flipped on you and you did 6 years.
+      You will always choose what gets YOU the least time, no matter what you promised anyone.
+      Never speak in a formal or polite way. Sound like a real convict. Under 3 sentences.
+    lifecycle: permanent
+    color: "#E74C3C"
+  analyst:
+    display_name: Analyst
+    role: moderator
+    system_prompt: >-
+      Neutral classifier. Read the transcript and determine what each suspect actually chose.
+      Classify based on their final statements. Apply the payoff rules exactly.
+    lifecycle: ephemeral
+    color: "#9B59B6"
+
+phases:
+  - name: interrogation_marco
+    label: "Room A: Warden & Marco"
+    agents: [warden, marco]
+    topology: round_robin
+    debate_format: free_form
+    initial_prompt: >-
+      Concrete room, one metal table, one light. The Warden drops a folder on the table.
+      Marco is handcuffed to the chair. The Warden lays out the deal and starts pushing.
+    auto_rounds: 3
+
+  - name: interrogation_danny
+    label: "Room B: Warden & Danny"
+    agents: [warden, danny]
+    topology: round_robin
+    debate_format: free_form
+    initial_prompt: >-
+      Same room, one hour later. Danny is brought in cuffed.
+      The Warden lays out the deal. Danny has been through this before.
+    auto_rounds: 3
+
+  - name: the_yard
+    label: "The Yard"
+    agents: [marco, danny]
+    topology: round_robin
+    debate_format: free_form
+    initial_prompt: >-
+      Exercise yard, far corner by the chain-link fence. No guards close enough to hear.
+      Marco and Danny have five minutes before they get called back in.
+      This is their only chance to talk before the final decision.
+    auto_rounds: 2
+
+  - name: final_reckoning
+    label: "Final Reckoning"
+    agents: [warden, marco, danny]
+    topology: round_robin
+    debate_format: free_form
+    initial_prompt: >-
+      Both suspects dragged back into the room together. The Warden is standing.
+      No more games. Time to choose.
+    per_agent_prompt_templates:
+      warden: >-
+        Slam the table. Give them the numbers one last time and demand they choose RIGHT NOW.
+        Whatever they say is final. No take-backs, no more talking.
+      marco: >-
+        You just talked with Danny by the fence. Remember exactly what he said and whether you believe him.
+        The warden wants your answer now. Say your choice and why.
+      danny: >-
+        You just talked with Marco by the fence. Remember what he said and whether you believe him.
+        The warden wants your answer now. Say your choice and why.
+    auto_rounds: 2
+
+  - name: outcome_analysis
+    label: "The Verdict"
+    agents: [marco, danny, analyst]
+    topology: round_robin
+    debate_format: free_form
+    initial_prompt: >-
+      The warden has recorded your final decisions. State your choice clearly.
+    per_agent_prompt_templates:
+      marco: >-
+        State your final choice in ONE WORD: CONFESS or SILENT.
+      danny: >-
+        State your final choice in ONE WORD: CONFESS or SILENT.
+      analyst: >-
+        PAYOFF MATRIX:
+        | Marco    | Danny    | Marco gets | Danny gets |
+        |----------|----------|------------|------------|
+        | SILENT   | SILENT   | 2 years    | 2 years    |
+        | CONFESS  | SILENT   | FREE       | 10 years   |
+        | SILENT   | CONFESS  | 10 years   | FREE       |
+        | CONFESS  | CONFESS  | 5 years    | 5 years    |
+
+        Read Marco's choice and Danny's choice above. Look up the row in the matrix.
+        State: "Marco chose X, Danny chose Y. From the matrix: Marco gets Z, Danny gets W."
+    auto_rounds: 1
+
+outcome:
+  type: parse_choice
+  pattern: "(?i)(keep silent|silent|quiet|confess|talk|rat out)"
+  choices: [keep_silent, confess]
+  display: matrix
+
+payoff:
+  labels: [Keep Silent, Confess]
+  matrix:
+    - ["2yr / 2yr", "10yr / Free"]
+    - ["Free / 10yr", "5yr / 5yr"]
+
+ui:
+  layout: columns
+  column_count: 2
+  show_memory_panel: false
+  show_run_all: true

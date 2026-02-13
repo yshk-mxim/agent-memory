@@ -1,0 +1,128 @@
+# Prometheus Alerting Rules for agent-memory
+# Production Alerting Thresholds
+
+groups:
+  - name: agent_memory_critical
+    interval: 30s
+    rules:
+      # Critical: Pool Exhaustion
+      - alert: SemanticPoolNearExhaustion
+        expr: semantic_pool_utilization_ratio > 0.90
+        for: 5m
+        labels:
+          severity: critical
+          component: block_pool
+        annotations:
+          summary: "BlockPool utilization >90% for 5 minutes"
+          description: "Pool utilization is {{ $value | humanizePercentage }}. Risk of 503 errors."
+          runbook: "Check /health/ready endpoint. Consider scaling horizontally or increasing cache budget."
+
+      # Critical: High Error Rate
+      - alert: SemanticHighErrorRate
+        expr: |
+          (
+            sum(rate(semantic_request_total{status_code=~"5.."}[5m]))
+            /
+            sum(rate(semantic_request_total[5m]))
+          ) > 0.05
+        for: 10m
+        labels:
+          severity: critical
+          component: api
+        annotations:
+          summary: "Error rate >5% for 10 minutes"
+          description: "{{ $value | humanizePercentage }} of requests returning 5xx errors."
+          runbook: "Check server logs. Review recent deployments. Verify pool capacity."
+
+      # Critical: Health Check Failures
+      - alert: SemanticHealthCheckFailing
+        expr: up{job="agent-memory"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          component: health
+        annotations:
+          summary: "Health check failing for 2 minutes"
+          description: "Service is down or not responding to health probes."
+          runbook: "Check pod status. Review startup logs. Verify MLX model loading."
+
+  - name: agent_memory_warning
+    interval: 1m
+    rules:
+      # Warning: High Latency
+      - alert: SemanticHighLatency
+        expr: |
+          histogram_quantile(0.95,
+            rate(semantic_request_duration_seconds_bucket[5m])
+          ) > 3.0
+        for: 5m
+        labels:
+          severity: warning
+          component: api
+        annotations:
+          summary: "p95 latency >3 seconds for 5 minutes"
+          description: "95th percentile latency is {{ $value }}s."
+          runbook: "Review performance baselines. Check MLX inference performance. Monitor pool utilization."
+
+      # Warning: Pool Utilization Rising
+      - alert: SemanticPoolUtilizationHigh
+        expr: semantic_pool_utilization_ratio > 0.80
+        for: 5m
+        labels:
+          severity: warning
+          component: block_pool
+        annotations:
+          summary: "Pool utilization >80% for 5 minutes"
+          description: "Pool utilization is {{ $value | humanizePercentage }}. May approach capacity soon."
+          runbook: "Monitor trend. Prepare to scale if continues rising."
+
+      # Warning: Many Agents Active
+      - alert: SemanticManyActiveAgents
+        expr: semantic_agents_active > 100
+        for: 10m
+        labels:
+          severity: warning
+          component: cache_store
+        annotations:
+          summary: ">100 active agents for 10 minutes"
+          description: "{{ $value }} agents currently in memory."
+          runbook: "Review agent retention policy. Check for memory leaks. Consider increasing max_agents_in_memory."
+
+      # Warning: Cache Eviction Rate
+      - alert: SemanticHighCacheEvictionRate
+        expr: rate(semantic_eviction_total[5m]) > 10
+        for: 10m
+        labels:
+          severity: warning
+          component: cache_store
+        annotations:
+          summary: "Cache eviction rate >10/min for 10 minutes"
+          description: "Evicting {{ $value }} caches per second."
+          runbook: "Check cache budget. Review agent access patterns. Consider increasing max_hot_agents."
+
+  - name: agent_memory_info
+    interval: 5m
+    rules:
+      # Info: Request Rate
+      - alert: SemanticRequestRateInfo
+        expr: rate(semantic_request_total[5m]) > 50
+        for: 15m
+        labels:
+          severity: info
+          component: api
+        annotations:
+          summary: "Request rate >50/sec for 15 minutes"
+          description: "Processing {{ $value }} requests per second."
+          runbook: "No action needed. Informational only. Monitor for capacity planning."
+
+      # Info: No Active Agents
+      - alert: SemanticNoActiveAgents
+        expr: semantic_agents_active == 0
+        for: 30m
+        labels:
+          severity: info
+          component: cache_store
+        annotations:
+          summary: "No active agents for 30 minutes"
+          description: "All agents have been evicted. Service is idle."
+          runbook: "No action needed unless unexpected. Check if traffic has stopped."

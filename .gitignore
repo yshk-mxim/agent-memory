@@ -1,0 +1,133 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+*.whl
+
+# Virtual Environments
+venv/
+env/
+ENV/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.project
+.pydevproject
+.settings/
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Environment variables and secrets
+.env
+.env.local
+env.json
+
+# Data and large files
+data/batch_*.json
+data/*.pkl
+data/*.pickle
+models/
+!config/models/
+
+# Results - keep scripts and small configs, ignore large outputs
+results/**/*.json
+results/**/*.csv
+results/**/*.png
+results/**/*.pdf
+results/**/*.pkl
+results/**/*.npy
+
+# Experiments - keep scripts, ignore outputs
+experiments/**/*.json
+experiments/**/*.csv
+experiments/**/*.pkl
+
+# General large files
+*.pkl
+*.pickle
+*.h5
+*.hdf5
+*.pt
+*.pth
+*.ckpt
+*.bin
+*.safetensors
+*.npy
+*.npz
+
+# Logs
+*.log
+logs/
+
+# Jupyter Notebook
+.ipynb_checkpoints/
+*.ipynb
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+pytest-of-*/
+
+# MyPy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Ruff
+.ruff_cache/
+
+# Hypothesis
+.hypothesis/
+
+# MkDocs
+site/
+
+# Benchmark results (capability_benchmark.py outputs)
+benchmarks/results/capability_*.json
+
+# Agent caches (semantic-specific)
+.agent_memory/
+~/.agent_memory/
+
+# Removed from release - internal project management
+project/
+archive/
+experiments/
+
+# Benchmark raw result data (keep scripts and methodology docs)
+benchmarks/results/*.json
+benchmarks/results/*_summary.txt
+
+# Claude Code session data
+.claude/
+
+# Developer tooling (local only)
+CLAUDE.md
+claude_code_proxy.py
+
+# Internal planning docs (removed from release)
+plans/
+
+# Local-only files (not in repo)
+STYLE_GUIDE.md
+humanize1.md
+docs/blog/*.md

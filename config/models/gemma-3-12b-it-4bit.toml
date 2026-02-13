@@ -1,0 +1,71 @@
+# Configuration for Gemma 3 12B IT 4-bit (MLX community)
+# Model: mlx-community/gemma-3-12b-it-4bit
+# Platform: Apple Silicon (M-series), 24GB+ recommended
+#
+# Gemma 3 uses hybrid attention: first 8 layers are global attention,
+# remaining layers use sliding window. The spec extractor handles this
+# automatically via is_gemma3 detection.
+
+[model]
+model_id = "mlx-community/gemma-3-12b-it-4bit"
+n_layers = 48
+n_kv_heads = 8
+head_dim = 256
+
+[inference]
+# Official Google AI Studio recommended settings for Gemma 3
+# Source: https://huggingface.co/google/gemma-3-12b-it/discussions/25
+temperature = 1.0
+top_p = 0.95
+top_k = 64
+repetition_penalty = 1.0
+extended_thinking = false
+supports_thinking = false   # Gemma 3 doesn't have extended thinking mode
+
+[optimal]
+max_batch_size = 2
+prefill_step_size = 256
+kv_bits = 4
+kv_group_size = 64
+
+chunked_prefill_enabled = true
+chunked_prefill_threshold = 2048
+chunked_prefill_min_chunk = 512
+chunked_prefill_max_chunk = 2048
+
+batch_window_ms = 10
+scheduler_enabled = true
+
+max_agents_in_memory = 3
+evict_to_disk = true
+
+[thresholds]
+long_context_threshold = 4000
+high_batch_threshold = 3
+memory_pressure_mb = 14000
+min_cache_benefit_ratio = 0.8
+
+[benchmark]
+# Apple Silicon M4 Pro, 24GB, MLX 0.30.5
+platform = "M4 Pro 24GB"
+date = "2026-02-01"
+
+cold_short_ttft_ms = 3213
+cold_short_e2e_ms = 3213
+cold_medium_ttft_ms = 9129
+cold_medium_e2e_ms = 9129
+
+multiturn_t1_e2e_ms = 9259
+multiturn_t1_tps = 6.9
+multiturn_t2_e2e_ms = 3358
+multiturn_t2_tps = 19.1
+multiturn_t3_e2e_ms = 3387
+multiturn_t3_tps = 18.9
+multiturn_speedup = "2.8x"
+
+model_memory_gb = 6.8
+block_pool_blocks = 15534
+# Q4 formula: (n_kv_heads * head_dim * block_tokens * 2(K+V) * 4bits/8)
+#   + scales/biases overhead = 589824 bytes ≈ 0.56 MB per block per layer
+# With n_kv_heads=8, head_dim=256: 8*256*256*2*0.5 + overhead
+block_size_mb = 0.56

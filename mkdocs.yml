@@ -1,0 +1,118 @@
+site_name: agent-memory — Persistent KV Cache for Multi-Agent LLM Systems
+site_description: Block-pool memory management for multi-agent LLM inference on Apple Silicon
+site_author: Yakov Shkolnikov
+repo_url: https://github.com/yshk-mxim/agent-memory
+repo_name: agent-memory
+
+theme:
+  name: material
+  palette:
+    # Light mode
+    - scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    # Dark mode
+    - scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.tabs
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.code.annotate
+
+markdown_extensions:
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.tasklist:
+      custom_checkbox: true
+  - admonition
+  - pymdownx.details
+  - attr_list
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          options:
+            docstring_style: google
+            members_order: source
+            show_root_heading: true
+            show_source: true
+            show_signature_annotations: true
+            separate_signature: true
+            merge_init_into_class: true
+
+nav:
+  - Home: index.md
+  - Getting Started:
+      - Quick Start: quick-start.md
+      - Installation: installation.md
+  - User Guide:
+      - User Guide: user-guide.md
+      - Configuration: configuration.md
+      - Scenarios: scenarios.md
+      - Model Hot-Swap: model-hot-swap.md
+      - FAQ: faq.md
+  - Architecture:
+      - Overview: architecture.md
+      - System Components: architecture/overview.md
+      - Hexagonal Architecture: architecture/hexagonal.md
+      - Domain Core: architecture/domain.md
+      - Application Services: architecture/application.md
+      - Adapters: architecture/adapters.md
+      - Cache Lifecycle: architecture/cache-lifecycle.md
+      - Cache Storage Schema: cache_storage_schema.md
+      - Request Flow: architecture/request-flow.md
+  - Development:
+      - Developer Guide: developer-guide.md
+      - Setup: developer/setup.md
+      - Code Quality Guide: code-quality-guide.md
+      - Adding Models: developer/adding-models.md
+      - MLX Notes: developer/mlx-notes.md
+      - Debugging: developer/debugging.md
+      - Testing: testing.md
+  - API Reference:
+      - Overview: api-reference.md
+      - Domain Types: api/domain.md
+      - Services: api/services.md
+  - Deployment:
+      - Deployment: deployment.md
+      - Production Runbook: PRODUCTION_RUNBOOK.md
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/yshk-mxim/agent-memory
+  version:
+    provider: mike
+
+copyright: Copyright &copy; 2026 Yakov Shkolnikov

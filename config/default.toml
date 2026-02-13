@@ -1,0 +1,43 @@
+# Default configuration for agent-memory server
+# All settings can be overridden via:
+# - CLI arguments (highest priority)
+# - Environment variables (SEMANTIC_*)
+# - .env file
+# - This file (lowest priority)
+
+[mlx]
+model_id = "mlx-community/gemma-3-12b-it-4bit"
+max_batch_size = 1  # Single request for stability
+prefill_step_size = 256  # Reduced to lower memory usage with large contexts
+kv_bits = 4  # 4-bit quantization (75% memory reduction)
+kv_group_size = 64
+block_tokens = 256
+cache_budget_mb = 8192  # 8GB for large context support
+
+[agent]
+max_agents_in_memory = 5
+cache_dir = "~/.agent_memory/caches"
+batch_window_ms = 10
+eviction_policy = "lru"  # Options: lru, lru_3tier (upgrade if profiling shows need)
+
+[server]
+host = "127.0.0.1"  # localhost-only by default (security)
+port = 8000
+allow_remote = false  # Set to true or use --allow-remote to bind 0.0.0.0
+shutdown_timeout_seconds = 30.0
+worker_count = 1  # Single worker (one model instance per process)
+
+[logging]
+level = "INFO"  # DEBUG, INFO, WARNING, ERROR
+format = "json"  # json, console
+output = "stdout"  # stdout, file
+file_path = "~/.agent_memory/logs/semantic.log"
+
+[metrics]
+enabled = true
+port = 9090  # Prometheus metrics on separate port
+include_agent_id_label = false  # Privacy: exclude agent_id from metrics by default
+
+[health]
+startup_timeout_seconds = 60.0  # Max time for model loading
+readiness_check_interval_seconds = 5.0

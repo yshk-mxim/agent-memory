@@ -1,0 +1,30 @@
+# Test configuration overrides
+# Used by pytest via SEMANTIC_CONFIG_FILE=config/test.toml
+
+[mlx]
+model_id = "mlx-community/SmolLM2-135M-Instruct-4bit"  # Fast lightweight model for tests
+max_batch_size = 3
+prefill_step_size = 128
+kv_bits = 0  # 0 = no quantization in tests (simpler)
+cache_budget_mb = 512  # Small budget for fast tests
+
+[agent]
+max_agents_in_memory = 3
+cache_dir = "/tmp/semantic_test_caches"
+batch_window_ms = 5  # Faster batching for tests
+
+[server]
+host = "127.0.0.1"
+port = 0  # Random port for tests
+shutdown_timeout_seconds = 5.0
+
+[logging]
+level = "DEBUG"
+format = "console"
+output = "stdout"
+
+[metrics]
+enabled = false  # Disable metrics in tests
+
+[health]
+startup_timeout_seconds = 30.0

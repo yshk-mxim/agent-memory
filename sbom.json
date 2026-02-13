@@ -1,0 +1,257 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.6",
+  "$schema": "http://cyclonedx.org/schema/bom-1.6.schema.json",
+  "version": 1,
+  "serialNumber": "urn:uuid:agent-memory-sbom-v1.0.0",
+  "metadata": {
+    "timestamp": "2026-02-11T00:25:29.373628+00:00",
+    "component": {
+      "name": "agent-memory",
+      "version": "1.0.0",
+      "type": "application"
+    }
+  },
+  "components": [
+    {
+      "bom-ref": "dep-1",
+      "name": "mlx",
+      "version": "0.30.3",
+      "type": "library",
+      "purl": "pkg:pypi/mlx@0.30.3",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://pypi.org/simple/mlx/",
+          "comment": "implicit dist url"
+        }
+      ]
+    },
+    {
+      "bom-ref": "dep-2",
+      "name": "mlx-lm",
+      "version": "0.30.4",
+      "type": "library",
+      "purl": "pkg:pypi/mlx-lm@0.30.4",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://pypi.org/simple/mlx-lm/",
+          "comment": "implicit dist url"
+        }
+      ]
+    },
+    {
+      "bom-ref": "dep-3",
+      "name": "sentencepiece",
+      "version": "0.2.1",
+      "type": "library",
+      "purl": "pkg:pypi/sentencepiece@0.2.1",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://pypi.org/simple/sentencepiece/",
+          "comment": "implicit dist url"
+        }
+      ]
+    },
+    {
+      "bom-ref": "dep-4",
+      "name": "protobuf",
+      "version": "6.32.0",
+      "type": "library",
+      "purl": "pkg:pypi/protobuf@6.32.0",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://pypi.org/simple/protobuf/",
+          "comment": "implicit dist url"
+        }
+      ]
+    },
+    {
+      "bom-ref": "dep-5",
+      "name": "fastapi",
+      "version": "0.122.0",
+      "type": "library",
+      "purl": "pkg:pypi/fastapi@0.122.0",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://pypi.org/simple/fastapi/",
+          "comment": "implicit dist url"
+        }
+      ]
+    },
+    {
+      "bom-ref": "dep-6",
+      "name": "uvicorn",
+      "version": "0.38.0",
+      "type": "library",
+      "purl": "pkg:pypi/uvicorn@0.38.0",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://pypi.org/simple/uvicorn/",
+          "comment": "implicit dist url"
+        }
+      ]
+    },
+    {
+      "bom-ref": "dep-7",
+      "name": "pydantic",
+      "version": "2.12.4",
+      "type": "library",
+      "purl": "pkg:pypi/pydantic@2.12.4",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://pypi.org/simple/pydantic/",
+          "comment": "implicit dist url"
+        }
+      ]
+    },
+    {
+      "bom-ref": "dep-8",
+      "name": "pydantic-settings",
+      "version": "2.12.0",
+      "type": "library",
+      "purl": "pkg:pypi/pydantic-settings@2.12.0",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://pypi.org/simple/pydantic-settings/",
+          "comment": "implicit dist url"
+        }
+      ]
+    },
+    {
+      "bom-ref": "dep-9",
+      "name": "safetensors",
+      "version": "0.7.0",
+      "type": "library",
+      "purl": "pkg:pypi/safetensors@0.7.0",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://pypi.org/simple/safetensors/",
+          "comment": "implicit dist url"
+        }
+      ]
+    },
+    {
+      "bom-ref": "dep-10",
+      "name": "transformers",
+      "version": "4.57.6",
+      "type": "library",
+      "purl": "pkg:pypi/transformers@4.57.6",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://pypi.org/simple/transformers/",
+          "comment": "implicit dist url"
+        }
+      ]
+    },
+    {
+      "bom-ref": "dep-11",
+      "name": "sse-starlette",
+      "version": "3.2.0",
+      "type": "library",
+      "purl": "pkg:pypi/sse-starlette@3.2.0",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://pypi.org/simple/sse-starlette/",
+          "comment": "implicit dist url"
+        }
+      ]
+    },
+    {
+      "bom-ref": "dep-12",
+      "name": "structlog",
+      "version": "25.5.0",
+      "type": "library",
+      "purl": "pkg:pypi/structlog@25.5.0",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://pypi.org/simple/structlog/",
+          "comment": "implicit dist url"
+        }
+      ]
+    },
+    {
+      "bom-ref": "dep-13",
+      "name": "prometheus-client",
+      "version": "0.24.1",
+      "type": "library",
+      "purl": "pkg:pypi/prometheus-client@0.24.1",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://pypi.org/simple/prometheus-client/",
+          "comment": "implicit dist url"
+        }
+      ]
+    },
+    {
+      "bom-ref": "dep-14",
+      "name": "typer",
+      "version": "0.20.0",
+      "type": "library",
+      "purl": "pkg:pypi/typer@0.20.0",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://pypi.org/simple/typer/",
+          "comment": "implicit dist url"
+        }
+      ]
+    }
+  ],
+  "dependencies": [
+    {
+      "ref": "dep-1"
+    },
+    {
+      "ref": "dep-2"
+    },
+    {
+      "ref": "dep-3"
+    },
+    {
+      "ref": "dep-4"
+    },
+    {
+      "ref": "dep-5"
+    },
+    {
+      "ref": "dep-6"
+    },
+    {
+      "ref": "dep-7"
+    },
+    {
+      "ref": "dep-8"
+    },
+    {
+      "ref": "dep-9"
+    },
+    {
+      "ref": "dep-10"
+    },
+    {
+      "ref": "dep-11"
+    },
+    {
+      "ref": "dep-12"
+    },
+    {
+      "ref": "dep-13"
+    },
+    {
+      "ref": "dep-14"
+    }
+  ]
+}

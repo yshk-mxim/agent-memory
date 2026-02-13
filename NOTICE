@@ -1,0 +1,26 @@
+agent-memory
+Copyright 2026 Yakov Shkolnikov and contributors
+
+This product includes software developed by third parties:
+
+MIT License:
+- FastAPI (https://github.com/tiangolo/fastapi) — Sebastián Ramírez
+- Pydantic (https://github.com/pydantic/pydantic) — Samuel Colvin and contributors
+- Typer (https://github.com/tiangolo/typer) — Sebastián Ramírez
+- MLX (https://github.com/ml-explore/mlx) — Apple Inc.
+- MLX-LM (https://github.com/ml-explore/mlx-lm) — Apple Inc.
+
+BSD License:
+- Uvicorn (https://github.com/encode/uvicorn) — Tom Christie (BSD-3-Clause)
+- SSE Starlette (https://github.com/sysid/sse-starlette) — sysid (BSD-3-Clause)
+- Protocol Buffers (https://github.com/protocolbuffers/protobuf) — Google LLC (BSD-3-Clause)
+
+Apache 2.0 License:
+- Transformers (https://github.com/huggingface/transformers) — The HuggingFace Team
+- Structlog (https://github.com/hynek/structlog) — Hynek Schlawack and contributors
+- Prometheus Client (https://github.com/prometheus/client_python) — The Prometheus Authors
+- Safetensors (https://github.com/huggingface/safetensors) — The HuggingFace Team
+- SentencePiece (https://github.com/google/sentencepiece) — Google LLC
+
+Full dependency list with licenses available via:
+  pip-licenses --from=mixed --format=markdown

@@ -1,0 +1,675 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "agent-memory"
+dynamic = ["version"]
+description = "Persistent KV cache for multi-agent LLM systems on Apple Silicon"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.11"
+authors = [
+    { name = "Yakov Shkolnikov" },
+]
+keywords = [
+    "llm",
+    "inference",
+    "multi-agent",
+    "mlx",
+    "continuous-batching",
+    "kv-cache",
+]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+    "mlx==0.30.3",
+    # mlx-lm==0.30.4 is installed separately with --no-deps (see scripts/setup.sh).
+    # Reason: mlx-lm pins transformers==5.0.0rc1 which has a SentencePiece bug
+    # (huggingface/transformers#43066). We pin transformers==4.57.6 instead.
+    "sentencepiece==0.2.1",         # mlx-lm runtime dep
+    "protobuf==6.32.0",            # mlx-lm runtime dep
+    "fastapi==0.122.0",
+    "uvicorn[standard]==0.38.0",
+    "pydantic==2.12.4",
+    "pydantic-settings==2.12.0",
+    "safetensors==0.7.0",
+    "transformers==4.57.6",         # v5.0.0rc1 breaks SentencePiece decode (gh #43066)
+    "sse-starlette==3.2.0",
+    "structlog==25.5.0",
+    "prometheus-client==0.24.1",
+    "typer==0.20.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest==9.0.2",
+    "pytest-asyncio==1.3.0",
+    "pytest-cov==7.0.0",
+    "pytest-timeout==2.4.0",
+    "hypothesis==6.150.3",
+    "httpx>=0.27.0",
+    "ruff==0.14.6",
+    "mypy==1.19.1",
+    "liccheck==0.9.2",
+    "pre-commit==4.2.0",
+]
+docs = [
+    "mkdocs-material==9.7.1",
+    "mkdocstrings[python]==1.0.2",
+]
+
+[project.scripts]
+agent-memory = "agent_memory.entrypoints.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/yshk-mxim/agent-memory"
+Documentation = "https://github.com/yshk-mxim/agent-memory"
+Repository = "https://github.com/yshk-mxim/agent-memory"
+Issues = "https://github.com/yshk-mxim/agent-memory/issues"
+
+[tool.hatch.version]
+path = "src/agent_memory/__init__.py"
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "/src",
+    "/tests",
+    "/config",
+    "/README.md",
+    "/LICENSE",
+    "/NOTICE",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/agent_memory"]
+
+# Ruff configuration
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E",      # pycodestyle errors
+    "W",      # pycodestyle warnings
+    "F",      # pyflakes
+    "I",      # isort
+    "N",      # pep8-naming
+    "UP",     # pyupgrade
+    "S",      # bandit security rules
+    "B",      # flake8-bugbear
+    "C90",    # mccabe complexity
+    "D",      # pydocstyle (docstring rules)
+    "PL",     # pylint (includes complexity checks)
+    "RUF",    # ruff-specific rules
+    "ERA",    # flake8-eradicate (commented-out code)
+    "SIM",    # flake8-simplify (overly complex code)
+    "C4",     # flake8-comprehensions (improve comprehensions)
+    "PIE",    # flake8-pie (misc anti-patterns)
+    "T20",    # flake8-print (no print statements in production)
+    "RET",    # flake8-return (simplify return statements)
+    "ARG",    # flake8-unused-arguments
+    "PTH",    # flake8-use-pathlib (prefer pathlib over os.path)
+]
+ignore = [
+    "S101",    # Allow assert statements (needed for tests)
+    "PLR0913", # Too many arguments to function (can be necessary)
+    "D100",    # Missing module docstring (allow for simple modules)
+    "D104",    # Missing package docstring
+    "D203",    # Conflicts with D211 (blank line before class)
+    "D213",    # Conflicts with D212 (multi-line summary second line)
+    "T201",    # Allow print in CLI/entrypoints
+]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10  # Sprint 4 quality standard: CC ≤ 10
+
+[tool.ruff.lint.pylint]
+max-args = 7            # Enforce reasonable function signatures
+max-branches = 10       # Sprint 4: max nesting depth
+max-returns = 6         # Encourage simple control flow
+max-statements = 50     # Detect long methods
+max-public-methods = 20 # Detect large classes
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = [
+    "S101",    # Allow assertions in tests
+    "PLR2004", # Allow magic values in tests
+    "ERA001",  # Allow commented-out code in tests (TODO placeholders)
+    "ARG001",  # Allow unused fixture arguments (pytest fixtures)
+    "ARG002",  # Allow unused method arguments (pytest fixtures)
+    "ARG005",  # Allow unused lambda arguments in tests
+    "PLC0415", # Allow imports inside functions (for mocking/lazy imports)
+    "E402",    # Allow module imports not at top (for mocking)
+    "PTH123",  # Allow open() instead of Path.open() in tests
+    "B017",    # Allow blind exception assertions in tests
+    "F841",    # Allow unused variables in tests
+    "E501",    # Allow long lines in tests
+    "RET504",  # Allow unnecessary variable assignments in tests
+    "D101",    # Test classes use descriptive names, not docstrings
+    "D102",    # Test methods use descriptive names, not docstrings
+    "D103",    # Test helper functions use descriptive names
+    "D107",    # Test __init__ methods don't need docstrings
+    "D205",    # Docstring formatting is relaxed in tests
+    "SIM117",  # Nested with statements are common in test mocking
+    "SIM102",  # Collapsible if statements acceptable in test logic
+    "RUF059",  # Unused unpacked vars common in fixture unpacking
+    "RUF001",  # Unicode characters in test data strings
+    "RUF002",  # Unicode characters in test docstrings
+    "RUF003",  # Unicode characters in test comments
+    "RUF005",  # Collection concatenation in test data construction
+    "S324",    # hashlib used for non-security purposes (cache keys)
+    "N806",    # Uppercase variable names for test constants
+    "N803",    # Uppercase argument names for ML dimension params
+    "C408",    # dict() calls acceptable for test fixtures
+    "C901",    # Complex test fixtures acceptable
+    "PLR0912", # Many branches in test setup/validation
+    "PLR0915", # Many statements in comprehensive test methods
+    "PLC0206", # dict[key] iteration pattern common in test assertions
+    "PIE810",  # Multiple starts/ends with calls acceptable
+    "PLR1714", # Repeated equality comparisons in assertions
+    "S108",    # Hardcoded /tmp paths acceptable in tests
+    "S113",    # Requests without timeout acceptable in test fixtures
+    "B905",    # zip without strict= acceptable in tests
+    "B007",    # Unused loop variables acceptable in tests
+    "C401",    # Generator-to-set acceptable in tests
+    "RUF012", # Mutable class attributes in test classes (parametrize data)
+    "PLW1510", # subprocess.run without check= in test validation code
+]
+"tests/benchmarks/**/*.py" = [
+    "S603",    # Allow subprocess calls (needed for server startup)
+    "S607",    # Allow partial executable paths (test environment)
+]
+"tests/e2e/**/*.py" = [
+    "S603",    # Allow subprocess calls (E2E server startup)
+    "S607",    # Allow partial executable paths (test environment)
+    "S108",    # Allow /tmp usage in tests
+    "S110",    # Allow try-except-pass in cleanup code
+    "E722",    # Allow bare except in cleanup code
+    "SIM105",  # Allow try-except-pass instead of suppress
+    "SIM115",  # Allow open() without context manager in fixtures
+    "SIM117",  # Allow nested with statements
+    "PLR0915", # Allow many statements in E2E fixtures
+]
+"tests/stress/**/*.py" = [
+    "S603",    # Allow subprocess calls (stress test server)
+    "S607",    # Allow partial executable paths
+    "S110",    # Allow try-except-pass in stress test cleanup
+    "SIM105",  # Allow try-except-pass in stress tests
+    "SIM117",  # Allow nested with statements for concurrent requests
+    "B905",    # Allow zip() without strict in stress tests
+    "B007",    # Allow unused loop variables in stress tests
+    "RUF001",  # Allow ambiguous characters (× for multiplication)
+    "RUF002",  # Allow ambiguous characters in docstrings
+]
+"demo/**/*.py" = [
+    "E402",    # sys.path must be set before demo.lib imports (Streamlit runtime)
+    "D100",    # Demo modules don't need module docstrings
+    "D101",    # Demo classes don't need class docstrings
+    "D103",    # Demo helper functions don't need docstrings
+    "PLC0415", # Runtime imports after path setup
+    "C901",    # Demo orchestration logic is inherently complex
+    "PLR0912", # Same functions as C901
+    "PLR0915", # Same functions as C901
+    "PLR2004", # UI layout constants
+    "RET504",  # Variable before return aids readability
+]
+"benchmarks/**/*.py" = [
+    "PLR2004", # Benchmark thresholds and port constants
+    "S110",    # Best-effort cleanup try-except-pass
+    "E501",    # Long log lines and format strings
+    "D102",    # Benchmark methods use descriptive names
+    "D103",    # Benchmark helpers use descriptive names
+    "D107",    # __init__ documented by class docstring
+    "PTH123",  # open() in benchmark I/O
+    "S607",    # Partial executable paths for server launch
+    "SIM105",  # try-except-pass for cleanup
+    "C901",    # Complex benchmark orchestration
+    "PLR0912", # Same functions as C901
+    "PLR0915", # Same functions as C901
+    "S603",    # subprocess calls for server management
+    "PLC0415", # Conditional imports
+    "RUF005",  # Collection concatenation for config building
+    "SIM102",  # Nested if for config checks
+    "N806",    # Dimension variable names
+    "ARG002",  # Interface params required by protocol
+    "B007",    # Unused loop variables in iteration
+    "F841",    # Intermediate variables for debugging
+    "RET504",  # Variable before return aids readability
+    "RUF001",  # Unicode characters in benchmark output
+    "RUF002",  # Unicode characters in docstrings
+    "SIM117",  # Nested with for concurrent requests
+    "ERA001",  # Config comments
+    "PLW0603", # Global for server state
+    "PLW2901", # Loop variable reassignment in stream
+    "RUF059",  # Unused unpacking in structured data
+    "SIM108",  # if-else blocks clearer in config
+    "B904",    # raise-without-from in cleanup
+    "SIM101",  # Multiple isinstance calls
+    "B905",    # zip() without strict in benchmark iteration
+    "C401",    # Generator in set() is fine
+    "D415",    # Benchmark docstring titles don't need punctuation
+    "SIM115",  # open() for subprocess log files (Popen lifecycle)
+    "S108",    # /tmp usage for benchmark logs
+    "PLC0206", # dict iteration without .items() in profiler
+    "PLR1722", # exit() in __main__ benchmark scripts
+]
+"scripts/**/*.py" = [
+    "D101",    # Script classes don't need docstrings
+    "D102",    # Script methods don't need docstrings
+    "D103",    # Script functions don't need docstrings
+    "PTH123",  # open() in scripts
+    "PLR2004", # Script constants
+    "SIM105",  # try-except-pass for cleanup
+]
+"tests/manual/**/*.py" = [
+    "PLW2901", # Loop variable reassignment common in stream parsing
+    "PLW0603", # Global statement for trace counters
+    "PTH109",  # os.getcwd() acceptable in manual test scripts
+    "SIM105",  # try-except-pass acceptable in manual JSON parsing
+    "SIM108",  # if-else blocks clearer than ternary in manual tests
+    "S104",    # Binding to 0.0.0.0 intentional for manual test server
+]
+"tests/mlx/**/*.py" = [
+    "PLC0415", # Runtime imports needed for real MLX lazy loading
+    "S101",    # Assertions in tests
+    "PLR2004", # Magic values in test data
+    "D101",    # Test classes use descriptive names
+    "D102",    # Test methods use descriptive names
+    "D103",    # Test helper functions use descriptive names
+]
+# MLX adapters use runtime imports to avoid ImportError when MLX not installed
+"src/agent_memory/adapters/outbound/mlx_*.py" = [
+    "PLC0415", # Runtime imports are intentional for optional dependencies
+]
+"src/agent_memory/adapters/config/settings.py" = [
+    "PLW0603", # Global statement for singleton pattern
+    "S104",    # Binding to 0.0.0.0 is intentional for server
+    "PLC0415", # tomllib/tomli try-except fallback import
+]
+"src/agent_memory/adapters/outbound/mlx_spec_extractor.py" = [
+    "PLW0603", # Global statement for singleton pattern
+]
+"src/agent_memory/application/agent_cache_store.py" = [
+    "PLC0415", # Lazy imports for backward compatibility
+    "C901",    # Disk load with error recovery is inherently branchy
+    "PLR0912", # Same function as C901
+]
+"src/agent_memory/application/batch_engine.py" = [
+    "C901",    # Complex methods acceptable in core engine
+    "PLR0912", # Many branches acceptable for cache handling
+    "PLR0915", # Many statements acceptable for comprehensive logic
+    "PLC0415", # MLX and entity lazy imports throughout
+    "D107",    # __init__ documented by class docstring
+    "RUF001",  # DeepSeek token strings use fullwidth Unicode
+    "RUF002",  # DeepSeek token strings in docstrings
+    "PLR2004", # Tuned heuristic thresholds and Q4 structural checks
+    "ERA001",  # Tuple structure comment, not dead code
+    "SIM102",  # Nested if clearer for type+length checks
+    "N806",    # ML dimension names (B, L, D, etc.)
+]
+"src/agent_memory/adapters/outbound/safetensors_cache_adapter.py" = [
+    "S112",    # try-except-continue for robust deserialization
+    "PLR2004", # Magic values for safetensors format constants
+    "PLC0415", # MLX lazy import for optional dependency
+    "C901",    # save/load are inherently complex serialization
+    "PLR0912", # Same functions as C901
+    "PLR0915", # Same functions as C901
+]
+"src/agent_memory/adapters/inbound/adapter_helpers.py" = [
+    "E402",    # Backward-compat re-export must follow module-level code
+    "C901",    # JSON bracket-counting parser is inherently branchy
+    "PLR0912", # Same function as C901
+]
+"src/agent_memory/adapters/inbound/admin_api.py" = [
+    "PLC0415", # MLX lazy import for optional dependency
+]
+"src/agent_memory/adapters/inbound/auth_middleware.py" = [
+    "PLR0911", # Auth dispatch has one early return per check
+]
+"src/agent_memory/adapters/outbound/mlx_cache_adapter.py" = [
+    "PLR2004", # len(tuple) == 3 is structural check for Q4 format
+    "ARG002",  # Interface params required by port but not used
+]
+"src/agent_memory/adapters/outbound/mlx_fused_attention.py" = [
+    "C901",    # Monkeypatch function contains inner closures
+    "PLR0915", # Same function
+    "PLW0603", # Idempotent _patched guard
+    "N806",    # B, L, N, D are standard ML dimension names
+    "PLR2004", # Hardware quantization constants
+    "ARG001",  # mask param kept for SDPA interface compatibility
+]
+"src/agent_memory/adapters/outbound/mlx_prefill_adapter.py" = [
+    "D107",    # Class docstring suffices for __init__
+]
+"src/agent_memory/adapters/outbound/mlx_quantized_extensions.py" = [
+    "PLC0415", # Runtime imports are intentional
+    "D102",    # Cache interface methods are self-documenting
+    "D107",    # __init__ documented by class docstring
+    "N806",    # B, H, Dk, Dv are standard ML dimension names
+    "N803",    # N is upstream interface parameter name
+    "PLR2004", # Structural len==3 checks and validation values
+    "PLR0915", # merge() is inherently complex for Q4 batch cache
+    "C901",    # Monkeypatch functions with multiple inner closures
+    "ARG001",  # cls required by @classmethod
+    "ARG002",  # Interface params required by protocol
+    "RET504",  # Variable assignment before return aids readability
+    "SIM102",  # Nested if clearer for structural checks
+]
+"src/agent_memory/adapters/outbound/mlx_sink_compat.py" = [
+    "PLW0603", # Idempotent _patched guard
+]
+"src/agent_memory/application/adaptive_config.py" = [
+    "D107",    # Class docstring with examples suffices
+]
+"src/agent_memory/application/chat_completion_service.py" = [
+    "C901",    # Core generation function is inherently complex
+    "PLR0912", # Same function
+]
+"src/agent_memory/application/coordination_service.py" = [
+    "D107",    # __init__ documented by class docstring
+    "C901",    # Session creation validation is inherently branchy
+    "PLC0415", # Lazy imports to avoid circular dependencies
+]
+"src/agent_memory/application/model_registry.py" = [
+    "D107",    # Class docstring with examples suffices
+]
+"src/agent_memory/application/model_swap_orchestrator.py" = [
+    "PLR0915", # Hot-swap orchestration is a linear multi-step sequence
+]
+"src/agent_memory/application/ports.py" = [
+    "D102",    # Protocol methods documented by class docstring
+]
+"src/agent_memory/application/prefill_state.py" = [
+    "D102",    # Simple property methods are self-documenting
+]
+"src/agent_memory/application/scheduler.py" = [
+    "D107",    # Class docstring suffices
+    "D102",    # Simple property methods are self-documenting
+]
+"src/agent_memory/application/shared_prefix_cache.py" = [
+    "D107",    # Simple __init__
+    "D102",    # Self-documenting property
+    "S324",    # md5 used for cache key hashing, not security
+]
+"src/agent_memory/application/tokenization.py" = [
+    "C901",    # Template application with fallback is inherently branchy
+    "PLR0912", # Same function
+]
+"src/agent_memory/domain/coordination.py" = [
+    "ARG003",  # Enum._missing_ requires value parameter
+]
+"src/agent_memory/domain/entities.py" = [
+    "B905",    # zip() without strict= intentional for prefix matching
+    "C901",    # __post_init__ validates multiple dataclass invariants
+    "PLR0912", # Same function
+]
+"src/agent_memory/domain/services.py" = [
+    "E402",    # mlx_io_lock must be defined before dependent imports
+]
+"src/agent_memory/domain/value_objects.py" = [
+    "PLR2004", # kv_bits == 16 is FP16 format check
+]
+"src/agent_memory/entrypoints/api_server.py" = [
+    "C901",    # Lifespan manager is the server lifecycle
+    "PLR0912", # Same function
+    "PLR0915", # Same function
+    "PLC0415", # Deferred imports inside lifespan and route handlers
+    "PLR0911", # Error-to-HTTP mapping has one return per error type
+]
+"src/agent_memory/entrypoints/cli.py" = [
+    "E402",    # faulthandler.enable() must precede all other imports
+    "ARG001",  # Signal handler signature requires (signum, frame)
+    "PLC0415", # Deferred imports for env vars and optional modules
+]
+"src/agent_memory/entrypoints/tune.py" = [
+    "C901",    # Tuning script is inherently sequential and long
+    "PLR0912", # Same function
+    "PLR0915", # Same function
+    "PLC0415", # Benchmark module and tomllib lazy imports
+    "ARG001",  # measure() env param for API consistency
+    "SIM105",  # Best-effort cleanup try-except-pass
+    "S110",    # Same cleanup pattern
+]
+
+[tool.ruff.lint.isort]
+force-single-line = false
+known-first-party = ["agent_memory"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"  # Google-style docstrings
+
+# Mypy configuration
+[tool.mypy]
+python_version = "3.11"
+mypy_path = "src"
+strict = true
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_any_generics = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_no_return = true
+check_untyped_defs = true
+
+[[tool.mypy.overrides]]
+module = "demo.*"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = [
+    "mlx.*",
+    "mlx_lm.*",
+    "transformers.*",
+    "yaml.*",
+    "httpx.*",
+    "tomli.*",
+    "capability_benchmark.*",
+]
+ignore_missing_imports = true
+
+# MLX adapters: heavy monkey-patching + missing MLX type stubs
+[[tool.mypy.overrides]]
+module = [
+    "agent_memory.adapters.outbound.mlx_quantized_extensions",
+    "agent_memory.adapters.outbound.mlx_fused_attention",
+    "agent_memory.adapters.outbound.mlx_sink_compat",
+    "agent_memory.adapters.outbound.mlx_cache_adapter",
+    "agent_memory.adapters.outbound.mlx_spec_extractor",
+    "agent_memory.adapters.outbound.mlx_prefill_adapter",
+    "agent_memory.adapters.outbound.mlx_model_loader",
+    "agent_memory.adapters.outbound.safetensors_cache_adapter",
+]
+disallow_untyped_defs = false
+warn_return_any = false
+disallow_any_generics = false
+strict = false
+
+# Application code with heavy MLX interaction
+[[tool.mypy.overrides]]
+module = [
+    "agent_memory.application.batch_engine",
+    "agent_memory.application.chat_completion_service",
+    "agent_memory.application.scheduler",
+    "agent_memory.application.agent_cache_store",
+    "agent_memory.application.coordination_service",
+]
+disallow_untyped_defs = false
+warn_return_any = false
+disallow_any_generics = false
+strict = false
+
+# Inbound adapters: Starlette/FastAPI dispatch patterns
+[[tool.mypy.overrides]]
+module = [
+    "agent_memory.adapters.inbound.request_id_middleware",
+    "agent_memory.adapters.inbound.request_logging_middleware",
+    "agent_memory.adapters.inbound.rate_limiter",
+    "agent_memory.adapters.inbound.metrics_middleware",
+    "agent_memory.adapters.inbound.auth_middleware",
+    "agent_memory.adapters.inbound.direct_agent_adapter",
+    "agent_memory.adapters.inbound.coordination_adapter",
+    "agent_memory.adapters.inbound.anthropic_adapter",
+    "agent_memory.adapters.inbound.openai_adapter",
+]
+disallow_untyped_defs = false
+warn_return_any = false
+disallow_any_generics = false
+strict = false
+
+# Entrypoints: FastAPI lifespan + CLI tooling (heavy untyped code)
+[[tool.mypy.overrides]]
+module = [
+    "agent_memory.entrypoints.api_server",
+    "agent_memory.entrypoints.tune",
+]
+ignore_errors = true
+
+# Config adapters: YAML/TOML parsing
+[[tool.mypy.overrides]]
+module = [
+    "agent_memory.adapters.config.settings",
+    "agent_memory.adapters.config.scenario_loader",
+]
+disallow_untyped_defs = false
+warn_return_any = false
+disallow_any_generics = false
+strict = false
+
+# Tests: relaxed type checking
+[[tool.mypy.overrides]]
+module = "tests.*"
+ignore_errors = true
+
+# Pytest configuration
+[tool.pytest.ini_options]
+minversion = "8.0"
+pythonpath = ["src"]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+markers = [
+    "unit: Fast unit tests with mocked boundaries",
+    "integration: Tests with real MLX and disk I/O (Apple Silicon only)",
+    "smoke: Basic server lifecycle tests",
+    "e2e: Full-stack multi-agent tests (slow, Apple Silicon only)",
+    "stress: Load and concurrency stress tests (very slow, Apple Silicon only)",
+    "benchmark: Performance benchmarks (very slow, Apple Silicon only)",
+    "property: Hypothesis property-based tests",
+    "live: Tests requiring a running server on localhost:8000",
+]
+addopts = [
+    "--strict-markers",
+    "--strict-config",
+]
+filterwarnings = [
+    "error",
+    "ignore::DeprecationWarning",
+]
+
+[tool.coverage.run]
+source = ["src"]
+omit = [
+    "tests/*",
+    "**/__pycache__/*",
+    "src/agent_memory/ports/*.py",         # Protocol definitions (not executable code)
+    "src/agent_memory/entrypoints/*.py",   # Server/CLI startup — tested by e2e/smoke tests
+    # Inbound adapters: FastAPI route handlers tested by integration/e2e tests
+    "src/agent_memory/adapters/inbound/anthropic_adapter.py",
+    "src/agent_memory/adapters/inbound/openai_adapter.py",
+    "src/agent_memory/adapters/inbound/direct_agent_adapter.py",
+    "src/agent_memory/adapters/inbound/auth_middleware.py",
+    "src/agent_memory/adapters/inbound/rate_limiter.py",
+    "src/agent_memory/adapters/inbound/metrics.py",
+    "src/agent_memory/adapters/inbound/metrics_middleware.py",
+    "src/agent_memory/adapters/inbound/request_id_middleware.py",
+    "src/agent_memory/adapters/inbound/request_logging_middleware.py",
+    # Outbound adapters: MLX-dependent — tested by integration tests on Apple Silicon
+    "src/agent_memory/adapters/outbound/mlx_cache_adapter.py",
+    "src/agent_memory/adapters/outbound/mlx_model_loader.py",
+    "src/agent_memory/adapters/outbound/mlx_prefill_adapter.py",
+    "src/agent_memory/adapters/outbound/mlx_quantized_extensions.py",
+    "src/agent_memory/adapters/outbound/mlx_sink_compat.py",
+    "src/agent_memory/adapters/outbound/safetensors_cache_adapter.py",
+    "src/agent_memory/adapters/utils/timeouts.py",
+    # Core inference engine: deeply coupled to MLX — tested by integration tests
+    "src/agent_memory/application/batch_engine.py",
+]
+
+[tool.coverage.report]
+fail_under = 80
+precision = 2
+show_missing = true
+skip_covered = false
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+    "@(abc\\.)?abstractmethod",
+]
+
+[tool.coverage.html]
+directory = "htmlcov"
+
+# Codespell configuration
+[tool.codespell]
+skip = "*.git,*.pyc,*.egg-info,htmlcov,.pytest_cache,.mypy_cache,.ruff_cache"
+ignore-words-list = "fo,nd,te"
+
+# Liccheck configuration
+# Note: Some packages (matplotlib-inline, sentencepiece) have UNKNOWN license metadata
+# but are actually BSD-3-Clause and Apache-2.0 respectively. These are safe to use.
+# License check is set to warning (non-blocking) until metadata is fixed upstream.
+[tool.liccheck]
+authorized_licenses = [
+    "MIT",
+    "MIT-CMU",
+    "BSD",
+    "BSD License",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "3-Clause BSD",
+    "Apache",
+    "Apache 2.0",
+    "Apache-2.0",
+    "Apache-2.0 AND CNRI-Python",
+    "Apache-2.0 AND BSD-2-Clause",
+    "Apache Software",
+    "Apache Software License",
+    "ISC",
+    "ISC License (ISCL)",
+    "Python Software Foundation",
+    "Python Software Foundation License",
+    "PSF",
+    "PSF-2.0",
+    "Zlib",
+    "MPL-2.0",
+    "Mozilla Public License 2.0 (MPL 2.0)",
+    "The Unlicense (Unlicense)",
+    "UNKNOWN",
+]
+unauthorized_licenses = [
+    "GPL",
+    "GPLv2",
+    "GPLv3",
+    "LGPL",
+    "LGPLv2",
+    "LGPLv3",
+    "AGPL",
+    "AGPLv3",
+    "SSPL",
+    "EUPL",
+]
