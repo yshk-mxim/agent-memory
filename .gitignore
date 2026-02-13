@@ -126,3 +126,7 @@ claude_code_proxy.py
 
 # Internal planning docs (removed from release)
 plans/
+
+# Local-only files (not in repo)
+STYLE_GUIDE.md
+humanize1.md
