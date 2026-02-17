@@ -83,6 +83,7 @@ CORPUS_PATH = Path(__file__).parent / "data" / "prefill_corpus.txt"
 MODELS = {
     "gemma": "mlx-community/gemma-3-12b-it-4bit",
     "deepseek": "mlx-community/DeepSeek-Coder-V2-Lite-Instruct-4bit-mlx",
+    "llama": "mlx-community/Llama-3.1-8B-Instruct-4bit",
 }
 
 ALL_CONTEXTS = [1024, 2048, 4096, 8192, 16384, 32768]
@@ -119,6 +120,7 @@ ADMIN_KEY = "benchmark"
 MODEL_CACHE_BUDGET: dict[str, int] = {
     "gemma": 8192,  # default
     "deepseek": 4096,  # reduced — MoE intermediates need headroom
+    "llama": 8192,  # same as Gemma — dense GQA, 32 layers
 }
 
 # ---------------------------------------------------------------------------
@@ -1993,7 +1995,7 @@ async def main() -> int:
         "--models",
         type=str,
         default="all",
-        choices=["all", "gemma", "deepseek"],
+        choices=["all", "gemma", "deepseek", "llama"],
         help="Which model(s) to benchmark",
     )
     parser.add_argument(

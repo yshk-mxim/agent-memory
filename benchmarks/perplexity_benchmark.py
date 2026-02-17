@@ -41,6 +41,7 @@ from mlx import nn
 # Model IDs
 GEMMA_MODEL_ID = "mlx-community/gemma-3-12b-it-4bit"
 DEEPSEEK_MODEL_ID = "mlx-community/DeepSeek-Coder-V2-Lite-Instruct-4bit-mlx"
+LLAMA_MODEL_ID = "mlx-community/Llama-3.1-8B-Instruct-4bit"
 
 # Config — sized for 24 GB device
 WINDOW_SIZE = 512  # Tokens per evaluation window
@@ -259,7 +260,7 @@ def main():
     parser = argparse.ArgumentParser(description="FP16 vs Q4 KV cache perplexity benchmark")
     parser.add_argument(
         "--model",
-        choices=["gemma", "deepseek", "all"],
+        choices=["gemma", "deepseek", "llama", "all"],
         default="gemma",
         help="Which model to benchmark (default: gemma)",
     )
@@ -279,6 +280,10 @@ def main():
 
     if args.model in ("deepseek", "all"):
         r = run_benchmark(DEEPSEEK_MODEL_ID, "DeepSeek V2 Lite 16B")
+        all_results.append(r)
+
+    if args.model in ("llama", "all"):
+        r = run_benchmark(LLAMA_MODEL_ID, "Llama 3.1 8B")
         all_results.append(r)
 
     # Summary

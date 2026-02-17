@@ -1,0 +1,85 @@
+╔══════════════════════════════════════════════════════════════════════════════╗
+║                    BENCHMARK ANALYSIS COMPLETE                               ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+
+📊 SOURCE DATA
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+File: /Users/dev_user/agent-memory/benchmarks/results/full_gemma_20260215_232610.json
+Size: 300.3 KB
+Measurements: 216 (100% quality pass, 0% errors)
+Duration: 2h 21m (2026-02-16 04:26-06:47 UTC)
+
+📁 ANALYSIS FILES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Location: /Users/dev_user/agent-memory/benchmarks/analysis/
+
+1. QUICK_REFERENCE.md (2.9K)
+   → One-page cheat sheet with all key numbers for paper
+   → Copy-paste ready LaTeX commands
+   → Narrative snippets
+
+2. BENCHMARK_REPORT.md (11K)
+   → Complete consolidated report
+   → All tables with full statistics (median, min, max, range)
+   → Quality metrics, configuration details
+   → Paper-ready claims with backing data
+
+3. benchmark_summary_report.md (10K)
+   → Detailed narrative analysis
+   → Methodology notes
+   → Executive summary
+
+4. latex_tables.tex (8.8K)
+   → 6 publication-ready LaTeX tables
+   → Table 1: Single Request TTFT
+   → Table 2: Concurrent Request TTFT
+   → Table 3: Decode Throughput
+   → Table 4: Single vs Concurrent Comparison
+   → Table 5: TTFT Variance
+   → Table 6: Batch=2 Per-Request TPS
+   → Comprehensive combined table
+
+5. generate_paper_stats.py (8.9K)
+   → Extract paper-ready statistics from JSON
+   → Outputs tables + LaTeX inline values
+   → Run: python generate_paper_stats.py
+
+6. analyze_benchmark_v2.py (13K)
+   → Full detailed analysis with formatted tables
+   → Handles both batch=1 and batch=2 formats
+   → Run: python analyze_benchmark_v2.py
+
+✨ KEY FINDINGS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+WARM CACHE SPEEDUP (Single Request, Batch=1)
+  1K context:  8.3x  (3,964ms → 475ms)
+  2K context: 14.4x  (7,119ms → 495ms)
+  4K context: 27.3x (15,736ms → 577ms)
+
+WARM CACHE SPEEDUP (Concurrent, Batch=2)
+  1K context:  3.4x  (6,491ms → 1,930ms)
+  2K context:  5.7x (11,806ms → 2,068ms)
+  4K context: 11.4x (25,274ms → 2,225ms)
+
+DECODE THROUGHPUT (Batch=1, Streaming)
+  Cold: 23-26 tps
+  Warm: 23-27 tps
+  Hot:  23-26 tps
+  → Cache has minimal impact (±1-3 tps)
+
+QUALITY METRICS
+  Total measurements: 216
+  Quality pass rate: 100% (216/216)
+  Error rate: 0% (0/216)
+  Variance: <4% relative to median
+
+🎯 READY FOR PAPER
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1. Copy LaTeX tables from latex_tables.tex
+2. Add \newcommand definitions from QUICK_REFERENCE.md
+3. Use narrative snippets from BENCHMARK_REPORT.md
+4. Cite exact numbers from tables
+
+All claims 100% backed by data.

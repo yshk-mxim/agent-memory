@@ -1,7 +1,15 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
 # Copyright (c) 2026 Yakov Shkolnikov and contributors
-"""Paper Benchmark Suite - Replicates all benchmarks from the agent-memory paper.
+"""OBSOLETE: Use full_benchmark.py instead.
+
+This script used repetitive PADDING_TEXT which produced artificially low TTFT
+values (e.g., Gemma 4K cold: 7.7s vs 15.6s with diverse corpus). The full
+benchmark uses a 151KB diverse Wikipedia corpus that better represents real
+workloads. Kept for reference only.
+
+Original description:
+Paper Benchmark Suite - Replicates all benchmarks from the agent-memory paper.
 
 This script runs the complete benchmark suite as described in the paper:
 - Context lengths: 1K, 2K, 4K, 8K, 16K, 32K tokens

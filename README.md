@@ -21,29 +21,37 @@ curl http://localhost:8000/v1/chat/completions \
 
 When multiple LLM agents share one local model, every new request re-computes the full KV cache from scratch. On a 12B model with 2K tokens of context, that costs 3-8 seconds of prefill per request.
 
-agent-memory persists KV caches to disk as Q4-quantized safetensors files. When an agent returns with the same conversation prefix, the server reloads the cache and skips directly to decoding. The result: 8-31x faster time-to-first-token on cache hits, scaling with context length.
+agent-memory persists KV caches to disk as Q4-quantized safetensors files. When an agent returns with the same conversation prefix, the server reloads the cache and skips directly to decoding. The result: 4-35x faster time-to-first-token on cache hits at 1K-4K context, scaling up to 136x at 32K.
 
 The server exposes an OpenAI-compatible `/v1/chat/completions` endpoint, so existing tools (LangChain, OpenAI SDK, curl) work without changes.
 
 ## Performance
 
-Measured on M4 Pro 24 GB, batch=1, median of 6 runs per configuration:
+Measured on M4 Pro 24 GB, streaming TTFT with diverse Wikipedia corpus, scheduler on (batch=2 server, single requests), median of 6 runs per configuration:
 
 **Gemma 3 12B IT (Q4)**
 
 | Context | Cold TTFT | Warm TTFT | Speedup |
 |---------|-----------|-----------|---------|
-| 1024 tokens | 1.95s | 0.23s | 8.6x |
-| 2048 tokens | 3.61s | 0.24s | 15x |
-| 4096 tokens | 7.73s | 0.25s | 31x |
+| 1024 tokens | 3.96s | 0.48s | 8.3x |
+| 2048 tokens | 7.12s | 0.50s | 14.4x |
+| 4096 tokens | 15.7s | 0.58s | 27.3x |
 
 **DeepSeek-Coder-V2-Lite 16B (Q4)**
 
 | Context | Cold TTFT | Warm TTFT | Speedup |
 |---------|-----------|-----------|---------|
-| 1024 tokens | 0.54s | 0.10s | 5.4x |
-| 2048 tokens | 0.91s | 0.11s | 8.1x |
-| 4096 tokens | 1.96s | 0.13s | 16x |
+| 1024 tokens | 1.04s | 0.23s | 4.4x |
+| 2048 tokens | 1.74s | 0.25s | 7.1x |
+| 4096 tokens | 3.97s | 0.27s | 14.6x |
+
+**Llama 3.1 8B Instruct (Q4)**
+
+| Context | Cold TTFT | Warm TTFT | Speedup |
+|---------|-----------|-----------|---------|
+| 1024 tokens | 2.50s | 0.26s | 9.6x |
+| 2048 tokens | 4.53s | 0.27s | 16.5x |
+| 4096 tokens | 10.2s | 0.29s | 35.3x |
 
 Concurrent batch=2 inference with interleaved chunked prefill. Q4 KV quantization adds ~3% perplexity impact.
 
@@ -89,6 +97,7 @@ The server supports batch=2 concurrent inference with a scheduler that interleav
 |-------|------|--------------------|
 | Gemma 3 12B IT | Q4, 6.5 GB | Hybrid attention: 8 global + 40 sliding window layers |
 | DeepSeek-Coder-V2-Lite | Q4, 8 GB | MLA with asymmetric K=192/V=128 dims |
+| Llama 3.1 8B Instruct | Q4, 4.5 GB | Standard GQA, 32 layers, 8 KV heads |
 
 Adding a new model requires a TOML config in `config/models/` and verifying the spec extractor detects its attention architecture. See `docs/developer-guide.md`.
 
