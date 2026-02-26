@@ -1,0 +1,22 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+type: software
+title: "Agent Memory: Persistent Q4 KV Cache for Multi-Agent LLM Inference on Edge Devices"
+authors:
+  - family-names: Shkolnikov
+    given-names: Yakov Pyotr
+    orcid: ""
+version: 1.0.1
+date-released: 2026-02-26
+license: MIT
+url: "https://github.com/yshk-mxim/agent-memory"
+doi: "10.5281/zenodo.18793752"
+repository-code: "https://github.com/yshk-mxim/agent-memory"
+abstract: "Multi-agent LLM systems on edge devices face a memory management problem: device RAM is too small to hold every agent's KV cache simultaneously. We address this by persisting each agent's KV cache to disk in 4-bit quantized format and reloading it directly into the attention layer, eliminating redundant prefill computation. Evaluated on Gemma 3 12B, DeepSeek-Coder-V2-Lite 16B, and Llama 3.1 8B, cache restoration reduces time-to-first-token by up to 136x."
+keywords:
+  - kv-cache
+  - multi-agent
+  - llm-inference
+  - edge-computing
+  - apple-silicon
+  - quantization

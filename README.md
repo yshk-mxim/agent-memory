@@ -1,5 +1,8 @@
 # agent-memory
 
+[![DOI](https://zenodo.org/badge/1156636930.svg)](https://doi.org/10.5281/zenodo.18793752)
+[![CI](https://github.com/yshk-mxim/agent-memory/actions/workflows/ci.yml/badge.svg)](https://github.com/yshk-mxim/agent-memory/actions/workflows/ci.yml)
+
 Persistent KV cache for multi-agent LLM systems on Apple Silicon.
 
 ```bash
@@ -171,6 +174,24 @@ See `docs/developer-guide.md` for the full developer guide.
 - **`tool_choice`** — accepted but not constrained; tool calls detected via post-hoc parsing
 - **Batch decode** — new requests wait until all active decodes complete
 - **Cache persistence** — disk save is synchronous on the event loop; ~50-100ms stall once per completed request (not per token)
+
+## Cite this work
+
+If you use agent-memory in your research, please cite:
+
+```bibtex
+@software{shkolnikov2026agentmemory,
+  author       = {Shkolnikov, Yakov Pyotr},
+  title        = {Agent Memory: Persistent Q4 KV Cache for Multi-Agent LLM Inference on Edge Devices},
+  year         = {2026},
+  publisher    = {Zenodo},
+  version      = {v1.0.1},
+  doi          = {10.5281/zenodo.18793752},
+  url          = {https://doi.org/10.5281/zenodo.18793752}
+}
+```
+
+Paper: [`agent-memory.pdf`](agent-memory.pdf)
 
 ## License
 
