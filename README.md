@@ -5,6 +5,8 @@
 
 Persistent KV cache for multi-agent LLM systems on Apple Silicon.
 
+**Paper:** [Agent Memory Below the Prompt: Persistent Q4 KV Cache for Multi-Agent LLM Inference on Edge Devices](agent-memory.pdf)
+
 ```bash
 scripts/setup.sh    # first-time: venv, dependencies, model download
 scripts/launch.sh   # start server + demo UI
