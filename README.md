@@ -5,7 +5,7 @@
 
 Persistent KV cache for multi-agent LLM systems on Apple Silicon.
 
-**Paper:** [Agent Memory Below the Prompt: Persistent Q4 KV Cache for Multi-Agent LLM Inference on Edge Devices](agent-memory.pdf)
+**Paper:** [Agent Memory Below the Prompt: Persistent Q4 KV Cache for Multi-Agent LLM Inference on Edge Devices](https://arxiv.org/abs/2603.04428) ([PDF](https://arxiv.org/pdf/2603.04428))
 
 ```bash
 scripts/setup.sh    # first-time: venv, dependencies, model download
@@ -182,18 +182,19 @@ See `docs/developer-guide.md` for the full developer guide.
 If you use agent-memory in your research, please cite:
 
 ```bibtex
-@software{shkolnikov2026agentmemory,
+@article{shkolnikov2026agentmemory,
   author       = {Shkolnikov, Yakov Pyotr},
-  title        = {Agent Memory: Persistent Q4 KV Cache for Multi-Agent LLM Inference on Edge Devices},
+  title        = {Agent Memory Below the Prompt: Persistent Q4 KV Cache
+                  for Multi-Agent LLM Inference on Edge Devices},
   year         = {2026},
-  publisher    = {Zenodo},
-  version      = {v1.0.1},
-  doi          = {10.5281/zenodo.18793752},
-  url          = {https://doi.org/10.5281/zenodo.18793752}
+  eprint       = {2603.04428},
+  archivePrefix= {arXiv},
+  primaryClass = {cs.LG},
+  url          = {https://arxiv.org/abs/2603.04428}
 }
 ```
 
-Paper: [`agent-memory.pdf`](agent-memory.pdf)
+Code: [![DOI](https://zenodo.org/badge/1156636930.svg)](https://doi.org/10.5281/zenodo.18793752)
 
 ## License
 
