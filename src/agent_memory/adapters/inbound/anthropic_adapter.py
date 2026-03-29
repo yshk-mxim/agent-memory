@@ -621,10 +621,11 @@ async def create_message(request_body: MessagesRequest, request: Request):  # no
 
     # Get app dependencies (with null check)
     semantic_state = get_semantic_state(request)
-    batch_engine: BlockPoolBatchEngine = semantic_state.batch_engine
+    batch_engine = semantic_state.batch_engine  # None for TRT backend
     cache_store: AgentCacheStore = semantic_state.cache_store
     scheduler = getattr(semantic_state, "scheduler", None)
     prefix_cache: SharedPrefixCache | None = getattr(semantic_state, "prefix_cache", None)
+    trt_subprocess = getattr(semantic_state, "trt_subprocess", None)
 
     try:
         tools_arg = request_body.tools if request_body.tools else None
@@ -636,7 +637,7 @@ async def create_message(request_body: MessagesRequest, request: Request):  # no
         logger.debug(f"Prompt length: {len(prompt)} chars")
         logger.debug(f"Full prompt:\n{prompt}")
 
-        tokenizer = batch_engine.tokenizer
+        tokenizer = getattr(semantic_state, "tokenizer", None) or batch_engine.tokenizer
         chat_dicts = messages_to_chat_dicts(
             request_body.messages,
             request_body.system,
@@ -687,6 +688,48 @@ async def create_message(request_body: MessagesRequest, request: Request):  # no
                             f"Prefix cache hit: hash={prefix_hash[:8]}, "
                             f"tokens={prefix_entry.n_tokens}"
                         )
+
+        # TRT backend: direct generation via subprocess (no batch engine)
+        if trt_subprocess is not None and batch_engine is None:
+            messages = [
+                {
+                    "role": m.role,
+                    "content": m.content if isinstance(m.content, str) else str(m.content),
+                }
+                for m in request_body.messages
+            ]
+            result = trt_subprocess.generate(
+                prompt_tokens=tokens,
+                max_tokens=request_body.max_tokens,
+                temperature=request_body.temperature or 0.7,
+                messages=messages,
+            )
+
+            # Parse tool calls from output
+            remaining_text, tool_calls = parse_tool_calls(result.text)
+
+            content_blocks = []
+            if remaining_text:
+                content_blocks.append(TextContentBlock(text=remaining_text))
+            for tc in tool_calls:
+                content_blocks.append(
+                    ToolUseContentBlock(
+                        id=f"toolu_{uuid.uuid4().hex[:24]}",
+                        name=tc["name"],
+                        input=tc["input"],
+                    )
+                )
+
+            return MessagesResponse(
+                id=f"msg_{uuid.uuid4().hex[:24]}",
+                model=request_body.model or "trt",
+                content=content_blocks,
+                stop_reason="end_turn" if not tool_calls else "tool_use",
+                usage=Usage(
+                    input_tokens=len(tokens),
+                    output_tokens=len(result.tokens),
+                ),
+            )
 
         # Streaming vs non-streaming
         if request_body.stream:
@@ -886,7 +929,7 @@ async def count_tokens(request_body: CountTokensRequest, request: Request) -> Co
             prompt = f"{tool_descriptions}\n\n{prompt}"
 
         # Tokenize (run in executor to avoid blocking)
-        tokenizer = batch_engine.tokenizer
+        tokenizer = getattr(semantic_state, "tokenizer", None) or batch_engine.tokenizer
         tokens = await asyncio.to_thread(tokenizer.encode, prompt)
 
         logger.info(f"Token count: {len(tokens)}")

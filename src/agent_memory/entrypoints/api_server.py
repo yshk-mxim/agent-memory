@@ -9,17 +9,15 @@ middleware, error handlers, and route registration.
 from contextlib import asynccontextmanager
 from dataclasses import replace
 from pathlib import Path
+from typing import Any
 
 import structlog
 from fastapi import FastAPI, Request, Response, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from mlx_lm import load
 from prometheus_client import generate_latest
 
-import agent_memory.adapters.outbound.mlx_quantized_extensions
-import agent_memory.adapters.outbound.mlx_sink_compat  # noqa: F401
 from agent_memory.adapters.config.logging import configure_logging
 from agent_memory.adapters.config.settings import get_settings
 from agent_memory.adapters.inbound.admin_api import (
@@ -41,16 +39,9 @@ from agent_memory.adapters.inbound.rate_limiter import RateLimiter
 from agent_memory.adapters.inbound.request_id_middleware import RequestIDMiddleware
 from agent_memory.adapters.inbound.request_logging_middleware import RequestLoggingMiddleware
 from agent_memory.adapters.outbound.chat_template_adapter import ChatTemplateAdapter
-from agent_memory.adapters.outbound.mlx_cache_adapter import MLXCacheAdapter
-from agent_memory.adapters.outbound.mlx_model_loader import MLXModelLoader
-from agent_memory.adapters.outbound.mlx_spec_extractor import get_extractor
 from agent_memory.adapters.outbound.safetensors_cache_adapter import SafetensorsCacheAdapter
 from agent_memory.application.agent_cache_store import AgentCacheStore, ModelTag
-from agent_memory.application.batch_engine import BlockPoolBatchEngine
 from agent_memory.application.coordination_service import CoordinationService
-from agent_memory.application.model_registry import ModelRegistry
-from agent_memory.application.model_swap_orchestrator import ModelSwapOrchestrator
-from agent_memory.application.scheduler import ConcurrentScheduler
 from agent_memory.application.shared_prefix_cache import SharedPrefixCache
 from agent_memory.domain.errors import (
     AgentNotFoundError,
@@ -75,15 +66,17 @@ class AppState:
     def __init__(self) -> None:
         """Initialize empty state (populated during startup)."""
         self.block_pool: BlockPool | None = None
-        self.batch_engine: BlockPoolBatchEngine | None = None
+        self.batch_engine: Any = None
         self.cache_store: AgentCacheStore | None = None
-        self.mlx_adapter: MLXCacheAdapter | None = None
+        self.mlx_adapter: Any = None
         self.cache_adapter: SafetensorsCacheAdapter | None = None
-        self.scheduler: ConcurrentScheduler | None = None
+        self.scheduler: Any = None
         self.prefix_cache: SharedPrefixCache | None = None
         self.coordination_service: CoordinationService | None = None
-        self.model_registry: ModelRegistry | None = None
-        self.model_swap_orchestrator: ModelSwapOrchestrator | None = None
+        self.model_registry: Any = None
+        self.model_swap_orchestrator: Any = None
+        self.trt_subprocess: Any = None  # TRT backend subprocess adapter
+        self.tokenizer: Any = None  # Tokenizer (shared, used by adapters)
 
 
 def _load_trt_model_and_extract_spec(settings):
@@ -154,6 +147,8 @@ def _load_model_and_extract_spec(settings):
         "trust_remote_code": True,
     }
 
+    from mlx_lm import load  # Runtime import — MLX backend only
+
     model, tokenizer = load(
         settings.mlx.model_id,
         tokenizer_config=tokenizer_config,
@@ -171,6 +166,8 @@ def _load_model_and_extract_spec(settings):
             target=expected_max,
             message="Tokenizer max length less than target, requests may be truncated",
         )
+
+    from agent_memory.adapters.outbound.mlx_spec_extractor import get_extractor
 
     spec_extractor = get_extractor()
     base_spec: ModelCacheSpec = spec_extractor.extract_spec(model)
@@ -277,6 +274,9 @@ def _initialize_batch_engine(model, tokenizer, block_pool, model_spec, settings)
     """
     logger = structlog.get_logger(__name__)
 
+    from agent_memory.adapters.outbound.mlx_cache_adapter import MLXCacheAdapter
+    from agent_memory.application.batch_engine import BlockPoolBatchEngine
+
     mlx_adapter = MLXCacheAdapter()
     batch_engine = BlockPoolBatchEngine(
         model=model,
@@ -377,8 +377,17 @@ async def lifespan(app: FastAPI):
 
         if settings.backend == "mlx":
             # Initialize model registry and swap orchestrator (MLX only)
+            from agent_memory.adapters.outbound.mlx_model_loader import MLXModelLoader
+            from agent_memory.adapters.outbound.mlx_spec_extractor import (
+                get_extractor as get_mlx_extractor,
+            )
+            from agent_memory.application.model_registry import ModelRegistry
+            from agent_memory.application.model_swap_orchestrator import (
+                ModelSwapOrchestrator,
+            )
+
             model_loader = MLXModelLoader()
-            spec_extractor = get_extractor()
+            spec_extractor = get_mlx_extractor()
             model_registry = ModelRegistry(
                 model_loader=model_loader,
                 spec_extractor=spec_extractor,
@@ -409,6 +418,8 @@ async def lifespan(app: FastAPI):
         app.state.agent_memory.cache_adapter = cache_adapter
         app.state.agent_memory.model_registry = model_registry
         app.state.agent_memory.model_swap_orchestrator = model_swap_orchestrator
+        app.state.agent_memory.trt_subprocess = trt_subprocess
+        app.state.agent_memory.tokenizer = tokenizer
         app.state.shutting_down = False
 
         # Shared prefix cache (always enabled)
@@ -431,6 +442,8 @@ async def lifespan(app: FastAPI):
                     min_chunk=settings.mlx.chunked_prefill_min_chunk,
                     max_chunk=settings.mlx.chunked_prefill_max_chunk,
                 )
+                from agent_memory.application.scheduler import ConcurrentScheduler
+
                 scheduler = ConcurrentScheduler(
                     engine=batch_engine,
                     prefill_adapter=prefill_adapter,
