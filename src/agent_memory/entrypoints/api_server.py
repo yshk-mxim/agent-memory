@@ -76,6 +76,7 @@ class AppState:
         self.model_registry: Any = None
         self.model_swap_orchestrator: Any = None
         self.trt_subprocess: Any = None  # TRT backend subprocess adapter
+        self.trt_inference: Any = None  # TRT inference service (with cache)
         self.tokenizer: Any = None  # Tokenizer (shared, used by adapters)
 
 
@@ -368,8 +369,15 @@ async def lifespan(app: FastAPI):
         cache_store, cache_adapter = _initialize_cache_store(settings, model_spec)
 
         if settings.backend == "trt":
+            from agent_memory.application.trt_inference_service import TRTInferenceService
+
             mlx_adapter = None
             batch_engine = None  # TRT uses subprocess, not batch engine
+            trt_inference = TRTInferenceService(
+                backend=trt_subprocess,
+                tokenizer=tokenizer,
+                cache_store=cache_store,
+            )
         else:
             batch_engine, mlx_adapter = _initialize_batch_engine(
                 model, tokenizer, block_pool, model_spec, settings
@@ -419,6 +427,7 @@ async def lifespan(app: FastAPI):
         app.state.agent_memory.model_registry = model_registry
         app.state.agent_memory.model_swap_orchestrator = model_swap_orchestrator
         app.state.agent_memory.trt_subprocess = trt_subprocess
+        app.state.agent_memory.trt_inference = trt_inference if settings.backend == "trt" else None
         app.state.agent_memory.tokenizer = tokenizer
         app.state.shutting_down = False
 
@@ -658,7 +667,12 @@ def _register_health_endpoints(app: FastAPI):
     @app.get("/health/startup")
     async def health_startup(response: Response):
         """Startup probe - initialization complete."""
-        if not hasattr(app.state, "agent_memory") or not app.state.agent_memory.batch_engine:
+        if not hasattr(app.state, "agent_memory"):
+            response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+            return {"status": "starting", "reason": "initializing"}
+        state = app.state.agent_memory
+        # Either batch_engine (MLX) or trt_subprocess (TRT) must be ready
+        if not state.batch_engine and not state.trt_subprocess:
             response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
             return {"status": "starting", "reason": "model_loading"}
         return {"status": "started"}
@@ -686,19 +700,28 @@ def _register_debug_endpoints(app: FastAPI):
 
     @app.get("/debug/memory")
     async def debug_memory():
-        """MLX memory statistics for benchmarking."""
-        import mlx.core as mx
-
+        """Memory statistics for benchmarking (MLX or generic)."""
         semantic = getattr(app.state, "agent_memory", None)
         pool = semantic.block_pool if semantic else None
 
-        return {
-            "active_memory_mb": round(mx.get_active_memory() / (1024**2), 1),
-            "peak_memory_mb": round(mx.get_peak_memory() / (1024**2), 1),
-            "cache_memory_mb": round(mx.get_cache_memory() / (1024**2), 1),
+        result: dict[str, Any] = {
             "pool_used_blocks": (pool.total_blocks - pool.available_blocks()) if pool else 0,
             "pool_total_blocks": pool.total_blocks if pool else 0,
         }
+
+        try:
+            import mlx.core as mx
+
+            result["active_memory_mb"] = round(mx.get_active_memory() / (1024**2), 1)
+            result["peak_memory_mb"] = round(mx.get_peak_memory() / (1024**2), 1)
+            result["cache_memory_mb"] = round(mx.get_cache_memory() / (1024**2), 1)
+        except ImportError:
+            result["backend"] = "trt"
+            if semantic and semantic.cache_store:
+                result["hot_memory_bytes"] = semantic.cache_store.hot_memory_bytes
+                result["disk_usage_bytes"] = semantic.cache_store.disk_usage_bytes
+
+        return result
 
 
 def _is_openai_request(request: Request) -> bool:

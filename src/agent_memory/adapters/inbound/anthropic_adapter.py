@@ -625,7 +625,7 @@ async def create_message(request_body: MessagesRequest, request: Request):  # no
     cache_store: AgentCacheStore = semantic_state.cache_store
     scheduler = getattr(semantic_state, "scheduler", None)
     prefix_cache: SharedPrefixCache | None = getattr(semantic_state, "prefix_cache", None)
-    trt_subprocess = getattr(semantic_state, "trt_subprocess", None)
+    trt_inference = getattr(semantic_state, "trt_inference", None)
 
     try:
         tools_arg = request_body.tools if request_body.tools else None
@@ -689,8 +689,8 @@ async def create_message(request_body: MessagesRequest, request: Request):  # no
                             f"tokens={prefix_entry.n_tokens}"
                         )
 
-        # TRT backend: direct generation via subprocess (no batch engine)
-        if trt_subprocess is not None and batch_engine is None:
+        # TRT backend: generation via TRTInferenceService (handles cache persistence)
+        if trt_inference is not None and batch_engine is None:
             messages = [
                 {
                     "role": m.role,
@@ -698,8 +698,9 @@ async def create_message(request_body: MessagesRequest, request: Request):  # no
                 }
                 for m in request_body.messages
             ]
-            result = trt_subprocess.generate(
-                prompt_tokens=tokens,
+            result = trt_inference.generate(
+                agent_id=agent_id,
+                prompt=templated_prompt,
                 max_tokens=request_body.max_tokens,
                 temperature=request_body.temperature or 0.7,
                 messages=messages,
