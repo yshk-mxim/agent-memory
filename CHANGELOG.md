@@ -52,6 +52,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `vendor/patches/sm110_fmha_fix.py` — patches Edge-LLM 0.6.0 context FMHA runner
   to remap sm_110 -> sm_101 cubins (matching NVIDIA's own `applyThorSMRenumberWAR`
   in the attention plugin, which was missing from the context attention path).
+- `vendor/patches/add_engine_accessor.py` — adds `getEngineRunner()` public accessor
+  to `LLMInferenceRuntime` for KV cache access via `LinearKVCache` API.
+- `vendor/llm_inference_interactive.cpp` — C++ interactive binary with KV cache
+  inject/extract. Commands: `generate` (with optional `extract_cache`),
+  `extract_cache`, `inject_cache`, `get_model_spec`, `shutdown`. KV cache
+  serialized as safetensors via Edge-LLM's native `saveSafetensors()`.
 
 ### Fixed
 

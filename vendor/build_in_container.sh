@@ -51,9 +51,27 @@ cmake "${EDGELLM_DIR}" \
     -DAARCH64_BUILD=1 \
     -DCMAKE_CUDA_ARCHITECTURES=110
 
-# Build stock llm_inference
-echo "=== Building llm_inference ==="
-make -j"$(nproc)" llm_inference
+# Copy interactive wrapper source into Edge-LLM examples
+echo "=== Copying llm_inference_interactive.cpp ==="
+cp "${VENDOR_DIR}/llm_inference_interactive.cpp" "${EDGELLM_DIR}/examples/llm/"
+
+# Append build target if not present
+EXAMPLE_CMAKE="${EDGELLM_DIR}/examples/llm/CMakeLists.txt"
+if ! grep -q "llm_inference_interactive" "${EXAMPLE_CMAKE}"; then
+    cat >> "${EXAMPLE_CMAKE}" << 'CMAKEEOF'
+
+# agent-memory interactive wrapper with KV cache inject/extract
+add_executable(llm_inference_interactive llm_inference_interactive.cpp)
+target_include_directories(llm_inference_interactive PRIVATE ${COMMON_INCLUDE_DIRS})
+target_link_libraries(llm_inference_interactive PRIVATE edgellmCore ${CUDA_DRIVER_LIB} ${CUDART_LIB})
+add_cross_build_link_options(llm_inference_interactive)
+CMAKEEOF
+    echo "Added llm_inference_interactive target to CMakeLists.txt"
+fi
+
+# Build stock + interactive
+echo "=== Building llm_inference + llm_inference_interactive ==="
+make -j"$(nproc)" llm_inference llm_inference_interactive
 
 echo ""
 echo "=== Build complete ==="
