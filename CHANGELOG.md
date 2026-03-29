@@ -43,6 +43,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - TRT integration tests (`tests/trt/`) — subprocess lifecycle, KV cache layout
   round-trip, Q4 quantization round-trip through safetensors. Runs on Mac via
   fake binary with SmolLM2-135M geometry.
+- `llm_inference_wrapper.py` — Python NDJSON wrapper bridging `TRTSubprocessAdapter`
+  to the stock `llm_inference` binary's JSON file I/O. No custom C++ needed.
+- Real TRT inference tests on Thor (`test_trt_real_inference.py`) — SmolLM2-135M
+  generating coherent text through the full adapter -> wrapper -> engine pipeline.
+- TRT Edge-LLM build pipeline (`vendor/`) — build scripts, Dockerfile, sm_110
+  FMHA patch, and detailed `BUILD_LOG.md` documenting every Thor-specific gotcha.
+- `vendor/patches/sm110_fmha_fix.py` — patches Edge-LLM 0.6.0 context FMHA runner
+  to remap sm_110 -> sm_101 cubins (matching NVIDIA's own `applyThorSMRenumberWAR`
+  in the attention plugin, which was missing from the context attention path).
 
 ### Fixed
 
