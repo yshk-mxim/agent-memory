@@ -46,6 +46,7 @@ from agent_memory.adapters.inbound.request_models import (
 )
 from agent_memory.application.agent_cache_store import AgentCacheStore
 from agent_memory.application.batch_engine import BlockPoolBatchEngine
+from agent_memory.application.generation_request import GenerationRequest
 from agent_memory.application.shared_prefix_cache import SharedPrefixCache
 from agent_memory.domain.errors import PoolExhaustedError, SemanticError
 
@@ -814,13 +815,40 @@ async def create_message(request_body: MessagesRequest, request: Request):  # no
 
         # TRT backend: generation via TRTInferenceService (handles cache persistence)
         if trt_inference is not None and batch_engine is None:
-            messages = [
-                {
-                    "role": m.role,
-                    "content": m.content if isinstance(m.content, str) else str(m.content),
-                }
-                for m in request_body.messages
-            ]
+            # Build messages list with system prompt prepended
+            messages = []
+            if request_body.system:
+                system_text = (
+                    request_body.system
+                    if isinstance(request_body.system, str)
+                    else json.dumps(request_body.system)
+                )
+                messages.append({"role": "system", "content": system_text})
+
+            # Add tools as part of system context if present
+            if tools_arg:
+                tools_text = "Available tools:\n" + json.dumps(tools_arg, indent=2)
+                if messages and messages[0]["role"] == "system":
+                    messages[0]["content"] += "\n\n" + tools_text
+                else:
+                    messages.append({"role": "system", "content": tools_text})
+
+            for m in request_body.messages:
+                content = m.content if isinstance(m.content, str) else str(m.content)
+                messages.append({"role": m.role, "content": content})
+
+            gen_req = GenerationRequest(
+                agent_id=agent_id,
+                messages=messages,
+                prompt=templated_prompt,
+                max_tokens=request_body.max_tokens,
+                temperature=request_body.temperature or 0.7,
+                top_p=request_body.top_p or 0.95,
+                top_k=request_body.top_k or 40,
+                stop_sequences=request_body.stop_sequences or [],
+                stream=request_body.stream,
+                model=request_body.model or "trt",
+            )
 
             # Streaming: generate full response, then yield as SSE events
             if request_body.stream:
@@ -835,13 +863,7 @@ async def create_message(request_body: MessagesRequest, request: Request):  # no
                     )
                 )
 
-            result = trt_inference.generate(
-                agent_id=agent_id,
-                prompt=templated_prompt,
-                max_tokens=request_body.max_tokens,
-                temperature=request_body.temperature or 0.7,
-                messages=messages,
-            )
+            result = trt_inference.generate_from_request(gen_req)
 
             remaining_text, tool_calls = parse_tool_calls(result.text)
 

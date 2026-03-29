@@ -11,6 +11,7 @@ from typing import Any
 
 import numpy as np
 
+from agent_memory.application.generation_request import GenerationRequest
 from agent_memory.domain.entities import AgentBlocks, KVBlock
 from agent_memory.domain.value_objects import GenerationResult
 from agent_memory.ports.outbound import ModelBackendPort
@@ -111,6 +112,23 @@ class TRTInferenceService:
             text=cleaned_text,
             tokens=result.tokens,
             cache=result.cache,
+        )
+
+    def generate_from_request(self, req: GenerationRequest) -> GenerationResult:
+        """Generate from a unified GenerationRequest (preferred entry point).
+
+        Both Anthropic and OpenAI adapters build a GenerationRequest,
+        then call this method. Avoids duplicating parameter passing.
+        """
+        return self.generate(
+            agent_id=req.agent_id,
+            prompt=req.prompt,
+            max_tokens=req.max_tokens,
+            temperature=req.temperature,
+            messages=req.messages,
+            top_p=req.top_p,
+            top_k=req.top_k,
+            stop_sequences=req.stop_sequences or None,
         )
 
     def _strip_special_tokens(self, text: str) -> str:

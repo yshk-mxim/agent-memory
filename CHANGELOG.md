@@ -75,6 +75,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `/v1/models` endpoint and `CoordinationService` now use backend-specific settings
   instead of always referencing `settings.mlx`.
 - CLI `MLX_METAL_FAST_SYNCH` env var only set when `backend == "mlx"`.
+- `GenerationRequest` common model in `application/generation_request.py` —
+  both Anthropic and OpenAI adapters transform their protocol-specific requests
+  into this unified model. Supports chat, FIM (fill-in-the-middle), stop sequences,
+  repetition/frequency/presence penalties, and system prompt cache pinning.
+- System prompt (`system` field) and tools now properly forwarded to TRT backend.
+  Previously the TRT path dropped the system prompt entirely (critical bug).
+- All Anthropic API fields survive to TRT: temperature, top_p, top_k, stop_sequences.
 - Configurable eviction policy: `SEMANTIC_AGENT_EVICTION_POLICY` (`lru`, `lfu`,
   `lru-lfu`). Default `lru-lfu` hybrid keeps both frequently-used system prompts
   (NemoClaw/Claude Code) and recently-used conversation caches warm.

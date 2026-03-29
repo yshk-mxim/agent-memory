@@ -37,6 +37,7 @@ from agent_memory.adapters.inbound.request_models import (
     OpenAIChatMessage,
 )
 from agent_memory.application.agent_cache_store import AgentCacheStore
+from agent_memory.application.generation_request import GenerationRequest
 from agent_memory.domain.errors import PoolExhaustedError, SemanticError
 
 logger = logging.getLogger(__name__)
@@ -671,13 +672,25 @@ async def create_chat_completion(  # noqa: C901, PLR0912, PLR0915
                 }
                 for m in request_body.messages
             ]
-            result = trt_inference.generate(
+            # Normalize stop to list
+            stop_seqs: list[str] = []
+            if isinstance(request_body.stop, str):
+                stop_seqs = [request_body.stop]
+            elif isinstance(request_body.stop, list):
+                stop_seqs = request_body.stop
+
+            gen_req = GenerationRequest(
                 agent_id=agent_id,
+                messages=messages,
                 prompt=templated_prompt,
                 max_tokens=request_body.max_tokens or 256,
                 temperature=request_body.temperature or 0.7,
-                messages=messages,
+                top_p=request_body.top_p or 0.95,
+                stop_sequences=stop_seqs,
+                stream=request_body.stream,
+                model=request_body.model or "trt",
             )
+            result = trt_inference.generate_from_request(gen_req)
             return ChatCompletionsResponse(
                 id=f"chatcmpl-{agent_id[:12]}",
                 created=int(time.time()),
