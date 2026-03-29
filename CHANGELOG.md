@@ -82,6 +82,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - System prompt (`system` field) and tools now properly forwarded to TRT backend.
   Previously the TRT path dropped the system prompt entirely (critical bug).
 - All Anthropic API fields survive to TRT: temperature, top_p, top_k, stop_sequences.
+- README.md updated: dual-backend tagline, Jetson requirements, backend selection,
+  Claude Code/NemoClaw client integration examples.
+- docs/configuration.md: TRT settings table, backend selection, agent settings.
+- docs/architecture/overview.md: dual-backend description.
+- docs/deployment.md: Jetson Thor deployment path.
 - Configurable eviction policy: `SEMANTIC_AGENT_EVICTION_POLICY` (`lru`, `lfu`,
   `lru-lfu`). Default `lru-lfu` hybrid keeps both frequently-used system prompts
   (NemoClaw/Claude Code) and recently-used conversation caches warm.

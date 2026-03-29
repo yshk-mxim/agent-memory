@@ -32,6 +32,49 @@ SEMANTIC_API_KEY=your-api-key-here
 SEMANTIC_ADMIN_KEY=your-admin-key-here
 ```
 
+## Backend Selection
+
+Set `SEMANTIC_BACKEND` to choose the inference backend:
+
+| Value | Platform | Description |
+|-------|----------|-------------|
+| `mlx` (default) | Apple Silicon | Uses MLX framework with Metal GPU |
+| `trt` | NVIDIA Jetson Thor | Uses TensorRT Edge-LLM via subprocess |
+
+```bash
+SEMANTIC_BACKEND=trt  # or mlx (default)
+```
+
+## TRT Settings (NVIDIA Jetson)
+
+Control TRT Edge-LLM inference engine. Only used when `SEMANTIC_BACKEND=trt`.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `SEMANTIC_TRT_ENGINE_PATH` | `/opt/trt-edge-llm/engines/qwen3-coder-next` | Path to TRT engine directory |
+| `SEMANTIC_TRT_LLM_INFERENCE_BIN` | `/opt/trt-edge-llm/bin/llm_inference` | Path to llm_inference binary |
+| `SEMANTIC_TRT_MODEL_ID` | `Qwen/Qwen3-Coder-Next-nvfp4` | HuggingFace model ID (for tokenizer) |
+| `SEMANTIC_TRT_MAX_CONTEXT_LENGTH` | `65536` | Maximum context length in tokens |
+| `SEMANTIC_TRT_MAX_BATCH_SIZE` | `1` | Maximum batch size |
+| `SEMANTIC_TRT_KV_BITS` | `None` (FP16) | KV cache bits on GPU (None=FP16, 8=FP8) |
+| `SEMANTIC_TRT_DISK_KV_BITS` | `4` | Disk cache quantization (Q4 saves 72%) |
+| `SEMANTIC_TRT_SUBPROCESS_TIMEOUT_S` | `30.0` | Subprocess command timeout |
+| `SEMANTIC_TRT_SHM_DIR` | `/dev/shm` | Shared memory for KV cache transfer |
+| `SEMANTIC_TRT_CACHE_BUDGET_MB` | `16384` | Cache memory budget (Thor: 128GB) |
+| `SEMANTIC_TRT_DEFAULT_TOP_P` | `0.95` | Default top-p sampling |
+| `SEMANTIC_TRT_DEFAULT_TOP_K` | `40` | Default top-k sampling |
+| `SEMANTIC_TRT_EDGELLM_PLUGIN_PATH` | (empty) | Path to libNvInfer_edgellm_plugin.so |
+
+## Agent Settings (Cross-Platform)
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `SEMANTIC_AGENT_EVICTION_POLICY` | `lru-lfu` | Cache eviction: `lru`, `lfu`, or `lru-lfu` (hybrid) |
+| `SEMANTIC_AGENT_PIN_SYSTEM_PROMPT_CACHES` | `true` | Pin system prompt caches (never evict) |
+| `SEMANTIC_AGENT_MAX_MEMORY_MB` | `0` | Maximum memory for hot caches (0=no limit) |
+| `SEMANTIC_AGENT_MAX_DISK_MB` | `0` | Maximum disk for warm caches (0=no limit) |
+| `SEMANTIC_AGENT_CACHE_DIR` | `~/.agent_memory/caches` | Cache directory path |
+
 ## MLX Settings
 
 Control MLX inference engine behavior.
