@@ -37,6 +37,8 @@ def app():
 
     app.state.agent_memory = SimpleNamespace()
     app.state.agent_memory.batch_engine = None  # Will be updated by swap
+    app.state.agent_memory.trt_subprocess = None
+    app.state.agent_memory.cache_store = None
 
     return app
 

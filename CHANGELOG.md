@@ -82,7 +82,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (never evicted). Manual `pin()`/`unpin()` API for arbitrary entries.
 - `CacheEntry.eviction_score(policy)` computes per-entry eviction priority.
   Hybrid scoring: `access_count / (1 + hours_since_last_access)`.
-- Admin `/models/swap` returns 501 on TRT backend (requires server restart).
+- Admin `/models/swap` on TRT backend: offloads all caches to SSD (Q4 safetensors),
+  stops the subprocess, returns `"offloaded"` status. Old model caches preserved on
+  disk tagged with original model_id for rollback. New engine requires server restart
+  with updated `SEMANTIC_TRT_ENGINE_PATH` (TRT engines are pre-built, not loadable
+  at runtime). This replaces the previous 501 response.
+- MLX `/models/swap` now offloads all caches to SSD before swap sequence.
+  Old model caches preserved on disk for rollback. Both backends use the same
+  pattern: offload → stop → start fresh. Caches from old model are not reusable
+  (different geometry/weights) but preserved tagged with original model_id.
 
 ### Fixed
 

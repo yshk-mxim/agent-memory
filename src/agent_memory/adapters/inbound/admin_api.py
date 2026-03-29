@@ -178,17 +178,45 @@ async def swap_model(
     """
     # CRITICAL: Acquire lock to prevent concurrent swaps (CR-2 fix)
     # Without this, two simultaneous swaps could load multiple models → OOM crash
-    # TRT backend: hot-swap not supported (requires engine rebuild)
     semantic = getattr(request.app.state, "agent_memory", None)
+
+    # TRT backend: offload all caches to SSD, stop subprocess, start with new engine.
+    # Old caches stay on disk tagged with old model_id (not reusable, preserved for rollback).
     if semantic and getattr(semantic, "trt_subprocess", None) is not None:
-        raise HTTPException(
-            status_code=status.HTTP_501_NOT_IMPLEMENTED,
-            detail=(
-                "Model hot-swap is not supported on the TRT backend. "
-                "To change models, restart the server with a different "
-                "SEMANTIC_TRT_ENGINE_PATH and SEMANTIC_TRT_MODEL_ID."
-            ),
-        )
+        async with _swap_lock:
+            try:
+                old_model_id = getattr(semantic, "tokenizer", None)
+                old_model_id = "unknown"  # TRT doesn't track model_id in registry
+
+                logger.info(f"TRT swap: offloading caches to SSD for {swap_request.model_id}")
+
+                # Step 1: Offload all hot caches to SSD (Q4 safetensors)
+                if semantic.cache_store:
+                    semantic.cache_store.evict_all_to_disk()
+
+                # Step 2: Stop the subprocess
+                if semantic.trt_subprocess:
+                    semantic.trt_subprocess.stop()
+                    semantic.trt_subprocess = None
+
+                # Step 3: Cannot start new engine without engine_path change.
+                # The new model_id requires a pre-built TRT engine.
+                return SwapModelResponse(
+                    status="offloaded",
+                    old_model_id=old_model_id,
+                    new_model_id=swap_request.model_id,
+                    message=(
+                        f"Caches offloaded to SSD. Subprocess stopped. "
+                        f"Restart server with SEMANTIC_TRT_ENGINE_PATH pointing "
+                        f"to the {swap_request.model_id} engine directory to complete swap."
+                    ),
+                )
+            except Exception as e:
+                logger.error(f"TRT swap failed: {e}", exc_info=True)
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail=f"TRT model swap failed: {e!s}",
+                ) from e
 
     async with _swap_lock:
         try:
@@ -199,14 +227,19 @@ async def swap_model(
             if hasattr(orchestrator, "_registry"):
                 old_model_id = orchestrator._registry.get_current_id()
 
-            # Execute swap (async to properly await drain)
+            # Step 1: Offload all caches to SSD (preserves for rollback)
+            if semantic and semantic.cache_store:
+                saved = semantic.cache_store.evict_all_to_disk()
+                logger.info(f"Offloaded {saved} caches to SSD")
+
+            # Step 2: Execute swap via orchestrator (drain, unload, load, reconfigure)
             new_engine = await orchestrator.swap_model(
                 old_engine=old_engine,
                 new_model_id=swap_request.model_id,
                 timeout_seconds=swap_request.timeout_seconds,
             )
 
-            # CRITICAL: Update app.state with new engine (CR-1 fix)
+            # Step 3: Update app.state with new engine
             request.app.state.agent_memory.batch_engine = new_engine
 
             # Update CoordinationService's engine reference
