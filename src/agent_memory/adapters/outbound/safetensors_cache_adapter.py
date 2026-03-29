@@ -27,8 +27,25 @@ _VALID_AGENT_ID_PATTERN = re.compile(r"^[a-zA-Z0-9_-]+$")
 class SafetensorsCacheAdapter:
     """Adapter for cache persistence using safetensors format."""
 
-    def __init__(self, cache_dir: Path) -> None:
-        """Initialize adapter with cache directory."""
+    def __init__(
+        self,
+        cache_dir: Path,
+        kv_bits: int = 4,
+        kv_group_size: int = 64,
+        quantizer: Any | None = None,
+    ) -> None:
+        """Initialize adapter with cache directory.
+
+        Args:
+            cache_dir: Directory for safetensors files.
+            kv_bits: Quantization bits for float->quantized fallback path.
+            kv_group_size: Quantization group size.
+            quantizer: Optional CacheQuantizationPort. When provided, used
+                for float->quantized conversion instead of mx.quantize().
+        """
+        self._kv_bits = kv_bits
+        self._kv_group_size = kv_group_size
+        self._quantizer = quantizer
         self.cache_dir = Path(cache_dir).expanduser().resolve()
         try:
             self.cache_dir.mkdir(parents=True, exist_ok=True)
@@ -167,15 +184,32 @@ class SafetensorsCacheAdapter:
 
                     else:
                         # Float16/float32 array - QUANTIZE it before saving
-                        # Convert to MLX array if needed
-                        if not hasattr(k_data, "dtype") or "mlx" not in str(type(k_data)):
-                            k_data = mx.array(k_data)
-                            v_data = mx.array(v_data)
-
-                        # TODO: group_size and bits should come from spec, not hardcoded
-                        # This fallback path is only hit for legacy unquantized data
-                        k_weights, k_scales, k_biases = mx.quantize(k_data, group_size=64, bits=4)
-                        v_weights, v_scales, v_biases = mx.quantize(v_data, group_size=64, bits=4)
+                        if self._quantizer is not None:
+                            k_weights, k_scales, k_biases = self._quantizer.quantize(
+                                k_data,
+                                bits=self._kv_bits,
+                                group_size=self._kv_group_size,
+                            )
+                            v_weights, v_scales, v_biases = self._quantizer.quantize(
+                                v_data,
+                                bits=self._kv_bits,
+                                group_size=self._kv_group_size,
+                            )
+                        else:
+                            # MLX fallback: convert to mx.array if needed
+                            if not hasattr(k_data, "dtype") or "mlx" not in str(type(k_data)):
+                                k_data = mx.array(k_data)
+                                v_data = mx.array(v_data)
+                            k_weights, k_scales, k_biases = mx.quantize(
+                                k_data,
+                                group_size=self._kv_group_size,
+                                bits=self._kv_bits,
+                            )
+                            v_weights, v_scales, v_biases = mx.quantize(
+                                v_data,
+                                group_size=self._kv_group_size,
+                                bits=self._kv_bits,
+                            )
 
                         # Save quantized components as native mx.array
                         tensors[f"L{layer_id}_B{block_idx}_K_weights"] = k_weights

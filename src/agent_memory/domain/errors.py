@@ -67,6 +67,18 @@ class GenerationError(SemanticError):
     """Generation operation failed (prefill failed, no active generator, request not found)."""
 
 
+class TRTSubprocessError(SemanticError):
+    """TRT subprocess communication failed (timeout, unexpected exit, parse error)."""
+
+
+class TRTEngineError(SemanticError):
+    """TRT engine operation failed (load, build, inference)."""
+
+
+class TRTLayoutError(SemanticError):
+    """KV cache layout mismatch between TRT engine and expected format."""
+
+
 class CoordinationError(SemanticError):
     """Base error for coordination operations."""
 

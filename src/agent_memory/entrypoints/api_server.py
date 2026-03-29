@@ -86,6 +86,52 @@ class AppState:
         self.model_swap_orchestrator: ModelSwapOrchestrator | None = None
 
 
+def _load_trt_model_and_extract_spec(settings):
+    """Load TRT engine via subprocess and extract cache spec.
+
+    Args:
+        settings: Application settings (uses settings.trt)
+
+    Returns:
+        Tuple of (subprocess_adapter, tokenizer, model_spec)
+    """
+    logger = structlog.get_logger(__name__)
+    trt = settings.trt
+    logger.info("loading_trt_model", engine_path=trt.engine_path, model_id=trt.model_id)
+
+    from agent_memory.adapters.outbound.trt_model_loader import TRTModelLoader
+
+    loader = TRTModelLoader()
+    subprocess_adapter, tokenizer = loader.load(
+        model_id=trt.model_id,
+        engine_path=trt.engine_path,
+        llm_inference_bin=trt.llm_inference_bin,
+        timeout_s=trt.subprocess_timeout_s,
+        shm_dir=trt.shm_dir,
+    )
+
+    # Override tokenizer max length
+    tokenizer.model_max_length = trt.max_context_length
+
+    # Extract spec from running engine
+    model_spec = subprocess_adapter.extract_model_spec()
+    model_spec = replace(
+        model_spec,
+        kv_bits=trt.kv_bits,
+        kv_format="fp",
+    )
+
+    logger.info(
+        "trt_model_loaded",
+        n_layers=model_spec.n_layers,
+        n_kv_heads=model_spec.n_kv_heads,
+        head_dim=model_spec.head_dim,
+        kv_format=model_spec.kv_format,
+    )
+
+    return subprocess_adapter, tokenizer, model_spec
+
+
 def _load_model_and_extract_spec(settings):
     """Load MLX model and extract cache spec.
 
@@ -160,7 +206,8 @@ def _initialize_block_pool(settings, model_spec):
     logger = structlog.get_logger(__name__)
 
     bytes_per_block = model_spec.bytes_per_block_per_layer()
-    total_blocks = (settings.mlx.cache_budget_mb * 1024 * 1024) // bytes_per_block
+    backend_settings = settings.trt if settings.backend == "trt" else settings.mlx
+    total_blocks = (backend_settings.cache_budget_mb * 1024 * 1024) // bytes_per_block
     mb_per_block = bytes_per_block / 1024 / 1024
     logger.info(
         "block_budget_calculated", total_blocks=total_blocks, mb_per_block=round(mb_per_block, 2)
@@ -185,10 +232,25 @@ def _initialize_cache_store(settings, model_spec):
     logger = structlog.get_logger(__name__)
 
     cache_dir = Path(settings.agent.cache_dir).expanduser()
-    cache_adapter = SafetensorsCacheAdapter(cache_dir=cache_dir)
+
+    # For TRT backend, use TRT quantization adapter for disk Q4 format
+    quantizer = None
+    if settings.backend == "trt":
+        from agent_memory.adapters.outbound.trt_quantization_adapter import TRTQuantizationAdapter
+
+        quantizer = TRTQuantizationAdapter()
+
+    backend_settings = settings.trt if settings.backend == "trt" else settings.mlx
+    cache_adapter = SafetensorsCacheAdapter(
+        cache_dir=cache_dir,
+        kv_bits=backend_settings.kv_bits or 4,
+        kv_group_size=backend_settings.kv_group_size,
+        quantizer=quantizer,
+    )
     logger.info("cache_persistence_configured", cache_dir=str(cache_dir))
 
-    model_tag = ModelTag.from_spec(settings.mlx.model_id, model_spec)
+    model_id = settings.trt.model_id if settings.backend == "trt" else settings.mlx.model_id
+    model_tag = ModelTag.from_spec(model_id, model_spec)
     cache_store = AgentCacheStore(
         cache_dir=cache_dir,
         max_hot_agents=settings.agent.max_agents_in_memory,
@@ -283,47 +345,60 @@ async def lifespan(app: FastAPI):
     logger.info("server_starting")
     settings = get_settings()
 
+    # Track TRT subprocess for cleanup
+    trt_subprocess = None
+
     try:
-        # Apply fused Q4 attention patch (must happen before model forward pass)
-        from agent_memory.adapters.outbound.mlx_fused_attention import apply_fused_attention_patch
+        if settings.backend == "trt":
+            # --- TRT backend path ---
+            trt_subprocess, tokenizer, model_spec = _load_trt_model_and_extract_spec(settings)
+            model = None  # No MLX model
+        else:
+            # --- MLX backend path ---
+            # Apply fused Q4 attention patch (must happen before model forward pass)
+            from agent_memory.adapters.outbound.mlx_fused_attention import (
+                apply_fused_attention_patch,
+            )
 
-        apply_fused_attention_patch()
+            apply_fused_attention_patch()
+            model, tokenizer, model_spec = _load_model_and_extract_spec(settings)
 
-        # Let MLX keep its default buffer cache — disabling it with
-        # set_cache_limit(0) forces the Metal allocator to handle every
-        # alloc/free, which can lead to OOM under memory pressure.
-        # The shutdown path below handles cleanup on graceful exit.
-
-        # Load model and extract spec
-        model, tokenizer, model_spec = _load_model_and_extract_spec(settings)
-
-        # Initialize components
+        # Initialize components (backend-agnostic)
         block_pool = _initialize_block_pool(settings, model_spec)
         cache_store, cache_adapter = _initialize_cache_store(settings, model_spec)
-        batch_engine, mlx_adapter = _initialize_batch_engine(
-            model, tokenizer, block_pool, model_spec, settings
-        )
 
-        # Initialize model registry and swap orchestrator for hot-swap support
-        model_loader = MLXModelLoader()
-        spec_extractor = get_extractor()
-        model_registry = ModelRegistry(
-            model_loader=model_loader,
-            spec_extractor=spec_extractor,
-        )
-        model_registry.set_loaded_model(
-            model=model,
-            tokenizer=tokenizer,
-            spec=model_spec,
-            model_id=settings.mlx.model_id,
-        )
+        if settings.backend == "trt":
+            mlx_adapter = None
+            batch_engine = None  # TRT uses subprocess, not batch engine
+        else:
+            batch_engine, mlx_adapter = _initialize_batch_engine(
+                model, tokenizer, block_pool, model_spec, settings
+            )
 
-        model_swap_orchestrator = ModelSwapOrchestrator(
-            model_registry=model_registry,
-            block_pool=block_pool,
-            cache_store=cache_store,
-            cache_adapter=mlx_adapter,
-        )
+        if settings.backend == "mlx":
+            # Initialize model registry and swap orchestrator (MLX only)
+            model_loader = MLXModelLoader()
+            spec_extractor = get_extractor()
+            model_registry = ModelRegistry(
+                model_loader=model_loader,
+                spec_extractor=spec_extractor,
+            )
+            model_registry.set_loaded_model(
+                model=model,
+                tokenizer=tokenizer,
+                spec=model_spec,
+                model_id=settings.mlx.model_id,
+            )
+
+            model_swap_orchestrator = ModelSwapOrchestrator(
+                model_registry=model_registry,
+                block_pool=block_pool,
+                cache_store=cache_store,
+                cache_adapter=mlx_adapter,
+            )
+        else:
+            model_registry = None
+            model_swap_orchestrator = None
 
         # Store in app state
         app.state.agent_memory = AppState()
@@ -343,8 +418,9 @@ async def lifespan(app: FastAPI):
 
         # Start ConcurrentScheduler — serializes all engine access through
         # a single worker thread, preventing concurrent Metal GPU crashes.
+        # (MLX only — TRT subprocess handles its own serialization)
         scheduler = None
-        if settings.mlx.scheduler_enabled:
+        if settings.backend == "mlx" and settings.mlx.scheduler_enabled:
             try:
                 from agent_memory.adapters.outbound.mlx_prefill_adapter import MLXPrefillAdapter
 
@@ -389,16 +465,19 @@ async def lifespan(app: FastAPI):
             scheduler_enabled=(scheduler is not None),
         )
 
-        # Validate Q4 pipeline patches applied correctly
-        from agent_memory.adapters.outbound.mlx_quantized_extensions import validate_q4_pipeline
-
-        if not validate_q4_pipeline():
-            logger.error(
-                "q4_validation_failed",
-                message="Q4 cache patches may not be applied correctly. "
-                "KV caches may fall back to FP16, causing higher memory usage. "
-                "Check mlx-lm version compatibility.",
+        # Validate Q4 pipeline patches applied correctly (MLX only)
+        if settings.backend == "mlx":
+            from agent_memory.adapters.outbound.mlx_quantized_extensions import (
+                validate_q4_pipeline,
             )
+
+            if not validate_q4_pipeline():
+                logger.error(
+                    "q4_validation_failed",
+                    message="Q4 cache patches may not be applied correctly. "
+                    "KV caches may fall back to FP16, causing higher memory usage. "
+                    "Check mlx-lm version compatibility.",
+                )
 
         logger.info("server_ready")
 
@@ -414,47 +493,42 @@ async def lifespan(app: FastAPI):
 
         await _drain_and_persist(batch_engine, cache_store)
 
-        # Explicitly release model and GPU memory to prevent wired memory
-        # accumulation across server restarts.  Without this, killed processes
-        # can leave Metal allocations that the OS is slow to reclaim.
-        logger.info("releasing_gpu_memory")
-        try:
-            import gc
+        # Release backend resources
+        if settings.backend == "trt" and trt_subprocess is not None:
+            logger.info("stopping_trt_subprocess")
+            trt_subprocess.stop()
+            logger.info("trt_subprocess_stopped")
+        elif settings.backend == "mlx":
+            # Explicitly release model and GPU memory to prevent wired memory
+            # accumulation across server restarts.
+            logger.info("releasing_gpu_memory")
+            try:
+                import gc
 
-            import mlx.core as mx
+                import mlx.core as mx
 
-            # 1. Shut down batch engine (clears internal model/tokenizer refs)
-            if batch_engine is not None:
-                batch_engine.shutdown()
+                if batch_engine is not None:
+                    batch_engine.shutdown()
+                if model_registry is not None:
+                    model_registry.unload_model()
+                if block_pool is not None:
+                    block_pool.force_clear_all_allocations()
 
-            # 2. Unload model from registry (dels model, tokenizer, gc.collects)
-            if model_registry is not None:
-                model_registry.unload_model()
+                gc.collect()
+                gc.collect()
+                mx.clear_cache()
+                logger.info(
+                    "gpu_memory_released",
+                    active_mb=round(mx.get_active_memory() / 1024**2),
+                    cache_mb=round(mx.get_cache_memory() / 1024**2),
+                )
+            except Exception as e:
+                logger.warning("gpu_memory_release_error", error=str(e))
 
-            # 3. Clear block pool tensors
-            if block_pool is not None:
-                block_pool.force_clear_all_allocations()
-
-            # 4. Clear all app.state references
-            if hasattr(app.state, "agent_memory"):
-                for attr in list(vars(app.state.agent_memory).keys()):
-                    setattr(app.state.agent_memory, attr, None)
-
-            # 5. Delete local variables holding references
-            del model, tokenizer, batch_engine, block_pool, cache_store
-            del model_registry, model_swap_orchestrator, coordination_service
-
-            # 6. Force garbage collection + clear Metal cache
-            gc.collect()
-            gc.collect()  # Second pass for ref cycles
-            mx.clear_cache()
-            logger.info(
-                "gpu_memory_released",
-                active_mb=round(mx.get_active_memory() / 1024**2),
-                cache_mb=round(mx.get_cache_memory() / 1024**2),
-            )
-        except Exception as e:
-            logger.warning("gpu_memory_release_error", error=str(e))
+        # Clear app.state references
+        if hasattr(app.state, "agent_memory"):
+            for attr in list(vars(app.state.agent_memory).keys()):
+                setattr(app.state.agent_memory, attr, None)
 
         logger.info("server_shutdown_complete")
     except Exception as e:

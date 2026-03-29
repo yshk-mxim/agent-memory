@@ -33,6 +33,9 @@ class ModelCacheSpec:
         sliding_window_size: Window size for sliding window layers.
         kv_bits: KV cache quantization bits (4 or 8, None = FP16).
         kv_group_size: Quantization group size.
+        kv_format: KV cache storage format. "quantized" for software-quantized
+            caches with per-group scales/biases (MLX Q4/Q8). "fp" for native
+            floating-point caches without quantization metadata (TRT FP16/FP8).
         v_head_dim: Dimension of each V attention head. None means same as
             head_dim (symmetric K/V, the common case). Set explicitly for
             architectures like DeepSeek V2 MLA where K and V have different
@@ -47,6 +50,7 @@ class ModelCacheSpec:
     sliding_window_size: int | None = None
     kv_bits: int | None = 4
     kv_group_size: int = 64
+    kv_format: str = "quantized"
     v_head_dim: int | None = None
 
     @property
@@ -73,14 +77,22 @@ class ModelCacheSpec:
                 f"n_layers ({self.n_layers})"
             )
 
-        # Validate kv_bits is a supported quantization level
+        self._validate_kv_params()
+
+    def _validate_kv_params(self) -> None:
+        """Validate KV cache format, quantization bits, and group size."""
+        valid_kv_formats = {"quantized", "fp"}
+        if self.kv_format not in valid_kv_formats:
+            raise ModelSpecValidationError(
+                f"kv_format must be one of {valid_kv_formats}, got {self.kv_format!r}"
+            )
+
         valid_kv_bits = {None, 4, 8, 16}
         if self.kv_bits not in valid_kv_bits:
             raise ModelSpecValidationError(
                 f"kv_bits must be one of {valid_kv_bits}, got {self.kv_bits}"
             )
 
-        # Validate kv_group_size is positive and power of 2
         if self.kv_group_size <= 0:
             raise ModelSpecValidationError(f"kv_group_size must be > 0, got {self.kv_group_size}")
         if self.kv_group_size & (self.kv_group_size - 1) != 0:
@@ -91,12 +103,15 @@ class ModelCacheSpec:
     def bytes_per_block_per_layer(self) -> int:
         """Calculate memory bytes required for one block at one layer.
 
-        Accounts for quantization if kv_bits is set:
+        For ``kv_format="quantized"`` (MLX-style software quantization):
         - FP16 (kv_bits=None or 16): 2 bytes per element
         - Q8 (kv_bits=8): ~1.0625 bytes (1 + scales/group_size)
         - Q4 (kv_bits=4): ~0.5625 bytes (0.5 + scales/group_size)
+        Quantization adds scales+biases overhead of ~4 bytes per group.
 
-        Quantization adds scales+biases overhead of ~4 bytes per group (2 scales + 2 biases).
+        For ``kv_format="fp"`` (TRT-style native floating point):
+        - FP16 (kv_bits=None or 16): 2 bytes per element
+        - FP8 (kv_bits=8): 1 byte per element (no scales/biases)
 
         Supports asymmetric K/V dimensions (e.g. DeepSeek V2 MLA: K=192, V=128).
         """
@@ -104,6 +119,14 @@ class ModelCacheSpec:
         v_elements = self.n_kv_heads * self.effective_v_head_dim * self.block_tokens
         total_elements = k_elements + v_elements
 
+        if self.kv_format == "fp":
+            # Native floating point: no quantization metadata overhead
+            if self.kv_bits is None or self.kv_bits == 16:
+                return total_elements * 2  # FP16
+            # FP8 or FP4: raw bytes, no scales/biases
+            return (total_elements * self.kv_bits) // 8
+
+        # "quantized" format: software quantization with scales+biases
         if self.kv_bits is None or self.kv_bits == 16:
             # FP16: 2 bytes per element
             return total_elements * 2

@@ -275,14 +275,17 @@ async def get_available_models(
         - Any HuggingFace model ID can be used, but these are validated
         - All models optimized for M4 Pro 24GB memory
     """
-    # Recommended models (all validated on M4 Pro 24GB)
+    # Recommended models (validated on M4 Pro 24GB + Jetson Thor)
     supported_models = [
+        # MLX backend (Apple Silicon)
         "mlx-community/gemma-3-12b-it-4bit",
         "mlx-community/DeepSeek-Coder-V2-Lite-Instruct-4bit-mlx",
         "mlx-community/Qwen2.5-14B-Instruct-4bit",
         "mlx-community/Llama-3.1-8B-Instruct-4bit",
         "mlx-community/gpt-oss-20b-MXFP4-Q4",
         "mlx-community/SmolLM2-135M-Instruct",
+        # TRT backend (Jetson AGX Thor)
+        "Qwen/Qwen3-Coder-Next-nvfp4",
     ]
 
     return AvailableModelsResponse(models=supported_models)

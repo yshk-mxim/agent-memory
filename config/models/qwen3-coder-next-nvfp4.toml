@@ -1,0 +1,49 @@
+# Configuration for Qwen3-Coder-Next on NVIDIA Jetson AGX Thor
+# Model: Qwen/Qwen3-Coder-Next-nvfp4
+# Platform: Jetson AGX Thor (aarch64, sm_110, 128GB unified memory)
+# Backend: TensorRT Edge-LLM (llm_inference subprocess)
+#
+# KV cache is FP16 on GPU, Q4 on disk (72% savings).
+# Dequantize on inject (~1-2ms), quantize on save (~1-2ms).
+
+[model]
+model_id = "Qwen/Qwen3-Coder-Next-nvfp4"
+backend = "trt"
+n_layers = 64
+n_kv_heads = 8
+head_dim = 128
+kv_format = "fp"
+
+[inference]
+temperature = 0.7
+top_p = 0.95
+top_k = 40
+repetition_penalty = 1.0
+extended_thinking = false
+supports_thinking = true
+
+[optimal]
+max_batch_size = 1
+kv_bits = 4              # Disk format (Q4 safetensors)
+kv_group_size = 64
+block_tokens = 256
+cache_budget_mb = 16384   # Thor has 128GB unified
+subprocess_timeout_s = 30.0
+shm_dir = "/dev/shm"
+
+max_agents_in_memory = 8
+evict_to_disk = true
+
+[thresholds]
+long_context_threshold = 8000
+high_batch_threshold = 2
+memory_pressure_mb = 65536
+min_cache_benefit_ratio = 0.8
+
+[trt]
+engine_path = "/opt/trt-edge-llm/engines/qwen3-coder-next"
+llm_inference_bin = "/opt/trt-edge-llm/bin/llm_inference"
+# GPU KV cache is native FP16 (kv_format=fp, kv_bits=None)
+# Disk KV cache is Q4 (disk_kv_bits=4)
+gpu_kv_bits = 16          # FP16 on GPU (None in code)
+disk_kv_bits = 4          # Q4 on disk

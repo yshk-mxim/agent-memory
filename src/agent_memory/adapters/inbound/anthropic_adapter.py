@@ -66,7 +66,8 @@ def generate_agent_id_from_tokens(tokens: list[int]) -> str:
         Agent ID in format "msg_{hash}"
     """
     prefix = tokens[:100]
-    hash_val = hashlib.sha256(str(prefix).encode()).hexdigest()[:16]
+    # Use JSON serialization for deterministic, platform-independent hashing
+    hash_val = hashlib.sha256(json.dumps(prefix).encode()).hexdigest()[:16]
     return f"msg_{hash_val}"
 
 
