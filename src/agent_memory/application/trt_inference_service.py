@@ -57,6 +57,9 @@ class TRTInferenceService:
         max_tokens: int = 256,
         temperature: float = 0.7,
         messages: list[dict[str, str]] | None = None,
+        top_p: float = 0.95,
+        top_k: int = 40,
+        stop_sequences: list[str] | None = None,
     ) -> GenerationResult:
         """Generate text with automatic KV cache persistence.
 
@@ -66,6 +69,9 @@ class TRTInferenceService:
             max_tokens: Maximum tokens to generate.
             temperature: Sampling temperature.
             messages: Chat messages for the engine's tokenizer.
+            top_p: Top-p (nucleus) sampling parameter.
+            top_k: Top-k sampling parameter.
+            stop_sequences: Optional stop strings to truncate output at.
 
         Returns:
             GenerationResult with text, tokens, and updated cache.
@@ -76,13 +82,15 @@ class TRTInferenceService:
         # Tokenize prompt for token count
         tokens = self._tokenizer.encode(prompt)
 
-        # Generate via backend
+        # Generate via backend (extra sampling params forwarded)
         result = self._backend.generate(  # type: ignore[call-arg]
             prompt_tokens=tokens,
             cache=cached_kv,
             max_tokens=max_tokens,
             temperature=temperature,
             messages=messages,
+            top_p=top_p,
+            top_k=top_k,
         )
 
         # Save updated cache to disk
@@ -91,6 +99,13 @@ class TRTInferenceService:
 
         # Strip special tokens from output (model-agnostic via tokenizer)
         cleaned_text = self._strip_special_tokens(result.text)
+
+        # Apply stop sequences if provided
+        if stop_sequences:
+            for seq in stop_sequences:
+                idx = cleaned_text.find(seq)
+                if idx != -1:
+                    cleaned_text = cleaned_text[:idx]
 
         return GenerationResult(
             text=cleaned_text,

@@ -325,7 +325,8 @@ async def _stream_trt_response(
             "event": "content_block_start",
             "data": json.dumps(
                 ContentBlockStartEvent(
-                    index=block_idx, content_block=TextContentBlock(text=""),
+                    index=block_idx,
+                    content_block=TextContentBlock(text=""),
                 ).model_dump()
             ),
         }
@@ -353,7 +354,9 @@ async def _stream_trt_response(
                 ContentBlockStartEvent(
                     index=block_idx,
                     content_block=ToolUseContentBlock(
-                        id=tool_id, name=tc["name"], input={},
+                        id=tool_id,
+                        name=tc["name"],
+                        input={},
                     ),
                 ).model_dump()
             ),
@@ -823,8 +826,12 @@ async def create_message(request_body: MessagesRequest, request: Request):  # no
             if request_body.stream:
                 return EventSourceResponse(
                     _stream_trt_response(
-                        trt_inference, agent_id, templated_prompt,
-                        request_body, messages, tokens,
+                        trt_inference,
+                        agent_id,
+                        templated_prompt,
+                        request_body,
+                        messages,
+                        tokens,
                     )
                 )
 

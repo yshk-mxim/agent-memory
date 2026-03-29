@@ -178,6 +178,18 @@ async def swap_model(
     """
     # CRITICAL: Acquire lock to prevent concurrent swaps (CR-2 fix)
     # Without this, two simultaneous swaps could load multiple models → OOM crash
+    # TRT backend: hot-swap not supported (requires engine rebuild)
+    semantic = getattr(request.app.state, "agent_memory", None)
+    if semantic and getattr(semantic, "trt_subprocess", None) is not None:
+        raise HTTPException(
+            status_code=status.HTTP_501_NOT_IMPLEMENTED,
+            detail=(
+                "Model hot-swap is not supported on the TRT backend. "
+                "To change models, restart the server with a different "
+                "SEMANTIC_TRT_ENGINE_PATH and SEMANTIC_TRT_MODEL_ID."
+            ),
+        )
+
     async with _swap_lock:
         try:
             logger.info(f"Admin API: Swap request to {swap_request.model_id} (lock acquired)")

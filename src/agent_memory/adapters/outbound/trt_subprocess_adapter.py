@@ -119,6 +119,8 @@ class TRTSubprocessAdapter:
         max_tokens: int = 256,
         temperature: float = 0.7,
         messages: list[dict[str, str]] | None = None,
+        top_p: float = 0.95,
+        top_k: int = 40,
     ) -> GenerationResult:
         """Generate text via TRT subprocess.
 
@@ -130,6 +132,8 @@ class TRTSubprocessAdapter:
             temperature: Sampling temperature.
             messages: Chat messages for the engine's tokenizer. If not
                 provided, prompt_tokens are passed as raw token IDs.
+            top_p: Top-p (nucleus) sampling parameter.
+            top_k: Top-k sampling parameter.
 
         Returns:
             GenerationResult with text, tokens, and updated cache.
@@ -153,6 +157,8 @@ class TRTSubprocessAdapter:
                 "cmd": "generate",
                 "max_tokens": max_tokens,
                 "temperature": temperature,
+                "top_p": top_p,
+                "top_k": top_k,
                 "extract_cache": True,
                 "kv_cache_path": str(extract_path),
             }
