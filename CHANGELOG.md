@@ -59,6 +59,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `extract_cache`, `inject_cache`, `get_model_spec`, `shutdown`. KV cache
   serialized as safetensors via Edge-LLM's native `saveSafetensors()`.
 
+- `AgentCacheStore` enforces `max_memory_mb` (evicts LRU hot caches when exceeded)
+  and `max_disk_mb` (deletes oldest warm cache files when exceeded). Adds
+  `hot_memory_bytes`, `disk_usage_bytes`, and `cache_location` properties.
+
 ### Fixed
 
 - Admin API model-swap tests (`TestSwapModelEndpoint`) returned 422 instead of

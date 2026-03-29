@@ -75,6 +75,33 @@ def handle_command(cmd: dict) -> dict:
             "kv_cache_path": cache_path,
         }
 
+    if action == "inject_cache":
+        # Fake inject: just acknowledge with seq_len from the file
+        input_path = cmd.get("input_path", "")
+        seq_len = 64  # Default fake seq_len
+        if input_path:
+            try:
+                from safetensors.numpy import load_file
+
+                tensors = load_file(input_path)
+                if "L0_K" in tensors:
+                    seq_len = tensors["L0_K"].shape[1]
+            except Exception:  # noqa: S110
+                pass
+        return {"status": "ok", "seq_len": seq_len}
+
+    if action == "extract_cache":
+        output_path = cmd.get("output_path", "/tmp/fake_kv.safetensors")
+        cache = _make_fake_cache(64)
+        from safetensors.numpy import save_file as sf
+
+        tensors = {}
+        for layer_idx, (k, v) in enumerate(cache):
+            tensors[f"L{layer_idx}_K"] = k
+            tensors[f"L{layer_idx}_V"] = v
+        sf(tensors, output_path)
+        return {"kv_cache_path": output_path, "seq_len": 64}
+
     if action == "get_model_spec":
         return {
             "n_layers": N_LAYERS,

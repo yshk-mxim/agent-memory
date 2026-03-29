@@ -27,6 +27,7 @@ from .conftest import skip_if_not_jetson
 
 ENGINE_DIR = os.environ.get("REAL_ENGINE_DIR", "")
 WRAPPER_PATH = os.environ.get("REAL_WRAPPER_PATH", "")
+INTERACTIVE_BIN = os.environ.get("REAL_INTERACTIVE_BIN", "")
 
 skip_if_no_engine = pytest.mark.skipif(
     not ENGINE_DIR or not Path(ENGINE_DIR).is_dir(),
@@ -36,20 +37,30 @@ skip_if_no_engine = pytest.mark.skipif(
 
 @pytest.fixture
 def real_trt_subprocess(tmp_path: Path) -> ModelBackendPort:
-    """TRT subprocess using llm_inference_wrapper.py with real engine."""
+    """TRT subprocess using interactive binary or Python wrapper.
+
+    Prefers REAL_INTERACTIVE_BIN (C++ with KV cache support).
+    Falls back to REAL_WRAPPER_PATH (Python, no KV cache).
+    """
     from agent_memory.adapters.outbound.trt_subprocess_adapter import TRTSubprocessAdapter
 
-    wrapper = Path(WRAPPER_PATH) if WRAPPER_PATH else None
-    if not wrapper or not wrapper.is_file():
-        # Try default location
-        wrapper = Path(__file__).resolve().parents[2] / "vendor" / "llm_inference_wrapper.py"
-
-    # Create shell wrapper that sets up env and runs the Python wrapper
     shm = tmp_path / "shm"
     shm.mkdir()
-    script = shm / "run_real.sh"
-    script.write_text(f'#!/bin/sh\nexec {sys.executable} {wrapper} --engineDir {ENGINE_DIR} "$@"\n')
-    script.chmod(0o755)
+
+    interactive = Path(INTERACTIVE_BIN) if INTERACTIVE_BIN else None
+    if interactive and interactive.is_file():
+        script = shm / "run_real.sh"
+        script.write_text(f'#!/bin/sh\nexec {interactive} --engineDir {ENGINE_DIR} "$@"\n')
+        script.chmod(0o755)
+    else:
+        wrapper = Path(WRAPPER_PATH) if WRAPPER_PATH else None
+        if not wrapper or not wrapper.is_file():
+            wrapper = Path(__file__).resolve().parents[2] / "vendor" / "llm_inference_wrapper.py"
+        script = shm / "run_real.sh"
+        script.write_text(
+            f'#!/bin/sh\nexec {sys.executable} {wrapper} --engineDir {ENGINE_DIR} "$@"\n'
+        )
+        script.chmod(0o755)
 
     adapter = TRTSubprocessAdapter(
         llm_inference_bin=str(script),
@@ -77,19 +88,38 @@ class TestRealInference:
 
     def test_generate(self, real_trt_subprocess: ModelBackendPort) -> None:
         result = real_trt_subprocess.generate(
-            prompt_tokens=[1, 2, 3],  # Ignored by wrapper (uses messages)
+            prompt_tokens=[1, 2, 3],
             max_tokens=16,
             temperature=0.7,
         )
         assert result.text
         assert len(result.text) > 0
 
-    def test_generate_with_messages(self, real_trt_subprocess: ModelBackendPort) -> None:
-        """Test that we get coherent output."""
+    def test_generate_returns_cache(self, real_trt_subprocess: ModelBackendPort) -> None:
+        """Generate should return extractable KV cache."""
         result = real_trt_subprocess.generate(
             prompt_tokens=[1],
-            max_tokens=32,
+            max_tokens=8,
         )
-        # SmolLM2 should produce some text
         assert result.text
-        assert len(result.text) > 0
+        assert result.cache  # Should have per-layer KV pairs
+        assert len(result.cache) > 0
+
+    def test_cache_round_trip(self, real_trt_subprocess: ModelBackendPort) -> None:
+        """Generate -> extract cache -> inject cache -> generate continuation."""
+        # Turn 1: generate and get cache
+        result1 = real_trt_subprocess.generate(
+            prompt_tokens=[1],
+            max_tokens=8,
+        )
+        assert result1.text
+        assert result1.cache
+
+        # Turn 2: inject turn 1 cache and generate more
+        result2 = real_trt_subprocess.generate(
+            prompt_tokens=[1],
+            cache=result1.cache,
+            max_tokens=8,
+        )
+        assert result2.text
+        assert result2.cache

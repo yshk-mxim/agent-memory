@@ -4,6 +4,7 @@
 
 import json
 import logging
+import sys
 import threading
 import time
 from dataclasses import dataclass, field
@@ -211,6 +212,8 @@ class AgentCacheStore:
         max_hot_agents: int,
         model_tag: ModelTag,
         cache_adapter: Any | None = None,
+        max_memory_mb: int = 0,
+        max_disk_mb: int = 0,
     ) -> None:
         """Initialize cache store.
 
@@ -219,6 +222,8 @@ class AgentCacheStore:
             max_hot_agents: Maximum agents in hot tier (memory)
             model_tag: Current model tag for compatibility checking
             cache_adapter: Optional persistence adapter (for dependency injection)
+            max_memory_mb: Maximum memory for hot caches (0 = no limit)
+            max_disk_mb: Maximum disk for warm caches (0 = no limit)
         """
         self.cache_dir = Path(cache_dir).expanduser()
         self.cache_dir.mkdir(parents=True, exist_ok=True)
@@ -226,6 +231,8 @@ class AgentCacheStore:
         self.max_hot_agents = max_hot_agents
         self.model_tag = model_tag
         self._cache_adapter = cache_adapter
+        self._max_memory_bytes = max_memory_mb * 1024 * 1024 if max_memory_mb > 0 else 0
+        self._max_disk_bytes = max_disk_mb * 1024 * 1024 if max_disk_mb > 0 else 0
 
         # Thread-safe lock for cache access
         self._lock = threading.RLock()
@@ -243,6 +250,89 @@ class AgentCacheStore:
         self._scan_cache_directory()
 
         # Future: trie-based prefix matching for O(log n) lookup
+
+    @property
+    def hot_memory_bytes(self) -> int:
+        """Estimated bytes used by hot-tier caches in memory.
+
+        Uses sys.getsizeof on each block's layer_data for a rough estimate.
+        """
+        total = 0
+        for entry in self._hot_cache.values():
+            if entry.blocks is None:
+                continue
+            for layer_blocks in entry.blocks.blocks.values():
+                for block in layer_blocks:
+                    if block.layer_data is not None:
+                        total += sys.getsizeof(block.layer_data)
+        return total
+
+    @property
+    def disk_usage_bytes(self) -> int:
+        """Total bytes used by warm-tier cache files on disk."""
+        total = 0
+        if self.cache_dir.exists():
+            for cache_file in self.cache_dir.glob("*.safetensors"):
+                total += cache_file.stat().st_size
+        return total
+
+    @property
+    def cache_location(self) -> Path:
+        """Path to the cache directory on disk."""
+        return self.cache_dir
+
+    def _enforce_memory_budget(self) -> int:
+        """Evict LRU hot caches until memory usage is within budget.
+
+        Returns:
+            Number of caches evicted.
+        """
+        if self._max_memory_bytes <= 0:
+            return 0
+
+        evicted = 0
+        while self.hot_memory_bytes > self._max_memory_bytes and len(self._hot_cache) > 1:
+            # Find LRU entry
+            lru_id = min(self._hot_cache, key=lambda k: self._hot_cache[k].last_accessed)
+            self._save_to_disk(lru_id)
+            self._hot_cache.pop(lru_id, None)
+            evicted += 1
+            logger.info(f"[MEMORY BUDGET] Evicted {lru_id}")
+
+        return evicted
+
+    def _enforce_disk_budget(self) -> int:
+        """Evict oldest warm caches until disk usage is within budget.
+
+        Returns:
+            Number of caches evicted.
+        """
+        if self._max_disk_bytes <= 0:
+            return 0
+
+        evicted = 0
+        while self.disk_usage_bytes > self._max_disk_bytes:
+            # Find oldest warm cache file
+            oldest_file: Path | None = None
+            oldest_mtime = float("inf")
+            for cache_file in self.cache_dir.glob("*.safetensors"):
+                mtime = cache_file.stat().st_mtime
+                if mtime < oldest_mtime:
+                    oldest_mtime = mtime
+                    oldest_file = cache_file
+
+            if oldest_file is None:
+                break
+
+            agent_id = oldest_file.stem
+            oldest_file.unlink(missing_ok=True)
+            self._warm_cache.pop(agent_id, None)
+            evicted += 1
+            logger.info(
+                f"[DISK BUDGET] Evicted {agent_id} ({oldest_file.name})"
+            )
+
+        return evicted
 
     def _scan_cache_directory(self) -> None:
         """Scan cache directory on startup and populate warm tier.
@@ -320,6 +410,9 @@ class AgentCacheStore:
             if has_data:
                 self._save_to_disk(agent_id)
                 entry.dirty = False  # Already persisted
+
+            # Enforce budgets
+            self._enforce_memory_budget()
 
             # Check if eviction needed
             if len(self._hot_cache) > self.max_hot_agents:
@@ -644,6 +737,9 @@ class AgentCacheStore:
         if entry.dirty:
             self.metrics.dirty_flushes += 1
         entry.dirty = False
+
+        # Enforce disk budget after writing
+        self._enforce_disk_budget()
 
     def flush_dirty(self) -> int:
         """Flush all dirty (unsaved) caches to disk.

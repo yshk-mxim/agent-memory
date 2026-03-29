@@ -15,6 +15,7 @@
 //   inject_cache:   {"status":"ok", "seq_len":N}
 //   shutdown:       {"status":"shutdown"}
 
+#include "common/logger.h"
 #include "common/safetensorsUtils.h"
 #include "common/tensor.h"
 #include "common/trtUtils.h"
@@ -312,6 +313,11 @@ int main(int argc, char* argv[])
 
     try
     {
+        // Suppress INFO logs on stdout (conflicts with NDJSON protocol).
+        // Only WARNING/ERROR go to stderr, which is safe.
+        if (!debug)
+            trt_edgellm::gLogger.setLevel(nvinfer1::ILogger::Severity::kWARNING);
+
         // Load TRT plugin library (required for attention plugin deserialization)
         auto pluginHandles = loadEdgellmPluginLib();
 

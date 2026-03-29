@@ -115,48 +115,61 @@ class TRTSubprocessAdapter:
         cache: list[Any] | None = None,
         max_tokens: int = 256,
         temperature: float = 0.7,
+        messages: list[dict[str, str]] | None = None,
     ) -> GenerationResult:
-        """Generate text from tokenized prompt.
+        """Generate text via TRT subprocess.
 
         Args:
-            prompt_tokens: Pre-tokenized input.
+            prompt_tokens: Pre-tokenized input (used as fallback text).
             cache: Optional KV cache (list of per-layer (K,V) tuples).
+                When provided, injected into the engine before generation.
             max_tokens: Maximum tokens to generate.
             temperature: Sampling temperature.
+            messages: Chat messages for the engine's tokenizer. If not
+                provided, prompt_tokens are passed as raw token IDs.
 
         Returns:
             GenerationResult with text, tokens, and updated cache.
         """
         self._ensure_running()
 
+        # Inject prior KV cache if provided
+        inject_path = None
+        if cache is not None:
+            inject_path = self._write_cache_to_shm(cache)
+            self._send_command({"cmd": "inject_cache", "input_path": str(inject_path)})
+            inject_resp = self._read_response()
+            inject_path.unlink(missing_ok=True)
+            if "error" in inject_resp:
+                raise TRTEngineError(f"Cache inject failed: {inject_resp['error']}")
+
+        # Build generate command
+        extract_path = self._shm_dir / f"kv_out_{os.getpid()}.safetensors"
         cmd: dict[str, Any] = {
             "cmd": "generate",
-            "tokens": prompt_tokens,
             "max_tokens": max_tokens,
             "temperature": temperature,
+            "extract_cache": True,
+            "kv_cache_path": str(extract_path),
         }
 
-        # Inject KV cache if provided
-        cache_path = None
-        if cache is not None:
-            cache_path = self._write_cache_to_shm(cache)
-            cmd["kv_cache_path"] = str(cache_path)
+        if messages is not None:
+            cmd["messages"] = messages
+        else:
+            cmd["tokens"] = prompt_tokens
 
-        try:
-            self._send_command(cmd)
-            resp = self._read_response()
-        finally:
-            if cache_path is not None:
-                cache_path.unlink(missing_ok=True)
+        self._send_command(cmd)
+        resp = self._read_response()
 
         if "error" in resp:
             raise TRTEngineError(f"Generation failed: {resp['error']}")
 
-        # Read updated cache if path provided
+        # Read extracted cache from safetensors
         updated_cache: list[tuple[Any, Any]] = []
-        if "kv_cache_path" in resp:
-            updated_cache = self._read_cache_from_shm(Path(resp["kv_cache_path"]))
-            Path(resp["kv_cache_path"]).unlink(missing_ok=True)
+        cache_file = Path(resp.get("kv_cache_path", str(extract_path)))
+        if cache_file.exists():
+            updated_cache = self._read_cache_from_shm(cache_file)
+            cache_file.unlink(missing_ok=True)
 
         return GenerationResult(
             text=resp.get("text", ""),
