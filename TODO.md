@@ -52,16 +52,53 @@ Unified in TRTInferenceService:
 
 ## Deferred — Later
 
-### Claude Code integration test
-Test with `ANTHROPIC_BASE_URL=http://localhost:8199 CLAUDE_CODE_ATTRIBUTION_HEADER=0 claude`.
-Requires: streaming works (done), tool_use works (done), agentic loop with
-multi-turn persistence. Cannot be automated — requires interactive Claude Code session.
+### Claude Code automated testing
+Claude Code supports headless mode via `claude -p` (non-interactive). Test harness:
+```bash
+ANTHROPIC_BASE_URL=http://localhost:8199 \
+ANTHROPIC_API_KEY=test \
+DISABLE_TELEMETRY=1 \
+CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 \
+MAX_THINKING_TOKENS=0 \
+claude --bare -p "What is 2+2?" --output-format json --max-turns 3
+```
 
-### NemoClaw production deployment
+**Server must support**: streaming SSE (done), tool_use blocks (done),
+`X-Claude-Code-Session-Id` header (maps to X-Session-ID, done).
+
+**Python test harness** via `claude-agent-sdk`:
+```python
+from claude_agent_sdk import query, ClaudeAgentOptions
+async for msg in query(prompt="test", options=ClaudeAgentOptions(max_turns=3)):
+    ...
+```
+
+**Known requirements**: Must forward `anthropic-beta` header, `anthropic-version`
+header, and handle `cache_control` blocks (disable with `DISABLE_PROMPT_CACHING=1`).
+
+### NemoClaw / OpenClaw deployment
+OpenClaw configures custom LLM endpoint in `~/.openclaw/openclaw.json`:
+```json
+{
+  "models": {
+    "providers": {
+      "agent-memory": {
+        "baseUrl": "http://thor:8199/v1",
+        "api": "anthropic-messages",
+        "models": [{"id": "SmolLM2-135M", "name": "SmolLM2"}]
+      }
+    }
+  }
+}
+```
+
+Headless test: `openclaw agent --local -m "hello" --session-id test`
+OpenClaw uses Vitest (TypeScript), not pytest. Integration via subprocess.
+
+**Remaining work**:
 - Build Qwen3-Coder-Next engine on Thor (same pipeline as SmolLM2)
-- Configure NemoClaw to use `http://thor:8199` as LLM endpoint
-- Verify multi-turn agent conversations with persistent KV cache
 - Performance benchmarks (tok/s, TTFT, cache restore latency)
+- NemoClaw sandbox setup via `nemoclaw onboard`
 
 ### Other deferred items
 - C5. README.md and docs/ update for dual-backend

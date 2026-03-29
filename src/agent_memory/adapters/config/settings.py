@@ -383,6 +383,25 @@ class AgentSettings(BaseSettings):
     )
 
     # Cache eviction policy
+    eviction_policy: Literal["lru", "lfu", "lru-lfu"] = Field(
+        default="lru-lfu",
+        description=(
+            "Cache eviction policy: 'lru' (least recently used), "
+            "'lfu' (least frequently used), or 'lru-lfu' (hybrid — "
+            "keeps both frequently-used system prompts and recently-used "
+            "conversation caches warm). Hybrid recommended for NemoClaw/Claude Code."
+        ),
+    )
+
+    pin_system_prompt_caches: bool = Field(
+        default=True,
+        description=(
+            "Pin system prompt KV caches in memory (never evict). "
+            "System prompts are expensive to recompute (~2-18K tokens) "
+            "and shared across conversations."
+        ),
+    )
+
     lru_eviction_enabled: bool = Field(
         default=True,
         description="Enable LRU eviction when max_agents exceeded",

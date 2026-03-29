@@ -75,6 +75,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `/v1/models` endpoint and `CoordinationService` now use backend-specific settings
   instead of always referencing `settings.mlx`.
 - CLI `MLX_METAL_FAST_SYNCH` env var only set when `backend == "mlx"`.
+- Configurable eviction policy: `SEMANTIC_AGENT_EVICTION_POLICY` (`lru`, `lfu`,
+  `lru-lfu`). Default `lru-lfu` hybrid keeps both frequently-used system prompts
+  (NemoClaw/Claude Code) and recently-used conversation caches warm.
+- `pin_system_prompt_caches` setting auto-pins `sysprompt_*` cache entries
+  (never evicted). Manual `pin()`/`unpin()` API for arbitrary entries.
+- `CacheEntry.eviction_score(policy)` computes per-entry eviction priority.
+  Hybrid scoring: `access_count / (1 + hours_since_last_access)`.
+- Admin `/models/swap` returns 501 on TRT backend (requires server restart).
 
 ### Fixed
 

@@ -174,11 +174,34 @@ class CacheEntry:
     access_count: int = 0
     is_hot: bool = True
     dirty: bool = False  # Write-behind: needs disk sync
+    pinned: bool = False  # Pinned entries are never evicted (system prompts)
 
     def mark_accessed(self) -> None:
         """Mark entry as accessed (update LRU timestamp)."""
         self.last_accessed = time.time()
         self.access_count += 1
+
+    def eviction_score(self, policy: str = "lru-lfu") -> float:
+        """Compute eviction score (lower = more likely to be evicted).
+
+        Args:
+            policy: 'lru' (recency only), 'lfu' (frequency only),
+                'lru-lfu' (hybrid frequency-weighted recency).
+
+        Returns:
+            Score value. Pinned entries return infinity (never evicted).
+        """
+        if self.pinned:
+            return float("inf")
+
+        if policy == "lru":
+            return self.last_accessed
+
+        if policy == "lfu":
+            return float(self.access_count)
+
+        hours_since = (time.time() - self.last_accessed) / 3600.0
+        return self.access_count / (1.0 + hours_since)
 
 
 class AgentCacheStore:
@@ -214,6 +237,8 @@ class AgentCacheStore:
         cache_adapter: Any | None = None,
         max_memory_mb: int = 0,
         max_disk_mb: int = 0,
+        eviction_policy: str = "lru-lfu",
+        pin_system_prompt_caches: bool = True,
     ) -> None:
         """Initialize cache store.
 
@@ -224,6 +249,8 @@ class AgentCacheStore:
             cache_adapter: Optional persistence adapter (for dependency injection)
             max_memory_mb: Maximum memory for hot caches (0 = no limit)
             max_disk_mb: Maximum disk for warm caches (0 = no limit)
+            eviction_policy: 'lru', 'lfu', or 'lru-lfu' (hybrid)
+            pin_system_prompt_caches: Auto-pin sysprompt_* entries
         """
         self.cache_dir = Path(cache_dir).expanduser()
         self.cache_dir.mkdir(parents=True, exist_ok=True)
@@ -233,6 +260,8 @@ class AgentCacheStore:
         self._cache_adapter = cache_adapter
         self._max_memory_bytes = max_memory_mb * 1024 * 1024 if max_memory_mb > 0 else 0
         self._max_disk_bytes = max_disk_mb * 1024 * 1024 if max_disk_mb > 0 else 0
+        self._eviction_policy = eviction_policy
+        self._pin_system_prompts = pin_system_prompt_caches
 
         # Thread-safe lock for cache access
         self._lock = threading.RLock()
@@ -282,7 +311,10 @@ class AgentCacheStore:
         return self.cache_dir
 
     def _enforce_memory_budget(self) -> int:
-        """Evict LRU hot caches until memory usage is within budget.
+        """Evict caches until memory usage is within budget.
+
+        Uses the configured eviction policy (LRU, LFU, or hybrid).
+        Pinned entries are never evicted.
 
         Returns:
             Number of caches evicted.
@@ -292,14 +324,51 @@ class AgentCacheStore:
 
         evicted = 0
         while self.hot_memory_bytes > self._max_memory_bytes and len(self._hot_cache) > 1:
-            # Find LRU entry
-            lru_id = min(self._hot_cache, key=lambda k: self._hot_cache[k].last_accessed)
-            self._save_to_disk(lru_id)
-            self._hot_cache.pop(lru_id, None)
+            victim_id = self._select_eviction_victim()
+            if victim_id is None:
+                break  # All entries pinned
+            self._save_to_disk(victim_id)
+            self._hot_cache.pop(victim_id, None)
             evicted += 1
-            logger.info(f"[MEMORY BUDGET] Evicted {lru_id}")
+            logger.info(f"[MEMORY BUDGET] Evicted {victim_id}")
 
         return evicted
+
+    def _select_eviction_victim(self) -> str | None:
+        """Select the best eviction candidate using the configured policy.
+
+        Returns:
+            agent_id of the victim, or None if all entries are pinned.
+        """
+        candidates = {aid: entry for aid, entry in self._hot_cache.items() if not entry.pinned}
+        if not candidates:
+            return None
+        return min(
+            candidates,
+            key=lambda aid: candidates[aid].eviction_score(self._eviction_policy),
+        )
+
+    def pin(self, agent_id: str) -> None:
+        """Pin a cache entry so it is never evicted (e.g., system prompt cache).
+
+        Args:
+            agent_id: Agent identifier to pin.
+        """
+        with self._lock:
+            entry = self._hot_cache.get(agent_id)
+            if entry:
+                entry.pinned = True
+
+    def unpin(self, agent_id: str) -> None:
+        """Unpin a cache entry so it can be evicted normally.
+
+        Args:
+            agent_id: Agent identifier to unpin.
+        """
+        with self._lock:
+            entry = self._hot_cache.get(agent_id)
+            if entry:
+                entry.pinned = False
 
     def _enforce_disk_budget(self) -> int:
         """Evict oldest warm caches until disk usage is within budget.
@@ -354,12 +423,13 @@ class AgentCacheStore:
         if count > 0:
             logger.info(f"[CACHE INIT] Found {count} warm caches in {self.cache_dir}")
 
-    def save(self, agent_id: str, blocks: AgentBlocks) -> None:
+    def save(self, agent_id: str, blocks: AgentBlocks, pinned: bool = False) -> None:
         """Save agent cache to hot tier with write-behind persistence.
 
         Args:
             agent_id: Unique agent identifier
             blocks: Agent's KV cache blocks
+            pinned: If True, cache is pinned and never evicted (system prompts)
 
         Raises:
             ValueError: If agent_id is empty
@@ -377,12 +447,16 @@ class AgentCacheStore:
         if not agent_id:
             raise InvalidRequestError("agent_id cannot be empty")
 
+        # Auto-pin system prompt caches if configured
+        is_pinned = pinned or (self._pin_system_prompts and agent_id.startswith("sysprompt_"))
+
         # Create entry with dirty flag (write-behind)
         entry = CacheEntry(
             agent_id=agent_id,
             blocks=blocks,
             model_tag=self.model_tag,
             dirty=True,  # Mark for eventual disk sync
+            pinned=is_pinned,
         )
         entry.mark_accessed()
 
@@ -595,17 +669,15 @@ class AgentCacheStore:
             evicted = 0
 
             while len(self._hot_cache) > target_count:
-                # Find LRU entry
-                lru_agent_id = min(
-                    self._hot_cache.keys(),
-                    key=lambda aid: self._hot_cache[aid].last_accessed,
-                )
+                victim_id = self._select_eviction_victim()
+                if victim_id is None:
+                    break  # All remaining entries pinned
 
                 # Persist to disk (flushes dirty entries)
-                self._save_to_disk(lru_agent_id)
+                self._save_to_disk(victim_id)
 
                 # Remove from hot tier
-                del self._hot_cache[lru_agent_id]
+                del self._hot_cache[victim_id]
                 evicted += 1
                 self.metrics.evictions += 1
 
