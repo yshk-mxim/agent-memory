@@ -328,9 +328,7 @@ class AgentCacheStore:
             oldest_file.unlink(missing_ok=True)
             self._warm_cache.pop(agent_id, None)
             evicted += 1
-            logger.info(
-                f"[DISK BUDGET] Evicted {agent_id} ({oldest_file.name})"
-            )
+            logger.info(f"[DISK BUDGET] Evicted {agent_id} ({oldest_file.name})")
 
         return evicted
 

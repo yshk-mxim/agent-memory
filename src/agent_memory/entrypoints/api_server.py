@@ -231,21 +231,28 @@ def _initialize_cache_store(settings, model_spec):
 
     cache_dir = Path(settings.agent.cache_dir).expanduser()
 
-    # For TRT backend, use TRT quantization adapter for disk Q4 format
-    quantizer = None
     if settings.backend == "trt":
+        # TRT: numpy-based I/O, no MLX dependency
         from agent_memory.adapters.outbound.trt_quantization_adapter import TRTQuantizationAdapter
+        from agent_memory.adapters.outbound.trt_safetensors_cache_adapter import (
+            TRTSafetensorsCacheAdapter,
+        )
 
         quantizer = TRTQuantizationAdapter()
-
-    backend_settings = settings.trt if settings.backend == "trt" else settings.mlx
-    cache_adapter = SafetensorsCacheAdapter(
-        cache_dir=cache_dir,
-        kv_bits=backend_settings.kv_bits or 4,
-        kv_group_size=backend_settings.kv_group_size,
-        quantizer=quantizer,
-    )
-    logger.info("cache_persistence_configured", cache_dir=str(cache_dir))
+        cache_adapter = TRTSafetensorsCacheAdapter(
+            cache_dir=cache_dir,
+            kv_bits=settings.trt.disk_kv_bits,
+            kv_group_size=settings.trt.kv_group_size,
+            quantizer=quantizer,
+        )
+    else:
+        # MLX: uses mx.save/mx.load for native MLX tensor I/O
+        cache_adapter = SafetensorsCacheAdapter(
+            cache_dir=cache_dir,
+            kv_bits=settings.mlx.kv_bits or 4,
+            kv_group_size=settings.mlx.kv_group_size,
+        )
+    logger.info("cache_persistence_configured", cache_dir=str(cache_dir), backend=settings.backend)
 
     model_id = settings.trt.model_id if settings.backend == "trt" else settings.mlx.model_id
     model_tag = ModelTag.from_spec(model_id, model_spec)
@@ -376,7 +383,7 @@ async def lifespan(app: FastAPI):
             trt_inference = TRTInferenceService(
                 backend=trt_subprocess,
                 tokenizer=tokenizer,
-                cache_store=cache_store,
+                cache_adapter=cache_adapter,
             )
         else:
             batch_engine, mlx_adapter = _initialize_batch_engine(
