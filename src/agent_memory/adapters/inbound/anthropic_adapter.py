@@ -270,6 +270,126 @@ def messages_to_chat_dicts(  # noqa: C901, PLR0912
     return result
 
 
+async def _stream_trt_response(
+    trt_inference: Any,
+    agent_id: str,
+    prompt: str,
+    request_body: MessagesRequest,
+    messages: list[dict[str, str]],
+    tokens: list[int],
+) -> AsyncIterator[dict[str, str]]:
+    """Generate full TRT response then yield as Anthropic SSE events.
+
+    This is "chunked streaming" — the model generates everything at once
+    (TRT subprocess is synchronous) but the response is sent to the client
+    as SSE events matching the Anthropic streaming protocol.
+    """
+    msg_id = f"msg_{uuid.uuid4().hex[:24]}"
+
+    # Generate full response
+    result = await asyncio.to_thread(
+        trt_inference.generate,
+        agent_id=agent_id,
+        prompt=prompt,
+        max_tokens=request_body.max_tokens,
+        temperature=request_body.temperature or 0.7,
+        messages=messages,
+    )
+
+    remaining_text, tool_calls = parse_tool_calls(result.text)
+
+    # message_start
+    yield {
+        "event": "message_start",
+        "data": json.dumps(
+            MessageStartEvent(
+                message=MessagesResponse(
+                    id=msg_id,
+                    model=request_body.model or "trt",
+                    content=[],
+                    stop_reason=None,
+                    usage=Usage(
+                        input_tokens=len(tokens),
+                        output_tokens=0,
+                    ),
+                ),
+            ).model_dump()
+        ),
+    }
+
+    block_idx = 0
+
+    # Text content block
+    if remaining_text:
+        yield {
+            "event": "content_block_start",
+            "data": json.dumps(
+                ContentBlockStartEvent(
+                    index=block_idx, content_block=TextContentBlock(text=""),
+                ).model_dump()
+            ),
+        }
+        yield {
+            "event": "content_block_delta",
+            "data": json.dumps(
+                ContentBlockDeltaEvent(
+                    index=block_idx,
+                    delta={"type": "text_delta", "text": remaining_text},
+                ).model_dump()
+            ),
+        }
+        yield {
+            "event": "content_block_stop",
+            "data": json.dumps(ContentBlockStopEvent(index=block_idx).model_dump()),
+        }
+        block_idx += 1
+
+    # Tool use blocks
+    for tc in tool_calls:
+        tool_id = f"toolu_{uuid.uuid4().hex[:24]}"
+        yield {
+            "event": "content_block_start",
+            "data": json.dumps(
+                ContentBlockStartEvent(
+                    index=block_idx,
+                    content_block=ToolUseContentBlock(
+                        id=tool_id, name=tc["name"], input={},
+                    ),
+                ).model_dump()
+            ),
+        }
+        yield {
+            "event": "content_block_delta",
+            "data": json.dumps(
+                ContentBlockDeltaEvent(
+                    index=block_idx,
+                    delta={"type": "input_json_delta", "partial_json": json.dumps(tc["input"])},
+                ).model_dump()
+            ),
+        }
+        yield {
+            "event": "content_block_stop",
+            "data": json.dumps(ContentBlockStopEvent(index=block_idx).model_dump()),
+        }
+        block_idx += 1
+
+    stop_reason = "tool_use" if tool_calls else "end_turn"
+    yield {
+        "event": "message_delta",
+        "data": json.dumps(
+            MessageDeltaEvent(
+                delta={"stop_reason": stop_reason},
+                usage={"output_tokens": len(result.tokens)},
+            ).model_dump()
+        ),
+    }
+
+    yield {
+        "event": "message_stop",
+        "data": json.dumps({"type": "message_stop"}),
+    }
+
+
 async def stream_generation(  # noqa: C901, PLR0912
     request_body: MessagesRequest,
     batch_engine: Any,
@@ -698,6 +818,16 @@ async def create_message(request_body: MessagesRequest, request: Request):  # no
                 }
                 for m in request_body.messages
             ]
+
+            # Streaming: generate full response, then yield as SSE events
+            if request_body.stream:
+                return EventSourceResponse(
+                    _stream_trt_response(
+                        trt_inference, agent_id, templated_prompt,
+                        request_body, messages, tokens,
+                    )
+                )
+
             result = trt_inference.generate(
                 agent_id=agent_id,
                 prompt=templated_prompt,
@@ -706,7 +836,6 @@ async def create_message(request_body: MessagesRequest, request: Request):  # no
                 messages=messages,
             )
 
-            # Parse tool calls from output
             remaining_text, tool_calls = parse_tool_calls(result.text)
 
             content_blocks = []

@@ -72,7 +72,13 @@ See analysis in previous version of this file. Options:
 
 - [ ] L1. Performance benchmarks on Thor
 - [ ] L2. CITATION.cff version update
-- [ ] L3. Streaming support for TRT backend
+- [ ] L3. **SSE streaming for TRT** — BLOCKS Claude Code integration
+- [ ] L3b. Full LLM ops pipeline in TRTInferenceService:
+  - Chat templates (ChatML, Llama, Qwen) — currently delegated to C++ binary
+  - Completion/FIM templates — for code completion use case
+  - Stop sequence handling — model-specific EOS tokens
+  - Accurate token counting (prompt + completion)
+  - Template should be applied by a port (ChatTemplatePort), not hardcoded
 - [ ] L4. System prompt caching for TRT
 - [ ] L5. Decompose swap_model() per 50-line guideline
 
