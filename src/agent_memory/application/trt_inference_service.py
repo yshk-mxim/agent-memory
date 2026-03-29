@@ -9,6 +9,8 @@ providing the same generate(agent_id, prompt) interface as the MLX path.
 import logging
 from typing import Any
 
+import numpy as np
+
 from agent_memory.domain.entities import AgentBlocks, KVBlock
 from agent_memory.domain.value_objects import GenerationResult
 from agent_memory.ports.outbound import ModelBackendPort
@@ -28,6 +30,7 @@ class TRTInferenceService:
         backend: ModelBackendPort,
         tokenizer: Any,
         cache_adapter: Any | None = None,
+        quantizer: Any | None = None,
     ) -> None:
         """Initialize TRT inference service.
 
@@ -35,10 +38,12 @@ class TRTInferenceService:
             backend: TRT subprocess adapter (implements ModelBackendPort).
             tokenizer: HuggingFace tokenizer for prompt processing.
             cache_adapter: Cache persistence adapter (TRTSafetensorsCacheAdapter).
+            quantizer: CacheQuantizationPort for Q4→FP16 dequantization on load.
         """
         self._backend = backend
         self._tokenizer = tokenizer
         self._cache_adapter = cache_adapter
+        self._quantizer = quantizer
 
     @property
     def tokenizer(self) -> Any:
@@ -84,7 +89,47 @@ class TRTInferenceService:
         if result.cache:
             self._save_agent_cache(agent_id, result.cache, len(tokens) + len(result.tokens))
 
-        return result
+        # Strip special tokens from output (model-agnostic via tokenizer)
+        cleaned_text = self._strip_special_tokens(result.text)
+
+        return GenerationResult(
+            text=cleaned_text,
+            tokens=result.tokens,
+            cache=result.cache,
+        )
+
+    def _strip_special_tokens(self, text: str) -> str:
+        """Remove special tokens from generated text using the tokenizer.
+
+        Model-agnostic: uses tokenizer.all_special_tokens to strip markers
+        like <|im_end|>, <|im_start|>, </s>, <s>, etc.
+        Works for ChatML (SmolLM2), Llama, Qwen, and other formats.
+        """
+        if not text:
+            return text
+
+        # Get special tokens from tokenizer
+        special_tokens = set()
+        if hasattr(self._tokenizer, "all_special_tokens"):
+            special_tokens = set(self._tokenizer.all_special_tokens)
+        if hasattr(self._tokenizer, "additional_special_tokens"):
+            special_tokens.update(self._tokenizer.additional_special_tokens)
+
+        # Also strip common role markers that may leak through
+        role_markers = {"<|im_start|>", "<|im_end|>", "<|endoftext|>"}
+        special_tokens.update(role_markers)
+
+        # Strip all special tokens from text
+        cleaned = text
+        for token in special_tokens:
+            cleaned = cleaned.replace(token, "")
+
+        # Strip role prefixes like "system\n", "user\n", "assistant\n"
+        for role in ("system", "user", "assistant"):
+            if cleaned.startswith(f"{role}\n"):
+                cleaned = cleaned[len(role) + 1 :]
+
+        return cleaned.strip()
 
     def _load_agent_cache(self, agent_id: str) -> list[Any] | None:
         """Load KV cache for agent from disk."""
@@ -138,12 +183,54 @@ class TRTInferenceService:
         except Exception:
             logger.warning(f"Failed to save cache for {agent_id}", exc_info=True)
 
-    @staticmethod
-    def _blocks_to_kv_cache(blocks: AgentBlocks) -> list[Any]:
-        """Convert AgentBlocks to per-layer KV tuples for backend injection."""
+    def _blocks_to_kv_cache(self, blocks: AgentBlocks) -> list[Any]:
+        """Convert AgentBlocks to per-layer FP16 KV tuples for backend injection.
+
+        If blocks contain Q4 quantized data (tuples of weights/scales/biases),
+        dequantizes to FP16 before returning. The TRT subprocess expects FP16.
+        """
         kv_cache = []
         for layer_id in sorted(blocks.blocks.keys()):
             layer_blocks = blocks.blocks[layer_id]
-            if layer_blocks and layer_blocks[0].layer_data is not None:
-                kv_cache.append(layer_blocks[0].layer_data)
+            if not layer_blocks or layer_blocks[0].layer_data is None:
+                continue
+
+            data = layer_blocks[0].layer_data
+
+            # Check if data is quantized: ((kw,ks,kb), (vw,vs,vb))
+            quantized_tuple_len = 3
+            if (
+                isinstance(data, tuple)
+                and len(data) == 2  # noqa: PLR2004
+                and isinstance(data[0], tuple)
+                and len(data[0]) == quantized_tuple_len
+                and self._quantizer is not None
+            ):
+                (kw, ks, kb), (vw, vs, vb) = data
+                # Dequantize returns flat 1D array — reshape to [n_kv_heads, seq_len, head_dim]
+                # The shape info must be inferred from the quantized data size
+                k_flat = self._quantizer.dequantize(kw, ks, kb, bits=4, group_size=64)
+                v_flat = self._quantizer.dequantize(vw, vs, vb, bits=4, group_size=64)
+
+                # Get model spec for reshape dimensions
+                spec = self._backend.extract_model_spec()
+                n_kv_heads = spec.n_kv_heads
+                head_dim = spec.head_dim
+                k_elements = k_flat.shape[0]
+                seq_len = k_elements // (n_kv_heads * head_dim)
+
+                k_fp16 = (
+                    k_flat[: n_kv_heads * seq_len * head_dim]
+                    .reshape(n_kv_heads, seq_len, head_dim)
+                    .astype(np.float16)
+                )
+                v_fp16 = (
+                    v_flat[: n_kv_heads * seq_len * head_dim]
+                    .reshape(n_kv_heads, seq_len, head_dim)
+                    .astype(np.float16)
+                )
+                kv_cache.append((k_fp16, v_fp16))
+            else:
+                kv_cache.append(data)
+
         return kv_cache if kv_cache else []

@@ -380,10 +380,15 @@ async def lifespan(app: FastAPI):
 
             mlx_adapter = None
             batch_engine = None  # TRT uses subprocess, not batch engine
+            from agent_memory.adapters.outbound.trt_quantization_adapter import (
+                TRTQuantizationAdapter as TRTQuant,
+            )
+
             trt_inference = TRTInferenceService(
                 backend=trt_subprocess,
                 tokenizer=tokenizer,
                 cache_adapter=cache_adapter,
+                quantizer=TRTQuant(),
             )
         else:
             batch_engine, mlx_adapter = _initialize_batch_engine(
