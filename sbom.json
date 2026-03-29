@@ -208,6 +208,63 @@
           "comment": "implicit dist url"
         }
       ]
+    },
+    {
+      "bom-ref": "dep-15",
+      "name": "numpy",
+      "version": "2.2.6",
+      "type": "library",
+      "purl": "pkg:pypi/numpy@2.2.6",
+      "licenses": [
+        {
+          "license": {
+            "id": "BSD-3-Clause"
+          }
+        }
+      ],
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://pypi.org/simple/numpy/",
+          "comment": "implicit dist url"
+        }
+      ]
+    },
+    {
+      "bom-ref": "vendor-1",
+      "name": "TensorRT-Edge-LLM",
+      "version": "0.6.0",
+      "type": "library",
+      "purl": "pkg:github/NVIDIA/TensorRT-Edge-LLM@v0.6.0",
+      "licenses": [
+        {
+          "license": {
+            "id": "Apache-2.0"
+          }
+        }
+      ],
+      "description": "Vendored C++ SDK for TRT inference on Jetson",
+      "externalReferences": [
+        {
+          "type": "vcs",
+          "url": "https://github.com/NVIDIA/TensorRT-Edge-LLM"
+        }
+      ]
+    },
+    {
+      "bom-ref": "vendor-2",
+      "name": "nlohmann-json",
+      "version": "3.12.0",
+      "type": "library",
+      "purl": "pkg:github/nlohmann/json@v3.12.0",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ],
+      "description": "Bundled in TensorRT-Edge-LLM 3rdParty"
     }
   ],
   "dependencies": [

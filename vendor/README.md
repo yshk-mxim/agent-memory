@@ -14,10 +14,17 @@ over stdin/stdout and KV cache exchange via safetensors in `/dev/shm`.
 
 | File | Purpose |
 |------|---------|
-| `llm_inference_interactive.cpp` | NDJSON wrapper around `LLMInferenceRuntime` |
-| `CMakeLists.txt` | Build config (links against Edge-LLM SDK) |
-| `build.sh` | Build script for Thor Docker container |
+| `llm_inference_interactive.cpp` | C++ NDJSON wrapper with KV cache inject/extract |
+| `llm_inference_wrapper.py` | Python NDJSON wrapper (uses stock binary, no C++ needed) |
+| `CMakeLists.txt` | Build config documentation |
+| `build_in_container.sh` | Reproducible build script for Docker container |
+| `Dockerfile` | Full build from NGC base image |
+| `BUILD_LOG.md` | Detailed build log with every gotcha discovered |
 | `.gitignore` | Ignores cloned SDK and build artifacts |
+| `patches/sm110_fmha_fix.py` | Fix missing sm_110 FMHA support in Edge-LLM |
+| `patches/add_engine_accessor.py` | Add public getEngineRunner() for KV cache access |
+| `patches/add_debug.py` | Debug fprintf (dev only, removed in production) |
+| `patches/remove_debug_prints.py` | Removes debug prints before production build |
 
 ## Build (on Thor)
 

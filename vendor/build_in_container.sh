@@ -70,6 +70,13 @@ CMAKEEOF
 fi
 
 # Build stock + interactive
+# Remove debug fprintf from attention plugin (if present)
+if [ -f "${VENDOR_DIR}/patches/remove_debug_prints.py" ]; then
+    echo "=== Removing debug prints ==="
+    python3 "${VENDOR_DIR}/patches/remove_debug_prints.py" \
+        "${EDGELLM_DIR}/cpp/plugins/attentionPlugin/attentionPlugin.cpp" 2>/dev/null || true
+fi
+
 echo "=== Building llm_inference + llm_inference_interactive ==="
 make -j"$(nproc)" llm_inference llm_inference_interactive
 

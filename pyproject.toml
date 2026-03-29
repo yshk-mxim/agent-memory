@@ -279,6 +279,11 @@ max-public-methods = 20 # Detect large classes
     "SIM108",  # if-else blocks clearer than ternary in manual tests
     "S104",    # Binding to 0.0.0.0 intentional for manual test server
 ]
+"tests/fixtures/**/*.py" = [
+    "PLR0911", # Multiple return statements in command handler
+    "S110",    # try-except-pass for optional file parsing
+    "PLC0415", # Runtime imports for optional safetensors
+]
 "tests/mlx/**/*.py" = [
     "PLC0415", # Runtime imports needed for real MLX lazy loading
     "S101",    # Assertions in tests

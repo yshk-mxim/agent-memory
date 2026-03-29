@@ -57,15 +57,31 @@ def handle_command(cmd: dict) -> dict:
 
     if action == "generate":
         tokens = cmd.get("tokens", [])
+        messages = cmd.get("messages", [])
         max_tokens = cmd.get("max_tokens", 10)
+
+        # Count input context from either tokens or messages
+        input_len = len(tokens) if tokens else sum(len(m.get("content", "")) for m in messages)
+
+        # Prefill-only mode (max_tokens=0): return cache but no text
+        if max_tokens == 0:
+            seq_len = max(input_len, 1)
+            cache = _make_fake_cache(seq_len)
+            cache_path = _save_cache_to_shm(cache)
+            return {
+                "text": "",
+                "tokens": [],
+                "finish_reason": "stop",
+                "kv_cache_path": cache_path,
+            }
 
         # Fake generation: echo back some tokens
         gen_tokens = list(range(100, 100 + max_tokens))
-        text = f"[fake output for {len(tokens)} input tokens]"
+        text = f"[fake output for {input_len} input tokens]"
 
         # Create and save a fake updated cache
-        seq_len = len(tokens) + max_tokens
-        cache = _make_fake_cache(seq_len)
+        seq_len = input_len + max_tokens
+        cache = _make_fake_cache(max(seq_len, 1))
         cache_path = _save_cache_to_shm(cache)
 
         return {
@@ -86,7 +102,7 @@ def handle_command(cmd: dict) -> dict:
                 tensors = load_file(input_path)
                 if "L0_K" in tensors:
                     seq_len = tensors["L0_K"].shape[1]
-            except Exception:  # noqa: S110
+            except Exception:
                 pass
         return {"status": "ok", "seq_len": seq_len}
 
