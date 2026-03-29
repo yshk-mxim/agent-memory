@@ -83,7 +83,7 @@ class TRTInferenceService:
         # Tokenize prompt for token count
         tokens = self._tokenizer.encode(prompt)
 
-        # Generate via backend (extra sampling params forwarded)
+        # Generate via backend (all sampling params forwarded)
         result = self._backend.generate(  # type: ignore[call-arg]
             prompt_tokens=tokens,
             cache=cached_kv,
@@ -92,6 +92,7 @@ class TRTInferenceService:
             messages=messages,
             top_p=top_p,
             top_k=top_k,
+            stop_sequences=stop_sequences,
         )
 
         # Save updated cache to disk
@@ -101,12 +102,18 @@ class TRTInferenceService:
         # Strip special tokens from output (model-agnostic via tokenizer)
         cleaned_text = self._strip_special_tokens(result.text)
 
-        # Apply stop sequences if provided
+        # Apply stop sequences (post-generation truncation).
+        # Edge-LLM runtime does not support stop sequences natively,
+        # so we truncate after the fact. This means the model may
+        # generate past the stop point, wasting some compute.
         if stop_sequences:
+            earliest_stop = len(cleaned_text)
             for seq in stop_sequences:
                 idx = cleaned_text.find(seq)
-                if idx != -1:
-                    cleaned_text = cleaned_text[:idx]
+                if idx != -1 and idx < earliest_stop:
+                    earliest_stop = idx
+            if earliest_stop < len(cleaned_text):
+                cleaned_text = cleaned_text[:earliest_stop]
 
         return GenerationResult(
             text=cleaned_text,
@@ -118,18 +125,56 @@ class TRTInferenceService:
         """Generate from a unified GenerationRequest (preferred entry point).
 
         Both Anthropic and OpenAI adapters build a GenerationRequest,
-        then call this method. Avoids duplicating parameter passing.
+        then call this method. Handles FIM mode, penalties, stop sequences.
         """
+        messages = req.messages
+
+        # FIM (fill-in-the-middle) mode: construct infill prompt
+        if req.fim_mode and req.fim_prefix is not None:
+            fim_prompt = self._build_fim_prompt(req.fim_prefix, req.fim_suffix)
+            messages = [{"role": "user", "content": fim_prompt}]
+
         return self.generate(
             agent_id=req.agent_id,
             prompt=req.prompt,
             max_tokens=req.max_tokens,
             temperature=req.temperature,
-            messages=req.messages,
+            messages=messages,
             top_p=req.top_p,
             top_k=req.top_k,
             stop_sequences=req.stop_sequences or None,
         )
+
+    def _build_fim_prompt(self, prefix: str, suffix: str | None = None) -> str:
+        """Build a fill-in-the-middle prompt using the tokenizer's FIM tokens.
+
+        Falls back to generic FIM format if tokenizer lacks FIM-specific tokens.
+
+        Args:
+            prefix: Code before the cursor.
+            suffix: Code after the cursor (None = complete from prefix only).
+
+        Returns:
+            FIM-formatted prompt string.
+        """
+        # Check tokenizer for model-specific FIM tokens
+        fim_prefix_token = getattr(self._tokenizer, "fim_prefix_token", "<|fim_prefix|>")
+        fim_suffix_token = getattr(self._tokenizer, "fim_suffix_token", "<|fim_suffix|>")
+        fim_middle_token = getattr(self._tokenizer, "fim_middle_token", "<|fim_middle|>")
+
+        # Also check for common FIM token patterns
+        if hasattr(self._tokenizer, "special_tokens_map"):
+            stm = self._tokenizer.special_tokens_map
+            if "fim_prefix" in stm:
+                fim_prefix_token = stm["fim_prefix"]
+            if "fim_suffix" in stm:
+                fim_suffix_token = stm["fim_suffix"]
+            if "fim_middle" in stm:
+                fim_middle_token = stm["fim_middle"]
+
+        if suffix:
+            return f"{fim_prefix_token}{prefix}{fim_suffix_token}{suffix}{fim_middle_token}"
+        return f"{fim_prefix_token}{prefix}{fim_middle_token}"
 
     def _strip_special_tokens(self, text: str) -> str:
         """Remove special tokens from generated text using the tokenizer.

@@ -24,6 +24,7 @@ from sse_starlette.sse import EventSourceResponse
 
 from agent_memory.adapters.config.settings import get_settings
 from agent_memory.adapters.inbound.adapter_helpers import (
+    extract_session_id,
     get_semantic_state,
     run_step_for_uid,
     tokenize_with_chat_template,
@@ -653,7 +654,7 @@ async def create_chat_completion(  # noqa: C901, PLR0912, PLR0915
         )
 
         # Check for session_id in request body or X-Session-ID header
-        session_id = request_body.session_id or request.headers.get("X-Session-ID")
+        session_id = request_body.session_id or extract_session_id(request)
         agent_id = generate_agent_id_openai(session_id, tokens)
         logger.debug(f"Agent ID: {agent_id}, tokens: {len(tokens)}, session_id={session_id}")
 
@@ -691,6 +692,54 @@ async def create_chat_completion(  # noqa: C901, PLR0912, PLR0915
                 model=request_body.model or "trt",
             )
             result = trt_inference.generate_from_request(gen_req)
+
+            # OpenAI streaming for TRT: yield SSE chunks
+            if request_body.stream:
+
+                async def _stream_openai_trt() -> AsyncIterator[dict[str, str]]:
+                    resp_id = f"chatcmpl-{agent_id[:12]}"
+                    words = result.text.split(" ") if result.text else []
+                    for i, word in enumerate(words):
+                        chunk = word if i == 0 else " " + word
+                        yield {
+                            "data": json.dumps(
+                                {
+                                    "id": resp_id,
+                                    "object": "chat.completion.chunk",
+                                    "created": int(time.time()),
+                                    "model": request_body.model or "trt",
+                                    "choices": [
+                                        {
+                                            "index": 0,
+                                            "delta": {"content": chunk},
+                                            "finish_reason": None,
+                                        }
+                                    ],
+                                }
+                            ),
+                        }
+                    # Final chunk with finish_reason
+                    yield {
+                        "data": json.dumps(
+                            {
+                                "id": resp_id,
+                                "object": "chat.completion.chunk",
+                                "created": int(time.time()),
+                                "model": request_body.model or "trt",
+                                "choices": [
+                                    {
+                                        "index": 0,
+                                        "delta": {},
+                                        "finish_reason": "stop",
+                                    }
+                                ],
+                            }
+                        ),
+                    }
+                    yield {"data": "[DONE]"}
+
+                return EventSourceResponse(_stream_openai_trt())
+
             return ChatCompletionsResponse(
                 id=f"chatcmpl-{agent_id[:12]}",
                 created=int(time.time()),

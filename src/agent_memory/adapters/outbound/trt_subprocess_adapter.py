@@ -121,6 +121,8 @@ class TRTSubprocessAdapter:
         messages: list[dict[str, str]] | None = None,
         top_p: float = 0.95,
         top_k: int = 40,
+        stop_sequences: list[str] | None = None,
+        repetition_penalty: float = 1.0,
     ) -> GenerationResult:
         """Generate text via TRT subprocess.
 
@@ -134,6 +136,8 @@ class TRTSubprocessAdapter:
                 provided, prompt_tokens are passed as raw token IDs.
             top_p: Top-p (nucleus) sampling parameter.
             top_k: Top-k sampling parameter.
+            stop_sequences: Stop strings for early output truncation.
+            repetition_penalty: Repetition penalty (1.0 = no penalty).
 
         Returns:
             GenerationResult with text, tokens, and updated cache.
@@ -162,6 +166,11 @@ class TRTSubprocessAdapter:
                 "extract_cache": True,
                 "kv_cache_path": str(extract_path),
             }
+
+            if stop_sequences:
+                cmd["stop_sequences"] = stop_sequences
+            if repetition_penalty != 1.0:
+                cmd["repetition_penalty"] = repetition_penalty
 
             if messages is not None:
                 cmd["messages"] = messages

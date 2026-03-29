@@ -23,6 +23,7 @@ from fastapi import APIRouter, HTTPException, Request, status
 from sse_starlette.sse import EventSourceResponse
 
 from agent_memory.adapters.inbound.adapter_helpers import (
+    extract_session_id,
     get_semantic_state,
     run_step_for_uid,
     tokenize_with_chat_template,
@@ -287,7 +288,7 @@ async def _stream_trt_response(
     """
     msg_id = f"msg_{uuid.uuid4().hex[:24]}"
 
-    # Generate full response
+    # Generate full response (all sampling params forwarded)
     result = await asyncio.to_thread(
         trt_inference.generate,
         agent_id=agent_id,
@@ -295,6 +296,9 @@ async def _stream_trt_response(
         max_tokens=request_body.max_tokens,
         temperature=request_body.temperature or 0.7,
         messages=messages,
+        top_p=request_body.top_p or 0.95,
+        top_k=request_body.top_k or 40,
+        stop_sequences=request_body.stop_sequences or None,
     )
 
     remaining_text, tool_calls = parse_tool_calls(result.text)
@@ -320,7 +324,7 @@ async def _stream_trt_response(
 
     block_idx = 0
 
-    # Text content block
+    # Text content block — stream in word-sized chunks for realistic SSE
     if remaining_text:
         yield {
             "event": "content_block_start",
@@ -331,15 +335,22 @@ async def _stream_trt_response(
                 ).model_dump()
             ),
         }
-        yield {
-            "event": "content_block_delta",
-            "data": json.dumps(
-                ContentBlockDeltaEvent(
-                    index=block_idx,
-                    delta={"type": "text_delta", "text": remaining_text},
-                ).model_dump()
-            ),
-        }
+
+        # Chunk text into words/tokens for progressive streaming
+        # This simulates per-token output from a streaming model
+        words = remaining_text.split(" ")
+        for i, word in enumerate(words):
+            chunk = word if i == 0 else " " + word
+            yield {
+                "event": "content_block_delta",
+                "data": json.dumps(
+                    ContentBlockDeltaEvent(
+                        index=block_idx,
+                        delta={"type": "text_delta", "text": chunk},
+                    ).model_dump()
+                ),
+            }
+
         yield {
             "event": "content_block_stop",
             "data": json.dumps(ContentBlockStopEvent(index=block_idx).model_dump()),
@@ -775,7 +786,7 @@ async def create_message(request_body: MessagesRequest, request: Request):  # no
         )
 
         # Session-based lookup enables prefix caching across conversation turns
-        session_id = request.headers.get("X-Session-ID")
+        session_id = extract_session_id(request)
         if session_id:
             agent_id = f"sess_{session_id}"
             logger.debug(f"Session-based agent ID: {agent_id}, tokens: {len(tokens)}")

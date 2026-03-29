@@ -18,6 +18,22 @@ logger = logging.getLogger(__name__)
 STEP_TIMEOUT_SECONDS = 300
 
 
+def extract_session_id(request: Request) -> str | None:
+    """Extract session ID from request headers (common across all APIs).
+
+    Checks multiple header names for compatibility with different clients:
+    - X-Session-ID: Generic session header (NemoClaw, custom clients)
+    - X-Claude-Code-Session-Id: Claude Code CLI session header
+
+    Args:
+        request: FastAPI request object
+
+    Returns:
+        Session ID string or None if not present.
+    """
+    return request.headers.get("X-Session-ID") or request.headers.get("X-Claude-Code-Session-Id")
+
+
 def get_semantic_state(request: Request) -> Any:
     """Safely get semantic state from request, raising clear error if not initialized.
 
