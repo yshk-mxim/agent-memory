@@ -24,6 +24,7 @@ import structlog
 from numpy.typing import NDArray
 from safetensors.numpy import load_file, save_file
 
+from agent_memory.domain.entities import BLOCK_SIZE_TOKENS
 from agent_memory.domain.errors import TRTEngineError, TRTSubprocessError
 from agent_memory.domain.value_objects import GenerationResult, ModelCacheSpec
 
@@ -198,7 +199,7 @@ class TRTSubprocessAdapter:
             n_layers=n_layers,
             n_kv_heads=resp["n_kv_heads"],
             head_dim=resp["head_dim"],
-            block_tokens=resp.get("block_tokens", 256),
+            block_tokens=resp.get("block_tokens", BLOCK_SIZE_TOKENS),
             layer_types=["global"] * n_layers,
             kv_format="fp",
             kv_bits=None,

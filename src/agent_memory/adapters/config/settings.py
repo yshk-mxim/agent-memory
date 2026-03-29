@@ -277,6 +277,32 @@ class TRTSettings(BaseSettings):
         description="Default sampling temperature",
     )
 
+    default_top_p: float = Field(
+        default=0.95,
+        ge=0.0,
+        le=1.0,
+        description="Default top-p (nucleus) sampling parameter",
+    )
+
+    default_top_k: int = Field(
+        default=40,
+        ge=1,
+        le=1000,
+        description="Default top-k sampling parameter",
+    )
+
+    edgellm_plugin_path: str = Field(
+        default="",
+        description="Path to libNvInfer_edgellm_plugin.so (set via EDGELLM_PLUGIN_PATH env)",
+    )
+
+    reasoning_extra_tokens: int = Field(
+        default=0,
+        ge=0,
+        le=1000,
+        description="Extra tokens for reasoning models (same as MLX setting)",
+    )
+
     @field_validator("kv_bits", mode="before")
     @classmethod
     def validate_kv_bits(cls, v: int | str | None) -> int | None:

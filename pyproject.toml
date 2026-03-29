@@ -305,6 +305,9 @@ max-public-methods = 20 # Detect large classes
     "PLR0912", # Same function as C901
 ]
 "src/agent_memory/application/batch_engine.py" = [
+    "PLC0415", # Re-export module
+]
+"src/agent_memory/adapters/outbound/mlx_batch_engine.py" = [
     "C901",    # Complex methods acceptable in core engine
     "PLR0912", # Many branches acceptable for cache handling
     "PLR0915", # Many statements acceptable for comprehensive logic
@@ -500,6 +503,7 @@ strict = false
 [[tool.mypy.overrides]]
 module = [
     "agent_memory.application.batch_engine",
+    "agent_memory.adapters.outbound.mlx_batch_engine",
     "agent_memory.application.chat_completion_service",
     "agent_memory.application.scheduler",
     "agent_memory.application.agent_cache_store",
@@ -602,8 +606,9 @@ omit = [
     "src/agent_memory/adapters/outbound/mlx_sink_compat.py",
     "src/agent_memory/adapters/outbound/safetensors_cache_adapter.py",
     "src/agent_memory/adapters/utils/timeouts.py",
-    # Core inference engine: deeply coupled to MLX — tested by integration tests
+    # Core MLX inference engine — tested by integration tests
     "src/agent_memory/application/batch_engine.py",
+    "src/agent_memory/adapters/outbound/mlx_batch_engine.py",
 ]
 
 [tool.coverage.report]

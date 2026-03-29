@@ -67,6 +67,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Lazy MLX imports in `api_server.py` — MLX modules only imported when
   `SEMANTIC_BACKEND=mlx`, enabling TRT-only operation on non-Apple platforms.
 
+- `BlockPoolBatchEngine` moved from `application/` to `adapters/outbound/mlx_batch_engine.py`
+  (hexagonal architecture: MLX-specific code in adapter layer). Backward-compatible
+  re-export from old location.
+- `TRTSettings` now includes `default_top_p`, `default_top_k`, `edgellm_plugin_path`,
+  and `reasoning_extra_tokens` for full parity with MLX settings.
+- `/v1/models` endpoint and `CoordinationService` now use backend-specific settings
+  instead of always referencing `settings.mlx`.
+- CLI `MLX_METAL_FAST_SYNCH` env var only set when `backend == "mlx"`.
+
 ### Fixed
 
 - Admin API model-swap tests (`TestSwapModelEndpoint`) returned 422 instead of

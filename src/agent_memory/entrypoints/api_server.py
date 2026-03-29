@@ -485,7 +485,11 @@ async def lifespan(app: FastAPI):
             scheduler=scheduler,
             cache_store=cache_store,
             engine=batch_engine,
-            reasoning_extra_tokens=settings.mlx.reasoning_extra_tokens,
+            reasoning_extra_tokens=(
+                settings.trt.reasoning_extra_tokens
+                if settings.backend == "trt"
+                else settings.mlx.reasoning_extra_tokens
+            ),
             chat_template=chat_template_adapter,
         )
         app.state.coordination_service = coordination_service
@@ -924,7 +928,11 @@ def _register_routes(app: FastAPI):
                 "head_dim": spec.head_dim,
                 "block_tokens": spec.block_tokens,
                 "kv_bits": spec.kv_bits,
-                "max_context_length": settings.mlx.max_context_length,
+                "max_context_length": (
+                    settings.trt.max_context_length
+                    if settings.backend == "trt"
+                    else settings.mlx.max_context_length
+                ),
             }
 
         return {"object": "list", "data": [model_entry]}

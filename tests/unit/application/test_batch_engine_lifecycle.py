@@ -14,7 +14,7 @@ sys.modules["mlx.core"] = MagicMock()
 sys.modules["mlx.utils"] = MagicMock()
 sys.modules["mlx_lm"] = MagicMock()
 
-from agent_memory.application.batch_engine import BlockPoolBatchEngine
+from agent_memory.adapters.outbound.mlx_batch_engine import BlockPoolBatchEngine
 from agent_memory.domain.errors import GenerationError
 from agent_memory.domain.value_objects import ModelCacheSpec
 
@@ -49,7 +49,7 @@ class TestBatchEngineDrain:
         # Verify - drain should be instant
         assert elapsed < 1.0  # Should finish in <1s
 
-    @patch("agent_memory.application.batch_engine.time.sleep")
+    @patch("agent_memory.adapters.outbound.mlx_batch_engine.time.sleep")
     async def test_drain_waits_for_active_requests_to_complete(self, mock_sleep):
         """Drain waits until all active requests finish."""
         # Setup
@@ -105,7 +105,7 @@ class TestBatchEngineDrain:
         assert len(engine._active_requests) == 0
         assert mock_batch_gen.next.call_count >= 2  # At least 2 steps needed
 
-    @patch("agent_memory.application.batch_engine.time.time")
+    @patch("agent_memory.adapters.outbound.mlx_batch_engine.time.time")
     async def test_drain_raises_on_timeout(self, mock_time):
         """Drain raises GenerationError if timeout exceeded."""
         # Setup
@@ -255,7 +255,7 @@ class TestBatchEngineShutdown:
 class TestDrainShutdownIntegration:
     """Test drain → shutdown sequence for model hot-swap."""
 
-    @patch("agent_memory.application.batch_engine.time.sleep")
+    @patch("agent_memory.adapters.outbound.mlx_batch_engine.time.sleep")
     async def test_drain_then_shutdown_clears_all_state(self, mock_sleep):
         """Typical hot-swap sequence: drain active requests then shutdown."""
         # Setup

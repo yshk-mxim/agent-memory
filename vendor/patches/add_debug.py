@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: Apache-2.0
 """Add debug fprintf to attention plugin before FMHA runner creation."""
 from pathlib import Path
 
