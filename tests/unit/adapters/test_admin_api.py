@@ -113,7 +113,7 @@ class TestSwapModelEndpoint:
         mock_new_engine = Mock()
         mock_orchestrator.swap_model.return_value = mock_new_engine
         app.dependency_overrides[get_orchestrator] = lambda: mock_orchestrator
-        app.dependency_overrides[get_old_engine] = lambda: Mock()
+        app.dependency_overrides[get_old_engine] = lambda: Mock()  # noqa: PLW0108
 
         # Verify initial state
         assert app.state.agent_memory.batch_engine is None
@@ -144,7 +144,7 @@ class TestSwapModelEndpoint:
         """Request without X-Admin-Key returns 401."""
         # Provide dependencies even though auth will fail first
         app.dependency_overrides[get_orchestrator] = Mock
-        app.dependency_overrides[get_old_engine] = lambda: Mock()
+        app.dependency_overrides[get_old_engine] = lambda: Mock()  # noqa: PLW0108
 
         response = client.post(
             "/admin/models/swap",
@@ -158,7 +158,7 @@ class TestSwapModelEndpoint:
         """Request with wrong admin key returns 401."""
         # Provide dependencies even though auth will fail first
         app.dependency_overrides[get_orchestrator] = Mock
-        app.dependency_overrides[get_old_engine] = lambda: Mock()
+        app.dependency_overrides[get_old_engine] = lambda: Mock()  # noqa: PLW0108
 
         response = client.post(
             "/admin/models/swap",
@@ -173,7 +173,7 @@ class TestSwapModelEndpoint:
         """Failed swap returns 500 with error details."""
         # Setup dependency override
         app.dependency_overrides[get_orchestrator] = lambda: mock_orchestrator
-        app.dependency_overrides[get_old_engine] = lambda: Mock()
+        app.dependency_overrides[get_old_engine] = lambda: Mock()  # noqa: PLW0108
 
         # Simulate swap failure
         mock_orchestrator.swap_model.side_effect = Exception("Model not found")
@@ -193,7 +193,7 @@ class TestSwapModelEndpoint:
     def test_swap_model_custom_timeout(self, client, app, mock_orchestrator):
         """Custom timeout is passed to orchestrator."""
         app.dependency_overrides[get_orchestrator] = lambda: mock_orchestrator
-        app.dependency_overrides[get_old_engine] = lambda: Mock()
+        app.dependency_overrides[get_old_engine] = lambda: Mock()  # noqa: PLW0108
 
         # Execute with custom timeout
         response = client.post(

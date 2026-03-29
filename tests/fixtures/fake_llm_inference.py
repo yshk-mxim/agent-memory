@@ -19,10 +19,10 @@ import tempfile
 
 import numpy as np
 
-# Model geometry for the fake engine
-N_LAYERS = 4
-N_KV_HEADS = 8
-HEAD_DIM = 128
+# Model geometry — overridable via env vars for integration tests
+N_LAYERS = int(os.environ.get("FAKE_N_LAYERS", "30"))
+N_KV_HEADS = int(os.environ.get("FAKE_N_KV_HEADS", "3"))
+HEAD_DIM = int(os.environ.get("FAKE_HEAD_DIM", "64"))
 
 
 def _make_fake_cache(seq_len: int) -> list[tuple[np.ndarray, np.ndarray]]:

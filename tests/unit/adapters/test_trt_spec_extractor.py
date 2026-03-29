@@ -13,8 +13,8 @@ pytestmark = pytest.mark.unit
 
 
 class TestTRTSpecExtractor:
-    def test_extract_delegates_to_subprocess(self) -> None:
-        """Extractor should delegate to subprocess adapter."""
+    def test_extract_delegates_to_backend_port(self) -> None:
+        """Extractor should delegate to ModelBackendPort."""
         expected_spec = ModelCacheSpec(
             n_layers=64,
             n_kv_heads=8,
@@ -25,13 +25,13 @@ class TestTRTSpecExtractor:
             kv_bits=None,
         )
 
-        mock_subprocess = Mock()
-        mock_subprocess.extract_model_spec.return_value = expected_spec
+        mock_backend = Mock()
+        mock_backend.extract_model_spec.return_value = expected_spec
 
-        extractor = TRTSpecExtractor(mock_subprocess)
+        extractor = TRTSpecExtractor(mock_backend)
         spec = extractor.extract()
 
         assert spec is expected_spec
         assert spec.kv_format == "fp"
         assert spec.n_layers == 64
-        mock_subprocess.extract_model_spec.assert_called_once()
+        mock_backend.extract_model_spec.assert_called_once()

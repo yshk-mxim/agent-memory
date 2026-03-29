@@ -12,7 +12,6 @@ for all inference calls, and stopped on shutdown.
 
 import contextlib
 import json
-import structlog
 import os
 import subprocess
 import tempfile
@@ -20,6 +19,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+import structlog
 from numpy.typing import NDArray
 from safetensors.numpy import load_file, save_file
 
@@ -101,6 +101,11 @@ class TRTSubprocessAdapter:
             self._process.kill()
             self._process.wait()
         finally:
+            # Close file handles to avoid ResourceWarning
+            for pipe in (self._process.stdin, self._process.stdout, self._process.stderr):
+                if pipe is not None:
+                    with contextlib.suppress(OSError):
+                        pipe.close()
             logger.info("trt_subprocess_stopped")
             self._process = None
 

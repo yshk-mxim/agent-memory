@@ -12,7 +12,7 @@ from typing import Any
 
 import numpy as np
 
-from agent_memory.adapters.outbound.trt_subprocess_adapter import TRTSubprocessAdapter
+from agent_memory.ports.outbound import ModelBackendPort
 
 logger = logging.getLogger(__name__)
 
@@ -26,12 +26,12 @@ class TRTPrefillAdapter:
 
     def __init__(
         self,
-        subprocess_adapter: TRTSubprocessAdapter,
+        backend: ModelBackendPort,
         min_chunk: int = _MIN_CHUNK,
         max_chunk: int = _MAX_CHUNK,
     ) -> None:
-        """Initialize with subprocess adapter and chunk size bounds."""
-        self._subprocess = subprocess_adapter
+        """Initialize with backend port and chunk size bounds."""
+        self._backend = backend
         self._min_chunk = min_chunk
         self._max_chunk = max_chunk
 
@@ -68,7 +68,7 @@ class TRTPrefillAdapter:
         """
         chunk_tokens = tokens[start:end]
 
-        result = self._subprocess.generate(
+        result = self._backend.generate(
             prompt_tokens=chunk_tokens,
             cache=kv_caches if start > 0 else None,
             max_tokens=0,  # Prefill only, no generation

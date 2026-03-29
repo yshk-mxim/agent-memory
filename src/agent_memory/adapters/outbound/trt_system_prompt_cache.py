@@ -6,15 +6,15 @@ Wraps TRT's ``genAndSaveSystemPromptKVCache()`` via subprocess command
 to pre-compute and cache the KV state for system + tools prompts.
 """
 
-import structlog
 from pathlib import Path
 from typing import Any
 
 import numpy as np
+import structlog
 from safetensors.numpy import load_file, save_file
 
-from agent_memory.adapters.outbound.trt_subprocess_adapter import TRTSubprocessAdapter
 from agent_memory.domain.errors import TRTEngineError
+from agent_memory.ports.outbound import ModelBackendPort
 
 logger = structlog.get_logger(__name__)
 
@@ -24,11 +24,11 @@ class TRTSystemPromptCache:
 
     def __init__(
         self,
-        subprocess_adapter: TRTSubprocessAdapter,
+        backend: ModelBackendPort,
         cache_dir: Path,
     ) -> None:
-        """Initialize with subprocess adapter and cache directory."""
-        self._subprocess = subprocess_adapter
+        """Initialize with backend port and cache directory."""
+        self._backend = backend
         self._cache_dir = cache_dir
         self._cache_dir.mkdir(parents=True, exist_ok=True)
 
@@ -55,7 +55,7 @@ class TRTSystemPromptCache:
         logger.info("trt_system_prompt_cache_miss", key=cache_key, n_tokens=len(system_tokens))
 
         # Generate system prompt KV cache via subprocess
-        result = self._subprocess.generate(
+        result = self._backend.generate(
             prompt_tokens=system_tokens,
             cache=None,
             max_tokens=0,  # Prefill only

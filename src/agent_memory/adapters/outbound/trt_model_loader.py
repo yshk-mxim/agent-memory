@@ -6,13 +6,13 @@ Launches the ``llm_inference`` subprocess and loads the HuggingFace
 tokenizer (same ``transformers`` library as the MLX path).
 """
 
-import structlog
 from typing import Any
 
+import structlog
 from transformers import AutoTokenizer
 
-from agent_memory.adapters.outbound.trt_subprocess_adapter import TRTSubprocessAdapter
 from agent_memory.domain.errors import TRTEngineError
+from agent_memory.ports.outbound import ModelBackendPort
 
 logger = structlog.get_logger(__name__)
 
@@ -27,7 +27,7 @@ class TRTModelLoader:
         llm_inference_bin: str,
         timeout_s: float = 30.0,
         shm_dir: str = "/dev/shm",  # noqa: S108
-    ) -> tuple[TRTSubprocessAdapter, Any]:
+    ) -> tuple[ModelBackendPort, Any]:
         """Launch subprocess and load tokenizer.
 
         Args:
@@ -38,7 +38,7 @@ class TRTModelLoader:
             shm_dir: Shared memory directory.
 
         Returns:
-            Tuple of (TRTSubprocessAdapter, tokenizer).
+            Tuple of (ModelBackendPort, tokenizer).
         """
         # Load tokenizer from HuggingFace (same as MLX path)
         try:
@@ -48,7 +48,11 @@ class TRTModelLoader:
 
         logger.info("trt_tokenizer_loaded", model_id=model_id)
 
-        # Launch subprocess
+        # Factory creates the concrete adapter (runtime import avoids cross-adapter dep)
+        from agent_memory.adapters.outbound.trt_subprocess_adapter import (  # noqa: PLC0415
+            TRTSubprocessAdapter,
+        )
+
         adapter = TRTSubprocessAdapter(
             llm_inference_bin=llm_inference_bin,
             engine_path=engine_path,

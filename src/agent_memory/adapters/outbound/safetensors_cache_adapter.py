@@ -17,6 +17,7 @@ from typing import Any
 from agent_memory.domain.entities import AgentBlocks, KVBlock
 from agent_memory.domain.errors import AgentNotFoundError, CachePersistenceError
 from agent_memory.domain.services import mlx_io_lock
+from agent_memory.ports.outbound import CacheQuantizationPort
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +33,7 @@ class SafetensorsCacheAdapter:
         cache_dir: Path,
         kv_bits: int = 4,
         kv_group_size: int = 64,
-        quantizer: Any | None = None,
+        quantizer: CacheQuantizationPort | None = None,
     ) -> None:
         """Initialize adapter with cache directory.
 

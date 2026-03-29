@@ -40,6 +40,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `generate_agent_id_from_tokens`).
 - `fake_llm_inference.py` test fixture — standalone NDJSON subprocess mock for
   TRT adapter unit tests without CUDA/TRT.
+- TRT integration tests (`tests/trt/`) — subprocess lifecycle, KV cache layout
+  round-trip, Q4 quantization round-trip through safetensors. Runs on Mac via
+  fake binary with SmolLM2-135M geometry.
 
 ### Fixed
 
@@ -51,7 +54,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   hashing, which is not guaranteed deterministic across Python implementations.
   Switched to `json.dumps(prefix)` for stable serialization.
 - `SafetensorsCacheAdapter` hardcoded `bits=4, group_size=64` at quantization
-  fallback path. Now uses configurable `kv_bits`/`kv_group_size` from constructor
+  fallback path. Now uses configurable `kv_bits`/`kv_group_size` from constructor,
+  with `quantizer` parameter properly typed as `CacheQuantizationPort | None`.
+- TRT adapters had cross-adapter imports (`trt_prefill_adapter`, `trt_spec_extractor`,
+  `trt_system_prompt_cache` imported `TRTSubprocessAdapter` directly). Refactored to
+  depend on `ModelBackendPort` protocol, preserving hexagonal architecture.
+- `TRTSubprocessAdapter.stop()` leaked file handles (stdin/stdout/stderr not closed),
+  causing `ResourceWarning` in tests. Now explicitly closes all subprocess pipes
   and supports pluggable `CacheQuantizationPort`.
 
 ---
