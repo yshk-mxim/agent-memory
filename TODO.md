@@ -1,119 +1,73 @@
-# TODO — TRT Backend Integration & Full Audit
+# TODO — TRT Backend Integration
 
-Branch `feat/trt-backend`. Audit date: 2026-03-29. Last updated: 2026-03-29.
-
----
-
-## CRITICAL — Blocks merge
-
-### ~~C1. InferencePort~~ — DONE
-TRTInferenceService wraps backend + cache persistence. Anthropic/OpenAI adapters
-call `trt_inference.generate(agent_id, prompt, messages)`.
-
-### ~~C2. TRT KV cache persistence~~ — DONE
-TRTInferenceService._save_agent_cache builds AgentBlocks from per-layer KV tuples,
-calls TRTSafetensorsCacheAdapter.save(). _load_agent_cache reverses.
-
-### C3. BatchEngine is in application layer but hardcoded to MLX
-**Hex violation V2.** `application/batch_engine.py` has 14+ deferred `import mlx.core`
-calls. Cannot be used without MLX.
-
-**Fix**: Move to `adapters/outbound/mlx_batch_engine.py`. Update all imports.
-
-### ~~C4. SafetensorsCacheAdapter requires MLX~~ — DONE
-TRTSafetensorsCacheAdapter uses safetensors.numpy. No MLX dependency. Each backend
-has its own cache I/O adapter. Wired by backend in api_server.py.
-
-### C5. README.md and docs/ not updated
-Zero mention of TRT, Jetson, `SEMANTIC_BACKEND`, or NemoClaw.
-
-### ~~C6. Startup health probe + debug endpoint~~ — DONE
-Probe checks both batch_engine and trt_subprocess. Debug endpoint gracefully
-handles missing MLX.
+Branch `feat/trt-backend`. Last updated: 2026-03-29.
 
 ---
 
-## HIGH — Should fix before merge
+## Completed
 
-### ~~H1. TRTSpecExtractor port conformance~~ — DONE
-Now uses `extract_spec(model)` matching SpecExtractorPort.
-
-### H2. Model hot-swap does not work for TRT
-### ~~H3. /debug/memory endpoint~~ — DONE (folded into C6)
-### H4. SBOM stale
-### H5. Missing SPDX header on vendor/patches/add_debug.py
-### ~~H6. Thread safety~~ — DONE (threading.Lock in generate)
-### ~~H7. OpenAI adapter TRT path~~ — DONE
-### ~~H8. Domain naming~~ — DONE (backend_io_lock)
-
-### H9. LRU vs LFU eviction for NemoClaw/Claude Code
-See analysis in previous version of this file. Options:
-1. `eviction_policy` setting (lru/lfu/hybrid)
-2. Pin system prompt caches
-3. Frequency-weighted scoring: `access_count / (1 + hours_since_last_access)`
+- [x] C1. InferencePort / TRTInferenceService
+- [x] C2. TRT KV cache persistence (full AgentBlocks save/load/dequantize)
+- [x] C3. BatchEngine moved to adapter layer
+- [x] C4. TRTSafetensorsCacheAdapter (no MLX dependency)
+- [x] C5. Startup probe + debug endpoint for TRT (was C6)
+- [x] H1. TRTSpecExtractor port conformance
+- [x] H6. Thread safety (Lock in subprocess adapter)
+- [x] H7. OpenAI adapter TRT path
+- [x] H8. Domain naming (backend_io_lock)
+- [x] M1-M8. Settings, magic numbers, backend-specific config
+- [x] Multi-turn KV persistence verified on Thor
+- [x] SSE streaming for TRT (enables Claude Code)
+- [x] Model-agnostic special token cleanup
 
 ---
 
-## MEDIUM — Fix soon after merge
+## In Progress — Current Sprint
 
-- [ ] M1. Add `top_p`/`top_k` to TRTSettings
-- [ ] M2. Add `EDGELLM_PLUGIN_PATH` to TRTSettings
-- [ ] M3. NemoClaw default model (Qwen3-Coder-Next) engine build on Thor
-- [ ] M4. Remove debug fprintf from attention plugin
-- [ ] M5. Magic number 256 → BLOCK_SIZE_TOKENS in trt_subprocess_adapter.py
-- [ ] M6. Fix `settings.mlx.reasoning_extra_tokens` for TRT coordination (V11)
-- [ ] M7. Fix `/v1/models` endpoint to use backend-specific settings (V12)
-- [ ] M8. Gate `MLX_METAL_FAST_SYNCH` env var on backend==mlx in cli.py (V9)
-- [ ] M9. Consider stdlib logging in application layer (V3)
+### 1. Convert e2e tests to pytest + functional test suite
+Replace `test_e2e_server.sh` with pytest-based e2e tests. Add:
+- Server lifecycle (start with TRT, health check, shutdown)
+- Non-streaming Anthropic API request
+- Streaming Anthropic API request
+- Multi-turn conversation with X-Session-ID + cache persistence
+- OpenAI API request
+- Cache file exists on disk after generation
 
----
+### 2. Multiple models support on TRT
+- TRT hot-swap via subprocess stop/restart with new engine path
+- Or: graceful "not supported" error with restart instructions
+- Model registry awareness of TRT backend
 
-## LOW — Nice to have
+### 3. Full LLM ops pipeline
+Unified in TRTInferenceService:
+- Chat templates (ChatML, Llama, Qwen) via ChatTemplatePort
+- Completion/FIM templates for code completion
+- Stop sequence handling (model-specific EOS tokens)
+- Sampling parameters (temperature, top_p, top_k, repetition_penalty)
+- Accurate token counting (prompt + completion)
 
-- [ ] L1. Performance benchmarks on Thor
-- [ ] L2. CITATION.cff version update
-- [ ] L3. **SSE streaming for TRT** — BLOCKS Claude Code integration
-- [ ] L3b. Full LLM ops pipeline in TRTInferenceService:
-  - Chat templates (ChatML, Llama, Qwen) — currently delegated to C++ binary
-  - Completion/FIM templates — for code completion use case
-  - Stop sequence handling — model-specific EOS tokens
-  - Accurate token counting (prompt + completion)
-  - Template should be applied by a port (ChatTemplatePort), not hardcoded
-- [ ] L4. System prompt caching for TRT
-- [ ] L5. Decompose swap_model() per 50-line guideline
+### 4. Complete test coverage for all above
 
 ---
 
-## Test Coverage Gaps
+## Deferred — Later
 
-### Untested files:
-- [ ] `trt_model_loader.py`
-- [ ] `trt_prefill_adapter.py`
-- [ ] `trt_system_prompt_cache.py`
-- [ ] `trt_safetensors_cache_adapter.py`
+### Claude Code integration test
+Test with `ANTHROPIC_BASE_URL=http://localhost:8199 CLAUDE_CODE_ATTRIBUTION_HEADER=0 claude`.
+Requires: streaming works (done), tool_use works (done), agentic loop with
+multi-turn persistence. Cannot be automated — requires interactive Claude Code session.
 
-### Missing test scenarios:
-- [ ] Multi-turn (5+) with cache persistence on TRT
-- [ ] Cache persistence across server restart
-- [ ] Concurrent requests on TRT (thread safety)
-- [ ] Memory/disk budget enforcement under load
-- [ ] Server graceful shutdown with subprocess cleanup
-- [ ] `messages` parameter + `max_tokens=0` in fake_llm_inference.py
-- [ ] Property-based (hypothesis) tests for quantization
+### NemoClaw production deployment
+- Build Qwen3-Coder-Next engine on Thor (same pipeline as SmolLM2)
+- Configure NemoClaw to use `http://thor:8199` as LLM endpoint
+- Verify multi-turn agent conversations with persistent KV cache
+- Performance benchmarks (tok/s, TTFT, cache restore latency)
 
-### Test infrastructure:
-- [ ] CI job for TRT integration tests
-- [ ] Convert test_e2e_server.sh to pytest
-- [ ] Error simulation in fake_llm_inference.py
-
----
-
-## Verification Items (from plan)
-
-- [x] Unit tests pass everywhere: 1211 pass
-- [x] Lint + type check: clean
-- [x] On Thor: 4 real tests pass
-- [x] End-to-end: Anthropic API → "2 + 2 = 4"
-- [ ] Claude Code integration
-- [ ] OpenClaw/NemoClaw multi-turn with persistent KV cache
-- [ ] Cache persistence across server restart
+### Other deferred items
+- C5. README.md and docs/ update for dual-backend
+- H2. Model hot-swap orchestrator for TRT
+- H4. SBOM update (numpy, TensorRT-Edge-LLM)
+- H9. LRU vs LFU eviction analysis for NemoClaw/Claude Code workloads
+- L1. Performance benchmarks on Thor
+- L2. CITATION.cff version update
+- L4. System prompt caching for TRT (genAndSaveSystemPromptKVCache)
