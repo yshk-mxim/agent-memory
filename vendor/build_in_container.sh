@@ -1,0 +1,66 @@
+#!/bin/bash
+# SPDX-License-Identifier: Apache-2.0
+# Build TensorRT Edge-LLM inside a Docker container on Jetson AGX Thor.
+#
+# Prerequisites:
+#   - Container with cmake >= 3.20, nvcc (CUDA 13.0), TensorRT dev libs
+#   - agent-memory repo mounted at /workspace/agent-memory
+#
+# Usage:
+#   docker exec triton_build bash /workspace/agent-memory/vendor/build_in_container.sh
+#
+# Output:
+#   /workspace/agent-memory/vendor/TensorRT-Edge-LLM/build/examples/llm/llm_inference
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+VENDOR_DIR="${SCRIPT_DIR}"
+EDGELLM_DIR="${VENDOR_DIR}/TensorRT-Edge-LLM"
+BUILD_DIR="${EDGELLM_DIR}/build"
+
+echo "=== TensorRT Edge-LLM Build ==="
+echo "Vendor dir: ${VENDOR_DIR}"
+echo "Edge-LLM dir: ${EDGELLM_DIR}"
+
+# Clone if not present
+if [ ! -d "${EDGELLM_DIR}" ]; then
+    echo "=== Cloning TensorRT Edge-LLM ==="
+    cd "${VENDOR_DIR}"
+    git clone --depth 1 https://github.com/NVIDIA/TensorRT-Edge-LLM.git
+    cd "${EDGELLM_DIR}"
+    git submodule update --init
+fi
+
+# Configure
+echo "=== Configuring ==="
+mkdir -p "${BUILD_DIR}"
+cd "${BUILD_DIR}"
+# Apply sm_110 FMHA fix (Thor context attention kernel remap)
+if [ -f "${VENDOR_DIR}/patches/sm110_fmha_fix.py" ]; then
+    echo "=== Applying sm_110 FMHA patch ==="
+    python3 "${VENDOR_DIR}/patches/sm110_fmha_fix.py" \
+        "${EDGELLM_DIR}/cpp/kernels/contextAttentionKernels/contextFMHARunner.cpp"
+fi
+
+cmake "${EDGELLM_DIR}" \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCUDA_CTK_VERSION=13.0 \
+    -DTRT_PACKAGE_DIR=/usr \
+    -DBUILD_TESTS=OFF \
+    -DAARCH64_BUILD=1 \
+    -DCMAKE_CUDA_ARCHITECTURES=110
+
+# Build stock llm_inference
+echo "=== Building llm_inference ==="
+make -j"$(nproc)" llm_inference
+
+echo ""
+echo "=== Build complete ==="
+echo "Binary: ${BUILD_DIR}/examples/llm/llm_inference"
+ls -la "${BUILD_DIR}/examples/llm/llm_inference"
+
+# Verify
+echo ""
+echo "=== Verify ==="
+"${BUILD_DIR}/examples/llm/llm_inference" --help 2>&1 | head -3
