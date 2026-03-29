@@ -74,7 +74,7 @@ class TestSpecExtractor:
         from agent_memory.adapters.outbound.trt_spec_extractor import TRTSpecExtractor
 
         extractor = TRTSpecExtractor(fake_trt_subprocess)
-        spec = extractor.extract()
+        spec = extractor.extract_spec()
 
         assert spec.kv_format == "fp"
         assert spec.n_layers == SMOLLM2_N_LAYERS

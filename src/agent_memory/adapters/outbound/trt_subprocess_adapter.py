@@ -15,6 +15,7 @@ import json
 import os
 import subprocess
 import tempfile
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -59,6 +60,7 @@ class TRTSubprocessAdapter:
         self._timeout_s = timeout_s
         self._shm_dir = Path(shm_dir)
         self._process: subprocess.Popen[bytes] | None = None
+        self._lock = threading.Lock()  # Serialize NDJSON command/response pairs
 
     def start(self) -> None:
         """Start the llm_inference subprocess."""
@@ -133,33 +135,34 @@ class TRTSubprocessAdapter:
         """
         self._ensure_running()
 
-        # Inject prior KV cache if provided
-        inject_path = None
-        if cache is not None:
-            inject_path = self._write_cache_to_shm(cache)
-            self._send_command({"cmd": "inject_cache", "input_path": str(inject_path)})
-            inject_resp = self._read_response()
-            inject_path.unlink(missing_ok=True)
-            if "error" in inject_resp:
-                raise TRTEngineError(f"Cache inject failed: {inject_resp['error']}")
+        with self._lock:
+            # Inject prior KV cache if provided
+            inject_path = None
+            if cache is not None:
+                inject_path = self._write_cache_to_shm(cache)
+                self._send_command({"cmd": "inject_cache", "input_path": str(inject_path)})
+                inject_resp = self._read_response()
+                inject_path.unlink(missing_ok=True)
+                if "error" in inject_resp:
+                    raise TRTEngineError(f"Cache inject failed: {inject_resp['error']}")
 
-        # Build generate command
-        extract_path = self._shm_dir / f"kv_out_{os.getpid()}.safetensors"
-        cmd: dict[str, Any] = {
-            "cmd": "generate",
-            "max_tokens": max_tokens,
-            "temperature": temperature,
-            "extract_cache": True,
-            "kv_cache_path": str(extract_path),
-        }
+            # Build generate command
+            extract_path = self._shm_dir / f"kv_out_{os.getpid()}.safetensors"
+            cmd: dict[str, Any] = {
+                "cmd": "generate",
+                "max_tokens": max_tokens,
+                "temperature": temperature,
+                "extract_cache": True,
+                "kv_cache_path": str(extract_path),
+            }
 
-        if messages is not None:
-            cmd["messages"] = messages
-        else:
-            cmd["tokens"] = prompt_tokens
+            if messages is not None:
+                cmd["messages"] = messages
+            else:
+                cmd["tokens"] = prompt_tokens
 
-        self._send_command(cmd)
-        resp = self._read_response()
+            self._send_command(cmd)
+            resp = self._read_response()
 
         if "error" in resp:
             raise TRTEngineError(f"Generation failed: {resp['error']}")

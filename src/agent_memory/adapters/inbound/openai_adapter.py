@@ -37,7 +37,6 @@ from agent_memory.adapters.inbound.request_models import (
     OpenAIChatMessage,
 )
 from agent_memory.application.agent_cache_store import AgentCacheStore
-from agent_memory.application.batch_engine import BlockPoolBatchEngine
 from agent_memory.domain.errors import PoolExhaustedError, SemanticError
 
 logger = logging.getLogger(__name__)
@@ -633,8 +632,9 @@ async def create_chat_completion(  # noqa: C901, PLR0912, PLR0915
 
     # Get app dependencies (with null check)
     semantic_state = get_semantic_state(request)
-    batch_engine: BlockPoolBatchEngine = semantic_state.batch_engine
+    batch_engine = semantic_state.batch_engine  # None for TRT backend
     cache_store: AgentCacheStore = semantic_state.cache_store
+    trt_inference = getattr(semantic_state, "trt_inference", None)
 
     try:
         tools_arg = request_body.tools if request_body.tools else None
@@ -642,7 +642,7 @@ async def create_chat_completion(  # noqa: C901, PLR0912, PLR0915
         logger.debug(f"Prompt length: {len(prompt)} chars")
         logger.debug(f"Full prompt:\n{prompt}")
 
-        tokenizer = batch_engine.tokenizer
+        tokenizer = getattr(semantic_state, "tokenizer", None) or batch_engine.tokenizer
         chat_dicts = openai_messages_to_chat_dicts(request_body.messages, tools_arg)
         tokens, templated_prompt = await asyncio.to_thread(
             tokenize_with_chat_template,
@@ -661,6 +661,43 @@ async def create_chat_completion(  # noqa: C901, PLR0912, PLR0915
             logger.info(f"Cache hit: {agent_id} ({cached_blocks.total_tokens} tokens)")
         else:
             logger.info(f"Cache miss: {agent_id}")
+
+        # TRT backend: generation via TRTInferenceService
+        if trt_inference is not None and batch_engine is None:
+            messages = [
+                {
+                    "role": m.role,
+                    "content": m.content if isinstance(m.content, str) else str(m.content),
+                }
+                for m in request_body.messages
+            ]
+            result = trt_inference.generate(
+                agent_id=agent_id,
+                prompt=templated_prompt,
+                max_tokens=request_body.max_tokens or 256,
+                temperature=request_body.temperature or 0.7,
+                messages=messages,
+            )
+            return ChatCompletionsResponse(
+                id=f"chatcmpl-{agent_id[:12]}",
+                created=int(time.time()),
+                model=request_body.model or "trt",
+                choices=[
+                    OpenAIChatChoice(
+                        index=0,
+                        message=OpenAIChatMessage(
+                            role="assistant",
+                            content=result.text,
+                        ),
+                        finish_reason="stop",
+                    )
+                ],
+                usage=OpenAIChatCompletionUsage(
+                    prompt_tokens=len(tokens),
+                    completion_tokens=len(result.tokens),
+                    total_tokens=len(tokens) + len(result.tokens),
+                ),
+            )
 
         # Streaming vs non-streaming
         if request_body.stream:

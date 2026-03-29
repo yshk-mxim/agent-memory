@@ -29,7 +29,7 @@ class TestTRTSpecExtractor:
         mock_backend.extract_model_spec.return_value = expected_spec
 
         extractor = TRTSpecExtractor(mock_backend)
-        spec = extractor.extract()
+        spec = extractor.extract_spec()  # Conforms to SpecExtractorPort
 
         assert spec is expected_spec
         assert spec.kv_format == "fp"
