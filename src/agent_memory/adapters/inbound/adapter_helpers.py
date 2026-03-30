@@ -34,6 +34,36 @@ def extract_session_id(request: Request) -> str | None:
     return request.headers.get("X-Session-ID") or request.headers.get("X-Claude-Code-Session-Id")
 
 
+def extract_system_text(system: Any) -> str:
+    """Extract plain text from system prompt (string or list of SystemBlock).
+
+    Claude Code sends system as list[SystemBlock] with cache_control.
+    The regular Anthropic API sends it as a plain string. This handles both.
+
+    Args:
+        system: str or list of SystemBlock objects (with .text attribute)
+
+    Returns:
+        Concatenated system prompt text.
+    """
+    if not system:
+        return ""
+    if isinstance(system, str):
+        return system
+    # list[SystemBlock] — extract .text from each block
+    if isinstance(system, list):
+        parts = []
+        for block in system:
+            if hasattr(block, "text"):
+                parts.append(block.text)
+            elif isinstance(block, dict) and "text" in block:
+                parts.append(block["text"])
+            elif isinstance(block, str):
+                parts.append(block)
+        return "\n".join(parts)
+    return str(system)
+
+
 def strip_thinking_tags(text: str) -> str:
     """Strip <think>...</think> reasoning tags from model output.
 

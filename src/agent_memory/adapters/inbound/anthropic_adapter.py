@@ -24,6 +24,7 @@ from sse_starlette.sse import EventSourceResponse
 
 from agent_memory.adapters.inbound.adapter_helpers import (
     extract_session_id,
+    extract_system_text,
     get_semantic_state,
     run_step_for_uid,
     strip_thinking_tags,
@@ -809,11 +810,7 @@ async def create_message(request_body: MessagesRequest, request: Request):  # no
             if prefix_cache is not None:
                 system_text = ""
                 if request_body.system:
-                    system_text = (
-                        request_body.system
-                        if isinstance(request_body.system, str)
-                        else json.dumps(request_body.system)
-                    )
+                    system_text = extract_system_text(request_body.system)
                 tools_text = ""
                 if request_body.tools:
                     tools_text = json.dumps(
@@ -833,11 +830,7 @@ async def create_message(request_body: MessagesRequest, request: Request):  # no
             # Build messages list with system prompt prepended
             messages = []
             if request_body.system:
-                system_text = (
-                    request_body.system
-                    if isinstance(request_body.system, str)
-                    else json.dumps(request_body.system)
-                )
+                system_text = extract_system_text(request_body.system)
                 messages.append({"role": "system", "content": system_text})
 
             # Add tools as part of system context if present
