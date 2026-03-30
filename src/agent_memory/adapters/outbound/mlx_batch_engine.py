@@ -671,15 +671,9 @@ class BlockPoolBatchEngine:
                                 f"expected tokens ({cache.total_tokens}). "
                                 f"This would cause shape mismatch."
                             )
-                        if (
-                            first_size is not None
-                            and first_offset is not None
-                            and first_size != first_offset
-                        ):
-                            raise GenerationError(
-                                f"Cache size/offset mismatch: layer 0 size() ({first_size}) != "
-                                f"offset ({first_offset}). BatchGenerator won't recognize cache."
-                            )
+                        # Note: size() vs offset check removed for mlx-lm 0.31+
+                        # Hybrid caches (ArraysCache) report size() differently
+                        # from offset. The offset check above is sufficient.
 
                     loaded_desc = (
                         f"{first_offset} (partial)"
@@ -1741,10 +1735,19 @@ class BlockPoolBatchEngine:
         if use_kv_cache:
             # Production mode: use real MLX KVCache objects
             import mlx.core as mx
-            from mlx_lm.models.cache import KVCache, QuantizedKVCache
+            from mlx_lm.models.cache import KVCache, QuantizedKVCache, make_prompt_cache
 
-            # Start with empty caches; overwrite with data below
-            cache: list[Any] = [KVCache() for _ in range(self._spec.n_layers)]
+            # Create model-native cache template (correct types per layer:
+            # KVCache for attention, ArraysCache for Mamba/SSM in hybrid models)
+            try:
+                cache: list[Any] = list(make_prompt_cache(self._model))
+                # Trim or pad to match spec
+                if len(cache) > self._spec.n_layers:
+                    cache = cache[: self._spec.n_layers]
+                while len(cache) < self._spec.n_layers:
+                    cache.append(KVCache())
+            except Exception:
+                cache = [KVCache() for _ in range(self._spec.n_layers)]
         else:
             # Test mode: use tuples (FakeBatchGenerator expects tuples)
             mx = None
