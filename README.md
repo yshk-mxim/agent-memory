@@ -1,5 +1,11 @@
 # agent-memory
 
+> **WARNING: This branch (`feat/trt-backend`) is v1.1.0-alpha — UNSTABLE.**
+> TRT backend and mlx-lm 0.31 upgrade are functional but NOT production-hardened.
+> Interactive testing with Claude Code CLI and NemoClaw still pending.
+> Cache persistence verified but not load-tested. API surface may change.
+> **For stable use, stay on `main` (v1.0.x).**
+
 [![DOI](https://zenodo.org/badge/1156636930.svg)](https://doi.org/10.5281/zenodo.18793752)
 [![CI](https://github.com/yshk-mxim/agent-memory/actions/workflows/ci.yml/badge.svg)](https://github.com/yshk-mxim/agent-memory/actions/workflows/ci.yml)
 
