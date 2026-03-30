@@ -119,24 +119,30 @@ class MLXCacheAdapter:
     def get_sequence_length(self, k_tensor: Any) -> int:
         """Extract sequence length from K tensor.
 
+        For KVCache tensors (4D: batch, heads, seq, dim): returns shape[2].
+        For ArraysCache state tensors (3D: batch, heads, state_dim): returns 0
+        (these are SSM states, not KV caches — no sequence axis).
+
         Args:
-            k_tensor: K tensor (mx.array or quantized tuple)
-                - Float: shape [n_kv_heads, head_dim, seq_len]
-                - Quantized: (weights, scales, biases) where weights shape has seq_len
+            k_tensor: K tensor from cache.state[0].
 
         Returns:
-            Sequence length (axis=2 dimension).
+            Sequence length, or 0 for non-KV cache layers.
         """
-        # Handle quantized tuple (weights, scales, biases)
-        if isinstance(k_tensor, tuple) and len(k_tensor) == 3:
-            weights = k_tensor[0]  # Weights tensor has the sequence dimension
-            # Weights are packed: shape is [..., seq_len_packed]
-            # For 4-bit quantization with group_size=64, need to multiply by 8
-            # But typically weights shape already reflects the unpacked sequence length
-            return int(weights.shape[2])
+        if k_tensor is None:
+            return 0
 
-        # Handle regular float tensor
-        return int(k_tensor.shape[2])  # Cast to int for type safety
+        # Quantized tuple (weights, scales, biases)
+        if isinstance(k_tensor, tuple) and len(k_tensor) == 3:
+            return int(k_tensor[0].shape[2])
+
+        # 4D tensor (batch, heads, seq_len, head_dim) — KVCache
+        ndim = 4
+        if hasattr(k_tensor, "ndim") and k_tensor.ndim == ndim:
+            return int(k_tensor.shape[2])
+
+        # 3D tensor (batch, heads, state_dim) — ArraysCache SSM state, NOT seq_len
+        return 0
 
     def slice_cache_tensor(
         self,
@@ -167,15 +173,87 @@ class MLXCacheAdapter:
             biases_slice = biases[:, :, start_token:end_token] if biases is not None else None
             return (weights_slice, scales_slice, biases_slice)
 
-        # Float format - validate bounds
-        seq_len = tensor.shape[2]
-        if start_token < 0 or end_token > seq_len or start_token > end_token:
-            raise GenerationError(
-                f"Invalid slice bounds [{start_token}:{end_token}] for tensor "
-                f"with sequence length {seq_len}"
-            )
+        # 4D float tensor (batch, heads, seq, dim) — KVCache
+        ndim_kv = 4
+        if hasattr(tensor, "ndim") and tensor.ndim == ndim_kv:
+            seq_len = tensor.shape[2]
+            if start_token < 0 or end_token > seq_len or start_token > end_token:
+                raise GenerationError(
+                    f"Invalid slice bounds [{start_token}:{end_token}] for tensor "
+                    f"with sequence length {seq_len}"
+                )
+            return tensor[:, :, start_token:end_token, :]
 
-        return tensor[:, :, start_token:end_token]
+        # 3D tensor (ArraysCache SSM state) — return as-is (no sequence axis)
+        return tensor
+
+    def get_cache_offset(self, layer_cache: Any) -> int:
+        """Get the current sequence offset of a cache layer.
+
+        Args:
+            layer_cache: A single layer's cache object (KVCache or ArraysCache).
+
+        Returns:
+            Number of tokens currently in the cache.
+        """
+        if hasattr(layer_cache, "offset"):
+            return int(layer_cache.offset)
+        if hasattr(layer_cache, "size"):
+            return int(layer_cache.size())
+        return 0
+
+    def trim_cache(self, kv_cache: list[Any], target_length: int) -> None:
+        """Trim all cache layers to target sequence length.
+
+        Args:
+            kv_cache: List of cache objects (one per layer).
+            target_length: Target sequence length.
+        """
+        import mlx.core as mx
+
+        for layer_cache in kv_cache:
+            current = self.get_cache_offset(layer_cache)
+            if current > target_length and hasattr(layer_cache, "trim"):
+                layer_cache.trim(current - target_length)
+
+    def eval_cache_tensors(self, kv_cache: list[Any]) -> None:
+        """Force evaluation of all cache tensors.
+
+        Args:
+            kv_cache: List of cache objects.
+        """
+        import mlx.core as mx
+
+        tensors: list[Any] = []
+        for c in kv_cache:
+            if hasattr(c, "state"):
+                st = c.state
+                if isinstance(st, (list, tuple)):
+                    tensors.extend(t for t in st if hasattr(t, "shape"))
+        if tensors:
+            mx.eval(*tensors)
+
+    def extract_kv_from_cache(self, cache: list[Any]) -> list[tuple[Any, Any]]:
+        """Extract (K, V) tensor pairs from cache layers.
+
+        Works with both KVCache (.state returns [k, v]) and ArraysCache
+        (.state returns SSM state tensors).
+
+        Args:
+            cache: List of cache layer objects.
+
+        Returns:
+            List of (k_tensor, v_tensor) per layer. For ArraysCache layers,
+            returns the state tensors as a pair.
+        """
+        result = []
+        for layer_cache in cache:
+            st = layer_cache.state if hasattr(layer_cache, "state") else []
+            if isinstance(st, (list, tuple)) and len(st) >= 2:
+                result.append((st[0], st[1]))
+            else:
+                result.append((None, None))
+        return result
 
     def create_batch_generator(
         self,

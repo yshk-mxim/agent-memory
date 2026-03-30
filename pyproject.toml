@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "agent-memory"
 dynamic = ["version"]
-description = "Persistent KV cache for multi-agent LLM systems on Apple Silicon"
+description = "Persistent KV cache for multi-agent LLM inference on edge devices"
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.11"
@@ -30,18 +30,16 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 dependencies = [
-    "mlx==0.30.3",
-    # mlx-lm==0.30.4 is installed separately with --no-deps (see scripts/setup.sh).
-    # Reason: mlx-lm pins transformers==5.0.0rc1 which has a SentencePiece bug
-    # (huggingface/transformers#43066). We pin transformers==4.57.6 instead.
-    "sentencepiece==0.2.1",         # mlx-lm runtime dep
-    "protobuf==6.32.0",            # mlx-lm runtime dep
-    "fastapi==0.122.0",
-    "uvicorn[standard]==0.38.0",
-    "pydantic==2.12.4",
-    "pydantic-settings==2.12.0",
-    "safetensors==0.7.0",
-    "transformers==4.57.6",         # v5.0.0rc1 breaks SentencePiece decode (gh #43066)
+    "mlx>=0.31.0",
+    "mlx-lm>=0.31.0",
+    "sentencepiece>=0.2.0",
+    "protobuf>=6.0.0",
+    "fastapi>=0.122.0",
+    "uvicorn[standard]>=0.38.0",
+    "pydantic>=2.12.0",
+    "pydantic-settings>=2.12.0",
+    "safetensors>=0.7.0",
+    "transformers>=5.4.0",
     "sse-starlette==3.2.0",
     "structlog==25.5.0",
     "prometheus-client==0.24.1",

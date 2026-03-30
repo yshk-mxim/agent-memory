@@ -363,12 +363,28 @@ async def lifespan(app: FastAPI):
             model = None  # No MLX model
         else:
             # --- MLX backend path ---
-            # Apply fused Q4 attention patch (must happen before model forward pass)
-            from agent_memory.adapters.outbound.mlx_fused_attention import (
-                apply_fused_attention_patch,
-            )
+            # Apply fused Q4 attention patch for mlx-lm < 0.31 (native Q4 support
+            # was added in 0.31, making these patches unnecessary).
+            try:
+                import mlx_lm
 
-            apply_fused_attention_patch()
+                mlx_lm_version = tuple(int(x) for x in mlx_lm.__version__.split(".")[:2])
+                if mlx_lm_version < (0, 31):
+                    from agent_memory.adapters.outbound.mlx_fused_attention import (
+                        apply_fused_attention_patch,
+                    )
+
+                    apply_fused_attention_patch()
+                    logger.info("applied_q4_patches", mlx_lm_version=mlx_lm.__version__)
+                else:
+                    logger.info(
+                        "skipping_q4_patches",
+                        mlx_lm_version=mlx_lm.__version__,
+                        reason="native Q4 KV cache in mlx-lm >= 0.31",
+                    )
+            except (ImportError, ValueError):
+                logger.warning("mlx_lm_version_check_failed")
+
             model, tokenizer, model_spec = _load_model_and_extract_spec(settings)
 
         # Initialize components (backend-agnostic)
@@ -503,8 +519,8 @@ async def lifespan(app: FastAPI):
             scheduler_enabled=(scheduler is not None),
         )
 
-        # Validate Q4 pipeline patches applied correctly (MLX only)
-        if settings.backend == "mlx":
+        # Validate Q4 pipeline patches (MLX < 0.31 only)
+        if settings.backend == "mlx" and mlx_lm_version < (0, 31):  # type: ignore[possibly-undefined]
             from agent_memory.adapters.outbound.mlx_quantized_extensions import (
                 validate_q4_pipeline,
             )

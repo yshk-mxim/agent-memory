@@ -87,6 +87,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - docs/configuration.md: TRT settings table, backend selection, agent settings.
 - docs/architecture/overview.md: dual-backend description.
 - docs/deployment.md: Jetson Thor deployment path.
+- Upgraded to mlx-lm 0.31+ / mlx 0.31+ / transformers 5.4+. Native Q4 KV
+  cache, Qwen3.5 hybrid architecture (KVCache + ArraysCache/Mamba layers).
+- MLX cache adapter handles both KVCache (4D: batch,heads,seq,dim) and
+  ArraysCache (3D: batch,heads,state_dim) tensor layouts. Sequence length
+  detection skips SSM state tensors. Slice operations only apply to KV layers.
+- Batch engine uses `trim()` and `update_and_fetch()` APIs instead of direct
+  `.keys`/`.values` attribute access. Cache eval via adapter method.
+- Q4 monkeypatches conditionally skipped for mlx-lm >= 0.31 (native support).
+- Dependencies unpinned: `mlx>=0.31.0`, `mlx-lm>=0.31.0`, `transformers>=5.4.0`.
+- Verified: Qwen3.5-9B-MLX-4bit generates correctly on Apple Silicon.
 - Configurable eviction policy: `SEMANTIC_AGENT_EVICTION_POLICY` (`lru`, `lfu`,
   `lru-lfu`). Default `lru-lfu` hybrid keeps both frequently-used system prompts
   (NemoClaw/Claude Code) and recently-used conversation caches warm.

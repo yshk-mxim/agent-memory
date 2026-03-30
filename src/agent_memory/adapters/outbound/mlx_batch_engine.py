@@ -1264,7 +1264,7 @@ class BlockPoolBatchEngine:
             if logits_processors_list is not None:
                 insert_kwargs["logits_processors"] = logits_processors_list
 
-            cached_tokens = kv_caches[0].offset if hasattr(kv_caches[0], "offset") else 0
+            cached_tokens = self._cache_adapter.get_cache_offset(kv_caches[0])
             logger.debug(
                 "[SUBMIT_WITH_CACHE] agent=%s, cache_tokens=%d, max_tokens=%d",
                 agent_id,
@@ -1695,9 +1695,8 @@ class BlockPoolBatchEngine:
     def _slice_cache_to_length(self, kv_cache: list[Any], target_length: int) -> None:
         """Slice cache tensors to exact target length (in-place).
 
-        MLX-LM's trim_prompt_cache only adjusts offset, not tensor shapes.
-        This method properly slices the underlying tensors to prevent
-        shape mismatch errors during attention.
+        Uses the cache object's trim() method (mlx-lm 0.31+) or falls back
+        to direct tensor slicing for older cache types.
 
         Args:
             kv_cache: List of cache objects (one per layer)
@@ -1706,46 +1705,18 @@ class BlockPoolBatchEngine:
         import mlx.core as mx
 
         for layer_cache in kv_cache:
-            if layer_cache.keys is None:
+            # Use trim() if available (mlx-lm 0.31+ KVCache)
+            if hasattr(layer_cache, "trim") and hasattr(layer_cache, "offset"):
+                current_len = layer_cache.offset
+                if current_len > target_length:
+                    layer_cache.trim(current_len - target_length)
                 continue
 
-            # Handle QuantizedKVCache (tuple of 3 tensors)
-            if isinstance(layer_cache.keys, tuple) and len(layer_cache.keys) == 3:
-                k_q, k_s, k_z = layer_cache.keys
-                v_q, v_s, v_z = layer_cache.values
+            # Fallback for ArraysCache or other types — skip slicing
+            # (ArraysCache manages its own internal state)
 
-                # Slice all tensors to target length
-                layer_cache.keys = (
-                    k_q[..., :target_length, :],
-                    k_s[..., :target_length, :],
-                    k_z[..., :target_length, :],
-                )
-                layer_cache.values = (
-                    v_q[..., :target_length, :],
-                    v_s[..., :target_length, :],
-                    v_z[..., :target_length, :],
-                )
-            else:
-                # Regular FP16 cache
-                k, v = layer_cache.keys, layer_cache.values
-                layer_cache.keys = k[..., :target_length, :]
-                layer_cache.values = v[..., :target_length, :]
-
-            # Update offset to match sliced length
-            layer_cache.offset = target_length
-
-        # Force evaluation to materialize ALL sliced tensors (keys AND values).
-        # Both must be concrete before BatchGenerator uses them for attention.
-        tensors_to_eval: list[Any] = []
-        for c in kv_cache:
-            if c.keys is not None:
-                if isinstance(c.keys, tuple):
-                    tensors_to_eval.extend(t for t in c.keys if t is not None)
-                    tensors_to_eval.extend(t for t in c.values if t is not None)
-                else:
-                    tensors_to_eval.extend([c.keys, c.values])
-        if tensors_to_eval:
-            mx.eval(*tensors_to_eval)
+        # Force evaluation via adapter
+        self._cache_adapter.eval_cache_tensors(kv_cache)
 
     def _reconstruct_cache(
         self,
@@ -1855,18 +1826,19 @@ class BlockPoolBatchEngine:
                     kv_group_size = getattr(self._spec, "kv_group_size", 64) or 64
 
                     kv_cache = QuantizedKVCache(group_size=kv_group_size, bits=kv_bits)
-                    kv_cache.keys = (k_weights, k_scales, k_biases)
-                    kv_cache.values = (v_weights, v_scales, v_biases)
-                    kv_cache.offset = actual_tokens
+                    # Use update_and_fetch to properly set cache state
+                    kv_cache.update_and_fetch(
+                        (k_weights, k_scales, k_biases),
+                        (v_weights, v_scales, v_biases),
+                    )
 
-                    # Collect tensors for batched eval (avoid per-layer GPU sync)
                     deferred_eval.extend([k_weights, k_scales, v_weights, v_scales])
                     if k_biases is not None:
                         deferred_eval.extend([k_biases, v_biases])
                 else:
                     kv_cache = KVCache()
-                    kv_cache.state = (k_full, v_full)
-                    kv_cache.offset = actual_tokens
+                    # Use update_and_fetch for proper buffer management
+                    kv_cache.update_and_fetch(k_full, v_full)
                     deferred_eval.extend([k_full, v_full])
 
                 cache.append(kv_cache)
@@ -2022,8 +1994,13 @@ class BlockPoolBatchEngine:
                 prompt_text=prompt_text,
             )
 
-        first_k = cache[0][0]
-        seq_len = self._cache_adapter.get_sequence_length(first_k)
+        # Find seq_len from the first KVCache layer (4D tensor), not ArraysCache (3D)
+        seq_len = 0
+        for k_tensor, _ in cache:
+            candidate = self._cache_adapter.get_sequence_length(k_tensor)
+            if candidate > 0:
+                seq_len = candidate
+                break
         n_blocks = (seq_len + self._spec.block_tokens - 1) // self._spec.block_tokens
         blocks_dict: dict[int, list[KVBlock]] = {}
 
