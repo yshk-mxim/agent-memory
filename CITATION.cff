@@ -5,7 +5,7 @@ title: "Agent Memory Below the Prompt: Persistent Q4 KV Cache for Multi-Agent LL
 authors:
   - family-names: Shkolnikov
     given-names: Yakov Pyotr
-version: 1.1.0
+version: 1.1.0-alpha
 date-released: 2026-03-29
 license: MIT
 url: "https://arxiv.org/abs/2603.04428"

@@ -7,7 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [1.1.0] — TRT Backend + MLX 0.31 Upgrade (Unreleased)
+## [1.1.0-alpha] — TRT Backend + MLX 0.31 Upgrade (Unreleased)
+
+> **Status: Alpha.** TRT backend and mlx-lm 0.31 cache pipeline are functional
+> but not production-hardened. Interactive testing with Claude Code CLI and
+> NemoClaw/OpenClaw pending. Cache persistence across restarts verified on
+> Mac (MLX) and Thor (TRT) but not load-tested. API surface may change.
 
 ### Added
 
