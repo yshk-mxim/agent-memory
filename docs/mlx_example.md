@@ -107,7 +107,6 @@ Add to `~/.claude/settings.json` (create if it doesn't exist):
         "ANTHROPIC_MODEL": "local-model",
         "CLAUDE_CODE_ATTRIBUTION_HEADER": "0",
         "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
-        "DISABLE_PROMPT_CACHING": "1",
         "MAX_THINKING_TOKENS": "0"
     },
     "permissions": {
