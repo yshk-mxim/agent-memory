@@ -35,9 +35,18 @@ Subsequent starts load from cache (`~/.cache/huggingface/`).
 **Note:** `KV_BITS=none` uses FP16 KV cache. Q4 KV cache on mlx-lm 0.31
 requires further testing. FP16 uses more memory but is fully verified.
 
-**Note:** Qwen3.5-9B uses thinking mode by default. Responses start with
-`Thinking Process:` followed by reasoning steps. Set `MAX_THINKING_TOKENS=0`
-in Claude Code to disable, or use the model as-is for reasoning tasks.
+**Note on Qwen3.5 thinking mode:** Qwen3.5 models enter thinking loops by
+default, generating `<think>` tags endlessly. agent-memory strips thinking
+tags from output, but tokens are still wasted. For Claude Code agentic use,
+**Qwen3.5-35B-A3B** (MoE, 3B active) is recommended with thinking disabled.
+Alternatively, use `Qwen2.5-14B-Instruct` for stable instruction following
+(no tool calling) or `gemma-3-12b-it` (default, no thinking).
+
+**For full agentic Claude Code (tool use, file read/write):** the recommended
+setup is `llama.cpp` + `Qwen3.5-35B-A3B-GGUF:Q4_K_M` with
+`--chat-template-kwargs '{"enable_thinking": false}'`. See the
+[Unsloth guide](https://unsloth.ai/docs/basics/claude-code) for details.
+agent-memory can sit in front of llama.cpp as a caching proxy.
 
 ## 3. Verify it works
 
@@ -95,9 +104,19 @@ Add to `~/.claude/settings.json` (create if it doesn't exist):
     "env": {
         "ANTHROPIC_BASE_URL": "http://localhost:8000",
         "ANTHROPIC_AUTH_TOKEN": "local",
+        "ANTHROPIC_MODEL": "local-model",
         "CLAUDE_CODE_ATTRIBUTION_HEADER": "0",
         "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+        "DISABLE_PROMPT_CACHING": "1",
         "MAX_THINKING_TOKENS": "0"
+    },
+    "permissions": {
+        "allow": [
+            "Bash(npm*)", "Bash(node*)", "Bash(python*)", "Bash(pip*)",
+            "Bash(git*)", "Bash(ls*)", "Bash(cat*)", "Bash(find*)",
+            "Bash(grep*)", "Bash(rg*)", "Bash(mkdir*)", "Bash(touch*)",
+            "Read", "Write", "Edit", "Glob", "Grep"
+        ]
     }
 }
 ```
