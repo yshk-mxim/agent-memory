@@ -107,7 +107,8 @@ class MLXCacheAdapter:
                         f"K/V shape mismatch in block {i}: K={k_t.shape[:2]}, V={v_t.shape[:2]}"
                     )
 
-        # Concatenate along sequence axis to form shape [n_kv_heads, head_dim, total_seq_len]
+        # Concatenate along sequence axis (axis=2).
+        # 4D layout: (batch, n_kv_heads, total_seq_len, head_dim)
         k_full = mx.concatenate(k_tensors, axis=2)
         v_full = mx.concatenate(v_tensors, axis=2)
 

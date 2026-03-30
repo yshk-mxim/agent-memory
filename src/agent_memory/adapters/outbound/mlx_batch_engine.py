@@ -1702,8 +1702,6 @@ class BlockPoolBatchEngine:
             kv_cache: List of cache objects (one per layer)
             target_length: Target sequence length to slice to
         """
-        import mlx.core as mx
-
         for layer_cache in kv_cache:
             # Use trim() if available (mlx-lm 0.31+ KVCache)
             if hasattr(layer_cache, "trim") and hasattr(layer_cache, "offset"):
@@ -1826,11 +1824,16 @@ class BlockPoolBatchEngine:
                     kv_group_size = getattr(self._spec, "kv_group_size", 64) or 64
 
                     kv_cache = QuantizedKVCache(group_size=kv_group_size, bits=kv_bits)
-                    # Use update_and_fetch to properly set cache state
-                    kv_cache.update_and_fetch(
-                        (k_weights, k_scales, k_biases),
-                        (v_weights, v_scales, v_biases),
-                    )
+                    # CRITICAL: Set .keys/.values/.offset directly instead of
+                    # update_and_fetch(). QuantizedKVCache.update_and_fetch()
+                    # expects raw float 4D tensors and quantizes internally —
+                    # passing already-quantized tuples would crash because
+                    # tuples don't have .shape.  Direct assignment avoids
+                    # double-quantization and correctly restores pre-quantized
+                    # cache state.
+                    kv_cache.keys = (k_weights, k_scales, k_biases)
+                    kv_cache.values = (v_weights, v_scales, v_biases)
+                    kv_cache.offset = actual_tokens
 
                     deferred_eval.extend([k_weights, k_scales, v_weights, v_scales])
                     if k_biases is not None:
@@ -1838,6 +1841,8 @@ class BlockPoolBatchEngine:
                 else:
                     kv_cache = KVCache()
                     # Use update_and_fetch for proper buffer management
+                    # KVCache.update_and_fetch expects 4D float tensors
+                    # (batch, heads, seq, dim) which is what we have
                     kv_cache.update_and_fetch(k_full, v_full)
                     deferred_eval.extend([k_full, v_full])
 
@@ -1893,31 +1898,52 @@ class BlockPoolBatchEngine:
                 prompt_text=prompt_text,
             )
 
-        # Convert KVCache objects to (K, V) tuples if needed
+        # Convert KVCache objects to (K, V) tuples if needed.
+        # KVCache/QuantizedKVCache .state → tuple of 2 (k, v)
+        # ArraysCache .state → list of N arrays (SSM state, not KV)
         first_layer = cache[0]
         if hasattr(first_layer, "state"):
             cache = [kv_cache.state for kv_cache in cache]
-            if cache and cache[0][0] is not None:
-                k_sample = cache[0][0]
+            # Find first KV layer (tuple of 2) for format detection
+            first_kv = next(
+                (s for s in cache if isinstance(s, tuple) and len(s) == 2 and s[0] is not None),
+                None,
+            )
+            if first_kv is not None:
+                k_sample = first_kv[0]
                 logger.debug(
                     f"Cache format check: type={type(k_sample)}, "
                     f"is_tuple={isinstance(k_sample, tuple)}, "
                     f"dtype={getattr(k_sample, 'dtype', None)}"
                 )
 
-        # Quantize float cache to save GPU memory
+        # Quantize float cache to save GPU memory.
+        # Only process KV layers (tuples of 2); skip ArraysCache layers (lists).
         kv_bits = self._spec.kv_bits
         kv_group_size = self._spec.kv_group_size or 64
 
-        if cache and len(cache) > 0 and cache[0][0] is not None:
-            k_sample = cache[0][0]
+        # Find first KV sample for format detection
+        first_kv_sample = None
+        for layer_state in cache:
+            is_kv = isinstance(layer_state, tuple) and len(layer_state) == 2
+            if is_kv and layer_state[0] is not None:
+                first_kv_sample = layer_state[0]
+                break
+
+        if first_kv_sample is not None:
             # Check if float (not already quantized) AND kv_bits is set (not None)
-            if not isinstance(k_sample, tuple) and kv_bits is not None:
+            if not isinstance(first_kv_sample, tuple) and kv_bits is not None:
                 import mlx.core as mx
 
                 quantized_cache = []
                 deferred_quant_eval: list[Any] = []
-                for _layer_id, (k, v) in enumerate(cache):
+                for _layer_id, layer_state in enumerate(cache):
+                    # Skip non-KV layers (ArraysCache SSM state)
+                    if not (isinstance(layer_state, tuple) and len(layer_state) == 2):
+                        quantized_cache.append(layer_state)
+                        continue
+
+                    k, v = layer_state
                     if k is None:
                         quantized_cache.append((None, None))
                         continue
@@ -1947,13 +1973,19 @@ class BlockPoolBatchEngine:
                     f"Quantized cache for {agent_id}: {len(cache)} layers, "
                     f"bits={kv_bits}, group_size={kv_group_size}"
                 )
-            elif not isinstance(k_sample, tuple):
+            elif not isinstance(first_kv_sample, tuple):
                 logger.info(
                     f"Keeping FP16 cache for {agent_id}: {len(cache)} layers "
                     f"(kv_bits=None, no quantization)"
                 )
 
-        if cache[0][0] is None:
+        # Check if all KV layers have None keys (empty cache)
+        all_kv_none = all(
+            (isinstance(s, tuple) and len(s) == 2 and s[0] is None)
+            or not (isinstance(s, tuple) and len(s) == 2)
+            for s in cache
+        )
+        if all_kv_none:
             return AgentBlocks(
                 agent_id=agent_id,
                 blocks={},
@@ -1963,13 +1995,23 @@ class BlockPoolBatchEngine:
             )
 
         # Handle FakeTensor in unit tests (TODO: replace with dependency injection)
-        first_tensor = cache[0][0]
-        if first_tensor.__class__.__name__ == "FakeTensor":
+        # Safely find first KV-layer tensor for FakeTensor check
+        first_tensor = None
+        for layer_state in cache:
+            is_kv = isinstance(layer_state, tuple) and len(layer_state) == 2
+            if is_kv and layer_state[0] is not None:
+                first_tensor = layer_state[0]
+                break
+        if first_tensor is not None and first_tensor.__class__.__name__ == "FakeTensor":
             seq_len = first_tensor.shape[2]
             n_blocks = (seq_len + self._spec.block_tokens - 1) // self._spec.block_tokens
             fake_blocks: dict[int, list[KVBlock]] = {}
             try:
-                for layer_id, (k, v) in enumerate(cache):
+                for layer_id, layer_state in enumerate(cache):
+                    # Skip non-KV layers (ArraysCache SSM state)
+                    if not (isinstance(layer_state, tuple) and len(layer_state) == 2):
+                        continue
+                    k, v = layer_state
                     if k is None:
                         continue
                     allocated_blocks = self._pool.allocate(n_blocks, layer_id, agent_id)
@@ -1994,9 +2036,16 @@ class BlockPoolBatchEngine:
                 prompt_text=prompt_text,
             )
 
-        # Find seq_len from the first KVCache layer (4D tensor), not ArraysCache (3D)
+        # Find seq_len from the first KVCache layer (4D tensor), not ArraysCache (3D).
+        # Use safe indexing instead of (k, _) destructuring to handle non-KV layers.
         seq_len = 0
-        for k_tensor, _ in cache:
+        for layer_state in cache:
+            # Only inspect KV layers (tuples of 2), skip ArraysCache (lists)
+            if not (isinstance(layer_state, tuple) and len(layer_state) == 2):
+                continue
+            k_tensor = layer_state[0]
+            if k_tensor is None:
+                continue
             candidate = self._cache_adapter.get_sequence_length(k_tensor)
             if candidate > 0:
                 seq_len = candidate
@@ -2005,7 +2054,11 @@ class BlockPoolBatchEngine:
         blocks_dict: dict[int, list[KVBlock]] = {}
 
         try:
-            for layer_id, (k, v) in enumerate(cache):
+            for layer_id, layer_state in enumerate(cache):
+                # Skip non-KV layers (ArraysCache SSM state — no sequence axis)
+                if not (isinstance(layer_state, tuple) and len(layer_state) == 2):
+                    continue
+                k, v = layer_state
                 if k is None:
                     continue  # Skip empty layers (sliding window)
 
