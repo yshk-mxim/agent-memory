@@ -77,30 +77,60 @@ curl -s http://localhost:8000/v1/messages \
 
 ## 4. Connect Claude Code CLI
 
+### One-time setup (skip login screen)
+
+Add to `~/.claude.json` (create if it doesn't exist):
+
+```json
+{
+    "hasCompletedOnboarding": true,
+    "primaryApiKey": "sk-local"
+}
+```
+
+Add to `~/.claude/settings.json` (create if it doesn't exist):
+
+```json
+{
+    "env": {
+        "ANTHROPIC_BASE_URL": "http://localhost:8000",
+        "ANTHROPIC_AUTH_TOKEN": "local",
+        "CLAUDE_CODE_ATTRIBUTION_HEADER": "0",
+        "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+        "MAX_THINKING_TOKENS": "0"
+    }
+}
+```
+
+**`CLAUDE_CODE_ATTRIBUTION_HEADER=0`** must be in `settings.json`, not as an env
+var — it prevents a header that invalidates the KV cache with local models.
+
+### Headless mode (scripted)
+
 ```bash
 ANTHROPIC_BASE_URL=http://localhost:8000 \
-ANTHROPIC_API_KEY=local \
-DISABLE_TELEMETRY=1 \
-CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 \
+ANTHROPIC_AUTH_TOKEN=local \
 MAX_THINKING_TOKENS=0 \
 claude --bare -p "What files are in this directory?" \
     --output-format json \
     --max-turns 3
 ```
 
-For interactive mode:
+### Interactive mode
 
 ```bash
-ANTHROPIC_BASE_URL=http://localhost:8000 \
-ANTHROPIC_API_KEY=local \
-MAX_THINKING_TOKENS=0 \
 claude
 ```
 
-**Required server capabilities** (all implemented):
-- Streaming SSE (`stream: true`)
-- Tool use (`tool_use` content blocks)
-- `X-Claude-Code-Session-Id` header (KV cache persistence across turns)
+(Uses settings from `~/.claude/settings.json` — no env vars needed after setup.)
+
+### What the server must support (all implemented)
+
+- Streaming SSE (`stream: true`) with Anthropic event format
+- Tool use (`tool_use` content blocks in responses)
+- `X-Claude-Code-Session-Id` header → KV cache persistence across turns
+- `/v1/messages` endpoint (Anthropic Messages API)
+- `anthropic-version` header forwarded (accepted, no version gating)
 
 ## 5. Connect NemoClaw / OpenClaw
 
