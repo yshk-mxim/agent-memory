@@ -210,8 +210,6 @@ class MLXCacheAdapter:
             kv_cache: List of cache objects (one per layer).
             target_length: Target sequence length.
         """
-        import mlx.core as mx
-
         for layer_cache in kv_cache:
             current = self.get_cache_offset(layer_cache)
             if current > target_length and hasattr(layer_cache, "trim"):

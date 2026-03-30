@@ -34,6 +34,19 @@ def extract_session_id(request: Request) -> str | None:
     return request.headers.get("X-Session-ID") or request.headers.get("X-Claude-Code-Session-Id")
 
 
+def strip_thinking_tags(text: str) -> str:
+    """Strip <think>...</think> reasoning tags from model output.
+
+    Qwen3.5 and other reasoning models wrap chain-of-thought in think tags.
+    Returns the final answer after </think>, or original text if no tags.
+    """
+    if "</think>" in text:
+        return text.rsplit("</think>", 1)[-1].strip()
+    if text.startswith("<think>"):
+        return text.replace("<think>", "").strip()
+    return text
+
+
 def get_semantic_state(request: Request) -> Any:
     """Safely get semantic state from request, raising clear error if not initialized.
 

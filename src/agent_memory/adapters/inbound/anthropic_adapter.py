@@ -26,6 +26,7 @@ from agent_memory.adapters.inbound.adapter_helpers import (
     extract_session_id,
     get_semantic_state,
     run_step_for_uid,
+    strip_thinking_tags,
     tokenize_with_chat_template,
     try_parse_json_at,
 )
@@ -76,18 +77,21 @@ def generate_agent_id_from_tokens(tokens: list[int]) -> str:
 def parse_tool_calls(text: str) -> tuple[str, list[dict[str, Any]]]:
     """Parse tool calls from model output.
 
-    Looks for JSON patterns like:
-    {"tool_use": {"name": "read_file", "input": {"path": "test.py"}}}
+    Strips thinking tags (<think>...</think>) first, then looks for JSON
+    patterns like: {"tool_use": {"name": "read_file", "input": {"path": "test.py"}}}
 
     Uses proper JSON parsing instead of regex to handle nested objects.
 
     Args:
-        text: Model generated text
+        text: Model generated text (may contain thinking tags)
 
     Returns:
         Tuple of (remaining_text, list of tool call dicts)
         Tool call dict contains: {"name": str, "input": dict}
     """
+    # Strip thinking tags before parsing
+    text = strip_thinking_tags(text)
+
     tool_calls = []
     found_ranges = []  # Track (start, end) ranges to remove
 

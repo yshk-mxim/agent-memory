@@ -115,6 +115,9 @@ class TRTInferenceService:
             if earliest_stop < len(cleaned_text):
                 cleaned_text = cleaned_text[:earliest_stop]
 
+        # Strip thinking tags — extract final answer after </think>
+        cleaned_text = self._strip_thinking_tags(cleaned_text)
+
         return GenerationResult(
             text=cleaned_text,
             tokens=result.tokens,
@@ -208,6 +211,32 @@ class TRTInferenceService:
                 cleaned = cleaned[len(role) + 1 :]
 
         return cleaned.strip()
+
+    @staticmethod
+    def _strip_thinking_tags(text: str) -> str:
+        """Strip <think>...</think> reasoning tags, return final answer only.
+
+        Qwen3.5 and other reasoning models wrap chain-of-thought in think tags.
+        The actual response comes after the closing </think> tag.
+        If no think tags present, returns text unchanged.
+        """
+        if "</think>" in text:
+            # Return everything after the last </think>
+            parts = text.rsplit("</think>", 1)
+            return parts[-1].strip()
+        # Strip opening <think> without closing (incomplete thinking)
+        if text.startswith("<think>"):
+            return text.replace("<think>", "").strip()
+        # Also handle "Thinking Process:" prefix (Qwen3.5 non-tag format)
+        if text.startswith("Thinking Process:"):
+            # Find first line that doesn't start with a number or whitespace
+            lines = text.split("\n")
+            for i, line in enumerate(lines):
+                stripped = line.strip()
+                is_reasoning = stripped[0].isdigit() or stripped.startswith(("*", "-", "Thinking"))
+                if stripped and not is_reasoning and i > 0:
+                    return "\n".join(lines[i:]).strip()
+        return text
 
     def _load_agent_cache(self, agent_id: str) -> list[Any] | None:
         """Load KV cache for agent from disk."""

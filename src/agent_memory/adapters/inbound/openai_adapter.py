@@ -27,6 +27,7 @@ from agent_memory.adapters.inbound.adapter_helpers import (
     extract_session_id,
     get_semantic_state,
     run_step_for_uid,
+    strip_thinking_tags,
     tokenize_with_chat_template,
     try_parse_json_at,
 )
@@ -833,8 +834,9 @@ async def create_chat_completion(  # noqa: C901, PLR0912, PLR0915
             cache_store.save(agent_id, updated_blocks)
             logger.debug(f"Saved cache: {agent_id} ({updated_blocks.total_tokens} tokens)")
 
-        # Parse for function calls
-        remaining_text, function_calls = parse_function_calls(completion.text)
+        # Strip thinking tags and parse for function calls
+        clean_text = strip_thinking_tags(completion.text)
+        remaining_text, function_calls = parse_function_calls(clean_text)
 
         # Format OpenAI response
         # Build tool_calls array if function calls detected
