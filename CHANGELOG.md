@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased]
+## [1.1.0] — TRT Backend + MLX 0.31 Upgrade (Unreleased)
 
 ### Added
 
@@ -114,7 +114,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   pattern: offload → stop → start fresh. Caches from old model are not reusable
   (different geometry/weights) but preserved tagged with original model_id.
 
+- Configurable eviction policy with `SEMANTIC_AGENT_EVICTION_POLICY` setting.
+- `TRTSafetensorsCacheAdapter` — numpy-based cache I/O, no MLX dependency.
+  Each backend has its own cache adapter wired by `api_server.py`.
+- `TRTInferenceService` — application service wrapping TRT backend with cache
+  persistence. Handles load/inject/generate/extract/save transparently.
+  Includes FIM prompt construction and model-agnostic special token stripping.
+- SSE streaming for TRT + OpenAI streaming for TRT (word-level chunked).
+- `extract_session_id()` common helper — supports both `X-Session-ID` and
+  `X-Claude-Code-Session-Id` headers for Claude Code CLI compatibility.
+- Pytest e2e test suite (`test_e2e_trt_server.py`) — 8 tests covering health,
+  Anthropic API, streaming, multi-turn, OpenAI API.
+- 83 new unit tests across 5 files: trt_model_loader, trt_prefill_adapter,
+  trt_safetensors_cache_adapter, trt_inference_service, generation_request.
+- `docs/mlx_example.md` — quick start guide for Qwen3.5-9B on Apple Silicon
+  with Claude Code CLI and NemoClaw integration instructions.
+- `config/models/qwen3.5-9b-4bit.toml` — model profile for Qwen3.5-9B.
+- SBOM updated: numpy, TensorRT-Edge-LLM, nlohmann-json (17 components).
+- CITATION.cff updated to 2.0.0-rc1 with nvidia-jetson keywords.
+- Removed stale `semantic-server` package dependency (project unified as
+  `agent-memory`).
+
 ### Fixed
+
+- **Cache pipeline for mlx-lm 0.31**: Complete fix for hybrid cache architecture.
+  KVCache (4D: batch,heads,seq,dim) and ArraysCache (3D: SSM state) handled
+  correctly in extract, split, reconstruct, and slice operations. Warm cache
+  reuse after server restart verified working (cache_read tokens reported).
+- **System prompt dropped on TRT path**: Anthropic adapter now prepends `system`
+  field and tools to the messages list before forwarding to TRT backend.
+- **X-Claude-Code-Session-Id header not recognized**: Session ID extraction
+  moved to common helper supporting both header names.
+- **TRT streaming dropped sampling params**: `_stream_trt_response()` now
+  forwards top_p, top_k, stop_sequences (were falling back to defaults).
+- **OpenAI TRT streaming**: Added SSE chunk streaming for `/v1/chat/completions`.
+- **Startup health probe**: Checks both `batch_engine` (MLX) and
+  `trt_subprocess` (TRT). `/debug/memory` gracefully handles missing MLX.
+- Batch engine `_reconstruct_cache`: Uses direct `.keys`/`.values` assignment
+  for QuantizedKVCache (not `update_and_fetch` which expects float input).
+- Batch engine `_extract_cache`: Safely handles ArraysCache layers in hybrid
+  models without destructuring crash.
+- Batch engine `_split_cache_to_blocks`: Finds first KVCache layer for
+  sequence length, skips ArraysCache/SSM layers.
+
+### Removed
+
+- Q4 monkeypatches disabled for mlx-lm >= 0.31 (native Q4 KV cache support).
+- `semantic-server` package dependency (project unified as `agent-memory`).
+- Pinned dependency versions: now uses `>=` ranges for mlx, mlx-lm, transformers.
+
+---
+
+## [1.0.0] - 2026-02-10
 
 - Admin API model-swap tests (`TestSwapModelEndpoint`) returned 422 instead of
   expected status codes. Root cause: `Mock` class passed directly as FastAPI
