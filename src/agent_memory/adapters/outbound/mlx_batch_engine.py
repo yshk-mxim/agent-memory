@@ -364,7 +364,6 @@ class BlockPoolBatchEngine:
             List of KVCache objects (one per layer) ready for generation
         """
         import mlx.core as mx
-        from mlx_lm.models.cache import QuantizedKVCache
 
         _, _, min_chunk, max_chunk = self._get_chunked_prefill_settings()
 
@@ -383,18 +382,14 @@ class BlockPoolBatchEngine:
         tokens_array = mx.array([tokens])
         seq_len = len(tokens)
 
-        # Get kv_bits from spec for cache creation
-        kv_bits = getattr(self._spec, "kv_bits", 4) or 4
-        kv_group_size = getattr(self._spec, "kv_group_size", 64) or 64
-
         # Use initial cache if provided (warm cache extension), otherwise create fresh
         if initial_cache is not None:
             kv_caches = initial_cache
         else:
-            kv_caches = [
-                QuantizedKVCache(group_size=kv_group_size, bits=kv_bits)
-                for _ in range(self._spec.n_layers)
-            ]
+            # Use make_prompt_cache for correct hybrid cache types (KVCache + ArraysCache)
+            from mlx_lm.models.cache import make_prompt_cache
+
+            kv_caches = make_prompt_cache(self._model)
 
         # Track memory for logging
         mem_start = mx.get_active_memory() / (1024**3)
@@ -640,9 +635,16 @@ class BlockPoolBatchEngine:
                         type(kv_cache[0]) if kv_cache else None,
                     )
 
-                    # Verify cache properties are set correctly - raise exceptions for mismatches
-                    if kv_cache and len(kv_cache) > 0:
-                        first_layer = kv_cache[0]
+                    # Verify cache properties — find first layer with actual data
+                    # (skip ArraysCache/empty layers that have offset=0 or no offset)
+                    first_layer = None
+                    if kv_cache:
+                        for _lc in kv_cache:
+                            lc_offset = getattr(_lc, "offset", None)
+                            if lc_offset is not None and lc_offset > 0:
+                                first_layer = _lc
+                                break
+                    if first_layer is not None:
                         first_offset = getattr(first_layer, "offset", None)
                         first_size = first_layer.size() if hasattr(first_layer, "size") else None
                         logger.debug(
@@ -1740,29 +1742,24 @@ class BlockPoolBatchEngine:
             # Production mode: use real MLX KVCache objects
             import mlx.core as mx
             from mlx_lm.models.cache import KVCache, QuantizedKVCache
+
+            # Start with empty caches; overwrite with data below
+            cache: list[Any] = [KVCache() for _ in range(self._spec.n_layers)]
         else:
             # Test mode: use tuples (FakeBatchGenerator expects tuples)
             mx = None
             KVCache = None
             QuantizedKVCache = None
+            cache = [(None, None) for _ in range(self._spec.n_layers)]
 
-        cache: list[Any] = []
         deferred_eval: list[Any] = []  # Collect tensors for single batched mx.eval
 
-        # For each layer in the model
+        # For each layer, overwrite with saved data if available
         for layer_id in range(self._spec.n_layers):
-            # Get all blocks for this layer
             layer_blocks = agent_blocks.blocks_for_layer(layer_id)
 
-            # Handle empty layers
             if not layer_blocks:
-                if use_kv_cache:
-                    empty_cache = KVCache()
-                    cache.append(empty_cache)
-                else:
-                    # Test environment: use tuples
-                    cache.append((None, None))
-                continue
+                continue  # Keep template cache (empty KVCache or ArraysCache)
 
             # Extract K and V tensors from blocks (respecting max_tokens limit)
             k_tensors = []
