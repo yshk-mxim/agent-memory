@@ -62,26 +62,51 @@ vLLM and any future Edge-LLM deployment.
 
 ## 2. Start vLLM server
 
+### Option A: Use existing PyTorch container (faster, no new download)
+
+If you already have a PyTorch container on Thor (e.g., `repnet/pytorch-triton`):
+
 ```bash
-# Use NVIDIA's pre-built vLLM container for Jetson
+# Restart container with model cache mounted
+docker stop triton_build 2>/dev/null; docker rm triton_build 2>/dev/null
+docker run -d --name triton_build \
+    --runtime nvidia --gpus all \
+    -v /home/yshkolni/.cache/huggingface:/root/.cache/huggingface \
+    -v /home/yshkolni/agent-memory:/workspace/agent-memory \
+    -p 5000:5000 --network host --ipc=host \
+    repnet/pytorch-triton:latest sleep infinity
+
+# Install vLLM into the container
+docker exec triton_build pip install vllm
+
+# Start vLLM server
+docker exec -d triton_build vllm serve \
+    nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-NVFP4 \
+    --port 5000 \
+    --async-scheduling \
+    --dtype auto \
+    --kv-cache-dtype fp8 \
+    --tensor-parallel-size 1 \
+    --attention-backend TRITON_ATTN \
+    --gpu-memory-utilization 0.8 \
+    --max-num-seqs 32 \
+    --enable-chunked-prefill \
+    --host 0.0.0.0
+```
+
+### Option B: Pre-built vLLM container (~20-30GB download)
+
+```bash
 docker run -d \
     --name vllm-nemotron \
     --runtime nvidia --gpus all \
     -v /home/yshkolni/.cache/huggingface:/root/.cache/huggingface \
-    -p 5000:5000 \
-    --ipc=host \
+    -p 5000:5000 --ipc=host \
     nvcr.io/nvidia/vllm:26.02-py3 \
     vllm serve nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-NVFP4 \
-        --port 5000 \
-        --async-scheduling \
-        --dtype auto \
-        --kv-cache-dtype fp8 \
-        --tensor-parallel-size 1 \
-        --attention-backend TRITON_ATTN \
-        --gpu-memory-utilization 0.8 \
-        --max-num-seqs 32 \
-        --enable-chunked-prefill \
-        --host 0.0.0.0
+        --port 5000 --host 0.0.0.0 \
+        --async-scheduling --dtype auto --kv-cache-dtype fp8 \
+        --gpu-memory-utilization 0.8 --enable-chunked-prefill
 ```
 
 Wait for vLLM to load (~2-3 minutes). Verify:
