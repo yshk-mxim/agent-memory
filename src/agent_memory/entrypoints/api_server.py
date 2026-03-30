@@ -357,7 +357,29 @@ async def lifespan(app: FastAPI):
     trt_subprocess = None
 
     try:
-        if settings.backend == "trt":
+        if settings.backend == "vllm":
+            # --- vLLM backend path ---
+            from transformers import AutoTokenizer
+
+            from agent_memory.adapters.outbound.vllm_backend_adapter import VLLMBackendAdapter
+
+            vllm_adapter = VLLMBackendAdapter(
+                base_url=settings.vllm.base_url,
+                model_id=settings.vllm.model_id,
+                timeout_s=settings.vllm.timeout_s,
+            )
+            tokenizer = AutoTokenizer.from_pretrained(settings.vllm.model_id)
+            tokenizer.model_max_length = settings.vllm.max_context_length
+            model_spec = vllm_adapter.extract_model_spec()
+            trt_subprocess = vllm_adapter  # Reuse TRT inference service path
+            model = None
+            logger.info(
+                "vllm_backend_configured",
+                base_url=settings.vllm.base_url,
+                model_id=settings.vllm.model_id,
+            )
+
+        elif settings.backend == "trt":
             # --- TRT backend path ---
             trt_subprocess, tokenizer, model_spec = _load_trt_model_and_extract_spec(settings)
             model = None  # No MLX model

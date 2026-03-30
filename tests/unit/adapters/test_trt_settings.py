@@ -112,9 +112,14 @@ class TestBackendSelector:
         assert settings.backend == "mlx"
 
     def test_reject_invalid_backend(self, monkeypatch) -> None:
-        monkeypatch.setenv("SEMANTIC_BACKEND", "vllm")
+        monkeypatch.setenv("SEMANTIC_BACKEND", "invalid_backend")
         with pytest.raises(Exception):
             Settings()
+
+    def test_backend_vllm_from_env(self, monkeypatch) -> None:
+        monkeypatch.setenv("SEMANTIC_BACKEND", "vllm")
+        settings = Settings()
+        assert settings.backend == "vllm"
 
     def test_trt_settings_accessible(self) -> None:
         settings = Settings()

@@ -495,12 +495,50 @@ class SecretsSettings(BaseSettings):
     )
 
 
+class VLLMSettings(BaseSettings):
+    """vLLM backend configuration.
+
+    Connects to an externally-running vLLM server via OpenAI-compatible API.
+    """
+
+    model_config = SettingsConfigDict(
+        env_prefix="SEMANTIC_VLLM_",
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
+
+    base_url: str = Field(
+        default="http://localhost:5000",
+        description="vLLM server URL",
+    )
+
+    model_id: str = Field(
+        default="nvidia/NVIDIA-Nemotron-3-Super-120B-A12B-NVFP4",
+        description="Model name for API requests",
+    )
+
+    timeout_s: float = Field(
+        default=120.0,
+        ge=5.0,
+        le=600.0,
+        description="HTTP request timeout in seconds",
+    )
+
+    max_context_length: int = Field(
+        default=262144,
+        ge=1024,
+        le=1048576,
+        description="Maximum context length in tokens",
+    )
+
+
 class Settings(BaseSettings):
     """Root settings container.
 
     Aggregates all subsettings into a single object.
-    Set ``SEMANTIC_BACKEND`` to ``"mlx"`` or ``"trt"`` to select the
-    inference backend.
+    Set ``SEMANTIC_BACKEND`` to ``"mlx"``, ``"trt"``, or ``"vllm"``
+    to select the inference backend.
 
     Example:
         >>> settings = Settings()
@@ -517,13 +555,17 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    backend: Literal["mlx", "trt"] = Field(
+    backend: Literal["mlx", "trt", "vllm"] = Field(
         default="mlx",
-        description="Inference backend: 'mlx' (Apple Silicon) or 'trt' (TensorRT on Jetson)",
+        description=(
+            "Inference backend: 'mlx' (Apple Silicon), 'trt' (TensorRT Edge-LLM), "
+            "or 'vllm' (external vLLM server)"
+        ),
     )
 
     mlx: MLXSettings = Field(default_factory=MLXSettings)
     trt: TRTSettings = Field(default_factory=TRTSettings)
+    vllm: VLLMSettings = Field(default_factory=VLLMSettings)
     agent: AgentSettings = Field(default_factory=AgentSettings)
     server: ServerSettings = Field(default_factory=ServerSettings)
     secrets: SecretsSettings = Field(default_factory=SecretsSettings)
