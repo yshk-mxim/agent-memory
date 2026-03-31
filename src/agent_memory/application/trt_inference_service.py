@@ -62,6 +62,7 @@ class TRTInferenceService:
         top_k: int = 40,
         stop_sequences: list[str] | None = None,
         openai_tools: list[dict] | None = None,
+        disable_thinking: bool = True,
     ) -> GenerationResult:
         """Generate text with automatic KV cache persistence.
 
@@ -95,6 +96,7 @@ class TRTInferenceService:
             top_k=top_k,
             stop_sequences=stop_sequences,
             openai_tools=openai_tools,
+            disable_thinking=disable_thinking,
         )
 
         # Save updated cache to disk
@@ -150,6 +152,7 @@ class TRTInferenceService:
             top_k=req.top_k,
             stop_sequences=req.stop_sequences or None,
             openai_tools=req.openai_tools,
+            disable_thinking=req.disable_thinking,
         )
 
     def _build_fim_prompt(self, prefix: str, suffix: str | None = None) -> str:

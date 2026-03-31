@@ -51,15 +51,20 @@ class LlamaCppBackendAdapter:
 
     # ── Thinking suppression ────────────────────────────────────
 
-    def _apply_no_think(self, messages: list[dict]) -> list[dict]:
+    def _apply_no_think(self, messages: list[dict], disable_thinking: bool | None = None) -> list[dict]:
         """Prepend /no_think to the system message to disable Qwen3 thinking.
 
         Qwen3's chat template disables thinking when the system message
         starts with /no_think. Using the system message avoids the model
         misinterpreting /no_think as a filesystem path when it appears in
         user message content. Works across all llama.cpp versions.
+
+        Args:
+            messages: Chat messages to modify.
+            disable_thinking: Per-request override. Defaults to instance setting.
         """
-        if not self._disable_thinking or not messages:
+        should_disable = disable_thinking if disable_thinking is not None else self._disable_thinking
+        if not should_disable or not messages:
             return messages
         messages = [m.copy() for m in messages]
         for i, msg in enumerate(messages):
@@ -86,6 +91,7 @@ class LlamaCppBackendAdapter:
         stop_sequences: list[str] | None = None,
         session_id: str | None = None,
         openai_tools: list[dict] | None = None,
+        disable_thinking: bool = True,
     ) -> GenerationResult:
         """Generate text via llama-server's OpenAI-compatible API.
 
@@ -108,8 +114,9 @@ class LlamaCppBackendAdapter:
         if not messages:
             messages = [{"role": "user", "content": "Hello"}]
 
-        messages = self._apply_no_think(messages)
-        logger.info("llamacpp generate: last_msg=%r n_msgs=%d", messages[-1] if messages else None, len(messages))
+        messages = self._apply_no_think(messages, disable_thinking=disable_thinking)
+        logger.info("llamacpp generate: disable_thinking=%s n_msgs=%d",
+                    disable_thinking, len(messages))
 
         body: dict[str, Any] = {
             "model": self._model_id,

@@ -941,6 +941,10 @@ async def create_message(request_body: MessagesRequest, request: Request):  # no
             messages = _anthropic_to_openai_messages(request_body.messages, system_text)
             openai_tools = _anthropic_to_openai_tools(tools_arg) if tools_arg else None
 
+            # thinking.type == "disabled" → suppress thinking; "enabled"/"adaptive" → allow it
+            thinking = request_body.thinking
+            disable_thinking = thinking is None or thinking.type == "disabled"
+
             gen_req = GenerationRequest(
                 agent_id=agent_id,
                 messages=messages,
@@ -953,6 +957,7 @@ async def create_message(request_body: MessagesRequest, request: Request):  # no
                 stream=request_body.stream,
                 model=request_body.model or "trt",
                 openai_tools=openai_tools,
+                disable_thinking=disable_thinking,
             )
 
             # Streaming: generate full response, then yield as SSE events

@@ -58,3 +58,8 @@ class GenerationRequest:
 
     # OpenAI-format tool definitions (for backends that support native function calling)
     openai_tools: list[dict] | None = None
+
+    # Thinking control — mirrors Anthropic's thinking.type field.
+    # True = suppress thinking (/no_think), False = allow thinking.
+    # Derived from request thinking.type: "disabled" → True, "enabled"/"adaptive" → False.
+    disable_thinking: bool = True

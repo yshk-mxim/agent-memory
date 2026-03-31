@@ -82,7 +82,7 @@ class Tool(BaseModel):
 class ThinkingConfig(BaseModel):
     """Extended thinking configuration."""
 
-    type: Literal["enabled", "disabled"] = "enabled"
+    type: Literal["enabled", "disabled", "adaptive"] = "enabled"
     budget_tokens: int = Field(default=1000, ge=0, le=32000)
 
 
