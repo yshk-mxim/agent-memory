@@ -124,6 +124,7 @@ class TRTInferenceService:
             text=cleaned_text,
             tokens=result.tokens,
             cache=result.cache,
+            tool_calls=result.tool_calls,
         )
 
     def generate_from_request(self, req: GenerationRequest) -> GenerationResult:

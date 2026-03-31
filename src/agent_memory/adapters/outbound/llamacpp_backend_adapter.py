@@ -52,21 +52,24 @@ class LlamaCppBackendAdapter:
     # ── Thinking suppression ────────────────────────────────────
 
     def _apply_no_think(self, messages: list[dict]) -> list[dict]:
-        """Append /no_think to the last user message to disable Qwen3 thinking.
+        """Prepend /no_think to the system message to disable Qwen3 thinking.
 
-        Qwen3's chat template checks for /no_think in user turns to skip
-        the <think>...</think> reasoning block. This works across all
-        llama.cpp versions without needing chat_template_kwargs support.
+        Qwen3's chat template disables thinking when the system message
+        starts with /no_think. Using the system message avoids the model
+        misinterpreting /no_think as a filesystem path when it appears in
+        user message content. Works across all llama.cpp versions.
         """
         if not self._disable_thinking or not messages:
             return messages
         messages = [m.copy() for m in messages]
-        for i in reversed(range(len(messages))):
-            if messages[i].get("role") == "user":
-                content = messages[i].get("content", "")
-                if isinstance(content, str) and "/no_think" not in content:
-                    messages[i]["content"] = content + " /no_think"
-                break
+        for i, msg in enumerate(messages):
+            if msg.get("role") == "system":
+                content = msg.get("content", "")
+                if isinstance(content, str) and not content.startswith("/no_think"):
+                    messages[i]["content"] = "/no_think\n" + content
+                return messages
+        # No system message — insert one at the front
+        messages.insert(0, {"role": "system", "content": "/no_think"})
         return messages
 
     # ── ModelBackendPort: generate ──────────────────────────────
