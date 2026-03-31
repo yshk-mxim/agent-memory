@@ -403,6 +403,13 @@ async def _stream_trt_response(
         openai_tools=openai_tools,
     )
 
+    logger.info(
+        "generate result: text=%r tool_calls=%r tokens=%d",
+        result.text[:300] if result.text else "",
+        result.tool_calls,
+        len(result.tokens),
+    )
+
     # Prefer structured tool_calls from backend (llamacpp/vllm native function calling).
     # Fall back to text-based parsing for backends that encode tool calls in output text.
     if result.tool_calls is not None:
