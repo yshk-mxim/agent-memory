@@ -1,86 +1,113 @@
-# Local Jina Reader on Thor
+# Local URL-to-Markdown Reader on Thor
 
-Jina Reader converts any public URL into clean markdown — 5-10x fewer tokens than raw HTML.
-Running it locally keeps page content private and removes the external dependency on `r.jina.ai`.
+Converts any public URL into clean markdown — 5-10x fewer tokens than raw HTML.
+Running locally keeps page content private (no traffic to `r.jina.ai`).
 
-Source: [github.com/jina-ai/reader](https://github.com/jina-ai/reader) (TypeScript, Puppeteer + Mozilla Readability)  
-Self-hosted fork: [github.com/intergalacticalvariable/reader](https://github.com/intergalacticalvariable/reader)
+Implemented as a lightweight Python HTTP server using `html2text`.
+No Docker required — runs natively on Thor's ARM64 (Jetson).
+
+**Source:** `~/reader_server.py` on Thor  
+**Port:** 3000  
+**Interface:** `GET http://<thor-ip>:3000/<url>`
 
 ---
 
-## Start on Thor
+## Setup (one-time on Thor)
 
 ```bash
-docker run -d \
-  --name jina-reader \
-  --restart always \
-  -p 3000:3000 \
-  ghcr.io/intergalacticalvariable/reader:latest
-```
+# Install html2text
+pip3 install html2text --break-system-packages
 
-`--restart always` ensures it comes back after reboots.
+# Copy reader_server.py to home directory (already done)
+
+# Install as persistent systemd user service
+mkdir -p ~/.config/systemd/user
+cat > ~/.config/systemd/user/reader.service << 'SVCEOF'
+[Unit]
+Description=Local URL-to-markdown reader server
+After=network.target
+
+[Service]
+ExecStart=/usr/bin/python3 /home/yshkolni/reader_server.py
+Restart=always
+RestartSec=5
+StandardOutput=append:/home/yshkolni/reader_server.log
+StandardError=append:/home/yshkolni/reader_server.log
+
+[Install]
+WantedBy=default.target
+SVCEOF
+
+systemctl --user daemon-reload
+systemctl --user enable reader
+systemctl --user start reader
+```
 
 Verify:
 ```bash
-curl "http://localhost:3000/https://example.com" | head -20
+python3 -c "import urllib.request; print(urllib.request.urlopen('http://localhost:3000/https://example.com').read().decode()[:200])"
+# Example Domain
+# This domain is for use in documentation examples...
 ```
 
 ---
 
 ## Usage
 
-### From Thor (Bash, no URL restrictions)
+### From Mac (Bash/Python, no URL restrictions)
 
 ```bash
-# Fetch any public URL as markdown
+# Via fetch.py helper
 python3 ~/fetch.py https://docs.python.org/3/library/urllib.html
+
+# Direct via Python
+python3 -c "import urllib.request; print(urllib.request.urlopen('http://192.168.184.150:3000/https://example.com').read().decode())"
 ```
 
-`~/fetch.py` hits `http://localhost:3000/<url>` and prints the markdown response.
+### In CLAUDE.md (instructs Claude Code)
 
-### Direct curl
-
-```bash
-curl "http://localhost:3000/https://example.com/page"
+```markdown
+Use Bash to fetch pages as clean markdown:
+    Bash: curl -s "http://192.168.184.150:3000/https://example.com/page"
+Or:
+    Bash: python3 ~/fetch.py https://example.com/page
 ```
 
 ---
 
-## Agent Test Integration
+## How It Works
 
-`~/agent_test/CLAUDE.md` instructs Claude Code to use `python3 ~/fetch.py <url>` via Bash
-for all page fetches. This bypasses Claude Code's WebFetch private-IP restriction
-(the HTTP request originates from Thor's loopback, not the Mac).
+`reader_server.py` is a minimal `http.server`-based HTTP server:
+1. Receives `GET /<url>`
+2. Fetches the target URL with a browser-like User-Agent
+3. Converts HTML → markdown via `html2text`
+4. Returns `text/plain` response
 
-The companion search script `~/search.py` handles web search via SearXNG (port 8080).
-See [`searxng_thor_setup.md`](searxng_thor_setup.md) for SearXNG setup.
+Non-HTML responses (JSON, plain text) are passed through unchanged.
+
+Compared to the Jina AI cloud service, this version:
+- Has no JavaScript rendering (no Puppeteer/Chromium) — works for most docs/blogs
+- Is ~2 MB RAM vs ~500 MB for Puppeteer-based Docker image
+- Runs natively on ARM64 (no cross-architecture emulation)
+- Pages requiring JS to render (SPAs) may return empty or partial content
 
 ---
 
 ## Management
 
 ```bash
-# Check status
-docker ps --filter name=jina-reader
+# Status
+systemctl --user status reader
 
-# View logs
-docker logs jina-reader --tail 20
+# Logs
+tail -f ~/reader_server.log
 
-# Stop / remove
-docker stop jina-reader && docker rm jina-reader
+# Restart
+systemctl --user restart reader
 
-# Update to latest image
-docker pull ghcr.io/intergalacticalvariable/reader:latest
-docker stop jina-reader && docker rm jina-reader
-# re-run the docker run command above
+# Stop
+systemctl --user stop reader
 ```
-
----
-
-## Memory Budget
-
-The container uses Puppeteer (headless Chromium) — allocate ~500 MB RAM.
-Thor has 128 GB unified memory, so this is negligible alongside llama-server.
 
 ---
 
@@ -88,7 +115,14 @@ Thor has 128 GB unified memory, so this is negligible alongside llama-server.
 
 | Error | Cause | Fix |
 |-------|-------|-----|
-| `Connection refused :3000` | Container not running | `docker start jina-reader` |
-| `Timeout` on fetch | Target site slow or blocked | Increase timeout in `fetch.py` or skip |
-| `Error: net::ERR_NAME_NOT_RESOLVED` | DNS unavailable in container | `docker run --dns 8.8.8.8 ...` |
-| Port 3000 already in use | Another service | Change `-p 3001:3000` and update `fetch.py` |
+| `Connection refused :3000` | Service not running | `systemctl --user start reader` |
+| Empty/partial content | Page requires JavaScript | Use SearXNG snippet instead, or skip |
+| `502` error | Target site unreachable from Thor | Verify network connectivity |
+| Port 3000 in use | Another process | `ss -tlnp | grep 3000` to find it |
+
+---
+
+## See Also
+
+- [`privacy_enhanced_example.md`](privacy_enhanced_example.md) — full private stack overview
+- [`searxng_thor_setup.md`](searxng_thor_setup.md) — web search companion service

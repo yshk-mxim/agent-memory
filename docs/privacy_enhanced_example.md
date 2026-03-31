@@ -165,26 +165,47 @@ For more details see [`searxng_thor_setup.md`](searxng_thor_setup.md).
 
 ---
 
-## Step 4 — Page Fetching: Jina Reader
+## Step 4 — Page Fetching: Local Reader Server
 
-Converts any public URL to clean markdown. Runs locally — page content never
-passes through Jina AI's cloud service.
+Converts any public URL to clean markdown. Runs locally as a Python HTTP server —
+page content never passes through Jina AI's cloud service. No Docker required;
+runs natively on Thor's ARM64.
 
 ```bash
-# On Thor
-docker run -d \
-  --name jina-reader \
-  --restart always \
-  -p 3000:3000 \
-  ghcr.io/intergalacticalvariable/reader:latest
+# On Thor — install dependency
+pip3 install html2text --break-system-packages
+
+# Install as persistent systemd user service
+mkdir -p ~/.config/systemd/user
+cat > ~/.config/systemd/user/reader.service << 'SVCEOF'
+[Unit]
+Description=Local URL-to-markdown reader server
+After=network.target
+
+[Service]
+ExecStart=/usr/bin/python3 /home/yshkolni/reader_server.py
+Restart=always
+RestartSec=5
+StandardOutput=append:/home/yshkolni/reader_server.log
+StandardError=append:/home/yshkolni/reader_server.log
+
+[Install]
+WantedBy=default.target
+SVCEOF
+
+systemctl --user daemon-reload
+systemctl --user enable reader
+systemctl --user start reader
 ```
 
 Verify:
 ```bash
-curl "http://localhost:3000/https://example.com" | head -10
+python3 -c "import urllib.request; print(urllib.request.urlopen('http://localhost:3000/https://example.com').read().decode()[:200])"
+# Example Domain
+# This domain is for use in documentation examples...
 ```
 
-For more details see [`jina_reader_thor_setup.md`](jina_reader_thor_setup.md).
+For more details and the server source see [`jina_reader_thor_setup.md`](jina_reader_thor_setup.md).
 
 ---
 
