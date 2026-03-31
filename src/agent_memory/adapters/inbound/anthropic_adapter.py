@@ -835,7 +835,11 @@ async def create_message(request_body: MessagesRequest, request: Request):  # no
 
             # Add tools as part of system context if present
             if tools_arg:
-                tools_text = "Available tools:\n" + json.dumps(tools_arg, indent=2)
+                tools_serializable = [
+                    t.model_dump() if hasattr(t, "model_dump") else t
+                    for t in tools_arg
+                ]
+                tools_text = "Available tools:\n" + json.dumps(tools_serializable, indent=2)
                 if messages and messages[0]["role"] == "system":
                     messages[0]["content"] += "\n\n" + tools_text
                 else:
