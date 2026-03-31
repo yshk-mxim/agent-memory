@@ -22,7 +22,7 @@ ssh yshkolni@main4.local
 
 mkdir -p ~/.agent_memory/llamacpp_slots
 
-~/llama.cpp/build/bin/llama-server \
+/tmp/llama-cpp-build/build/bin/llama-server \
     -m ~/models/qwen3-coder-next/Qwen3-Coder-Next-Q4_K_M.gguf \
     --port 8001 \
     --host 0.0.0.0 \
@@ -53,7 +53,7 @@ curl http://localhost:8001/health
 
 **For Qwen3.5-27B-Opus-Distilled instead:**
 ```bash
-~/llama.cpp/build/bin/llama-server \
+/tmp/llama-cpp-build/build/bin/llama-server \
     -m ~/models/qwen35-opus-distilled/Qwen3.5-27B-Claude-4.6-Opus-Distilled-Q4_K_M.gguf \
     --port 8001 --host 0.0.0.0 \
     -ngl 999 --ctx-size 65536 -np 4 \
