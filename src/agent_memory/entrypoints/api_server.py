@@ -506,7 +506,9 @@ async def lifespan(app: FastAPI):
         app.state.agent_memory.model_registry = model_registry
         app.state.agent_memory.model_swap_orchestrator = model_swap_orchestrator
         app.state.agent_memory.trt_subprocess = trt_subprocess
-        app.state.agent_memory.trt_inference = trt_inference if settings.backend == "trt" else None
+        app.state.agent_memory.trt_inference = (
+            trt_inference if settings.backend in ("trt", "vllm", "llamacpp") else None
+        )
         app.state.agent_memory.tokenizer = tokenizer
         app.state.shutting_down = False
 
