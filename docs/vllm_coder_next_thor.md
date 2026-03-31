@@ -36,10 +36,34 @@ vLLM internals:
 | Prefix caching | Per-slot (cache_prompt) | APC (system prompt shared) |
 | Architecture support | Universal (GGUF) | Explicit per-model |
 
+## Status: BLOCKED — cuBLAS broken on SM110
+
+**As of 2026-03-31**, cuBLAS is completely non-functional on Thor (SM110, Jetson AGX Thor).
+Every `torch.mm()` / `torch.nn.functional.linear()` call fails with
+`CUBLAS_STATUS_INVALID_VALUE` — even a 4×4 fp32 matmul. This affects ALL dtypes
+(fp16, bf16, fp32) and ALL dimensions.
+
+**Root cause:** The CUDA 13.0 toolkit installed on Thor provides only
+`sbsa-linux` (server-class Arm) cuBLAS libraries (`libcublas.so.13.0.0.19`).
+These do not contain SM110 (Tegra/Jetson) GEMM kernels. There is no separate
+JetPack/Tegra cuBLAS package available yet.
+
+**Impact:** vLLM, PyTorch-based inference, and any framework using cuBLAS cannot
+run on Thor. llama.cpp works because it uses its own CUDA GEMM kernels
+(CUTLASS-based, not cuBLAS).
+
+**Resolution:** Wait for NVIDIA to release a JetPack 7 / Tegra-specific cuBLAS
+for SM110, or rebuild cuBLAS from source with SM110 support.
+
+Use `bash ~/switch_backend.sh llamacpp` to revert to the working llama.cpp stack.
+
+---
+
 ## Prerequisites
 
 - vLLM 0.18+ built for Thor (see [`thor_vllm_build.md`](thor_vllm_build.md))
 - `~/vllm-env` with working CUDA 13.0 + torch
+- **Working cuBLAS for SM110** (currently broken — see above)
 - 68+ GB free GPU memory (model: 47.6 GB + KV cache + overhead)
 
 ## Model
