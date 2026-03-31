@@ -765,6 +765,33 @@ def _register_health_endpoints(app: FastAPI):
         return {"status": "started"}
 
 
+def _register_search_proxy(app: FastAPI, searxng_url: str):
+    """Register /search proxy endpoint that forwards to SearXNG.
+
+    Allows Claude Code (and other clients) to use web search via the same
+    port as agent-memory (8000) without needing direct access to SearXNG (8080).
+    """
+    import json as _json
+    from urllib.request import urlopen as _urlopen
+    from urllib.parse import quote_plus as _qp
+    from urllib.error import URLError as _URLError
+
+    @app.get("/search")
+    async def search_proxy(q: str, format: str = "json", engines: str = "", num: int = 10):
+        """Proxy web search to SearXNG."""
+        params = f"q={_qp(q)}&format=json&pageno=1"
+        if engines:
+            params += f"&engines={_qp(engines)}"
+        url = f"{searxng_url}/search?{params}"
+        try:
+            with _urlopen(url, timeout=15) as resp:  # noqa: S310
+                data = _json.loads(resp.read())
+            results = data.get("results", [])[:num]
+            return {"query": q, "results": results, "n": len(results)}
+        except _URLError as e:
+            return JSONResponse(status_code=502, content={"error": f"SearXNG unavailable: {e}"})
+
+
 def _register_metrics_endpoint(app: FastAPI):
     """Register Prometheus metrics endpoint.
 
@@ -1061,6 +1088,9 @@ def create_app() -> FastAPI:
     _register_debug_endpoints(app)
     _register_error_handlers(app)
     _register_routes(app)
+    if settings.server.searxng_url:
+        _register_search_proxy(app, settings.server.searxng_url)
+        logger.info("search_proxy_registered", searxng_url=settings.server.searxng_url)
 
     # Set up dependency overrides for admin API
     def _get_orchestrator():

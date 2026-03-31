@@ -475,6 +475,14 @@ class ServerSettings(BaseSettings):
         ),
     )
 
+    searxng_url: str = Field(
+        default="",
+        description=(
+            "SearXNG base URL for /search proxy endpoint. "
+            "E.g. http://localhost:8080. Leave empty to disable."
+        ),
+    )
+
 
 class SecretsSettings(BaseSettings):
     """Sensitive configuration (API keys, tokens).
