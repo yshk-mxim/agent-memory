@@ -175,17 +175,29 @@ Streamlit demos in `demo/` (launched via `scripts/launch.sh`):
 - Docker (for TRT Edge-LLM build)
 - See `vendor/BUILD_LOG.md` for full build instructions
 
+**llama.cpp backend (recommended for coding models on Thor):**
+- Any platform with CUDA (Jetson Thor, DGX Spark, desktop GPUs)
+- Handles all architectures: DeltaNet, MoE, MLA via GGUF
+- Slot-level KV cache save/restore for session persistence
+- See `docs/llamacpp_backend.md` for setup guide
+
 ## Backend Selection
 
 ```bash
 # Apple Silicon (default)
 SEMANTIC_BACKEND=mlx agent-memory serve
 
-# NVIDIA Jetson Thor
+# NVIDIA Jetson Thor (TRT Edge-LLM)
 SEMANTIC_BACKEND=trt \
 SEMANTIC_TRT_ENGINE_PATH=/path/to/engine \
 SEMANTIC_TRT_LLM_INFERENCE_BIN=/path/to/llm_inference_interactive \
 SEMANTIC_TRT_MODEL_ID=HuggingFaceTB/SmolLM2-135M-Instruct \
+agent-memory serve
+
+# llama.cpp (any GPU — best for coding models)
+SEMANTIC_BACKEND=llamacpp \
+SEMANTIC_LLAMACPP_BASE_URL=http://localhost:8001 \
+SEMANTIC_LLAMACPP_MODEL_ID=unsloth/Qwen3-Coder-Next-GGUF \
 agent-memory serve
 ```
 

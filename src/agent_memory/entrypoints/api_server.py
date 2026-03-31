@@ -379,6 +379,35 @@ async def lifespan(app: FastAPI):
                 model_id=settings.vllm.model_id,
             )
 
+        elif settings.backend == "llamacpp":
+            # --- llama.cpp backend path ---
+            from transformers import AutoTokenizer
+
+            from agent_memory.adapters.outbound.llamacpp_backend_adapter import (
+                LlamaCppBackendAdapter,
+            )
+
+            llamacpp_adapter = LlamaCppBackendAdapter(
+                base_url=settings.llamacpp.base_url,
+                model_id=settings.llamacpp.model_id,
+                timeout_s=settings.llamacpp.timeout_s,
+                n_slots=settings.llamacpp.n_slots,
+            )
+            tokenizer = AutoTokenizer.from_pretrained(
+                settings.llamacpp.model_id,
+                trust_remote_code=True,
+            )
+            tokenizer.model_max_length = settings.llamacpp.max_context_length
+            model_spec = llamacpp_adapter.extract_model_spec()
+            trt_subprocess = llamacpp_adapter  # Reuse TRT inference service path
+            model = None
+            logger.info(
+                "llamacpp_backend_configured",
+                base_url=settings.llamacpp.base_url,
+                model_id=settings.llamacpp.model_id,
+                n_slots=settings.llamacpp.n_slots,
+            )
+
         elif settings.backend == "trt":
             # --- TRT backend path ---
             trt_subprocess, tokenizer, model_spec = _load_trt_model_and_extract_spec(settings)
@@ -413,11 +442,11 @@ async def lifespan(app: FastAPI):
         block_pool = _initialize_block_pool(settings, model_spec)
         cache_store, cache_adapter = _initialize_cache_store(settings, model_spec)
 
-        if settings.backend == "trt":
+        if settings.backend in ("trt", "vllm", "llamacpp"):
             from agent_memory.application.trt_inference_service import TRTInferenceService
 
             mlx_adapter = None
-            batch_engine = None  # TRT uses subprocess, not batch engine
+            batch_engine = None  # External backends use subprocess/HTTP, not batch engine
             from agent_memory.adapters.outbound.trt_quantization_adapter import (
                 TRTQuantizationAdapter as TRTQuant,
             )

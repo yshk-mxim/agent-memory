@@ -533,12 +533,73 @@ class VLLMSettings(BaseSettings):
     )
 
 
+class LlamaCppSettings(BaseSettings):
+    """llama.cpp backend configuration.
+
+    Connects to an externally-running llama-server via OpenAI-compatible API.
+    Adds slot-level KV cache save/restore for session persistence.
+    """
+
+    model_config = SettingsConfigDict(
+        env_prefix="SEMANTIC_LLAMACPP_",
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
+
+    base_url: str = Field(
+        default="http://localhost:8001",
+        description="llama-server URL",
+    )
+
+    model_id: str = Field(
+        default="qwen3-coder-next",
+        description="Model name (HuggingFace ID or local name for tokenizer)",
+    )
+
+    timeout_s: float = Field(
+        default=120.0,
+        ge=5.0,
+        le=600.0,
+        description="HTTP request timeout in seconds",
+    )
+
+    max_context_length: int = Field(
+        default=65536,
+        ge=1024,
+        le=1048576,
+        description="Maximum context length in tokens",
+    )
+
+    slot_save_path: str = Field(
+        default="~/.agent_memory/llamacpp_slots",
+        description="Directory for slot KV cache files (mirrors --slot-save-path)",
+    )
+
+    n_slots: int = Field(
+        default=4,
+        ge=1,
+        le=64,
+        description="Number of parallel slots (mirrors --parallel)",
+    )
+
+    cache_type_k: str = Field(
+        default="q4_0",
+        description="KV cache quantization for keys (mirrors --cache-type-k)",
+    )
+
+    cache_type_v: str = Field(
+        default="q4_0",
+        description="KV cache quantization for values (mirrors --cache-type-v)",
+    )
+
+
 class Settings(BaseSettings):
     """Root settings container.
 
     Aggregates all subsettings into a single object.
-    Set ``SEMANTIC_BACKEND`` to ``"mlx"``, ``"trt"``, or ``"vllm"``
-    to select the inference backend.
+    Set ``SEMANTIC_BACKEND`` to ``"mlx"``, ``"trt"``, ``"vllm"``, or
+    ``"llamacpp"`` to select the inference backend.
 
     Example:
         >>> settings = Settings()
@@ -555,17 +616,18 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    backend: Literal["mlx", "trt", "vllm"] = Field(
+    backend: Literal["mlx", "trt", "vllm", "llamacpp"] = Field(
         default="mlx",
         description=(
             "Inference backend: 'mlx' (Apple Silicon), 'trt' (TensorRT Edge-LLM), "
-            "or 'vllm' (external vLLM server)"
+            "'vllm' (external vLLM server), or 'llamacpp' (llama-server)"
         ),
     )
 
     mlx: MLXSettings = Field(default_factory=MLXSettings)
     trt: TRTSettings = Field(default_factory=TRTSettings)
     vllm: VLLMSettings = Field(default_factory=VLLMSettings)
+    llamacpp: LlamaCppSettings = Field(default_factory=LlamaCppSettings)
     agent: AgentSettings = Field(default_factory=AgentSettings)
     server: ServerSettings = Field(default_factory=ServerSettings)
     secrets: SecretsSettings = Field(default_factory=SecretsSettings)

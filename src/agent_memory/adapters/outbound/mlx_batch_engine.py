@@ -1846,9 +1846,9 @@ class BlockPoolBatchEngine:
                     kv_cache.update_and_fetch(k_full, v_full)
                     deferred_eval.extend([k_full, v_full])
 
-                cache.append(kv_cache)
+                cache[layer_id] = kv_cache
             else:
-                cache.append((k_full, v_full))
+                cache[layer_id] = (k_full, v_full)
 
         # Single batched GPU sync for ALL layers (was ~54 separate mx.eval calls)
         # Acquire mlx_io_lock to prevent concurrent MLX operations with
