@@ -74,6 +74,7 @@ SEMANTIC_LLAMACPP_MODEL_ID=qwen3-coder-next \
 SEMANTIC_LLAMACPP_TOKENIZER_ID=Qwen/Qwen2.5-Coder-32B-Instruct \
 SEMANTIC_LLAMACPP_MAX_CONTEXT_LENGTH=131072 \
 SEMANTIC_LLAMACPP_N_SLOTS=4 \
+SEMANTIC_SERVER_SEARXNG_URL=http://localhost:8080 \
 python -m uvicorn agent_memory.entrypoints.api_server:create_app \
     --factory --host '::' --port 8000
 ```
@@ -84,6 +85,10 @@ python -m uvicorn agent_memory.entrypoints.api_server:create_app \
 > `MODEL_ID` can be any short name — it's only what agent-memory sends in API
 > responses, not a HuggingFace path.
 
+> **`SEARXNG_URL` note:** Enables the `/search?q=...` proxy endpoint on port 8000,
+> routing to SearXNG's JSON API. Omit if SearXNG is not running. See
+> [`searxng_thor_setup.md`](searxng_thor_setup.md) for setup instructions.
+
 For Qwen3.5-27B-Opus-Distilled:
 ```bash
 SEMANTIC_BACKEND=llamacpp \
@@ -92,6 +97,7 @@ SEMANTIC_LLAMACPP_MODEL_ID=qwen35-opus-distilled \
 SEMANTIC_LLAMACPP_TOKENIZER_ID=Qwen/Qwen2.5-72B-Instruct \
 SEMANTIC_LLAMACPP_MAX_CONTEXT_LENGTH=65536 \
 SEMANTIC_LLAMACPP_N_SLOTS=4 \
+SEMANTIC_SERVER_SEARXNG_URL=http://localhost:8080 \
 python -m uvicorn agent_memory.entrypoints.api_server:create_app \
     --factory --host '::' --port 8000
 ```
