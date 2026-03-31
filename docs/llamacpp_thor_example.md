@@ -382,6 +382,37 @@ this to a llama.cpp slot via `hash(session_id) % n_slots`.
 | `OOM killed` | Model too large | Switch to Q4_K_M or smaller model |
 | DNS `main4.local` not resolving | mDNS not working on Mac | Use IP directly: `ssh yshkolni@main4.local "hostname -I"` |
 
+## Cache Management
+
+Two cache directories on Thor:
+
+| Directory | Contents | Managed by |
+|-----------|----------|------------|
+| `~/.agent_memory/caches/` | Session KV cache (safetensors per agent ID) | agent-memory |
+| `~/.agent_memory/llamacpp_slots/` | Slot KV cache saves (llama-server slot save/restore) | llama-server |
+
+**Clear all cache (start fresh):**
+```bash
+rm -rf ~/.agent_memory/caches/* ~/.agent_memory/llamacpp_slots/*
+```
+
+No restart needed — both are loaded on demand. Do this when:
+- Switching models
+- Context corruption suspected
+- Freeing disk space
+- Starting a clean session after major prompt changes
+
+**Inspect cache:**
+```bash
+# Session caches (one dir per agent ID)
+ls -lh ~/.agent_memory/caches/
+
+# Slot saves (one file per slot)
+ls -lh ~/.agent_memory/llamacpp_slots/
+```
+
+---
+
 ## Diagnostics
 
 ```bash
