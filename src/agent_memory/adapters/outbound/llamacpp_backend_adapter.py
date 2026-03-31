@@ -92,6 +92,9 @@ class LlamaCppBackendAdapter:
             "top_k": top_k,
             "stream": False,
             "cache_prompt": True,
+            # Disable Qwen3 thinking mode — prevents the model from spending
+            # all tokens on <think>...</think> instead of generating a response.
+            "chat_template_kwargs": {"enable_thinking": False},
         }
 
         if stop_sequences:
@@ -185,6 +188,7 @@ class LlamaCppBackendAdapter:
             "top_p": top_p,
             "stream": True,
             "cache_prompt": True,
+            "chat_template_kwargs": {"enable_thinking": False},
         }
 
         if stop_sequences:
