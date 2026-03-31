@@ -116,7 +116,7 @@ class MessagesRequest(BaseModel):
     @field_validator("messages")
     @classmethod
     def validate_message_alternation(cls, messages: list[Message]) -> list[Message]:
-        """Validate that messages alternate between user and assistant."""
+        """Validate messages list is non-empty and starts with a user turn."""
         if not messages:
             raise ValueError("At least one message is required")
 
@@ -124,13 +124,8 @@ class MessagesRequest(BaseModel):
         if messages[0].role != "user":
             raise ValueError("First message must have role 'user'")
 
-        # Check alternation
-        for i in range(1, len(messages)):
-            if messages[i].role == messages[i - 1].role:
-                raise ValueError(
-                    f"Messages must alternate between user and assistant "
-                    f"(found consecutive {messages[i].role} at index {i})"
-                )
+        # Do NOT enforce strict alternation — Claude Code sends consecutive user
+        # messages after conversation compaction (compact summary + new user turn).
 
         return messages
 
