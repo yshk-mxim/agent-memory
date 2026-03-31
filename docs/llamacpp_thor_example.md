@@ -27,7 +27,7 @@ mkdir -p ~/.agent_memory/llamacpp_slots
     --port 8001 \
     --host 0.0.0.0 \
     -ngl 999 \
-    --ctx-size 65536 \
+    --ctx-size 131072 \
     -np 4 \
     --slot-save-path ~/.agent_memory/llamacpp_slots \
     --cache-type-k q4_0 \
@@ -36,6 +36,12 @@ mkdir -p ~/.agent_memory/llamacpp_slots
     -b 4096 \
     -ub 1024
 ```
+
+> **Context sizing:** llama-server divides `--ctx-size` equally among `-np` slots.
+> `131072 ÷ 4 = 32768` tokens per slot. Claude Code's system prompt is ~23K tokens,
+> so each slot needs ≥32K to fit it plus conversation history.
+> Using fewer slots (e.g. `-np 2 --ctx-size 65536`) gives the same per-slot budget
+> with lower total memory usage.
 
 Wait for: `llama server listening at http://0.0.0.0:8001`
 
@@ -66,7 +72,7 @@ SEMANTIC_BACKEND=llamacpp \
 SEMANTIC_LLAMACPP_BASE_URL=http://localhost:8001 \
 SEMANTIC_LLAMACPP_MODEL_ID=qwen3-coder-next \
 SEMANTIC_LLAMACPP_TOKENIZER_ID=Qwen/Qwen2.5-Coder-32B-Instruct \
-SEMANTIC_LLAMACPP_MAX_CONTEXT_LENGTH=65536 \
+SEMANTIC_LLAMACPP_MAX_CONTEXT_LENGTH=131072 \
 SEMANTIC_LLAMACPP_N_SLOTS=4 \
 python -m uvicorn agent_memory.entrypoints.api_server:create_app \
     --factory --host '::' --port 8000
