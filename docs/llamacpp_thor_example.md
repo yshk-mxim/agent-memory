@@ -72,11 +72,11 @@ SEMANTIC_BACKEND=llamacpp \
 SEMANTIC_LLAMACPP_BASE_URL=http://localhost:8001 \
 SEMANTIC_LLAMACPP_MODEL_ID=qwen3-coder-next \
 SEMANTIC_LLAMACPP_TOKENIZER_ID=Qwen/Qwen2.5-Coder-32B-Instruct \
-SEMANTIC_LLAMACPP_MAX_CONTEXT_LENGTH=131072 \
-SEMANTIC_LLAMACPP_N_SLOTS=4 \
+SEMANTIC_LLAMACPP_MAX_CONTEXT_LENGTH=262144 \
+SEMANTIC_LLAMACPP_N_SLOTS=2 \
 SEMANTIC_SERVER_SEARXNG_URL=http://localhost:8080 \
 python -m uvicorn agent_memory.entrypoints.api_server:create_app \
-    --factory --host '::' --port 8000
+    --factory --host 0.0.0.0 --port 8000
 ```
 
 > **`TOKENIZER_ID` note:** `unsloth/*-GGUF` repos contain only model weights, no
@@ -99,7 +99,7 @@ SEMANTIC_LLAMACPP_MAX_CONTEXT_LENGTH=65536 \
 SEMANTIC_LLAMACPP_N_SLOTS=4 \
 SEMANTIC_SERVER_SEARXNG_URL=http://localhost:8080 \
 python -m uvicorn agent_memory.entrypoints.api_server:create_app \
-    --factory --host '::' --port 8000
+    --factory --host 0.0.0.0 --port 8000
 ```
 
 Verify from Thor (or Mac):
@@ -371,7 +371,7 @@ this to a llama.cpp slot via `hash(session_id) % n_slots`.
 
 | Symptom | Cause | Fix |
 |---------|-------|-----|
-| `ConnectionRefused` from Mac | agent-memory died, or bound to `0.0.0.0` (IPv4-only) while Node.js tries IPv6 first | Restart with `--host '::'`; verify with `ss -tlnp \| grep 8000` |
+| `ConnectionRefused` from Mac | agent-memory not running or wrong host binding | Use `--host 0.0.0.0`; verify with `ss -tlnp \| grep 8000` |
 | `ConnectionRefused` from Mac | Port 8000 blocked by firewall | `ssh main4.local "sudo ufw allow 8000"` |
 | `{"status":"loading"}` from llama-server | Model still loading | Wait for `{"status":"ok"}` before starting agent-memory |
 | `500` on `/v1/messages` | llama-server not running | Check `curl http://main4.local:8001/health` |

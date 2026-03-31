@@ -90,11 +90,11 @@ SEMANTIC_BACKEND=llamacpp \
 SEMANTIC_LLAMACPP_BASE_URL=http://localhost:8001 \
 SEMANTIC_LLAMACPP_MODEL_ID=qwen3-coder-next \
 SEMANTIC_LLAMACPP_TOKENIZER_ID=Qwen/Qwen2.5-Coder-32B-Instruct \
-SEMANTIC_LLAMACPP_MAX_CONTEXT_LENGTH=131072 \
-SEMANTIC_LLAMACPP_N_SLOTS=4 \
+SEMANTIC_LLAMACPP_MAX_CONTEXT_LENGTH=262144 \
+SEMANTIC_LLAMACPP_N_SLOTS=2 \
 SEMANTIC_SERVER_SEARXNG_URL=http://localhost:8080 \
 python -m uvicorn agent_memory.entrypoints.api_server:create_app \
-    --factory --host '::' --port 8000
+    --factory --host 0.0.0.0 --port 8000
 ```
 
 `SEMANTIC_SERVER_SEARXNG_URL` enables the `/search` proxy endpoint.
