@@ -112,7 +112,10 @@ class LlamaCppBackendAdapter:
         try:
             with urlopen(req, timeout=self._timeout_s) as resp:  # noqa: S310
                 result = json.loads(resp.read())
-        except (HTTPError, URLError, TimeoutError) as e:
+        except HTTPError as e:
+            body = e.read().decode(errors="replace")
+            raise GenerationError(f"llama.cpp request failed: {e} — {body}") from e
+        except (URLError, TimeoutError) as e:
             raise GenerationError(f"llama.cpp request failed: {e}") from e
 
         choices = result.get("choices", [])
