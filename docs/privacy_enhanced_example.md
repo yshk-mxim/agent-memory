@@ -271,27 +271,29 @@ Add to your project's `CLAUDE.md` to instruct Claude how to search and fetch:
 
 DO NOT use the WebSearch tool — it requires an API key and returns 0 results.
 
-For web search, use Bash:
-    Bash: python3 ~/search.py "your query here"
+For web search, use Bash with curl (no URL restrictions in Bash):
+    Bash: curl -s "http://192.168.184.150:8000/search?q=your+query+here"
 
-This queries Google + DuckDuckGo + Bing via SearXNG on Thor.
+Response is JSON with a `results` array — each entry has `url`, `title`, `content`, `engine`.
+Alternatively: python3 ~/search.py "your query here"
 
 # Fetching Web Pages
 
 DO NOT use WebFetch directly for public URLs — it returns raw HTML (slow, token-heavy).
 
-Instead use Bash to fetch via the local Jina Reader on Thor:
-    Bash: python3 ~/fetch.py https://example.com/page
+Use Bash to fetch via the local Jina Reader on Thor (returns clean markdown, 5-10x smaller):
+    Bash: curl -s "http://192.168.184.150:3000/https://example.com/page"
 
-This returns clean markdown (5-10x smaller than raw HTML).
+Alternatively: python3 ~/fetch.py https://example.com/page
 
-For compact content that doesn't need conversion (JSON APIs, search snippets, etc.),
-WebFetch is fine without the proxy.
+For compact content that doesn't need conversion (JSON APIs like api.github.com, search
+snippets), WebFetch is fine without the proxy.
 ```
 
-> **Why Bash instead of WebFetch?** Claude Code blocks WebFetch to private IPs and
-> `localhost` (SSRF protection). Bash has no such restriction — `python3 ~/fetch.py`
-> runs on Thor where `localhost:3000` is valid.
+> **Why Bash instead of WebFetch?** Claude Code blocks WebFetch to private IPs
+> (SSRF protection). Bash/curl has no such restriction. The Python helper scripts
+> (`~/search.py`, `~/fetch.py`) do the same thing and are useful for other users or
+> non-Claude tooling.
 
 ---
 
