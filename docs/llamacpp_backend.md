@@ -211,7 +211,8 @@ Cache files are stored in `--slot-save-path` (default:
 |----------|---------|-------------|
 | `SEMANTIC_BACKEND` | `mlx` | Set to `llamacpp` |
 | `SEMANTIC_LLAMACPP_BASE_URL` | `http://localhost:8001` | llama-server URL |
-| `SEMANTIC_LLAMACPP_MODEL_ID` | `qwen3-coder-next` | HuggingFace model ID (for tokenizer) |
+| `SEMANTIC_LLAMACPP_MODEL_ID` | `qwen3-coder-next` | Model name sent in API requests |
+| `SEMANTIC_LLAMACPP_TOKENIZER_ID` | *(same as MODEL_ID)* | HuggingFace tokenizer repo — set when MODEL_ID is a GGUF-only repo (e.g. `unsloth/*-GGUF`) with no tokenizer files; point at the base model instead |
 | `SEMANTIC_LLAMACPP_TIMEOUT_S` | `120.0` | HTTP timeout |
 | `SEMANTIC_LLAMACPP_MAX_CONTEXT_LENGTH` | `65536` | Context window |
 | `SEMANTIC_LLAMACPP_SLOT_SAVE_PATH` | `~/.agent_memory/llamacpp_slots` | Slot cache directory |

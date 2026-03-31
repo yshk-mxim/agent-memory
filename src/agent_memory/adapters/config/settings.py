@@ -554,7 +554,18 @@ class LlamaCppSettings(BaseSettings):
 
     model_id: str = Field(
         default="qwen3-coder-next",
-        description="Model name (HuggingFace ID or local name for tokenizer)",
+        description="Model name sent in API requests (can be any string llama-server accepts)",
+    )
+
+    tokenizer_id: str = Field(
+        default="",
+        description=(
+            "HuggingFace model ID to load the tokenizer from. "
+            "Defaults to model_id when empty. "
+            "Set this when model_id is a GGUF-only repo (e.g. unsloth/*-GGUF) "
+            "that has no HuggingFace tokenizer files — point it at the base model instead, "
+            "e.g. SEMANTIC_LLAMACPP_TOKENIZER_ID=Qwen/Qwen2.5-Coder-32B-Instruct."
+        ),
     )
 
     timeout_s: float = Field(

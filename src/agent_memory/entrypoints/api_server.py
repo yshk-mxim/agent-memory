@@ -393,8 +393,9 @@ async def lifespan(app: FastAPI):
                 timeout_s=settings.llamacpp.timeout_s,
                 n_slots=settings.llamacpp.n_slots,
             )
+            tokenizer_id = settings.llamacpp.tokenizer_id or settings.llamacpp.model_id
             tokenizer = AutoTokenizer.from_pretrained(
-                settings.llamacpp.model_id,
+                tokenizer_id,
                 trust_remote_code=True,
             )
             tokenizer.model_max_length = settings.llamacpp.max_context_length
@@ -405,6 +406,7 @@ async def lifespan(app: FastAPI):
                 "llamacpp_backend_configured",
                 base_url=settings.llamacpp.base_url,
                 model_id=settings.llamacpp.model_id,
+                tokenizer_id=tokenizer_id,
                 n_slots=settings.llamacpp.n_slots,
             )
 
