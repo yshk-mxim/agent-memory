@@ -846,7 +846,25 @@ async def create_message(request_body: MessagesRequest, request: Request):  # no
                     messages.append({"role": "system", "content": tools_text})
 
             for m in request_body.messages:
-                content = m.content if isinstance(m.content, str) else str(m.content)
+                if isinstance(m.content, str):
+                    content = m.content
+                elif isinstance(m.content, list):
+                    parts = []
+                    for block in m.content:
+                        if hasattr(block, "text"):
+                            parts.append(block.text)
+                        elif hasattr(block, "content"):
+                            # tool_result block
+                            c = block.content
+                            parts.append(c if isinstance(c, str) else json.dumps(c))
+                        elif hasattr(block, "input"):
+                            # tool_use block — format as a call description
+                            parts.append(
+                                f"[tool_use: {block.name}({json.dumps(block.input)})]"
+                            )
+                    content = "\n".join(parts)
+                else:
+                    content = str(m.content)
                 messages.append({"role": m.role, "content": content})
 
             gen_req = GenerationRequest(
