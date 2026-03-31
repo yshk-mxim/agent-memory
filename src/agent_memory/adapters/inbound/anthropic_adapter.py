@@ -399,7 +399,7 @@ async def _stream_trt_response(
         "data": json.dumps(
             MessageDeltaEvent(
                 delta={"stop_reason": stop_reason},
-                usage={"output_tokens": len(result.tokens)},
+                usage=Usage(input_tokens=0, output_tokens=len(result.tokens)),
             ).model_dump()
         ),
     }
