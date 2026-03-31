@@ -58,6 +58,101 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/v1", tags=["anthropic"])
 
 
+def _anthropic_to_openai_messages(
+    anthropic_messages: list,
+    system_text: str | None = None,
+) -> list[dict]:
+    """Convert Anthropic Messages API messages to OpenAI chat format.
+
+    Handles all content block types:
+    - text/thinking → plain string content
+    - tool_use (assistant) → tool_calls array
+    - tool_result (user) → role=tool message
+    System prompt is prepended as role=system if provided.
+    """
+    result: list[dict] = []
+    if system_text:
+        result.append({"role": "system", "content": system_text})
+
+    for msg in anthropic_messages:
+        role = msg.role if hasattr(msg, "role") else msg.get("role", "user")
+        content = msg.content if hasattr(msg, "content") else msg.get("content", "")
+
+        if isinstance(content, str):
+            result.append({"role": role, "content": content})
+            continue
+
+        # content is a list of typed blocks
+        text_parts: list[str] = []
+        tool_calls: list[dict] = []
+        tool_results: list[dict] = []
+
+        for block in content:
+            btype = block.type if hasattr(block, "type") else block.get("type", "")
+
+            if btype in ("text", "thinking"):
+                text = block.text if hasattr(block, "text") else block.get("text", "")
+                if text:
+                    text_parts.append(text)
+
+            elif btype == "tool_use":
+                tid = block.id if hasattr(block, "id") else block.get("id", "")
+                name = block.name if hasattr(block, "name") else block.get("name", "")
+                inp = block.input if hasattr(block, "input") else block.get("input", {})
+                tool_calls.append({
+                    "id": tid,
+                    "type": "function",
+                    "function": {"name": name, "arguments": json.dumps(inp)},
+                })
+
+            elif btype == "tool_result":
+                tool_use_id = (
+                    block.tool_use_id
+                    if hasattr(block, "tool_use_id")
+                    else block.get("tool_use_id", "")
+                )
+                rc = block.content if hasattr(block, "content") else block.get("content", "")
+                if isinstance(rc, list):
+                    rc = "\n".join(
+                        (b.text if hasattr(b, "text") else b.get("text", str(b)))
+                        for b in rc
+                    )
+                tool_results.append({
+                    "role": "tool",
+                    "tool_call_id": tool_use_id,
+                    "content": rc or "",
+                })
+
+        if tool_calls:
+            result.append({
+                "role": "assistant",
+                "content": "\n".join(text_parts) or None,
+                "tool_calls": tool_calls,
+            })
+        elif tool_results:
+            result.extend(tool_results)
+        else:
+            result.append({"role": role, "content": "\n".join(text_parts)})
+
+    return result
+
+
+def _anthropic_to_openai_tools(tools: list) -> list[dict]:
+    """Convert Anthropic tool definitions to OpenAI function calling format."""
+    result = []
+    for tool in tools:
+        t = tool.model_dump() if hasattr(tool, "model_dump") else tool
+        result.append({
+            "type": "function",
+            "function": {
+                "name": t.get("name", ""),
+                "description": t.get("description", ""),
+                "parameters": t.get("input_schema", {}),
+            },
+        })
+    return result
+
+
 def generate_agent_id_from_tokens(tokens: list[int]) -> str:
     """Generate agent ID from token prefix for cache lookup.
 
@@ -284,6 +379,7 @@ async def _stream_trt_response(
     request_body: MessagesRequest,
     messages: list[dict[str, str]],
     tokens: list[int],
+    openai_tools: list[dict] | None = None,
 ) -> AsyncIterator[dict[str, str]]:
     """Generate full TRT response then yield as Anthropic SSE events.
 
@@ -304,9 +400,16 @@ async def _stream_trt_response(
         top_p=request_body.top_p or 0.95,
         top_k=request_body.top_k or 40,
         stop_sequences=request_body.stop_sequences or None,
+        openai_tools=openai_tools,
     )
 
-    remaining_text, tool_calls = parse_tool_calls(result.text)
+    # Prefer structured tool_calls from backend (llamacpp/vllm native function calling).
+    # Fall back to text-based parsing for backends that encode tool calls in output text.
+    if result.tool_calls is not None:
+        remaining_text = result.text
+        tool_calls = result.tool_calls
+    else:
+        remaining_text, tool_calls = parse_tool_calls(result.text)
 
     # message_start
     yield {
@@ -827,45 +930,9 @@ async def create_message(request_body: MessagesRequest, request: Request):  # no
 
         # TRT backend: generation via TRTInferenceService (handles cache persistence)
         if trt_inference is not None and batch_engine is None:
-            # Build messages list with system prompt prepended
-            messages = []
-            if request_body.system:
-                system_text = extract_system_text(request_body.system)
-                messages.append({"role": "system", "content": system_text})
-
-            # Add tools as part of system context if present
-            if tools_arg:
-                tools_serializable = [
-                    t.model_dump() if hasattr(t, "model_dump") else t
-                    for t in tools_arg
-                ]
-                tools_text = "Available tools:\n" + json.dumps(tools_serializable, indent=2)
-                if messages and messages[0]["role"] == "system":
-                    messages[0]["content"] += "\n\n" + tools_text
-                else:
-                    messages.append({"role": "system", "content": tools_text})
-
-            for m in request_body.messages:
-                if isinstance(m.content, str):
-                    content = m.content
-                elif isinstance(m.content, list):
-                    parts = []
-                    for block in m.content:
-                        if hasattr(block, "text"):
-                            parts.append(block.text)
-                        elif hasattr(block, "content"):
-                            # tool_result block
-                            c = block.content
-                            parts.append(c if isinstance(c, str) else json.dumps(c))
-                        elif hasattr(block, "input"):
-                            # tool_use block — format as a call description
-                            parts.append(
-                                f"[tool_use: {block.name}({json.dumps(block.input)})]"
-                            )
-                    content = "\n".join(parts)
-                else:
-                    content = str(m.content)
-                messages.append({"role": m.role, "content": content})
+            system_text = extract_system_text(request_body.system) if request_body.system else None
+            messages = _anthropic_to_openai_messages(request_body.messages, system_text)
+            openai_tools = _anthropic_to_openai_tools(tools_arg) if tools_arg else None
 
             gen_req = GenerationRequest(
                 agent_id=agent_id,
@@ -878,6 +945,7 @@ async def create_message(request_body: MessagesRequest, request: Request):  # no
                 stop_sequences=request_body.stop_sequences or [],
                 stream=request_body.stream,
                 model=request_body.model or "trt",
+                openai_tools=openai_tools,
             )
 
             # Streaming: generate full response, then yield as SSE events
@@ -890,12 +958,18 @@ async def create_message(request_body: MessagesRequest, request: Request):  # no
                         request_body,
                         messages,
                         tokens,
+                        openai_tools=openai_tools,
                     )
                 )
 
             result = trt_inference.generate_from_request(gen_req)
 
-            remaining_text, tool_calls = parse_tool_calls(result.text)
+            # Prefer structured tool_calls from backend; fall back to text parsing.
+            if result.tool_calls is not None:
+                remaining_text = result.text
+                tool_calls = result.tool_calls
+            else:
+                remaining_text, tool_calls = parse_tool_calls(result.text)
 
             content_blocks = []
             if remaining_text:

@@ -55,3 +55,6 @@ class GenerationRequest:
 
     # System prompt pinning hint
     pin_system_cache: bool = False  # Pin system prompt KV cache in memory
+
+    # OpenAI-format tool definitions (for backends that support native function calling)
+    openai_tools: list[dict] | None = None

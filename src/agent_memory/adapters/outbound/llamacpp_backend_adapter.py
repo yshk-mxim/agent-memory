@@ -16,6 +16,7 @@ lifecycle.  Start it with::
 """
 
 import json
+import uuid
 import logging
 from typing import Any
 from urllib.error import HTTPError, URLError
@@ -59,6 +60,7 @@ class LlamaCppBackendAdapter:
         top_k: int = 40,
         stop_sequences: list[str] | None = None,
         session_id: str | None = None,
+        openai_tools: list[dict] | None = None,
     ) -> GenerationResult:
         """Generate text via llama-server's OpenAI-compatible API.
 
@@ -67,14 +69,16 @@ class LlamaCppBackendAdapter:
             cache: Not used (llama-server manages its own KV cache).
             max_tokens: Maximum tokens to generate.
             temperature: Sampling temperature.
-            messages: Chat messages.
+            messages: OpenAI-format chat messages (already converted by caller).
             top_p: Top-p sampling.
             top_k: Top-k sampling.
             stop_sequences: Stop strings.
             session_id: Optional session ID for slot pinning.
+            openai_tools: OpenAI-format tool definitions for native function calling.
 
         Returns:
-            GenerationResult with text and token count.
+            GenerationResult with text, token count, and tool_calls if the
+            model chose to call a tool.
         """
         if not messages:
             messages = [{"role": "user", "content": "Hello"}]
@@ -92,6 +96,10 @@ class LlamaCppBackendAdapter:
 
         if stop_sequences:
             body["stop"] = stop_sequences
+
+        if openai_tools:
+            body["tools"] = openai_tools
+            body["tool_choice"] = "auto"
 
         # Pin to a slot based on session ID for KV cache reuse
         if session_id and self._n_slots > 0:
@@ -111,14 +119,33 @@ class LlamaCppBackendAdapter:
         if not choices:
             raise GenerationError("llama.cpp returned no choices")
 
-        text = choices[0].get("message", {}).get("content", "")
+        message = choices[0].get("message", {})
+        text = message.get("content") or ""
         usage = result.get("usage", {})
         completion_tokens = usage.get("completion_tokens", 0)
+
+        # Convert OpenAI tool_calls → list[dict] for GenerationResult
+        raw_tool_calls = message.get("tool_calls")
+        tool_calls: list[dict] | None = None
+        if raw_tool_calls:
+            tool_calls = []
+            for tc in raw_tool_calls:
+                fn = tc.get("function", {})
+                try:
+                    arguments = json.loads(fn.get("arguments", "{}"))
+                except json.JSONDecodeError:
+                    arguments = {}
+                tool_calls.append({
+                    "id": tc.get("id", f"toolu_{uuid.uuid4().hex[:24]}"),
+                    "name": fn.get("name", ""),
+                    "input": arguments,
+                })
 
         return GenerationResult(
             text=text,
             tokens=list(range(completion_tokens)),
             cache=[],  # llama.cpp manages its own KV cache
+            tool_calls=tool_calls,
         )
 
     # ── Streaming ───────────────────────────────────────────────

@@ -18,6 +18,7 @@ class GenerationResult:
     text: str
     tokens: list[int]
     cache: list[tuple[Any, Any]]
+    tool_calls: list[dict] | None = None
 
 
 @dataclass(frozen=True)
