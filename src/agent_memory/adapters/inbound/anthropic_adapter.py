@@ -866,7 +866,7 @@ async def create_message(request_body: MessagesRequest, request: Request):  # no
     Raises:
         HTTPException: On generation errors
     """
-    logger.info(f"POST /v1/messages: model={request_body.model}, stream={request_body.stream}")
+    logger.info(f"POST /v1/messages: model={request_body.model}, stream={request_body.stream}, max_tokens={request_body.max_tokens}")
     logger.debug(f"Messages: {request_body.messages}")
 
     # Get app dependencies (with null check)
