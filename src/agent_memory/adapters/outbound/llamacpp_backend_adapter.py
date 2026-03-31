@@ -41,11 +41,33 @@ class LlamaCppBackendAdapter:
         model_id: str = "qwen3-coder-next",
         timeout_s: float = 120.0,
         n_slots: int = 4,
+        disable_thinking: bool = True,
     ) -> None:
         self._base_url = base_url.rstrip("/")
         self._model_id = model_id
         self._timeout_s = timeout_s
         self._n_slots = n_slots
+        self._disable_thinking = disable_thinking
+
+    # ── Thinking suppression ────────────────────────────────────
+
+    def _apply_no_think(self, messages: list[dict]) -> list[dict]:
+        """Append /no_think to the last user message to disable Qwen3 thinking.
+
+        Qwen3's chat template checks for /no_think in user turns to skip
+        the <think>...</think> reasoning block. This works across all
+        llama.cpp versions without needing chat_template_kwargs support.
+        """
+        if not self._disable_thinking or not messages:
+            return messages
+        messages = [m.copy() for m in messages]
+        for i in reversed(range(len(messages))):
+            if messages[i].get("role") == "user":
+                content = messages[i].get("content", "")
+                if isinstance(content, str) and "/no_think" not in content:
+                    messages[i]["content"] = content + " /no_think"
+                break
+        return messages
 
     # ── ModelBackendPort: generate ──────────────────────────────
 
@@ -83,6 +105,8 @@ class LlamaCppBackendAdapter:
         if not messages:
             messages = [{"role": "user", "content": "Hello"}]
 
+        messages = self._apply_no_think(messages)
+
         body: dict[str, Any] = {
             "model": self._model_id,
             "messages": messages,
@@ -92,9 +116,6 @@ class LlamaCppBackendAdapter:
             "top_k": top_k,
             "stream": False,
             "cache_prompt": True,
-            # Disable Qwen3 thinking mode — prevents the model from spending
-            # all tokens on <think>...</think> instead of generating a response.
-            "chat_template_kwargs": {"enable_thinking": False},
         }
 
         if stop_sequences:
@@ -180,6 +201,8 @@ class LlamaCppBackendAdapter:
         Yields:
             Parsed JSON chunks from llama-server's streaming response.
         """
+        messages = self._apply_no_think(messages)
+
         body: dict[str, Any] = {
             "model": self._model_id,
             "messages": messages,
@@ -188,7 +211,6 @@ class LlamaCppBackendAdapter:
             "top_p": top_p,
             "stream": True,
             "cache_prompt": True,
-            "chat_template_kwargs": {"enable_thinking": False},
         }
 
         if stop_sequences:
