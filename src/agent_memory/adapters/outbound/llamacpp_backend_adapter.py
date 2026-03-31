@@ -106,6 +106,7 @@ class LlamaCppBackendAdapter:
             messages = [{"role": "user", "content": "Hello"}]
 
         messages = self._apply_no_think(messages)
+        logger.info("llamacpp generate: last_msg=%r n_msgs=%d", messages[-1] if messages else None, len(messages))
 
         body: dict[str, Any] = {
             "model": self._model_id,
@@ -150,6 +151,11 @@ class LlamaCppBackendAdapter:
         text = message.get("content") or ""
         usage = result.get("usage", {})
         completion_tokens = usage.get("completion_tokens", 0)
+        logger.info("llamacpp response: content=%r reasoning=%r tool_calls=%r tokens=%d",
+                    text[:100] if text else None,
+                    str(message.get("reasoning_content", ""))[:100],
+                    message.get("tool_calls"),
+                    completion_tokens)
 
         # Convert OpenAI tool_calls → list[dict] for GenerationResult
         raw_tool_calls = message.get("tool_calls")
