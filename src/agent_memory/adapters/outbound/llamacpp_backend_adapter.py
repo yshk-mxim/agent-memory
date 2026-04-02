@@ -11,8 +11,8 @@ lifecycle.  Start it with::
 
     llama-server -m model.gguf --port 8001 \\
         --slot-save-path ~/.agent_memory/llamacpp_slots \\
-        --cache-type-k q4_0 --cache-type-v q4_0 \\
-        -np 4 --ctx-size 65536
+        --cache-type-k q8_0 --cache-type-v q8_0 \\
+        -np 2 --ctx-size 131072
 """
 
 import json

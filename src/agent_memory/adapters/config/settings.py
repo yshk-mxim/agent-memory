@@ -603,12 +603,12 @@ class LlamaCppSettings(BaseSettings):
     )
 
     cache_type_k: str = Field(
-        default="q4_0",
+        default="q8_0",
         description="KV cache quantization for keys (mirrors --cache-type-k)",
     )
 
     cache_type_v: str = Field(
-        default="q4_0",
+        default="q8_0",
         description="KV cache quantization for values (mirrors --cache-type-v)",
     )
 

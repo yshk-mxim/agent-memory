@@ -135,7 +135,10 @@ class TestGenerate:
             adapter.generate(prompt_tokens=[])
 
         body = json.loads(mock_urlopen.call_args[0][0].data)
-        assert body["messages"] == [{"role": "user", "content": "Hello"}]
+        assert body["messages"] == [
+            {"role": "system", "content": "/no_think"},
+            {"role": "user", "content": "Hello"},
+        ]
 
 
 class TestGenerateStream:

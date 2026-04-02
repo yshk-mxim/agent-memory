@@ -30,8 +30,8 @@ mkdir -p ~/.agent_memory/llamacpp_slots
     --ctx-size 131072 \
     -np 4 \
     --slot-save-path ~/.agent_memory/llamacpp_slots \
-    --cache-type-k q4_0 \
-    --cache-type-v q4_0 \
+    --cache-type-k q8_0 \
+    --cache-type-v q8_0 \
     --cache-prompt \
     -b 4096 \
     -ub 1024

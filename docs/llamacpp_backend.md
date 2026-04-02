@@ -37,11 +37,12 @@ no architecture-specific gaps.  It just works.
 
 | Model | Active Params | SWE-bench | GGUF Q4_K_M Size | Tool Calling | Recommended |
 |-------|--------------|-----------|-----------------|-------------|-------------|
-| **Qwen3-Coder-Next** | 3B (of 80B MoE) | **70.6%** | ~46 GB | Yes | **Best for coding** |
+| **Gemma 4 31B** | 31B (dense) | N/A | ~18 GB | Yes | **Best quality/size ratio** |
+| **Qwen3-Coder-Next** | 3B (of 80B MoE) | **70.6%** | ~46 GB | Yes | **Best SWE-bench** |
 | **Qwen3.5-27B-Opus-Distilled** | 27B (dense) | Good | ~16.5 GB | Yes (stable) | **Best for reasoning** |
+| Gemma 4 26B-A4B | 3.8B (of 26B MoE) | N/A | ~14 GB | Yes | Fastest (MoE) |
 | Qwen3.5-35B-A3B | 3B (of 35B MoE) | 76.4% (27B) | ~20 GB | Yes | Good all-round |
 | Qwen2.5-Coder-32B | 32B (dense) | ~55% | ~20 GB | Yes | Stable fallback |
-| Nemotron-3-Super-120B | 12B (of 120B) | 60.5% | ~80 GB | Yes | Too large |
 
 ## 1. Build llama.cpp for Thor (sm_110)
 
@@ -66,8 +67,14 @@ torch.compile alongside llama.cpp.
 ## 2. Download a Model
 
 ```bash
-# Qwen3-Coder-Next (best coding model — 70.6% SWE-bench)
 pip install huggingface-hub
+
+# Gemma 4 31B (best quality/size — 18 GB Q4_K_M, 256K context, Apache 2.0)
+huggingface-cli download ggml-org/gemma-4-31B-it-GGUF \
+    --include "*Q4_K_M*" \
+    --local-dir ~/models/gemma4-31b
+
+# OR: Qwen3-Coder-Next (best SWE-bench — 70.6%, but 46 GB)
 huggingface-cli download unsloth/Qwen3-Coder-Next-GGUF \
     --include "*Q4_K_M*" \
     --local-dir ~/models/qwen3-coder-next
@@ -84,28 +91,33 @@ huggingface-cli download Jackrong/Qwen3.5-27B-Claude-4.6-Opus-Reasoning-Distille
 mkdir -p ~/.agent_memory/llamacpp_slots
 
 ./build/bin/llama-server \
-    -m ~/models/qwen3-coder-next/Qwen3-Coder-Next-Q4_K_M.gguf \
+    -m ~/models/gemma4-31b/gemma-4-31B-it-Q4_K_M.gguf \
     --port 8001 \
     --host 0.0.0.0 \
     -ngl 999 \
-    --ctx-size 65536 \
-    -np 4 \
+    --ctx-size 131072 \
+    -np 2 \
     --slot-save-path ~/.agent_memory/llamacpp_slots \
-    --cache-type-k q4_0 \
-    --cache-type-v q4_0 \
+    --cache-type-k q8_0 \
+    --cache-type-v q8_0 \
     --cache-prompt
 ```
 
 | Flag | Purpose |
 |------|---------|
 | `-ngl 999` | Offload all layers to GPU |
-| `--ctx-size 65536` | Context window (divided among slots) |
-| `-np 4` | 4 parallel slots (4 concurrent sessions) |
+| `--ctx-size 131072` | 128K context window (divided among slots) |
+| `-np 2` | 2 parallel slots (65K per slot) |
 | `--slot-save-path` | Enable KV cache save/restore to disk |
-| `--cache-type-k q4_0` | Q4 quantized KV cache (saves memory) |
+| `--cache-type-k q8_0` | Q8 quantized KV cache (near-lossless, ~48 GB at 128K) |
 | `--cache-prompt` | Reuse KV cache for shared prompt prefixes |
 | `-b 2048` | Prefill batch size (chunked prefill, default 2048) |
 | `-ub 512` | Micro-batch size for prefill (default 512) |
+
+> **Why Q8 not Q4 KV cache?** Q4 saves more memory but adds +0.2 perplexity and
+> causes context-tracking errors on long conversations. Q8 is near-lossless
+> (+0.002–0.05 perplexity) and still halves KV memory vs FP16. For coding
+> workloads where precision matters, Q8 is the right tradeoff.
 
 Verify:
 ```bash
@@ -120,9 +132,10 @@ cd ~/agent-memory
 
 SEMANTIC_BACKEND=llamacpp \
 SEMANTIC_LLAMACPP_BASE_URL=http://localhost:8001 \
-SEMANTIC_LLAMACPP_MODEL_ID=unsloth/Qwen3-Coder-Next-GGUF \
-SEMANTIC_LLAMACPP_MAX_CONTEXT_LENGTH=65536 \
-SEMANTIC_LLAMACPP_N_SLOTS=4 \
+SEMANTIC_LLAMACPP_MODEL_ID=gemma4-31b \
+SEMANTIC_LLAMACPP_TOKENIZER_ID=google/gemma-4-31B-it \
+SEMANTIC_LLAMACPP_MAX_CONTEXT_LENGTH=131072 \
+SEMANTIC_LLAMACPP_N_SLOTS=2 \
 python -m uvicorn agent_memory.entrypoints.api_server:create_app \
     --factory --host 0.0.0.0 --port 8000
 ```
@@ -217,23 +230,26 @@ Cache files are stored in `--slot-save-path` (default:
 | `SEMANTIC_LLAMACPP_MAX_CONTEXT_LENGTH` | `65536` | Context window |
 | `SEMANTIC_LLAMACPP_SLOT_SAVE_PATH` | `~/.agent_memory/llamacpp_slots` | Slot cache directory |
 | `SEMANTIC_LLAMACPP_N_SLOTS` | `4` | Parallel slots (mirrors `-np`) |
-| `SEMANTIC_LLAMACPP_CACHE_TYPE_K` | `q4_0` | Key cache quantization |
-| `SEMANTIC_LLAMACPP_CACHE_TYPE_V` | `q4_0` | Value cache quantization |
+| `SEMANTIC_LLAMACPP_CACHE_TYPE_K` | `q8_0` | Key cache quantization (q8_0 recommended for quality) |
+| `SEMANTIC_LLAMACPP_CACHE_TYPE_V` | `q8_0` | Value cache quantization (q8_0 recommended for quality) |
 
 ## Memory Budget (Thor 128 GB)
 
-| Setup | Model | KV Cache | OS/System | Free |
-|-------|-------|----------|-----------|------|
-| Qwen3-Coder-Next Q4_K_M | ~46 GB | ~12 GB (64K ctx, Q4 KV) | ~10 GB | **~60 GB** |
-| Qwen3.5-27B-Opus Q4_K_M | ~16.5 GB | ~12 GB | ~10 GB | **~89 GB** |
-| Qwen3.5-35B-A3B Q4_K_M | ~20 GB | ~12 GB | ~10 GB | **~86 GB** |
+| Setup | Model | KV Cache (Q8, 128K ctx) | OS/System | Free |
+|-------|-------|------------------------|-----------|------|
+| **Gemma 4 31B Q4_K_M** | ~18 GB | ~48 GB | ~10 GB | **~52 GB** |
+| Gemma 4 26B-A4B Q4_K_M | ~14 GB | ~16 GB (3.8B active) | ~10 GB | **~88 GB** |
+| Qwen3-Coder-Next Q4_K_M | ~46 GB | ~48 GB | ~10 GB | **~24 GB** |
+| Qwen3.5-27B-Opus Q4_K_M | ~16.5 GB | ~48 GB | ~10 GB | **~53 GB** |
 
 ## Performance Expectations (Thor)
 
-Based on llama.cpp benchmarks for similar MoE models on Thor:
+Based on llama.cpp benchmarks for similar models on Thor (~273 GB/s bandwidth):
 
 | Model | Quantization | Prefill (tok/s) | Generate (tok/s) |
 |-------|-------------|-----------------|-----------------|
+| **Gemma 4 31B (dense)** | Q4_K_M | ~500 (est.) | **~10-15** (est.) |
+| Gemma 4 26B-A4B (MoE) | Q4_K_M | ~1,200 (est.) | **~30-50** (est.) |
 | Qwen3-30B-A3B | Q8_0 | ~1,533 | ~42.7 |
 | Qwen3-Coder-Next (80B/3B active) | Q4_K_M | ~1,000 (est.) | ~15-20 (est.) |
 | Qwen3.5-27B-Opus (dense) | Q4_K_M | ~500 (est.) | ~25-35 (est.) |
