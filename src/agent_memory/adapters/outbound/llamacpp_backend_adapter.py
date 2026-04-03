@@ -51,20 +51,22 @@ class LlamaCppBackendAdapter:
 
     # ── Thinking suppression ────────────────────────────────────
 
-    def _apply_no_think(self, messages: list[dict], disable_thinking: bool | None = None) -> list[dict]:
-        """Prepend /no_think to the system message to disable Qwen3 thinking.
+    @property
+    def _is_gemma(self) -> bool:
+        return "gemma" in self._model_id.lower()
 
-        Qwen3's chat template disables thinking when the system message
-        starts with /no_think. Using the system message avoids the model
-        misinterpreting /no_think as a filesystem path when it appears in
-        user message content. Works across all llama.cpp versions.
+    def _apply_no_think(self, messages: list[dict], disable_thinking: bool | None = None) -> list[dict]:
+        """Suppress thinking for models that support it.
+
+        - Qwen3: Prepend /no_think to the system message.
+        - Gemma 4: Uses chat_template_kwargs (handled in request body, not here).
 
         Args:
             messages: Chat messages to modify.
             disable_thinking: Per-request override. Defaults to instance setting.
         """
         should_disable = disable_thinking if disable_thinking is not None else self._disable_thinking
-        if not should_disable or not messages:
+        if not should_disable or not messages or self._is_gemma:
             return messages
         messages = [m.copy() for m in messages]
         for i, msg in enumerate(messages):
@@ -135,6 +137,10 @@ class LlamaCppBackendAdapter:
         if openai_tools:
             body["tools"] = openai_tools
             body["tool_choice"] = "auto"
+
+        # Gemma 4: disable thinking via chat_template_kwargs
+        if self._is_gemma and (disable_thinking if disable_thinking is not None else self._disable_thinking):
+            body["chat_template_kwargs"] = {"enable_thinking": False}
 
         # Pin to a slot based on session ID for KV cache reuse
         if session_id and self._n_slots > 0:
@@ -231,6 +237,8 @@ class LlamaCppBackendAdapter:
 
         if stop_sequences:
             body["stop"] = stop_sequences
+        if self._is_gemma and self._disable_thinking:
+            body["chat_template_kwargs"] = {"enable_thinking": False}
         if session_id and self._n_slots > 0:
             body["id_slot"] = hash(session_id) % self._n_slots
 
