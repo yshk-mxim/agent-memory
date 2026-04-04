@@ -16,13 +16,16 @@ lifecycle.  Start it with::
 """
 
 import json
-import re
-import uuid
 import logging
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
+from agent_memory.adapters.outbound.tool_call_parsers import create_parser_for_model
+from agent_memory.adapters.outbound.tool_call_parsers.llama_server_native import (
+    extract_from_openai_tool_calls,
+)
+from agent_memory.application.tool_call_parsing import ToolCallParserChain
 from agent_memory.domain.errors import GenerationError
 from agent_memory.domain.value_objects import GenerationResult, ModelCacheSpec
 
@@ -43,12 +46,14 @@ class LlamaCppBackendAdapter:
         timeout_s: float = 120.0,
         n_slots: int = 4,
         disable_thinking: bool = True,
+        tool_parser: ToolCallParserChain | None = None,
     ) -> None:
         self._base_url = base_url.rstrip("/")
         self._model_id = model_id
         self._timeout_s = timeout_s
         self._n_slots = n_slots
         self._disable_thinking = disable_thinking
+        self._tool_parser = tool_parser or create_parser_for_model(model_id)
 
     # ── Thinking suppression ────────────────────────────────────
 
@@ -181,30 +186,18 @@ class LlamaCppBackendAdapter:
                     message.get("tool_calls"),
                     completion_tokens)
 
-        # Extract tool calls from text output (model generates JSON per template)
-        # Also check OpenAI tool_calls in case llama-server parsed them natively
+        # Extract tool calls: check native API field first, then parse from text
         tool_calls: list[dict] | None = None
         raw_tool_calls = message.get("tool_calls")
         if raw_tool_calls:
-            tool_calls = []
-            for tc in raw_tool_calls:
-                fn = tc.get("function", {})
-                try:
-                    arguments = json.loads(fn.get("arguments", "{}"))
-                except json.JSONDecodeError:
-                    arguments = {}
-                tool_calls.append({
-                    "id": tc.get("id", f"toolu_{uuid.uuid4().hex[:24]}"),
-                    "name": fn.get("name", ""),
-                    "input": arguments,
-                })
-        elif text:
-            # Parse tool calls from model text output (JSON objects with name+parameters)
-            parsed = self._extract_tool_calls_from_text(text)
+            parsed = extract_from_openai_tool_calls(raw_tool_calls)
             if parsed:
-                tool_calls = parsed
-                # Remove tool call JSON from the text content
-                text = self._strip_tool_calls_from_text(text)
+                tool_calls = [{"id": tc.id, "name": tc.name, "input": tc.input} for tc in parsed]
+        elif text:
+            remaining, parsed = self._tool_parser.parse(text)
+            if parsed:
+                tool_calls = [{"id": tc.id, "name": tc.name, "input": tc.input} for tc in parsed]
+                text = remaining
 
         return GenerationResult(
             text=text,
@@ -212,186 +205,6 @@ class LlamaCppBackendAdapter:
             cache=[],  # llama.cpp manages its own KV cache
             tool_calls=tool_calls,
         )
-
-    # ── Tool call extraction from text ──────────────────────────
-    #
-    # Three formats handled:
-    #   1. JSON (template-instructed): {"name": "tool", "parameters": {...}}
-    #   2. Gemma native: call:ToolName{key: "value"}  (concatenated, no newlines)
-    #   3. Qwen native: <tool_call>{"name": "tool", "arguments": {...}}</tool_call>
-
-    # Gemma: call:Name{...} or call:namespace:Name {...}
-    # Captures the last colon-separated segment as the tool name
-    _GEMMA_CALL_RE = re.compile(r'call:([\w:]+)')
-
-    # Qwen: <tool_call>...</tool_call>
-    _QWEN_CALL_RE = re.compile(r'<tool_call>\s*(.*?)\s*</tool_call>', re.DOTALL)
-
-    def _extract_tool_calls_from_text(self, text: str) -> list[dict] | None:
-        """Extract tool calls from model text output."""
-        results: list[dict] = []
-
-        # --- Format 1: JSON lines — {"name": ..., "parameters": ...}
-        for line in text.split("\n"):
-            line = line.strip()
-            if not line or not line.startswith("{"):
-                continue
-            try:
-                obj = json.loads(line)
-                if "name" in obj and ("parameters" in obj or "arguments" in obj):
-                    results.append({
-                        "id": f"toolu_{uuid.uuid4().hex[:24]}",
-                        "name": obj["name"],
-                        "input": obj.get("parameters") or obj.get("arguments", {}),
-                    })
-            except json.JSONDecodeError:
-                continue
-        if results:
-            return results
-
-        # --- Format 2: Gemma native — call:Name{...}call:Name{...}
-        if "call:" in text:
-            results = self._parse_gemma_native_calls(text)
-            if results:
-                return results
-
-        # --- Format 3: Qwen native — <tool_call>JSON</tool_call>
-        for match in self._QWEN_CALL_RE.finditer(text):
-            try:
-                obj = json.loads(match.group(1))
-                name = obj.get("name", "")
-                args = obj.get("arguments") or obj.get("parameters", {})
-                if isinstance(args, str):
-                    args = json.loads(args)
-                if name:
-                    results.append({
-                        "id": f"toolu_{uuid.uuid4().hex[:24]}",
-                        "name": name,
-                        "input": args,
-                    })
-            except (json.JSONDecodeError, TypeError):
-                continue
-        return results or None
-
-    def _parse_gemma_native_calls(self, text: str) -> list[dict]:
-        """Parse Gemma's call:Name{...} format with balanced brace matching.
-
-        Handles variants:
-          - call:ToolName{key: "val"}         (simple)
-          - call:ns:ToolName{key: "val"}      (namespace prefix)
-          - call:ns:ToolName {key: "val"}     (space before brace)
-          - call:A{...}call:B{...}            (concatenated)
-        """
-        results = []
-        # Find all call: positions
-        for m in self._GEMMA_CALL_RE.finditer(text):
-            raw_name = m.group(1)
-            # Use the last colon-separated segment as tool name
-            # e.g. "agent_memory:Agent" → "Agent"
-            name = raw_name.rsplit(":", 1)[-1] if ":" in raw_name else raw_name
-            # Find the opening brace (may have whitespace/newline between name and {)
-            rest = text[m.end():]
-            rest_stripped = rest.lstrip(" \t\n")
-            if not rest_stripped or rest_stripped[0] != "{":
-                continue
-            raw_args = self._extract_balanced_braces(rest_stripped)
-            if raw_args is None:
-                continue
-            parsed = self._parse_jslike_object(raw_args)
-            if parsed is not None:
-                results.append({
-                    "id": f"toolu_{uuid.uuid4().hex[:24]}",
-                    "name": name,
-                    "input": parsed,
-                })
-        return results
-
-    @staticmethod
-    def _extract_balanced_braces(s: str) -> str | None:
-        """Extract content within balanced { } from start of string."""
-        if not s or s[0] != "{":
-            return None
-        depth = 0
-        for i, ch in enumerate(s):
-            if ch == "{":
-                depth += 1
-            elif ch == "}":
-                depth -= 1
-                if depth == 0:
-                    return s[: i + 1]
-        return None  # Unbalanced
-
-    @staticmethod
-    def _parse_jslike_object(raw: str) -> dict | None:
-        """Parse JS-like object syntax into a Python dict.
-
-        Gemma outputs {key: "value"} — not valid JSON. Attempts:
-        1. Direct JSON parse
-        2. Quote unquoted keys, fix single quotes
-        3. Manual key-value extraction (flat only)
-        """
-        # Direct JSON
-        try:
-            return json.loads(raw)
-        except json.JSONDecodeError:
-            pass
-
-        # Fix unquoted keys and brackets: {key: "val"} → {"key": "val"}
-        # Also handle nested arrays: [{key: "val"}] → [{"key": "val"}]
-        fixed = re.sub(r'(?<=[{,\[])\s*(\w+)\s*:', r' "\1":', raw)
-        fixed = fixed.replace("'", '"')
-        try:
-            return json.loads(fixed)
-        except json.JSONDecodeError:
-            pass
-
-        # Flat key-value extraction (last resort)
-        try:
-            result = {}
-            for kv in re.finditer(r'(\w+)\s*:\s*(?:"([^"]*)"|([\w.+\-/]+))', raw):
-                key = kv.group(1)
-                val = kv.group(2) if kv.group(2) is not None else kv.group(3)
-                result[key] = val
-            return result if result else None
-        except Exception:
-            return None
-
-    def _strip_tool_calls_from_text(self, text: str) -> str:
-        """Remove tool calls from text (all formats)."""
-        # Strip Gemma native: call:Name{...} (with optional namespace and whitespace)
-        # Rebuild text by removing matched call: regions
-        result_chars = list(text)
-        # Mark regions to remove (reverse order to preserve indices)
-        regions_to_remove = []
-        for m in self._GEMMA_CALL_RE.finditer(text):
-            rest = text[m.end():]
-            rest_stripped = rest.lstrip(" \t\n")
-            skip = len(rest) - len(rest_stripped)
-            balanced = self._extract_balanced_braces(rest_stripped)
-            if balanced:
-                start = m.start()
-                end = m.end() + skip + len(balanced)
-                regions_to_remove.append((start, end))
-        for start, end in reversed(regions_to_remove):
-            result_chars[start:end] = []
-        text = "".join(result_chars)
-
-        # Strip Qwen native: <tool_call>...</tool_call>
-        text = self._QWEN_CALL_RE.sub("", text)
-
-        # Strip JSON tool call lines
-        lines = []
-        for line in text.split("\n"):
-            stripped = line.strip()
-            if stripped.startswith("{"):
-                try:
-                    obj = json.loads(stripped)
-                    if "name" in obj and ("parameters" in obj or "arguments" in obj):
-                        continue
-                except json.JSONDecodeError:
-                    pass
-            lines.append(line)
-        return "\n".join(lines).strip()
 
     # ── Streaming ───────────────────────────────────────────────
 

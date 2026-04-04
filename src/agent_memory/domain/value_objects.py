@@ -12,6 +12,19 @@ if TYPE_CHECKING:
 
 
 @dataclass(frozen=True)
+class ParsedToolCall:
+    """A validated tool call extracted from model output.
+
+    Framework-independent representation — works for any client
+    (Claude Code, Open WebUI, custom agents, raw curl).
+    """
+
+    id: str  # "toolu_..." UUID
+    name: str  # tool name (non-empty)
+    input: dict[str, Any]  # tool arguments
+
+
+@dataclass(frozen=True)
 class GenerationResult:
     """Result of a text generation operation."""
 
