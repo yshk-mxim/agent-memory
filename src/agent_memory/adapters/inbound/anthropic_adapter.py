@@ -389,6 +389,10 @@ async def _stream_trt_response(
     """
     msg_id = f"msg_{uuid.uuid4().hex[:24]}"
 
+    # thinking.type == "disabled" → suppress thinking
+    thinking = request_body.thinking
+    disable_thinking = thinking is None or thinking.type == "disabled"
+
     # Generate full response (all sampling params forwarded)
     result = await asyncio.to_thread(
         trt_inference.generate,
@@ -401,6 +405,7 @@ async def _stream_trt_response(
         top_k=request_body.top_k or 40,
         stop_sequences=request_body.stop_sequences or None,
         openai_tools=openai_tools,
+        disable_thinking=disable_thinking,
         model=request_body.model or None,
     )
 
