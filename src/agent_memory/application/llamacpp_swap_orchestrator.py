@@ -46,7 +46,28 @@ class LlamaCppSwapOrchestrator:
         self._cache_store = cache_store
         self._loader = model_loader  # For slot save/restore
 
+    def swap_model_sync(
+        self,
+        new_model_id: str,
+        timeout_seconds: float = 60.0,
+    ) -> Any:
+        """Synchronous swap — used by auto-swap in TRTInferenceService.
+
+        All operations in the swap sequence are synchronous (subprocess
+        start/stop, HTTP health checks, cache eviction). The async wrapper
+        exists for the admin API endpoint.
+        """
+        return self._do_swap(new_model_id, timeout_seconds)
+
     async def swap_model(
+        self,
+        new_model_id: str,
+        timeout_seconds: float = 60.0,
+    ) -> Any:
+        """Async swap — used by admin API endpoint."""
+        return self._do_swap(new_model_id, timeout_seconds)
+
+    def _do_swap(
         self,
         new_model_id: str,
         timeout_seconds: float = 60.0,

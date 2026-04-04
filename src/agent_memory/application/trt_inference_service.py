@@ -90,26 +90,10 @@ class TRTInferenceService:
         if model and self._swap_orchestrator and self._model_registry:
             current_id = self._model_registry.get_current_id()
             if current_id and model.lower() not in current_id.lower() and current_id.lower() not in model.lower():
-                import asyncio
                 logger.info("auto-swap: %s -> %s", current_id, model)
-                loop = asyncio.get_event_loop()
-                if loop.is_running():
-                    # We're in a thread (called via asyncio.to_thread)
-                    new_loop = asyncio.new_event_loop()
-                    try:
-                        adapter, tokenizer = new_loop.run_until_complete(
-                            self._swap_orchestrator.swap_model(model)
-                        )
-                        self._backend = adapter
-                        self._tokenizer = tokenizer
-                    finally:
-                        new_loop.close()
-                else:
-                    adapter, tokenizer = loop.run_until_complete(
-                        self._swap_orchestrator.swap_model(model)
-                    )
-                    self._backend = adapter
-                    self._tokenizer = tokenizer
+                adapter, tokenizer = self._swap_orchestrator.swap_model_sync(model)
+                self._backend = adapter
+                self._tokenizer = tokenizer
 
         # Load cached KV state for this agent
         cached_kv = self._load_agent_cache(agent_id)
