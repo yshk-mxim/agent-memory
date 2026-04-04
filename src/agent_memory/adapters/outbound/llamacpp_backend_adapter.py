@@ -16,6 +16,7 @@ lifecycle.  Start it with::
 """
 
 import json
+import re
 import uuid
 import logging
 from typing import Any
@@ -136,9 +137,10 @@ class LlamaCppBackendAdapter:
         if stop_sequences:
             body["stop"] = stop_sequences
 
-        if openai_tools:
-            body["tools"] = openai_tools
-            body["tool_choice"] = "auto"
+        # NOTE: We do NOT pass tools to llama-server. The Jinja chat template
+        # already injects tool definitions into the prompt. Passing tools to
+        # llama-server activates its built-in tool parser, which chokes on
+        # multiple tool calls. Instead we parse tool calls from text output.
 
         # Gemma 4: disable thinking via chat_template_kwargs
         if self._is_gemma and (disable_thinking if disable_thinking is not None else self._disable_thinking):
@@ -175,9 +177,10 @@ class LlamaCppBackendAdapter:
                     message.get("tool_calls"),
                     completion_tokens)
 
-        # Convert OpenAI tool_calls → list[dict] for GenerationResult
-        raw_tool_calls = message.get("tool_calls")
+        # Extract tool calls from text output (model generates JSON per template)
+        # Also check OpenAI tool_calls in case llama-server parsed them natively
         tool_calls: list[dict] | None = None
+        raw_tool_calls = message.get("tool_calls")
         if raw_tool_calls:
             tool_calls = []
             for tc in raw_tool_calls:
@@ -191,6 +194,13 @@ class LlamaCppBackendAdapter:
                     "name": fn.get("name", ""),
                     "input": arguments,
                 })
+        elif text:
+            # Parse tool calls from model text output (JSON objects with name+parameters)
+            parsed = self._extract_tool_calls_from_text(text)
+            if parsed:
+                tool_calls = parsed
+                # Remove tool call JSON from the text content
+                text = self._strip_tool_calls_from_text(text)
 
         return GenerationResult(
             text=text,
@@ -198,6 +208,70 @@ class LlamaCppBackendAdapter:
             cache=[],  # llama.cpp manages its own KV cache
             tool_calls=tool_calls,
         )
+
+    # ── Tool call extraction from text ─────���─────────────────────
+
+    _TOOL_CALL_RE = re.compile(
+        r'\{\s*"name"\s*:\s*"[^"]+"\s*,\s*"parameters"\s*:\s*\{[^}]*\}\s*\}',
+        re.DOTALL,
+    )
+
+    def _extract_tool_calls_from_text(self, text: str) -> list[dict] | None:
+        """Extract tool call JSON objects from model text output.
+
+        The Jinja template instructs the model to output tool calls as:
+            {"name": "tool_name", "parameters": {"param": "value"}}
+        One per line. This method finds all such objects in the text.
+        """
+        results = []
+        # Try line-by-line first (most common format)
+        for line in text.split("\n"):
+            line = line.strip()
+            if not line or not line.startswith("{"):
+                continue
+            try:
+                obj = json.loads(line)
+                if "name" in obj and "parameters" in obj:
+                    results.append({
+                        "id": f"toolu_{uuid.uuid4().hex[:24]}",
+                        "name": obj["name"],
+                        "input": obj["parameters"],
+                    })
+            except json.JSONDecodeError:
+                continue
+
+        if results:
+            return results
+
+        # Fallback: regex extraction for inline JSON
+        for match in self._TOOL_CALL_RE.finditer(text):
+            try:
+                obj = json.loads(match.group())
+                if "name" in obj and "parameters" in obj:
+                    results.append({
+                        "id": f"toolu_{uuid.uuid4().hex[:24]}",
+                        "name": obj["name"],
+                        "input": obj["parameters"],
+                    })
+            except json.JSONDecodeError:
+                continue
+
+        return results or None
+
+    def _strip_tool_calls_from_text(self, text: str) -> str:
+        """Remove tool call JSON from text, leaving any surrounding prose."""
+        lines = []
+        for line in text.split("\n"):
+            stripped = line.strip()
+            if stripped.startswith("{"):
+                try:
+                    obj = json.loads(stripped)
+                    if "name" in obj and "parameters" in obj:
+                        continue  # Skip tool call lines
+                except json.JSONDecodeError:
+                    pass
+            lines.append(line)
+        return "\n".join(lines).strip()
 
     # ── Streaming ───────────────────────────────────────────────
 
