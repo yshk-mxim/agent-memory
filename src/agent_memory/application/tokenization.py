@@ -102,13 +102,13 @@ def tokenize_with_chat_template(
             )
 
             tokens = tokenizer.apply_chat_template(messages_for_template, **template_kwargs)
-            logger.info(
-                "Template result: tokens_type=%s, tokens_is_list=%s, text_type=%s, text_is_str=%s",
-                type(tokens).__name__,
-                isinstance(tokens, list),
-                type(templated_text).__name__,
-                isinstance(templated_text, str),
-            )
+
+            # Some tokenizers (Gemma 4) return BatchEncoding instead of list
+            if hasattr(tokens, "input_ids"):
+                tokens = tokens.input_ids
+            if not isinstance(tokens, list) and hasattr(tokens, "tolist"):
+                tokens = tokens.tolist()
+
             if isinstance(tokens, list) and isinstance(templated_text, str):
                 logger.info(f"Template applied: {len(tokens)} tokens, {len(templated_text)} chars")
                 return tokens, templated_text

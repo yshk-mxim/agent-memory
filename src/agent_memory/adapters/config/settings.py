@@ -586,10 +586,10 @@ class LlamaCppSettings(BaseSettings):
     )
 
     timeout_s: float = Field(
-        default=120.0,
+        default=600.0,
         ge=5.0,
-        le=600.0,
-        description="HTTP request timeout in seconds",
+        le=1200.0,
+        description="HTTP request timeout in seconds (600s needed for dense 31B at 10 t/s)",
     )
 
     max_context_length: int = Field(
