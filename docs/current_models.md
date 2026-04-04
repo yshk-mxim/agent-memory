@@ -27,18 +27,52 @@ Sources: [Google Gemma 4 model card](https://huggingface.co/google/gemma-4-31b-i
 
 ## Swapping Models
 
-Auto-swap is disabled (Claude Code sends parallel requests with different model names, causing destructive ping-pong). Swap manually:
+Auto-swap is disabled (Claude Code sends parallel requests with different model names, causing destructive ping-pong). Swap manually via the interactive script or admin API.
+
+### Interactive script (recommended)
 
 ```bash
-# Via admin API
+~/agent-memory/scripts/thor/swap_model.sh
+```
+
+Shows current model, lists available models with a `▸` marker, prompts for selection:
+```
+Currently loaded: gemma-4-26b-a4b
+
+Available models:
+  ▸ 1) gemma-4-26b-a4b   MoE   51 t/s   262K ctx   Fast interactive, research
+    2) gemma-4-31b        Dense 10 t/s   131K ctx   Deep reasoning, architecture
+    3) qwen3-coder-next   Hybrid         128K ctx   Coding specialist (SWE 70.6%)
+
+Select [1-3]:
+```
+
+Also accepts direct arguments:
+```bash
+~/agent-memory/scripts/thor/swap_model.sh gemma-4-31b    # By name
+~/agent-memory/scripts/thor/swap_model.sh 2              # By number
+```
+
+Requires `SEMANTIC_ADMIN_KEY` env var (or prompts for it).
+
+### Admin API
+
+```bash
 curl -X POST http://localhost:8000/admin/models/swap \
   -H "X-Admin-Key: $SEMANTIC_ADMIN_KEY" \
   -H "Content-Type: application/json" \
   -d '{"model_id": "gemma-4-31b"}'
-
-# Via script
-~/agent-memory/scripts/thor/swap_model.sh gemma-4-31b
 ```
+
+### Other scripts
+
+| Script | Purpose |
+|--------|---------|
+| `scripts/thor/start.sh` | Start agent-memory (default: gemma-4-26b-a4b) |
+| `scripts/thor/start.sh gemma-4-31b` | Start with a specific model |
+| `scripts/thor/stop.sh` | Stop agent-memory and llama-server |
+| `scripts/thor/clear_cache.sh` | Clear all KV caches |
+| `scripts/thor/swap_model.sh` | Interactive model swap |
 
 Swap takes ~10-15 seconds (stop old server → start new → load GGUF → health check).
 
