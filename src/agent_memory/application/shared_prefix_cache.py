@@ -52,8 +52,14 @@ class SharedPrefixCache:
 
     @staticmethod
     def compute_hash(system_text: str, tools_text: str) -> str:
-        """Compute a stable hash for a system+tools combination."""
-        payload = f"{system_text}\x00{tools_text}"
+        """Compute a stable hash for a system+tools combination.
+
+        Tools are sorted by line before hashing so that reordering
+        (which Claude Code does occasionally) doesn't invalidate the cache.
+        """
+        tool_lines = sorted(tools_text.strip().split("\n")) if tools_text else []
+        normalized_tools = "\n".join(tool_lines)
+        payload = f"{system_text}\x00{normalized_tools}"
         return hashlib.md5(payload.encode()).hexdigest()
 
     def get(self, prefix_hash: str) -> PrefixEntry | None:

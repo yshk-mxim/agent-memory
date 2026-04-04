@@ -100,6 +100,39 @@ Swap via admin API:
       -d '{"model_id": "gemma-4-31b"}'
 ```
 
+### Tool quick reference (survives compaction)
+
+This section gives the model a stable, compact reference for tool parameters.
+It persists in the system prompt across compaction cycles — the model doesn't
+lose this even in very long conversations.
+
+```markdown
+# Tool Quick Reference
+
+Tools are defined in the API request. Here is a condensed reference for reliable usage:
+
+## File Operations
+- **Read** `file_path` (required, absolute), `offset` (start line), `limit` (max lines)
+- **Write** `file_path` (required, absolute), `content` (required, full file)
+- **Edit** `file_path` (required), `old_string` (required, must be unique in file), `new_string` (required), `replace_all` (bool)
+- **Glob** `pattern` (required, e.g. "**/*.py"), `path` (optional directory)
+- **Grep** `pattern` (required, regex), `path`, `glob`, `output_mode` ("files_with_matches"|"content"|"count"), `-n` (line numbers), `-A`/`-B`/`-C` (context lines)
+
+## Execution
+- **Bash** `command` (required), `timeout` (ms, max 600000), `description` (short summary)
+  - Prefer Read/Write/Grep tools over cat/sed/grep in bash.
+- **Agent** `prompt` (required), `description` (required, 3-5 words), `subagent_type` (str)
+
+## Planning & Tracking
+- **TodoWrite** `todos` (required, array of {content, status, activeForm})
+  - status: "pending" | "in_progress" | "completed"
+
+## Output Format
+Call tools with JSON on its own line:
+{"name": "ToolName", "parameters": {"param": "value"}}
+Multiple calls = multiple JSON objects, one per line. No markdown code blocks.
+```
+
 ### Execution strategy (important for local models)
 
 ```markdown

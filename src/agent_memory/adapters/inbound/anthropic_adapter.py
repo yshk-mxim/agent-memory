@@ -252,20 +252,15 @@ def messages_to_prompt(  # noqa: PLR0912, C901
                 if hasattr(block, "text"):
                     lines.append(f"System: {block.text}\n")
 
-    # Add tool definitions if present
+    # Add tool definitions if present (compressed for local model efficiency)
     if tools:
-        lines.append("\nAvailable Tools:")
-        for tool in tools:
-            tool_def = {
-                "name": tool.name,
-                "description": tool.description,
-                "input_schema": tool.input_schema,
-            }
-            lines.append(json.dumps(tool_def, indent=2))
-        lines.append(
-            '\nTo use a tool, output JSON: {"tool_use": {"name": "<tool_name>", '
-            '"input": {<parameters>}}}\n'
-        )
+        from agent_memory.adapters.inbound.tool_compression import compress_tool_definitions
+
+        tool_dicts = [
+            {"name": t.name, "description": t.description, "input_schema": t.input_schema}
+            for t in tools
+        ]
+        lines.append("\n" + compress_tool_definitions(tool_dicts) + "\n")
 
     # Add conversation messages
     for msg in messages:
@@ -328,19 +323,13 @@ def messages_to_chat_dicts(  # noqa: C901, PLR0912
                     system_parts.append(block.text)
 
     if tools:
-        tool_lines = ["\nAvailable Tools:"]
-        for tool in tools:
-            tool_def = {
-                "name": tool.name,
-                "description": tool.description,
-                "input_schema": tool.input_schema,
-            }
-            tool_lines.append(json.dumps(tool_def, indent=2))
-        tool_lines.append(
-            '\nTo use a tool, output JSON: {"tool_use": {"name": "<tool_name>", '
-            '"input": {<parameters>}}}'
-        )
-        system_parts.append("\n".join(tool_lines))
+        from agent_memory.adapters.inbound.tool_compression import compress_tool_definitions
+
+        tool_dicts = [
+            {"name": t.name, "description": t.description, "input_schema": t.input_schema}
+            for t in tools
+        ]
+        system_parts.append(compress_tool_definitions(tool_dicts))
 
     if system_parts:
         result.append({"role": "system", "content": "\n\n".join(system_parts)})

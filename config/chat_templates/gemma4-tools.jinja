@@ -39,17 +39,18 @@
 
 {% endif -%}
 {%- if tools is not none -%}
-You have access to the following tools. To call a tool, respond with a JSON object:
+You have access to the following tools. To call a tool, output a JSON object on its own line:
 {"name": "tool_name", "parameters": {"param": "value"}}
-
-You may call multiple tools by outputting multiple JSON objects, one per line.
-Do NOT wrap tool calls in markdown code blocks.
+Multiple calls = multiple JSON objects, one per line. Do NOT wrap in markdown code blocks.
 
 Available tools:
 {% for tool in tools -%}
 {%- if tool.type == 'function' -%}
-- {{ tool.function.name }}: {{ tool.function.description | default('') }}
-  Parameters: {{ tool.function.parameters | tojson }}
+{%- set fn = tool.function -%}
+{%- set params = fn.parameters | default({}) -%}
+{%- set props = params.get('properties', {}) if params is mapping else {} -%}
+{%- set req = params.get('required', []) if params is mapping else [] -%}
+- {{ fn.name }}: {{ fn.description | default('') | truncate(120, True) }}{% if props %} Params:{% for pname in props %} {{ pname }} ({{ props[pname].get('type', 'any') }}{% if pname in req %}, required{% endif %}){% if not loop.last %},{% endif %}{% endfor %}{% endif %}
 {% endif -%}
 {%- endfor %}
 {% endif -%}
