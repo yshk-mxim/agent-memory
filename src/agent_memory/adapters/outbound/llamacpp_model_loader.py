@@ -229,7 +229,7 @@ class LlamaCppModelLoader:
             "-ngl", str(n_gpu_layers),
             "--cache-type-k", self._cache_type_k,
             "--cache-type-v", self._cache_type_v,
-            "-fa",  # flash attention
+            "-fa", "on",  # flash attention (newer llama.cpp requires on|off|auto)
             "--log-disable",
         ]
         if extra_args:
