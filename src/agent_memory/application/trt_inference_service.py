@@ -86,14 +86,12 @@ class TRTInferenceService:
         Returns:
             GenerationResult with text, tokens, and updated cache.
         """
-        # Auto-swap: if model doesn't match currently loaded model, swap
-        if model and self._swap_orchestrator and self._model_registry:
-            current_id = self._model_registry.get_current_id()
-            if current_id and model.lower() not in current_id.lower() and current_id.lower() not in model.lower():
-                logger.info("auto-swap: %s -> %s", current_id, model)
-                adapter, tokenizer = self._swap_orchestrator.swap_model_sync(model)
-                self._backend = adapter
-                self._tokenizer = tokenizer
+        # Auto-swap disabled: Claude Code sends parallel requests with
+        # different model names (title gen on haiku + main on opus), causing
+        # destructive ping-pong swaps. Use admin API for manual swap instead:
+        #   curl -X POST http://host:8000/admin/models/swap \
+        #     -H "X-Admin-Key: $KEY" -H "Content-Type: application/json" \
+        #     -d '{"model_id": "gemma-4-31b"}'
 
         # Load cached KV state for this agent
         cached_kv = self._load_agent_cache(agent_id)
