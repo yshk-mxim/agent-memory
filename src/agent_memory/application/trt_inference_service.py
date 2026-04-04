@@ -32,6 +32,8 @@ class TRTInferenceService:
         tokenizer: Any,
         cache_adapter: Any | None = None,
         quantizer: Any | None = None,
+        swap_orchestrator: Any | None = None,
+        model_registry: Any | None = None,
     ) -> None:
         """Initialize TRT inference service.
 
@@ -40,11 +42,15 @@ class TRTInferenceService:
             tokenizer: HuggingFace tokenizer for prompt processing.
             cache_adapter: Cache persistence adapter (TRTSafetensorsCacheAdapter).
             quantizer: CacheQuantizationPort for Q4→FP16 dequantization on load.
+            swap_orchestrator: LlamaCppSwapOrchestrator for auto model swap.
+            model_registry: ModelRegistry for current model tracking.
         """
         self._backend = backend
         self._tokenizer = tokenizer
         self._cache_adapter = cache_adapter
         self._quantizer = quantizer
+        self._swap_orchestrator = swap_orchestrator
+        self._model_registry = model_registry
 
     @property
     def tokenizer(self) -> Any:
@@ -63,6 +69,7 @@ class TRTInferenceService:
         stop_sequences: list[str] | None = None,
         openai_tools: list[dict] | None = None,
         disable_thinking: bool = True,
+        model: str | None = None,
     ) -> GenerationResult:
         """Generate text with automatic KV cache persistence.
 
@@ -79,6 +86,31 @@ class TRTInferenceService:
         Returns:
             GenerationResult with text, tokens, and updated cache.
         """
+        # Auto-swap: if model doesn't match currently loaded model, swap
+        if model and self._swap_orchestrator and self._model_registry:
+            current_id = self._model_registry.get_current_id()
+            if current_id and model.lower() not in current_id.lower() and current_id.lower() not in model.lower():
+                import asyncio
+                logger.info("auto-swap: %s -> %s", current_id, model)
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    # We're in a thread (called via asyncio.to_thread)
+                    new_loop = asyncio.new_event_loop()
+                    try:
+                        adapter, tokenizer = new_loop.run_until_complete(
+                            self._swap_orchestrator.swap_model(model)
+                        )
+                        self._backend = adapter
+                        self._tokenizer = tokenizer
+                    finally:
+                        new_loop.close()
+                else:
+                    adapter, tokenizer = loop.run_until_complete(
+                        self._swap_orchestrator.swap_model(model)
+                    )
+                    self._backend = adapter
+                    self._tokenizer = tokenizer
+
         # Load cached KV state for this agent
         cached_kv = self._load_agent_cache(agent_id)
 
@@ -97,6 +129,7 @@ class TRTInferenceService:
             stop_sequences=stop_sequences,
             openai_tools=openai_tools,
             disable_thinking=disable_thinking,
+            model=model,
         )
 
         # Save updated cache to disk
@@ -153,6 +186,7 @@ class TRTInferenceService:
             stop_sequences=req.stop_sequences or None,
             openai_tools=req.openai_tools,
             disable_thinking=req.disable_thinking,
+            model=req.model or None,
         )
 
     def _build_fim_prompt(self, prefix: str, suffix: str | None = None) -> str:

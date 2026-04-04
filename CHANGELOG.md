@@ -122,6 +122,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Configurable eviction policy with `SEMANTIC_AGENT_EVICTION_POLICY` setting.
 - `TRTSafetensorsCacheAdapter` — numpy-based cache I/O, no MLX dependency.
   Each backend has its own cache adapter wired by `api_server.py`.
+- **llama.cpp multi-model backend** with managed model swapping. Three models
+  available on Thor: Gemma 4 26B-A4B (MoE, 51 t/s gen, 1681 t/s pp),
+  Gemma 4 31B (Dense, 10 t/s gen, 361 t/s pp), Qwen3-Coder-Next (SWE-bench 70.6%).
+  Set `SEMANTIC_BACKEND=llamacpp` + `SEMANTIC_LLAMACPP_DEFAULT_MODEL=gemma-4-26b-a4b`.
+- `LlamaCppModelLoader` — manages llama-server subprocess lifecycle (start/stop/health).
+  Implements `ModelLoaderPort` so `ModelRegistry` can swap GGUF models exactly like MLX.
+- `LlamaCppSwapOrchestrator` — 5-step swap: save slot KV caches → evict agent caches →
+  stop llama-server → start with new GGUF → update model tag. Rollback on failure.
+- Auto-swap: `TRTInferenceService` detects model mismatch in API requests and triggers
+  swap automatically (controlled by `SEMANTIC_LLAMACPP_AUTO_SWAP`, default true).
+- TOML model profiles for Thor: `config/models/gemma-4-26b-a4b.toml`,
+  `config/models/gemma-4-31b.toml`, `config/models/qwen3-coder-next.toml`.
+- Thor management scripts: `scripts/thor/start.sh`, `stop.sh`, `swap_model.sh`,
+  `clear_cache.sh`.
 - `TRTInferenceService` — application service wrapping TRT backend with cache
   persistence. Handles load/inject/generate/extract/save transparently.
   Includes FIM prompt construction and model-agnostic special token stripping.

@@ -94,6 +94,8 @@ class LlamaCppBackendAdapter:
         session_id: str | None = None,
         openai_tools: list[dict] | None = None,
         disable_thinking: bool = True,
+        model: str | None = None,  # noqa: ARG002 — used by router, ignored here
+        **kwargs: Any,  # noqa: ARG002
     ) -> GenerationResult:
         """Generate text via llama-server's OpenAI-compatible API.
 

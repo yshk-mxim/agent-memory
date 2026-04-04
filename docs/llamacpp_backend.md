@@ -1,9 +1,11 @@
-# llama.cpp Backend — Run Any Model on Thor
+# llama.cpp Backend — Multi-Model on Thor
 
-> **v1.1.0-alpha** — functional but not production-hardened.
+> **v1.1.0** — Managed multi-model with hot-swap.
 
-Run Qwen3-Coder-Next (70.6% SWE-bench), Qwen3.5-27B-Opus-Distilled, or any
-GGUF model on NVIDIA Jetson Thor through agent-memory with persistent KV cache.
+Run Gemma 4 26B-A4B (fast MoE), Gemma 4 31B (deep dense), or Qwen3-Coder-Next
+(coding specialist) on NVIDIA Jetson Thor through agent-memory. Models swap
+automatically when you change the model name in your API request — one model
+loaded at a time maximizes context window per model.
 
 ## Architecture
 
@@ -11,150 +13,230 @@ GGUF model on NVIDIA Jetson Thor through agent-memory with persistent KV cache.
 Claude Code CLI ──→ agent-memory (:8000) ──→ llama-server (:8001) ──→ Thor GPU
                          │                         │
                    Anthropic Messages API    OpenAI-compat API
-                   Session management        GGUF Q4_K_M weights
-                   Cache persistence         Slot-level KV save/restore
-                   Tool call translation     Native CUDA on sm_110
-                   Thinking tag stripping    DeltaNet/MoE/MLA — all handled
+                   Model swap orchestrator   GGUF Q4_K_M weights
+                   Session management        Slot-level KV cache
+                   Cache persistence         Native CUDA on sm_110
+                   Tool call translation     MoE/Dense — all handled
+                   Thinking tag stripping
 ```
 
-agent-memory translates Anthropic Messages API (Claude Code) to OpenAI Chat
-Completions API (llama-server), manages sessions, and handles cache persistence.
-llama-server manages the actual model weights and KV cache in GPU memory.
+### Managed Mode (recommended)
+
+agent-memory manages the llama-server process lifecycle:
+
+```
+API request (model=gemma-4-31b)
+  │
+  ├── Model already loaded? → generate directly
+  │
+  └── Different model? → LlamaCppSwapOrchestrator:
+        1. Save slot KV caches (HTTP /slots/{id}?action=save)
+        2. Evict agent-memory caches to disk
+        3. Stop llama-server (SIGTERM → SIGKILL)
+        4. Start llama-server with new GGUF
+        5. Update cache store model tag
+        6. Generate response
+```
+
+Swap time: ~10-15 seconds (NVMe → GPU). KV caches survive swaps via disk.
+
+### External Mode (advanced)
+
+Start llama-server yourself, point agent-memory at it. No swap support.
 
 ## Why llama.cpp?
 
-| Engine | DeltaNet (Qwen3.5) | MoE | MLA (DeepSeek) | sm_110 | FP4 native |
-|--------|-------------------|-----|----------------|--------|-----------|
-| **llama.cpp** | **Yes** | **Yes** | **Yes** | **Yes** | No (Q4 dequant) |
-| vLLM | Yes (fla) | Yes | Yes | Partial (rebuild needed) | No (Marlin dequant) |
-| Edge-LLM v0.6.0 | No | Qwen3 only | No | Yes | Yes |
-| TensorRT-LLM | N/A | N/A | N/A | **Not supported on Thor** | N/A |
+| Engine | MoE (Gemma 4) | Dense (Gemma 4) | DeltaNet (Qwen3.5) | sm_110 |
+|--------|--------------|-----------------|-------------------|--------|
+| **llama.cpp** | **Yes** | **Yes** | **Yes** | **Yes** |
+| vLLM | Yes | Yes | Yes (fla) | Partial (rebuild, cuBLAS blocked) |
+| Edge-LLM v0.6.0 | Qwen3 only | No Gemma | No | Yes |
+| TensorRT-LLM | N/A | N/A | N/A | **Not supported** |
 
-llama.cpp handles **every architecture** via GGUF — no precompiled CUDA kernels,
-no architecture-specific gaps.  It just works.
+llama.cpp handles **every architecture** via GGUF — no precompiled CUDA
+kernels, no architecture-specific gaps.
 
 ## Supported Models
 
-| Model | Active Params | SWE-bench | GGUF Q4_K_M Size | Tool Calling | Recommended |
-|-------|--------------|-----------|-----------------|-------------|-------------|
-| **Gemma 4 31B** | 31B (dense) | N/A | ~18 GB | Yes | **Best quality/size ratio** |
-| **Qwen3-Coder-Next** | 3B (of 80B MoE) | **70.6%** | ~46 GB | Yes | **Best SWE-bench** |
-| **Qwen3.5-27B-Opus-Distilled** | 27B (dense) | Good | ~16.5 GB | Yes (stable) | **Best for reasoning** |
-| Gemma 4 26B-A4B | 3.8B (of 26B MoE) | N/A | ~14 GB | Yes | Fastest (MoE) |
-| Qwen3.5-35B-A3B | 3B (of 35B MoE) | 76.4% (27B) | ~20 GB | Yes | Good all-round |
-| Qwen2.5-Coder-32B | 32B (dense) | ~55% | ~20 GB | Yes | Stable fallback |
+| Model | Type | Active Params | GGUF Q4_K_M | Best For |
+|-------|------|--------------|-------------|----------|
+| **Gemma 4 26B-A4B** | MoE | 3.8B (of 26B) | ~14 GB | Fast interactive coding, research, triage |
+| **Gemma 4 31B** | Dense | 31B | ~18 GB | Deep reasoning, architecture, security audit |
+| **Qwen3-Coder-Next** | Hybrid | 3B (of 80B) | ~46 GB | Coding specialist (SWE-bench 70.6%) |
+
+## Performance (Measured)
+
+### Thor (Jetson AGX, 273 GB/s, sm_110)
+
+| Model | Quantization | Prefill (tok/s) | Generate (tok/s) | Context | Slots |
+|-------|-------------|-----------------|------------------|---------|-------|
+| **Gemma 4 26B-A4B** | Q4_K_M + Q8 KV | **1,681** | **51** | 262K | 4 |
+| **Gemma 4 31B** | Q4_K_M + Q8 KV | **361** | **10** | 131K | 2 |
+| Qwen3-Coder-Next | Q4_K_M + Q8 KV | ~1,000 (est.) | ~15-20 (est.) | 131K | 2 |
+
+### Cross-Platform Comparison
+
+| Platform | Gemma 4 26B-A4B gen (tok/s) | Gemma 4 31B gen (tok/s) | Bandwidth |
+|----------|---------------------------|------------------------|-----------|
+| **Thor** (sm_110) | **51** | **10** | 273 GB/s |
+| M5 Max (128 GB) | 81 | ~15 (est.) | 546 GB/s |
+| M3 Ultra (192 GB) | ~60 (est.) | ~11 (est.) | 409 GB/s |
+| RTX 5090 (32 GB) | 55-60 | N/A (32 GB) | 1792 GB/s |
+
+> RTX 5090 bandwidth is 6.5x Thor but gen speed only ~1.1x for MoE —
+> generation is bottlenecked by active parameter bandwidth (3.8B), not total.
+> Dense 31B won't fit in 32 GB VRAM at Q4_K_M + Q8 KV cache.
+
+### End-to-End Latency Analysis (Thor)
+
+For Claude Code agentic workloads (system prompt reuse, ~30K prefill + ~500 gen):
+
+| Model | First turn (30K pp) | Subsequent turns (cached pp) | 500 tok gen |
+|-------|--------------------|-----------------------------|-------------|
+| **Gemma 4 26B-A4B** | 17.8s pp + 9.8s gen = **27.6s** | ~0s (cached) + 9.8s = **9.8s** |
+| **Gemma 4 31B** | 83s pp + 50s gen = **133s** | ~0s (cached) + 50s = **50s** |
+
+The MoE model is **5x faster** end-to-end for interactive coding. Use Dense 31B
+only when you need deeper reasoning (architecture reviews, security audits).
+
+### Custom FP4 Kernel (tcgen05)
+
+Thor has native FP4 tensor cores (tcgen05 MXFP4). A custom kernel was built and
+benchmarked but is **not recommended** for production:
+
+| Kernel | Gemma 4 26B-A4B pp (tok/s) | Gemma 4 26B-A4B gen (tok/s) |
+|--------|---------------------------|----------------------------|
+| Stock Q4_K_M (dequant) | **1,681** | **51** |
+| Custom MXFP4 (tcgen05) | **2,200** (est. at scale) | **3.3** (broken pipelining) |
+
+Custom FP4 wins on prefill-heavy workloads (>15:1 prefill:gen ratio) but the
+pipelining issue makes it impractical for interactive use. Stock Q4_K_M is the
+production choice.
+
+## Memory Budget (Thor 128 GB, single model loaded)
+
+| Model | Model Size | KV Cache (Q8) | Context | Slots | Free |
+|-------|-----------|---------------|---------|-------|------|
+| **Gemma 4 26B-A4B** | 16 GB | 102 GB | 262K total (65K/slot) | 4 | ~10 GB |
+| **Gemma 4 31B** | 17 GB | 101 GB | 131K total (65K/slot) | 2 | ~10 GB |
+| Qwen3-Coder-Next | 46 GB | 48 GB | 131K total (65K/slot) | 2 | ~34 GB |
+
+> Single model loaded at a time. Full 128 GB available per model.
+> MoE at 262K context = 4 concurrent Claude Code sessions at 65K each.
 
 ## 1. Build llama.cpp for Thor (sm_110)
 
 ```bash
 # On Thor (main4.local)
-source ~/vllm-env/bin/activate  # or any env with cmake
-
-git clone https://github.com/ggml-org/llama.cpp
-cd llama.cpp
+git clone https://github.com/ggml-org/llama.cpp ~/llama.cpp-build
+cd ~/llama.cpp-build
 cmake -B build \
     -DGGML_CUDA=ON \
     -DCMAKE_CUDA_ARCHITECTURES="110" \
     -DCMAKE_BUILD_TYPE=Release
-cmake --build build --config Release -j$(nproc)
+cmake --build build --config Release -j$(nproc) --target llama-server
 ```
+
+> **Only sm_110.** Do not add other architectures — wastes compile time and
+> the fat binary won't run faster. See `thor_compile_fix.md` for ptxas setup.
 
 Verify: `./build/bin/llama-server --help | head -5`
 
-See `thor_compile_fix.md` for Triton/ptxas environment setup if using
-torch.compile alongside llama.cpp.
-
-## 2. Download a Model
+## 2. Download Models
 
 ```bash
 pip install huggingface-hub
 
-# Gemma 4 31B (best quality/size — 18 GB Q4_K_M, 256K context, Apache 2.0)
+# Gemma 4 26B-A4B (MoE, fast — 51 t/s gen, 262K context)
+huggingface-cli download ggml-org/gemma-4-26B-A4B-it-GGUF \
+    --include "*Q4_K_M*" \
+    --local-dir ~/models/gemma4-26b-a4b
+
+# Gemma 4 31B (Dense, deep — 10 t/s gen, 131K context)
 huggingface-cli download ggml-org/gemma-4-31B-it-GGUF \
     --include "*Q4_K_M*" \
     --local-dir ~/models/gemma4-31b
 
-# OR: Qwen3-Coder-Next (best SWE-bench — 70.6%, but 46 GB)
+# Qwen3-Coder-Next (SWE-bench 70.6%, 131K context)
 huggingface-cli download unsloth/Qwen3-Coder-Next-GGUF \
     --include "*Q4_K_M*" \
     --local-dir ~/models/qwen3-coder-next
-
-# OR: Qwen3.5-27B-Opus-Distilled (best reasoning + stable tool calling)
-huggingface-cli download Jackrong/Qwen3.5-27B-Claude-4.6-Opus-Reasoning-Distilled-GGUF \
-    --include "*Q4_K_M*" \
-    --local-dir ~/models/qwen35-opus-distilled
 ```
 
-## 3. Start llama-server
+## 3. Configure Model Profiles
 
-```bash
-mkdir -p ~/.agent_memory/llamacpp_slots
+Each model has a TOML config in `config/models/`:
 
-./build/bin/llama-server \
-    -m ~/models/gemma4-31b/gemma-4-31B-it-Q4_K_M.gguf \
-    --port 8001 \
-    --host 0.0.0.0 \
-    -ngl 999 \
-    --ctx-size 131072 \
-    -np 2 \
-    --slot-save-path ~/.agent_memory/llamacpp_slots \
-    --cache-type-k q8_0 \
-    --cache-type-v q8_0 \
-    --cache-prompt
+```toml
+# config/models/gemma-4-26b-a4b.toml
+[llamacpp]
+gguf_path = "/home/yshkolni/models/gemma4-26b-a4b/gemma-4-26B-A4B-it-Q4_K_M.gguf"
+tokenizer_id = "google/gemma-4-26B-A4B-it"
+ctx_size = 262144
+n_slots = 4
+n_gpu_layers = 99
 ```
 
-| Flag | Purpose |
-|------|---------|
-| `-ngl 999` | Offload all layers to GPU |
-| `--ctx-size 131072` | 128K context window (divided among slots) |
-| `-np 2` | 2 parallel slots (65K per slot) |
-| `--slot-save-path` | Enable KV cache save/restore to disk |
-| `--cache-type-k q8_0` | Q8 quantized KV cache (near-lossless, ~48 GB at 128K) |
-| `--cache-prompt` | Reuse KV cache for shared prompt prefixes |
-| `-b 2048` | Prefill batch size (chunked prefill, default 2048) |
-| `-ub 512` | Micro-batch size for prefill (default 512) |
+The managed mode loader reads these profiles when swapping models.
 
-> **Why Q8 not Q4 KV cache?** Q4 saves more memory but adds +0.2 perplexity and
-> causes context-tracking errors on long conversations. Q8 is near-lossless
-> (+0.002–0.05 perplexity) and still halves KV memory vs FP16. For coding
-> workloads where precision matters, Q8 is the right tradeoff.
+## 4. Start (Managed Mode)
 
-Verify:
+Use the helper script — it starts agent-memory which manages llama-server:
+
 ```bash
-curl http://localhost:8001/health
-# {"status":"ok"}
+# Default: starts with MoE (fastest)
+~/agent-memory/scripts/thor/start.sh
+
+# Or start with a specific model
+~/agent-memory/scripts/thor/start.sh gemma-4-31b
+~/agent-memory/scripts/thor/start.sh qwen3-coder-next
 ```
 
-## 4. Start agent-memory
+This sets:
+- `SEMANTIC_BACKEND=llamacpp`
+- `SEMANTIC_LLAMACPP_SERVER_BINARY=~/llama.cpp-build/build/bin/llama-server`
+- `SEMANTIC_LLAMACPP_DEFAULT_MODEL=gemma-4-26b-a4b`
+- `SEMANTIC_LLAMACPP_CACHE_TYPE_K=q8_0`
+- `SEMANTIC_LLAMACPP_CACHE_TYPE_V=q8_0`
+- `SEMANTIC_LLAMACPP_AUTO_SWAP=true`
+
+## 5. Swap Models
+
+### Automatic (recommended)
+
+Just change the model name in your API request:
 
 ```bash
-cd ~/agent-memory
-
-SEMANTIC_BACKEND=llamacpp \
-SEMANTIC_LLAMACPP_BASE_URL=http://localhost:8001 \
-SEMANTIC_LLAMACPP_MODEL_ID=gemma4-31b \
-SEMANTIC_LLAMACPP_TOKENIZER_ID=google/gemma-4-31B-it \
-SEMANTIC_LLAMACPP_MAX_CONTEXT_LENGTH=131072 \
-SEMANTIC_LLAMACPP_N_SLOTS=2 \
-python -m uvicorn agent_memory.entrypoints.api_server:create_app \
-    --factory --host 0.0.0.0 --port 8000
-```
-
-Verify:
-```bash
-curl http://localhost:8000/health/live
-# {"status":"alive"}
-
+# This auto-swaps to gemma-4-31b if gemma-4-26b-a4b was loaded
 curl -s http://localhost:8000/v1/messages \
     -H "Content-Type: application/json" \
     -d '{
-        "model": "qwen3-coder-next",
-        "max_tokens": 32,
-        "messages": [{"role": "user", "content": "What is 2+2?"}]
-    }' | python3 -m json.tool
+        "model": "gemma-4-31b",
+        "max_tokens": 256,
+        "messages": [{"role": "user", "content": "Review this architecture"}]
+    }'
 ```
 
-## 5. Connect Claude Code CLI
+### Explicit
+
+```bash
+# Via admin API
+curl -X POST http://localhost:8000/admin/models/swap \
+    -H "X-Admin-Key: $SEMANTIC_ADMIN_KEY" \
+    -H "Content-Type: application/json" \
+    -d '{"model_id": "gemma-4-31b"}'
+
+# Via script
+~/agent-memory/scripts/thor/swap_model.sh gemma-4-31b
+```
+
+### Stop
+
+```bash
+~/agent-memory/scripts/thor/stop.sh
+```
+
+## 6. Connect Claude Code CLI
 
 Add to `~/.claude/settings.json`:
 
@@ -163,7 +245,7 @@ Add to `~/.claude/settings.json`:
     "env": {
         "ANTHROPIC_BASE_URL": "http://localhost:8000",
         "ANTHROPIC_AUTH_TOKEN": "local",
-        "ANTHROPIC_MODEL": "qwen3-coder-next",
+        "ANTHROPIC_MODEL": "gemma-4-26b-a4b",
         "CLAUDE_CODE_ATTRIBUTION_HEADER": "0",
         "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
         "MAX_THINKING_TOKENS": "0"
@@ -182,6 +264,10 @@ Add to `~/.claude/settings.json`:
 **`CLAUDE_CODE_ATTRIBUTION_HEADER=0`** prevents a header that invalidates
 the KV cache with local models — critical for performance.
 
+Switch models from Claude Code by changing `ANTHROPIC_MODEL` or by letting
+the agent-memory auto-swap handle it when different model names appear in
+API requests.
+
 Headless mode:
 ```bash
 ANTHROPIC_BASE_URL=http://localhost:8000 \
@@ -192,7 +278,7 @@ claude --bare -p "What files are in this directory?" \
     --max-turns 3
 ```
 
-## 6. KV Cache Persistence
+## 7. KV Cache Persistence
 
 llama-server provides slot-level KV cache save/restore:
 
@@ -206,95 +292,80 @@ curl -X POST "http://localhost:8001/slots/0?action=save" \
 curl -X POST "http://localhost:8001/slots/1?action=restore" \
     -H "Content-Type: application/json" \
     -d '{"filename": "session-abc.bin"}'
-
-# Clear a slot
-curl -X POST "http://localhost:8001/slots/0?action=erase"
 ```
 
-agent-memory's `LlamaCppBackendAdapter` maps sessions to slots using
-`hash(session_id) % n_slots`.  The `--cache-prompt` flag automatically
-reuses KV cache when requests share a prefix (e.g., system prompt).
-
-Cache files are stored in `--slot-save-path` (default:
-`~/.agent_memory/llamacpp_slots/`).  They survive server restarts.
+During model swaps, the orchestrator automatically saves all slot caches
+before stopping the server. The `--cache-prompt` flag reuses KV cache when
+requests share a prefix (e.g., system prompt) — critical for Claude Code's
+agentic loop (10-40K system prompt repeated every turn).
 
 ## Configuration Reference
+
+### Managed Mode (recommended)
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `SEMANTIC_BACKEND` | `mlx` | Set to `llamacpp` |
-| `SEMANTIC_LLAMACPP_BASE_URL` | `http://localhost:8001` | llama-server URL |
-| `SEMANTIC_LLAMACPP_MODEL_ID` | `qwen3-coder-next` | Model name sent in API requests |
-| `SEMANTIC_LLAMACPP_TOKENIZER_ID` | *(same as MODEL_ID)* | HuggingFace tokenizer repo — set when MODEL_ID is a GGUF-only repo (e.g. `unsloth/*-GGUF`) with no tokenizer files; point at the base model instead |
+| `SEMANTIC_LLAMACPP_SERVER_BINARY` | `llama-server` | Path to llama-server binary |
+| `SEMANTIC_LLAMACPP_DEFAULT_MODEL` | *(empty)* | Model ID to load on startup (enables managed mode) |
+| `SEMANTIC_LLAMACPP_AUTO_SWAP` | `true` | Auto-swap when request model differs from loaded |
+| `SEMANTIC_LLAMACPP_BASE_URL` | `http://localhost:8001` | llama-server URL (port for managed process) |
+| `SEMANTIC_LLAMACPP_CACHE_TYPE_K` | `q8_0` | Key cache quantization |
+| `SEMANTIC_LLAMACPP_CACHE_TYPE_V` | `q8_0` | Value cache quantization |
 | `SEMANTIC_LLAMACPP_TIMEOUT_S` | `120.0` | HTTP timeout |
+
+### External Mode
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `SEMANTIC_LLAMACPP_BASE_URL` | `http://localhost:8001` | llama-server URL |
+| `SEMANTIC_LLAMACPP_MODEL_ID` | `qwen3-coder-next` | Model name for API requests |
+| `SEMANTIC_LLAMACPP_TOKENIZER_ID` | *(same as MODEL_ID)* | HuggingFace tokenizer repo |
 | `SEMANTIC_LLAMACPP_MAX_CONTEXT_LENGTH` | `65536` | Context window |
-| `SEMANTIC_LLAMACPP_SLOT_SAVE_PATH` | `~/.agent_memory/llamacpp_slots` | Slot cache directory |
-| `SEMANTIC_LLAMACPP_N_SLOTS` | `4` | Parallel slots (mirrors `-np`) |
-| `SEMANTIC_LLAMACPP_CACHE_TYPE_K` | `q8_0` | Key cache quantization (q8_0 recommended for quality) |
-| `SEMANTIC_LLAMACPP_CACHE_TYPE_V` | `q8_0` | Value cache quantization (q8_0 recommended for quality) |
-
-## Memory Budget (Thor 128 GB)
-
-| Setup | Model | KV Cache (Q8, 128K ctx) | OS/System | Free |
-|-------|-------|------------------------|-----------|------|
-| **Gemma 4 31B Q4_K_M** | ~18 GB | ~48 GB | ~10 GB | **~52 GB** |
-| Gemma 4 26B-A4B Q4_K_M | ~14 GB | ~16 GB (3.8B active) | ~10 GB | **~88 GB** |
-| Qwen3-Coder-Next Q4_K_M | ~46 GB | ~48 GB | ~10 GB | **~24 GB** |
-| Qwen3.5-27B-Opus Q4_K_M | ~16.5 GB | ~48 GB | ~10 GB | **~53 GB** |
-
-## Performance Expectations (Thor)
-
-Based on llama.cpp benchmarks for similar models on Thor (~273 GB/s bandwidth):
-
-| Model | Quantization | Prefill (tok/s) | Generate (tok/s) |
-|-------|-------------|-----------------|-----------------|
-| **Gemma 4 31B (dense)** | Q4_K_M | ~500 (est.) | **~10-15** (est.) |
-| Gemma 4 26B-A4B (MoE) | Q4_K_M | ~1,200 (est.) | **~30-50** (est.) |
-| Qwen3-30B-A3B | Q8_0 | ~1,533 | ~42.7 |
-| Qwen3-Coder-Next (80B/3B active) | Q4_K_M | ~1,000 (est.) | ~15-20 (est.) |
-| Qwen3.5-27B-Opus (dense) | Q4_K_M | ~500 (est.) | ~25-35 (est.) |
+| `SEMANTIC_LLAMACPP_N_SLOTS` | `4` | Parallel slots |
 
 ## Troubleshooting
 
 | Error | Cause | Fix |
 |-------|-------|-----|
-| `Connection refused` | llama-server not running | Start llama-server first |
+| `Connection refused` | llama-server not running | Check start script logs |
 | `{"status":"loading"}` | Model still loading | Wait for `{"status":"ok"}` |
-| `slot save failed` | `--slot-save-path` not set | Add flag to llama-server command |
-| `OOM killed` | Model too large for Thor | Use smaller quantization or model |
-| `no choices` | Context overflow or bad prompt | Check `--ctx-size` vs prompt length |
-| Slow first request | Triton/CUDA kernel compilation | Normal on first run; cached after |
+| `slot save failed` | `--slot-save-path` not set | Managed mode sets this automatically |
+| `OOM killed` | Model too large | Use smaller quantization or fewer slots |
+| `no choices` | Context overflow | Check ctx_size in model TOML |
+| Swap timeout | GGUF too large for 60s | Increase `timeout_seconds` in swap call |
+| Slow first request | CUDA kernel compilation | Normal on first run; cached after |
 | `ptxas fatal: sm_110a` | Triton ptxas too old | Set `TRITON_PTXAS_BLACKWELL_PATH=/usr/local/cuda/bin/ptxas` |
+
+## Why Q8 KV Cache?
+
+Q4 saves more memory but adds +0.2 perplexity and causes context-tracking
+errors on long conversations. Q8 is near-lossless (+0.002–0.05 perplexity)
+and still halves KV memory vs FP16. For coding workloads where precision
+matters, Q8 is the right tradeoff.
 
 ## Prefill Chunking
 
-llama.cpp handles prefill chunking internally — agent-memory does **not** need
-to orchestrate it (unlike the MLX and TRT backends).
+llama.cpp handles prefill chunking internally — agent-memory does **not**
+need to orchestrate it (unlike the MLX and TRT backends).
 
 | Mechanism | How it works |
 |-----------|-------------|
-| **Chunked prefill** (`-b 2048`) | Long prompts are processed in batches of 2048 tokens, preventing OOM |
-| **Micro-batching** (`-ub 512`) | Each batch is further split into 512-token micro-batches for GPU efficiency |
-| **Prefix caching** (`--cache-prompt`) | When the same system prompt is sent across turns, llama.cpp skips re-processing the matching prefix — equivalent to agent-memory's system prompt cache |
-| **Slot persistence** (`--slot-save-path`) | KV cache saved to disk survives server restarts — equivalent to agent-memory's warm cache tier |
+| **Chunked prefill** (`-b 2048`) | Long prompts processed in 2048-token batches |
+| **Micro-batching** (`-ub 512`) | Each batch split into 512-token micro-batches |
+| **Prefix caching** (`--cache-prompt`) | Shared system prompt KV reused across turns |
+| **Slot persistence** (`--slot-save-path`) | KV cache saved to disk survives swaps/restarts |
 
-For Claude Code's agentic loop (10-40K system prompt repeated every turn),
-`--cache-prompt` is critical — it avoids re-computing the system prompt KV
-state on every request. The first request is slow (full prefill), subsequent
-requests in the same slot skip the shared prefix entirely.
-
-Tune prefill batch size based on available memory:
-- **Thor (128 GB):** `-b 4096 -ub 1024` (larger batches, more GPU utilization)
-- **16 GB Mac:** `-b 1024 -ub 256` (smaller to avoid OOM)
+Tune for Thor: `-b 4096 -ub 1024` (larger batches, more GPU utilization).
 
 ## Notes
 
 - **No native FP4 compute:** llama.cpp uses Q4_K_M dequantization, not Thor's
-  native FP4 tensor cores.  When TensorRT Edge-LLM adds DeltaNet support,
-  native FP4 will deliver ~2-4x higher throughput.
+  native FP4 tensor cores. Custom tcgen05 kernel exists but pipelining issues
+  make stock Q4_K_M faster for interactive workloads.
 - **Thinking mode:** Qwen3.5 models generate `<think>` tags by default.
-  agent-memory strips these automatically.  Use `MAX_THINKING_TOKENS=0` in
-  Claude Code settings to minimize wasted tokens.
-- **Tool calling:** Qwen3-Coder-Next and Qwen3.5 models support native tool
-  calling via `<tool_call>` tags.  agent-memory's anthropic adapter handles
-  Anthropic ↔ Qwen tool format translation.
+  agent-memory strips these automatically. Use `MAX_THINKING_TOKENS=0`.
+- **Tool calling:** Full Anthropic ↔ OpenAI tool format translation pipeline
+  in agent-memory's anthropic adapter.
+- **Gemma 4 thinking:** Gemma 4 models support thinking via `chat_template_kwargs`.
+  agent-memory suppresses thinking by default for coding workloads.

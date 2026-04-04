@@ -78,6 +78,30 @@ class AppState:
         self.trt_subprocess: Any = None  # TRT backend subprocess adapter
         self.trt_inference: Any = None  # TRT inference service (with cache)
         self.tokenizer: Any = None  # Tokenizer (shared, used by adapters)
+        self.llamacpp_swap_orchestrator: Any = None  # llama.cpp model swap
+
+
+class _LlamaCppSpecExtractor:
+    """SpecExtractorPort for llama.cpp — returns advisory spec.
+
+    llama.cpp manages its own KV cache, so the spec is advisory
+    (used only for cache store model tagging, not block allocation).
+    The 'model' here is actually a LlamaCppBackendAdapter.
+    """
+
+    def extract_spec(self, model: Any) -> ModelCacheSpec:
+        """Extract spec from a LlamaCppBackendAdapter."""
+        if hasattr(model, "extract_model_spec"):
+            return model.extract_model_spec()
+        return ModelCacheSpec(
+            n_layers=48,
+            n_kv_heads=16,
+            head_dim=128,
+            block_tokens=256,
+            layer_types=["global"] * 48,
+            kv_format="fp",
+            kv_bits=None,
+        )
 
 
 def _load_trt_model_and_extract_spec(settings):
@@ -381,33 +405,73 @@ async def lifespan(app: FastAPI):
 
         elif settings.backend == "llamacpp":
             # --- llama.cpp backend path ---
-            from transformers import AutoTokenizer
+            # Two modes:
+            # 1. Managed mode (server_binary set, default_model set):
+            #    agent-memory starts/stops llama-server, supports model swapping.
+            # 2. External mode (base_url only):
+            #    llama-server runs independently, single model, no swap.
 
-            from agent_memory.adapters.outbound.llamacpp_backend_adapter import (
-                LlamaCppBackendAdapter,
-            )
+            if settings.llamacpp.default_model and settings.llamacpp.server_binary:
+                # -- Managed mode: agent-memory manages llama-server lifecycle --
+                from agent_memory.adapters.outbound.llamacpp_model_loader import (
+                    LlamaCppModelLoader,
+                )
+                from agent_memory.application.llamacpp_swap_orchestrator import (
+                    LlamaCppSwapOrchestrator,
+                )
+                from agent_memory.application.model_registry import ModelRegistry
 
-            llamacpp_adapter = LlamaCppBackendAdapter(
-                base_url=settings.llamacpp.base_url,
-                model_id=settings.llamacpp.model_id,
-                timeout_s=settings.llamacpp.timeout_s,
-                n_slots=settings.llamacpp.n_slots,
-            )
-            tokenizer_id = settings.llamacpp.tokenizer_id or settings.llamacpp.model_id
-            tokenizer = AutoTokenizer.from_pretrained(
-                tokenizer_id,
-                trust_remote_code=True,
-            )
-            tokenizer.model_max_length = settings.llamacpp.max_context_length
-            model_spec = llamacpp_adapter.extract_model_spec()
-            trt_subprocess = llamacpp_adapter  # Reuse TRT inference service path
+                llamacpp_loader = LlamaCppModelLoader(
+                    server_binary=settings.llamacpp.server_binary,
+                    port=int(settings.llamacpp.base_url.rsplit(":", 1)[-1]),
+                    cache_type_k=settings.llamacpp.cache_type_k,
+                    cache_type_v=settings.llamacpp.cache_type_v,
+                    timeout_s=settings.llamacpp.timeout_s,
+                )
+
+                # LlamaCppModelLoader implements ModelLoaderPort — reuse ModelRegistry
+                llamacpp_registry = ModelRegistry(
+                    model_loader=llamacpp_loader,
+                    spec_extractor=_LlamaCppSpecExtractor(),
+                )
+
+                # Load default model (starts llama-server)
+                llamacpp_adapter, tokenizer = llamacpp_registry.load_model(
+                    settings.llamacpp.default_model,
+                )
+                model_spec = llamacpp_registry.get_current_spec()
+
+            else:
+                # -- External mode: llama-server managed externally --
+                from transformers import AutoTokenizer
+
+                from agent_memory.adapters.outbound.llamacpp_backend_adapter import (
+                    LlamaCppBackendAdapter,
+                )
+
+                llamacpp_adapter = LlamaCppBackendAdapter(
+                    base_url=settings.llamacpp.base_url,
+                    model_id=settings.llamacpp.model_id,
+                    timeout_s=settings.llamacpp.timeout_s,
+                    n_slots=settings.llamacpp.n_slots,
+                )
+                tokenizer_id = settings.llamacpp.tokenizer_id or settings.llamacpp.model_id
+                tokenizer = AutoTokenizer.from_pretrained(
+                    tokenizer_id,
+                    trust_remote_code=True,
+                )
+                tokenizer.model_max_length = settings.llamacpp.max_context_length
+                model_spec = llamacpp_adapter.extract_model_spec()
+                llamacpp_loader = None
+                llamacpp_registry = None
+
+            trt_subprocess = llamacpp_adapter
             model = None
             logger.info(
                 "llamacpp_backend_configured",
                 base_url=settings.llamacpp.base_url,
-                model_id=settings.llamacpp.model_id,
-                tokenizer_id=tokenizer_id,
-                n_slots=settings.llamacpp.n_slots,
+                model_id=(settings.llamacpp.default_model or settings.llamacpp.model_id),
+                managed=bool(settings.llamacpp.default_model),
             )
 
         elif settings.backend == "trt":
@@ -494,9 +558,34 @@ async def lifespan(app: FastAPI):
                 cache_store=cache_store,
                 cache_adapter=mlx_adapter,
             )
+            llamacpp_swap_orchestrator = None
+
+        elif (
+            settings.backend == "llamacpp"
+            and locals().get("llamacpp_registry") is not None
+        ):
+            # Managed llama.cpp: wire swap orchestrator
+            from agent_memory.application.llamacpp_swap_orchestrator import (
+                LlamaCppSwapOrchestrator,
+            )
+
+            model_registry = llamacpp_registry  # type: ignore[assignment]
+            model_swap_orchestrator = None  # MLX-specific, not used
+            llamacpp_swap_orchestrator = LlamaCppSwapOrchestrator(
+                model_registry=llamacpp_registry,
+                cache_store=cache_store,
+                model_loader=llamacpp_loader,  # type: ignore[name-defined]
+            )
+            # Wire swap orchestrator into TRTInferenceService for auto-swap
+            # (can't pass at construction — orchestrator depends on cache_store
+            # which is created between TRTInferenceService and orchestrator)
+            if settings.llamacpp.auto_swap:
+                trt_inference._swap_orchestrator = llamacpp_swap_orchestrator  # type: ignore[union-attr]
+                trt_inference._model_registry = llamacpp_registry  # type: ignore[union-attr]
         else:
             model_registry = None
             model_swap_orchestrator = None
+            llamacpp_swap_orchestrator = None
 
         # Store in app state
         app.state.agent_memory = AppState()
@@ -507,6 +596,7 @@ async def lifespan(app: FastAPI):
         app.state.agent_memory.cache_adapter = cache_adapter
         app.state.agent_memory.model_registry = model_registry
         app.state.agent_memory.model_swap_orchestrator = model_swap_orchestrator
+        app.state.agent_memory.llamacpp_swap_orchestrator = llamacpp_swap_orchestrator
         app.state.agent_memory.trt_subprocess = trt_subprocess
         app.state.agent_memory.trt_inference = (
             trt_inference if settings.backend in ("trt", "vllm", "llamacpp") else None
@@ -607,6 +697,14 @@ async def lifespan(app: FastAPI):
             logger.info("stopping_trt_subprocess")
             trt_subprocess.stop()
             logger.info("trt_subprocess_stopped")
+        elif settings.backend == "llamacpp" and llamacpp_swap_orchestrator is not None:
+            # Managed mode: stop the llama-server subprocess
+            logger.info("stopping_llama_server")
+            try:
+                llamacpp_loader.clear_cache()  # type: ignore[union-attr]
+                logger.info("llama_server_stopped")
+            except Exception as e:
+                logger.warning("llama_server_stop_error", error=str(e))
         elif settings.backend == "mlx":
             # Explicitly release model and GPU memory to prevent wired memory
             # accumulation across server restarts.

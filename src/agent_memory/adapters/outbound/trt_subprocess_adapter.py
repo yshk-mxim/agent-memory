@@ -123,6 +123,7 @@ class TRTSubprocessAdapter:
         top_k: int = 40,
         stop_sequences: list[str] | None = None,
         repetition_penalty: float = 1.0,
+        **kwargs: Any,  # noqa: ARG002
     ) -> GenerationResult:
         """Generate text via TRT subprocess.
 

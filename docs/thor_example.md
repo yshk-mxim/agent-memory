@@ -1,6 +1,10 @@
 # Thor Quick Start — Nemotron 3 Super 120B on Jetson AGX Thor
 
 > **v1.1.0-alpha** — functional but not production-hardened.
+>
+> **For Gemma 4 or Qwen3 models, use the llama.cpp backend instead.**
+> See [`llamacpp_backend.md`](llamacpp_backend.md) — supports multi-model
+> swap, 262K context, and 51 tok/s on MoE.
 
 Run agent-memory with Nemotron 3 Super (120B total, 12B active) on NVIDIA Jetson
 AGX Thor, then connect NemoClaw/OpenClaw or Claude Code CLI.

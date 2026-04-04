@@ -180,6 +180,40 @@ async def swap_model(
     # Without this, two simultaneous swaps could load multiple models → OOM crash
     semantic = getattr(request.app.state, "agent_memory", None)
 
+    # llama.cpp managed backend: swap via LlamaCppSwapOrchestrator
+    llamacpp_orch = getattr(semantic, "llamacpp_swap_orchestrator", None) if semantic else None
+    if llamacpp_orch is not None:
+        async with _swap_lock:
+            try:
+                old_model_id = None
+                if semantic.model_registry:
+                    old_model_id = semantic.model_registry.get_current_id()
+
+                adapter, tokenizer = await llamacpp_orch.swap_model(
+                    new_model_id=swap_request.model_id,
+                    timeout_seconds=swap_request.timeout_seconds,
+                )
+
+                # Update app state with new adapter + tokenizer
+                semantic.trt_subprocess = adapter
+                semantic.tokenizer = tokenizer
+                if semantic.trt_inference:
+                    semantic.trt_inference._backend = adapter
+                    semantic.trt_inference._tokenizer = tokenizer
+
+                return SwapModelResponse(
+                    status="success",
+                    old_model_id=old_model_id,
+                    new_model_id=swap_request.model_id,
+                    message=f"Model swapped to {swap_request.model_id}",
+                )
+            except Exception as e:
+                logger.error(f"llama.cpp swap failed: {e}", exc_info=True)
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail=f"llama.cpp model swap failed: {e!s}",
+                ) from e
+
     # TRT backend: offload all caches to SSD, stop subprocess, start with new engine.
     # Old caches stay on disk tagged with old model_id (not reusable, preserved for rollback).
     if semantic and getattr(semantic, "trt_subprocess", None) is not None:
@@ -329,7 +363,11 @@ async def get_available_models(
         "mlx-community/Llama-3.1-8B-Instruct-4bit",
         "mlx-community/gpt-oss-20b-MXFP4-Q4",
         "mlx-community/SmolLM2-135M-Instruct",
-        # TRT backend (Jetson AGX Thor)
+        # llama.cpp backend (Jetson Thor — model swapping)
+        "gemma-4-26b-a4b",    # MoE: 51 t/s gen, 1681 t/s pp (fast)
+        "gemma-4-31b",         # Dense: 10 t/s gen, 361 t/s pp (deep)
+        "qwen3-coder-next",    # Coding specialist
+        # TRT backend (Jetson Thor)
         "Qwen/Qwen3-Coder-Next-nvfp4",
     ]
 

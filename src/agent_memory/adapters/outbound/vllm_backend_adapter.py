@@ -56,6 +56,7 @@ class VLLMBackendAdapter:
         top_p: float = 0.95,
         top_k: int = 40,
         stop_sequences: list[str] | None = None,
+        **kwargs: Any,  # noqa: ARG002
     ) -> GenerationResult:
         """Generate text via vLLM's OpenAI-compatible API.
 

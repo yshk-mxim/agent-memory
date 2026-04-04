@@ -1,0 +1,40 @@
+# Gemma 4 26B-A4B (MoE) on NVIDIA Jetson AGX Thor
+# Fast model: 128 experts, 8 active (~4B params/token)
+# Backend: llama.cpp (llama-server, managed by agent-memory)
+#
+# Performance (Thor sm_110, 228 GB/s, Q4_K_M):
+#   Generation: 51.2 t/s  |  Prefill pp512: 1,266 t/s
+#   Custom FP4 kernel (MXFP4): Prefill pp512: 1,681 t/s (+28%)
+#
+# Best for: coding agents, web research, document triage, interactive tasks
+# where speed matters more than maximum reasoning depth.
+
+[model]
+model_id = "gemma-4-26b-a4b"
+backend = "llamacpp"
+n_layers = 30
+n_kv_heads = 16
+head_dim = 88
+kv_format = "fp"
+
+[inference]
+temperature = 0.7
+top_p = 0.95
+top_k = 40
+extended_thinking = false
+supports_thinking = true
+
+[optimal]
+max_batch_size = 4
+block_tokens = 256
+cache_budget_mb = 32768
+max_agents_in_memory = 8
+evict_to_disk = true
+
+[llamacpp]
+gguf_path = "/home/yshkolni/models/gemma4-26b-a4b/gemma-4-26B-A4B-it-Q4_K_M.gguf"
+tokenizer_id = "google/gemma-4-26B-A4B-it"
+ctx_size = 262144     # ~15.6 GiB model + ~90 GiB for KV = plenty of context
+n_slots = 4           # 4 parallel requests (agent batching)
+n_gpu_layers = 99
+extra_args = []

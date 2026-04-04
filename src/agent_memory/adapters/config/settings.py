@@ -612,6 +612,33 @@ class LlamaCppSettings(BaseSettings):
         description="KV cache quantization for values (mirrors --cache-type-v)",
     )
 
+    # Server process management (agent-memory starts/stops llama-server)
+    server_binary: str = Field(
+        default="llama-server",
+        description=(
+            "Path to llama-server binary. "
+            "When set, agent-memory manages the process lifecycle for model swapping. "
+            "Leave as 'llama-server' to use PATH, or set absolute path."
+        ),
+    )
+
+    default_model: str = Field(
+        default="",
+        description=(
+            "Model ID to load on startup (must match a [llamacpp] section in config/models/*.toml). "
+            "Empty = use model_id field as a static single-model config."
+        ),
+    )
+
+    auto_swap: bool = Field(
+        default=True,
+        description=(
+            "Automatically swap models when a request specifies a different model "
+            "than the one currently loaded. Set to false to require explicit "
+            "/admin/models/swap calls."
+        ),
+    )
+
 
 class Settings(BaseSettings):
     """Root settings container.

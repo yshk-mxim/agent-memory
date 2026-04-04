@@ -401,6 +401,7 @@ async def _stream_trt_response(
         top_k=request_body.top_k or 40,
         stop_sequences=request_body.stop_sequences or None,
         openai_tools=openai_tools,
+        model=request_body.model or None,
     )
 
     logger.info(
