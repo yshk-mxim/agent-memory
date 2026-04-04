@@ -220,8 +220,9 @@ class LlamaCppBackendAdapter:
     #   2. Gemma native: call:ToolName{key: "value"}  (concatenated, no newlines)
     #   3. Qwen native: <tool_call>{"name": "tool", "arguments": {...}}</tool_call>
 
-    # Gemma: call:Name{...} — greedy brace matching via splitting on "call:"
-    _GEMMA_CALL_RE = re.compile(r'call:(\w+)')
+    # Gemma: call:Name{...} or call:namespace:Name {...}
+    # Captures the last colon-separated segment as the tool name
+    _GEMMA_CALL_RE = re.compile(r'call:([\w:]+)')
 
     # Qwen: <tool_call>...</tool_call>
     _QWEN_CALL_RE = re.compile(r'<tool_call>\s*(.*?)\s*</tool_call>', re.DOTALL)
@@ -273,18 +274,27 @@ class LlamaCppBackendAdapter:
         return results or None
 
     def _parse_gemma_native_calls(self, text: str) -> list[dict]:
-        """Parse Gemma's call:Name{...} format with balanced brace matching."""
+        """Parse Gemma's call:Name{...} format with balanced brace matching.
+
+        Handles variants:
+          - call:ToolName{key: "val"}         (simple)
+          - call:ns:ToolName{key: "val"}      (namespace prefix)
+          - call:ns:ToolName {key: "val"}     (space before brace)
+          - call:A{...}call:B{...}            (concatenated)
+        """
         results = []
-        # Split on "call:" boundaries
-        parts = re.split(r'(?=call:\w+\{)', text)
-        for part in parts:
-            m = self._GEMMA_CALL_RE.match(part)
-            if not m:
+        # Find all call: positions
+        for m in self._GEMMA_CALL_RE.finditer(text):
+            raw_name = m.group(1)
+            # Use the last colon-separated segment as tool name
+            # e.g. "agent_memory:Agent" → "Agent"
+            name = raw_name.rsplit(":", 1)[-1] if ":" in raw_name else raw_name
+            # Find the opening brace (may have whitespace/newline between name and {)
+            rest = text[m.end():]
+            rest_stripped = rest.lstrip(" \t\n")
+            if not rest_stripped or rest_stripped[0] != "{":
                 continue
-            name = m.group(1)
-            # Extract balanced braces after the name
-            rest = part[m.end():]
-            raw_args = self._extract_balanced_braces(rest)
+            raw_args = self._extract_balanced_braces(rest_stripped)
             if raw_args is None:
                 continue
             parsed = self._parse_jslike_object(raw_args)
@@ -348,20 +358,23 @@ class LlamaCppBackendAdapter:
 
     def _strip_tool_calls_from_text(self, text: str) -> str:
         """Remove tool calls from text (all formats)."""
-        # Strip Gemma native: call:Name{...}
-        parts = re.split(r'(?=call:\w+\{)', text)
-        cleaned_parts = []
-        for part in parts:
-            if self._GEMMA_CALL_RE.match(part):
-                rest = part[self._GEMMA_CALL_RE.match(part).end():]  # type: ignore[union-attr]
-                balanced = self._extract_balanced_braces(rest)
-                if balanced:
-                    remainder = rest[len(balanced):]
-                    if remainder.strip():
-                        cleaned_parts.append(remainder)
-                    continue
-            cleaned_parts.append(part)
-        text = "".join(cleaned_parts)
+        # Strip Gemma native: call:Name{...} (with optional namespace and whitespace)
+        # Rebuild text by removing matched call: regions
+        result_chars = list(text)
+        # Mark regions to remove (reverse order to preserve indices)
+        regions_to_remove = []
+        for m in self._GEMMA_CALL_RE.finditer(text):
+            rest = text[m.end():]
+            rest_stripped = rest.lstrip(" \t\n")
+            skip = len(rest) - len(rest_stripped)
+            balanced = self._extract_balanced_braces(rest_stripped)
+            if balanced:
+                start = m.start()
+                end = m.end() + skip + len(balanced)
+                regions_to_remove.append((start, end))
+        for start, end in reversed(regions_to_remove):
+            result_chars[start:end] = []
+        text = "".join(result_chars)
 
         # Strip Qwen native: <tool_call>...</tool_call>
         text = self._QWEN_CALL_RE.sub("", text)
