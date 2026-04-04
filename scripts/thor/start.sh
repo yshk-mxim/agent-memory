@@ -52,6 +52,8 @@ export SEMANTIC_AGENT_EVICT_TO_DISK=true
 export SEMANTIC_SERVER_HOST=0.0.0.0
 export SEMANTIC_SERVER_PORT=8000
 export SEMANTIC_SERVER_LOG_LEVEL=INFO
+export SEMANTIC_SERVER_SEARXNG_URL=http://localhost:8080
+export SEMANTIC_SERVER_JINA_READER_URL=http://localhost:3000
 
 # Ensure bandwidth is healthy (Thor memory controller bug)
 echo "=== Thor agent-memory launcher ==="

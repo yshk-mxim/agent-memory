@@ -890,6 +890,37 @@ def _register_search_proxy(app: FastAPI, searxng_url: str):
             return JSONResponse(status_code=502, content={"error": f"SearXNG unavailable: {e}"})
 
 
+def _register_fetch_proxy(app: FastAPI, jina_reader_url: str):
+    """Register /fetch proxy endpoint that converts URLs to clean markdown via Jina Reader.
+
+    Allows Claude Code to fetch web pages as markdown through agent-memory,
+    avoiding raw HTML (token-heavy) and private-IP restrictions on WebFetch.
+    """
+    from urllib.request import Request as _Req
+    from urllib.request import urlopen as _urlopen
+    from urllib.error import URLError as _URLError
+
+    @app.get("/fetch")
+    async def fetch_proxy(url: str, timeout: int = 15):
+        """Fetch a URL via Jina Reader, returning clean markdown."""
+        reader_url = f"{jina_reader_url}/{url}"
+        try:
+            req = _Req(reader_url)  # noqa: S310
+            with _urlopen(req, timeout=timeout) as resp:  # noqa: S310
+                content = resp.read().decode("utf-8", errors="replace")
+            return Response(content=content, media_type="text/plain; charset=utf-8")
+        except _URLError as e:
+            return JSONResponse(
+                status_code=502,
+                content={"error": f"Jina Reader unavailable: {e}"},
+            )
+        except Exception as e:
+            return JSONResponse(
+                status_code=500,
+                content={"error": f"Fetch failed: {e}"},
+            )
+
+
 def _register_metrics_endpoint(app: FastAPI):
     """Register Prometheus metrics endpoint.
 
@@ -1189,6 +1220,9 @@ def create_app() -> FastAPI:
     if settings.server.searxng_url:
         _register_search_proxy(app, settings.server.searxng_url)
         logger.info("search_proxy_registered", searxng_url=settings.server.searxng_url)
+    if settings.server.jina_reader_url:
+        _register_fetch_proxy(app, settings.server.jina_reader_url)
+        logger.info("fetch_proxy_registered", jina_reader_url=settings.server.jina_reader_url)
 
     # Set up dependency overrides for admin API
     def _get_orchestrator():

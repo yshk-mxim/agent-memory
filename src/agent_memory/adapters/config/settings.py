@@ -483,6 +483,15 @@ class ServerSettings(BaseSettings):
         ),
     )
 
+    jina_reader_url: str = Field(
+        default="",
+        description=(
+            "Jina Reader base URL for /fetch proxy endpoint. "
+            "E.g. http://localhost:3000. Converts web pages to clean markdown. "
+            "Leave empty to disable."
+        ),
+    )
+
 
 class SecretsSettings(BaseSettings):
     """Sensitive configuration (API keys, tokens).
