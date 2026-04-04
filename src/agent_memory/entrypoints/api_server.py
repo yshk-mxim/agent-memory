@@ -1134,40 +1134,72 @@ def _register_routes(app: FastAPI):
 
     @app.get("/v1/models", status_code=status.HTTP_200_OK)
     async def list_models():
-        """OpenAI-compatible models endpoint — returns loaded model info."""
+        """OpenAI-compatible models endpoint — returns available models.
+
+        For llama.cpp managed mode, returns all models from config/models/*.toml.
+        The currently loaded model is marked with 'active: true'.
+        """
         semantic = getattr(app.state, "agent_memory", None)
         engine = semantic.batch_engine if semantic else None
         registry = semantic.model_registry if semantic else None
         settings = get_settings()
 
-        # Use registry's current model (tracks swaps) or empty if offloaded
-        model_id = registry.get_current_id() if registry else None
+        models = []
 
-        if not model_id:
-            return {"object": "list", "data": []}
+        if settings.backend == "llamacpp" and settings.llamacpp.default_model:
+            # Managed mode: list all available models from TOML configs
+            from pathlib import Path
+            config_dir = Path(__file__).resolve().parents[3] / "config" / "models"
+            current_id = registry.get_current_id() if registry else None
 
-        model_entry = {
-            "id": model_id,
-            "object": "model",
-            "owned_by": "local",
-        }
+            if config_dir.is_dir():
+                try:
+                    import tomllib
+                except ImportError:
+                    import tomli as tomllib  # type: ignore[no-redef]
 
-        if engine:
-            spec = engine._spec
-            model_entry["spec"] = {
-                "n_layers": spec.n_layers,
-                "n_kv_heads": spec.n_kv_heads,
-                "head_dim": spec.head_dim,
-                "block_tokens": spec.block_tokens,
-                "kv_bits": spec.kv_bits,
-                "max_context_length": (
-                    settings.trt.max_context_length
-                    if settings.backend == "trt"
-                    else settings.mlx.max_context_length
-                ),
-            }
+                for toml_file in sorted(config_dir.glob("*.toml")):
+                    try:
+                        with toml_file.open("rb") as f:
+                            profile = tomllib.load(f)
+                        if "llamacpp" not in profile:
+                            continue
+                        mid = profile.get("model", {}).get("model_id", toml_file.stem)
+                        entry = {
+                            "id": mid,
+                            "object": "model",
+                            "owned_by": "local",
+                            "active": mid == current_id,
+                        }
+                        models.append(entry)
+                    except Exception:
+                        pass
+        else:
+            # Single model mode (MLX, TRT, vLLM, external llamacpp)
+            model_id = registry.get_current_id() if registry else None
+            if model_id:
+                model_entry = {
+                    "id": model_id,
+                    "object": "model",
+                    "owned_by": "local",
+                }
+                if engine:
+                    spec = engine._spec
+                    model_entry["spec"] = {
+                        "n_layers": spec.n_layers,
+                        "n_kv_heads": spec.n_kv_heads,
+                        "head_dim": spec.head_dim,
+                        "block_tokens": spec.block_tokens,
+                        "kv_bits": spec.kv_bits,
+                        "max_context_length": (
+                            settings.trt.max_context_length
+                            if settings.backend == "trt"
+                            else settings.mlx.max_context_length
+                        ),
+                    }
+                models.append(model_entry)
 
-        return {"object": "list", "data": [model_entry]}
+        return {"object": "list", "data": models}
 
     app.include_router(anthropic_router)
     logger.info("routes_registered", router="anthropic", path="/v1/messages")
