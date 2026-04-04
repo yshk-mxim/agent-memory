@@ -56,6 +56,10 @@ class LlamaCppBackendAdapter:
     def _is_gemma(self) -> bool:
         return "gemma" in self._model_id.lower()
 
+    @property
+    def _is_qwen(self) -> bool:
+        return "qwen" in self._model_id.lower()
+
     def _apply_no_think(self, messages: list[dict], disable_thinking: bool | None = None) -> list[dict]:
         """Suppress thinking for models that support it.
 
@@ -209,65 +213,168 @@ class LlamaCppBackendAdapter:
             tool_calls=tool_calls,
         )
 
-    # ── Tool call extraction from text ─────���─────────────────────
+    # ── Tool call extraction from text ──────────────────────────
+    #
+    # Three formats handled:
+    #   1. JSON (template-instructed): {"name": "tool", "parameters": {...}}
+    #   2. Gemma native: call:ToolName{key: "value"}  (concatenated, no newlines)
+    #   3. Qwen native: <tool_call>{"name": "tool", "arguments": {...}}</tool_call>
 
-    _TOOL_CALL_RE = re.compile(
-        r'\{\s*"name"\s*:\s*"[^"]+"\s*,\s*"parameters"\s*:\s*\{[^}]*\}\s*\}',
-        re.DOTALL,
-    )
+    # Gemma: call:Name{...} — greedy brace matching via splitting on "call:"
+    _GEMMA_CALL_RE = re.compile(r'call:(\w+)')
+
+    # Qwen: <tool_call>...</tool_call>
+    _QWEN_CALL_RE = re.compile(r'<tool_call>\s*(.*?)\s*</tool_call>', re.DOTALL)
 
     def _extract_tool_calls_from_text(self, text: str) -> list[dict] | None:
-        """Extract tool call JSON objects from model text output.
+        """Extract tool calls from model text output."""
+        results: list[dict] = []
 
-        The Jinja template instructs the model to output tool calls as:
-            {"name": "tool_name", "parameters": {"param": "value"}}
-        One per line. This method finds all such objects in the text.
-        """
-        results = []
-        # Try line-by-line first (most common format)
+        # --- Format 1: JSON lines — {"name": ..., "parameters": ...}
         for line in text.split("\n"):
             line = line.strip()
             if not line or not line.startswith("{"):
                 continue
             try:
                 obj = json.loads(line)
-                if "name" in obj and "parameters" in obj:
+                if "name" in obj and ("parameters" in obj or "arguments" in obj):
                     results.append({
                         "id": f"toolu_{uuid.uuid4().hex[:24]}",
                         "name": obj["name"],
-                        "input": obj["parameters"],
+                        "input": obj.get("parameters") or obj.get("arguments", {}),
                     })
             except json.JSONDecodeError:
                 continue
-
         if results:
             return results
 
-        # Fallback: regex extraction for inline JSON
-        for match in self._TOOL_CALL_RE.finditer(text):
+        # --- Format 2: Gemma native — call:Name{...}call:Name{...}
+        if "call:" in text:
+            results = self._parse_gemma_native_calls(text)
+            if results:
+                return results
+
+        # --- Format 3: Qwen native — <tool_call>JSON</tool_call>
+        for match in self._QWEN_CALL_RE.finditer(text):
             try:
-                obj = json.loads(match.group())
-                if "name" in obj and "parameters" in obj:
+                obj = json.loads(match.group(1))
+                name = obj.get("name", "")
+                args = obj.get("arguments") or obj.get("parameters", {})
+                if isinstance(args, str):
+                    args = json.loads(args)
+                if name:
                     results.append({
                         "id": f"toolu_{uuid.uuid4().hex[:24]}",
-                        "name": obj["name"],
-                        "input": obj["parameters"],
+                        "name": name,
+                        "input": args,
                     })
-            except json.JSONDecodeError:
+            except (json.JSONDecodeError, TypeError):
                 continue
-
         return results or None
 
+    def _parse_gemma_native_calls(self, text: str) -> list[dict]:
+        """Parse Gemma's call:Name{...} format with balanced brace matching."""
+        results = []
+        # Split on "call:" boundaries
+        parts = re.split(r'(?=call:\w+\{)', text)
+        for part in parts:
+            m = self._GEMMA_CALL_RE.match(part)
+            if not m:
+                continue
+            name = m.group(1)
+            # Extract balanced braces after the name
+            rest = part[m.end():]
+            raw_args = self._extract_balanced_braces(rest)
+            if raw_args is None:
+                continue
+            parsed = self._parse_jslike_object(raw_args)
+            if parsed is not None:
+                results.append({
+                    "id": f"toolu_{uuid.uuid4().hex[:24]}",
+                    "name": name,
+                    "input": parsed,
+                })
+        return results
+
+    @staticmethod
+    def _extract_balanced_braces(s: str) -> str | None:
+        """Extract content within balanced { } from start of string."""
+        if not s or s[0] != "{":
+            return None
+        depth = 0
+        for i, ch in enumerate(s):
+            if ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    return s[: i + 1]
+        return None  # Unbalanced
+
+    @staticmethod
+    def _parse_jslike_object(raw: str) -> dict | None:
+        """Parse JS-like object syntax into a Python dict.
+
+        Gemma outputs {key: "value"} — not valid JSON. Attempts:
+        1. Direct JSON parse
+        2. Quote unquoted keys, fix single quotes
+        3. Manual key-value extraction (flat only)
+        """
+        # Direct JSON
+        try:
+            return json.loads(raw)
+        except json.JSONDecodeError:
+            pass
+
+        # Fix unquoted keys and brackets: {key: "val"} → {"key": "val"}
+        # Also handle nested arrays: [{key: "val"}] → [{"key": "val"}]
+        fixed = re.sub(r'(?<=[{,\[])\s*(\w+)\s*:', r' "\1":', raw)
+        fixed = fixed.replace("'", '"')
+        try:
+            return json.loads(fixed)
+        except json.JSONDecodeError:
+            pass
+
+        # Flat key-value extraction (last resort)
+        try:
+            result = {}
+            for kv in re.finditer(r'(\w+)\s*:\s*(?:"([^"]*)"|([\w.+\-/]+))', raw):
+                key = kv.group(1)
+                val = kv.group(2) if kv.group(2) is not None else kv.group(3)
+                result[key] = val
+            return result if result else None
+        except Exception:
+            return None
+
     def _strip_tool_calls_from_text(self, text: str) -> str:
-        """Remove tool call JSON from text, leaving any surrounding prose."""
+        """Remove tool calls from text (all formats)."""
+        # Strip Gemma native: call:Name{...}
+        parts = re.split(r'(?=call:\w+\{)', text)
+        cleaned_parts = []
+        for part in parts:
+            if self._GEMMA_CALL_RE.match(part):
+                rest = part[self._GEMMA_CALL_RE.match(part).end():]  # type: ignore[union-attr]
+                balanced = self._extract_balanced_braces(rest)
+                if balanced:
+                    remainder = rest[len(balanced):]
+                    if remainder.strip():
+                        cleaned_parts.append(remainder)
+                    continue
+            cleaned_parts.append(part)
+        text = "".join(cleaned_parts)
+
+        # Strip Qwen native: <tool_call>...</tool_call>
+        text = self._QWEN_CALL_RE.sub("", text)
+
+        # Strip JSON tool call lines
         lines = []
         for line in text.split("\n"):
             stripped = line.strip()
             if stripped.startswith("{"):
                 try:
                     obj = json.loads(stripped)
-                    if "name" in obj and "parameters" in obj:
-                        continue  # Skip tool call lines
+                    if "name" in obj and ("parameters" in obj or "arguments" in obj):
+                        continue
                 except json.JSONDecodeError:
                     pass
             lines.append(line)
