@@ -5,6 +5,8 @@
 #   ./scripts/thor/swap_model.sh                    # Interactive menu
 #   ./scripts/thor/swap_model.sh gemma-4-31b        # Direct swap
 #   ./scripts/thor/swap_model.sh 2                  # Pick by number
+#
+# Uses python3+urllib (no curl dependency).
 
 set -euo pipefail
 
@@ -23,16 +25,41 @@ if [ -z "${SEMANTIC_ADMIN_KEY:-}" ]; then
     echo ""
 fi
 
+# --- HTTP helper (python3, no curl needed) ---
+_http() {
+    # Usage: _http GET /path  or  _http POST /path '{"json":"body"}'
+    python3 -c "
+import urllib.request, urllib.error, json, sys
+method, path = sys.argv[1], sys.argv[2]
+body = sys.argv[3].encode() if len(sys.argv) > 3 else None
+req = urllib.request.Request(
+    '${BASE_URL}' + path,
+    data=body,
+    headers={'X-Admin-Key': '${SEMANTIC_ADMIN_KEY}', 'Content-Type': 'application/json'},
+    method=method,
+)
+try:
+    with urllib.request.urlopen(req, timeout=90) as resp:
+        data = json.loads(resp.read())
+        print(json.dumps(data))
+except urllib.error.HTTPError as e:
+    print(json.dumps({'error': e.read().decode(), 'status': e.code}), file=sys.stderr)
+    sys.exit(1)
+except Exception as e:
+    print(json.dumps({'error': str(e)}), file=sys.stderr)
+    sys.exit(1)
+" "$@"
+}
+
 # --- Show current model ---
-CURRENT=$(curl -s "$BASE_URL/admin/models/current" \
-    -H "X-Admin-Key: $SEMANTIC_ADMIN_KEY" 2>/dev/null \
-    | python3 -c "import sys,json;print(json.load(sys.stdin).get('model_id','unknown'))" 2>/dev/null || echo "unknown")
+CURRENT=$(_http GET /admin/models/current 2>/dev/null \
+    | python3 -c "import sys,json;print(json.load(sys.stdin).get('model_id','unknown'))" 2>/dev/null \
+    || echo "unknown")
 echo "Currently loaded: $CURRENT"
 echo ""
 
 # --- Pick model ---
 if [ -n "${1:-}" ]; then
-    # Argument given: number or model name
     if [[ "$1" =~ ^[0-9]+$ ]] && [ "$1" -ge 1 ] && [ "$1" -le ${#MODELS[@]} ]; then
         MODEL="${MODELS[$(($1-1))]}"
     else
@@ -60,18 +87,9 @@ if [ "$MODEL" = "$CURRENT" ]; then
 fi
 
 echo "Swapping to $MODEL..."
-RESP=$(curl -s -w "\n%{http_code}" -X POST "$BASE_URL/admin/models/swap" \
-    -H "X-Admin-Key: $SEMANTIC_ADMIN_KEY" \
-    -H "Content-Type: application/json" \
-    -d "{\"model_id\": \"$MODEL\", \"timeout_seconds\": 60}")
-
-HTTP_CODE=$(echo "$RESP" | tail -1)
-BODY=$(echo "$RESP" | sed '$d')
-
-if [ "$HTTP_CODE" = "200" ]; then
-    echo "✓ $MODEL is now active."
+if _http POST /admin/models/swap "{\"model_id\": \"$MODEL\", \"timeout_seconds\": 60}" > /dev/null; then
+    echo "Done — $MODEL is now active."
 else
-    echo "Failed (HTTP $HTTP_CODE):" >&2
-    echo "$BODY" | python3 -m json.tool 2>/dev/null || echo "$BODY" >&2
+    echo "Swap failed." >&2
     exit 1
 fi
