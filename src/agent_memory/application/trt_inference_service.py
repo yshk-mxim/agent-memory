@@ -89,6 +89,7 @@ class TRTInferenceService:
         # Auto-swap: if model doesn't match currently loaded model, swap
         if model and self._swap_orchestrator and self._model_registry:
             current_id = self._model_registry.get_current_id()
+            logger.info("auto-swap check: model=%s current_id=%s orch=%s", model, current_id, type(self._swap_orchestrator).__name__)
             if current_id and model.lower() not in current_id.lower() and current_id.lower() not in model.lower():
                 logger.info("auto-swap: %s -> %s", current_id, model)
                 adapter, tokenizer = self._swap_orchestrator.swap_model_sync(model)
