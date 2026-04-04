@@ -38,3 +38,4 @@ ctx_size = 131072     # ~17.4 GiB model + ~100 GiB for KV
 n_slots = 2           # 2 parallel requests (dense model is slower)
 n_gpu_layers = 99
 extra_args = []
+chat_template_file = "config/chat_templates/gemma4-tools.jinja"

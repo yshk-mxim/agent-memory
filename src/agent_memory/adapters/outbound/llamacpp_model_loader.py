@@ -121,6 +121,17 @@ class LlamaCppModelLoader:
         n_gpu_layers = llamacpp_cfg.get("n_gpu_layers", 99)
         extra_args = llamacpp_cfg.get("extra_args", [])
 
+        # Chat template override (enables better tool calling)
+        chat_template_file = llamacpp_cfg.get("chat_template_file", "")
+        if chat_template_file:
+            # Resolve relative paths from project root
+            tpl_path = Path(chat_template_file)
+            if not tpl_path.is_absolute():
+                tpl_path = Path(__file__).resolve().parents[4] / chat_template_file
+            if tpl_path.exists():
+                extra_args = list(extra_args) + ["--jinja", "--chat-template-file", str(tpl_path)]
+                logger.info("using chat template: %s", tpl_path)
+
         self._gguf_size_bytes = Path(gguf_path).stat().st_size
 
         # Start llama-server
