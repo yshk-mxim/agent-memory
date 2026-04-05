@@ -181,6 +181,67 @@ class TokenizerPort(Protocol):
         ...
 
 
+class CacheQuantizationPort(Protocol):
+    """Port for KV cache quantization/dequantization.
+
+    Abstracts the conversion between quantized (Q4/Q8) and full-precision
+    (FP16/FP8) KV cache representations. Implementations may use MLX,
+    PyTorch/CUDA, or numpy depending on the backend.
+    """
+
+    @property
+    def supported_bits(self) -> set[int]:
+        """Return the set of supported quantization bit widths.
+
+        Returns:
+            Set of supported bit widths (e.g. {4, 8, 16}).
+        """
+        ...
+
+    def quantize(
+        self,
+        tensor: Any,
+        bits: int,
+        group_size: int,
+    ) -> tuple[Any, Any, Any]:
+        """Quantize a full-precision tensor.
+
+        Args:
+            tensor: Full-precision KV cache tensor (FP16 or FP32).
+            bits: Target quantization bits (4 or 8).
+            group_size: Number of elements per quantization group.
+
+        Returns:
+            Tuple of (weights, scales, biases) — the quantized representation.
+
+        Raises:
+            ModelSpecValidationError: If bits not in supported_bits.
+        """
+        ...
+
+    def dequantize(
+        self,
+        weights: Any,
+        scales: Any,
+        biases: Any,
+        bits: int,
+        group_size: int,
+    ) -> Any:
+        """Dequantize to full-precision tensor.
+
+        Args:
+            weights: Quantized weight tensor.
+            scales: Per-group scale factors (float16).
+            biases: Per-group bias values (float16).
+            bits: Quantization bit width used during quantize().
+            group_size: Group size used during quantize().
+
+        Returns:
+            Dequantized full-precision tensor (FP16).
+        """
+        ...
+
+
 class CacheOperationsPort(Protocol):
     """Port for tensor operations on KV cache."""
 

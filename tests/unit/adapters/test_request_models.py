@@ -122,17 +122,17 @@ class TestMessagesRequest:
                 messages=[Message(role="assistant", content="Hello!")],
             )
 
-    def test_reject_consecutive_same_role(self):
-        """Consecutive messages with same role should be rejected."""
-        with pytest.raises(ValidationError, match="must alternate"):
-            MessagesRequest(
-                model="claude-sonnet-4-5-20250929",
-                max_tokens=1024,
-                messages=[
-                    Message(role="user", content="Hello!"),
-                    Message(role="user", content="Again!"),
-                ],
-            )
+    def test_allow_consecutive_same_role(self):
+        """Consecutive user messages are allowed (Claude Code sends them after compaction)."""
+        request = MessagesRequest(
+            model="claude-sonnet-4-5-20250929",
+            max_tokens=1024,
+            messages=[
+                Message(role="user", content="Hello!"),
+                Message(role="user", content="Again!"),
+            ],
+        )
+        assert len(request.messages) == 2
 
     def test_system_prompt_string(self):
         """System prompt as string should be valid."""

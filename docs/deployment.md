@@ -1,8 +1,12 @@
 # Deployment Guide
 
-Guide for deploying agent-memory on Apple Silicon.
+Guide for deploying agent-memory on Apple Silicon (MLX) or NVIDIA Jetson Thor (TRT).
 
-**Important**: This application is optimized for Apple Silicon (M1/M2/M3) with MLX framework. Docker deployment is not supported due to MLX Metal GPU requirements.
+**Apple Silicon**: Native Metal GPU via MLX framework. No Docker needed.
+
+**NVIDIA Jetson Thor**: TensorRT Edge-LLM via Docker container. See `vendor/BUILD_LOG.md`
+for the full build pipeline including sm_110 FMHA patches, engine building, and
+dependency setup. Quick start: `SEMANTIC_BACKEND=trt` with pre-built engine directory.
 
 ## Table of Contents
 

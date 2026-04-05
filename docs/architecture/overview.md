@@ -1,9 +1,17 @@
 # System Overview
 
 Architecture of the agent-memory inference server. The system provides
-OpenAI-compatible and Anthropic-compatible chat completion APIs backed by
-MLX on Apple Silicon, with per-agent KV cache persistence and block-pool
-memory management.
+OpenAI-compatible and Anthropic-compatible chat completion APIs with
+per-agent KV cache persistence and block-pool memory management.
+
+Supports two backends:
+- **MLX** (Apple Silicon): In-process Metal GPU inference via mlx-lm
+- **TRT** (NVIDIA Jetson Thor): Subprocess-based inference via TensorRT Edge-LLM
+
+The backend is selected at startup via `SEMANTIC_BACKEND` (`mlx` or `trt`).
+Both backends expose the same API surface and cache persistence behavior.
+Clients (Claude Code, NemoClaw, OpenAI SDK) connect without knowing which
+backend is running.
 
 ## Component Diagram
 

@@ -1,6 +1,6 @@
 # Benchmark Analysis Quick Reference
 
-**Source Data**: `/Users/dev_user/agent-memory/benchmarks/results/full_gemma_20260215_232610.json`
+**Source Data**: `./benchmarks/results/full_gemma_20260215_232610.json`
 
 **Analysis Files** (in this directory):
 - `BENCHMARK_REPORT.md` - Complete consolidated report

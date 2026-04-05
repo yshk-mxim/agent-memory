@@ -24,8 +24,10 @@ from sse_starlette.sse import EventSourceResponse
 
 from agent_memory.adapters.config.settings import get_settings
 from agent_memory.adapters.inbound.adapter_helpers import (
+    extract_session_id,
     get_semantic_state,
     run_step_for_uid,
+    strip_thinking_tags,
     tokenize_with_chat_template,
     try_parse_json_at,
 )
@@ -37,7 +39,7 @@ from agent_memory.adapters.inbound.request_models import (
     OpenAIChatMessage,
 )
 from agent_memory.application.agent_cache_store import AgentCacheStore
-from agent_memory.application.batch_engine import BlockPoolBatchEngine
+from agent_memory.application.generation_request import GenerationRequest
 from agent_memory.domain.errors import PoolExhaustedError, SemanticError
 
 logger = logging.getLogger(__name__)
@@ -123,7 +125,7 @@ def parse_function_calls(text: str) -> tuple[str, list[dict[str, Any]]]:
     return remaining_text.strip(), function_calls
 
 
-def openai_messages_to_prompt(  # noqa: C901, PLR0912
+def openai_messages_to_prompt(
     messages: list[OpenAIChatMessage],
     tools: list[Any] | None = None,
 ) -> str:
@@ -138,21 +140,12 @@ def openai_messages_to_prompt(  # noqa: C901, PLR0912
     """
     lines = []
 
-    # Add tool definitions if present
+    # Add tool definitions if present (compressed for local model efficiency)
     if tools:
-        lines.append("\nAvailable Functions:")
-        for tool in tools:
-            if tool.type == "function":
-                func_def = {
-                    "name": tool.function.get("name"),
-                    "description": tool.function.get("description"),
-                    "parameters": tool.function.get("parameters"),
-                }
-                lines.append(json.dumps(func_def, indent=2))
-        lines.append(
-            '\nTo call a function, output JSON: {"function_call": {"name": "<function_name>", '
-            '"arguments": {<parameters>}}}\n'
-        )
+        from agent_memory.adapters.inbound.tool_compression import compress_tool_definitions
+
+        tool_dicts = [{"type": t.type, "function": t.function} for t in tools]
+        lines.append("\n" + compress_tool_definitions(tool_dicts) + "\n")
 
     for msg in messages:
         if msg.role == "system":
@@ -180,7 +173,7 @@ def openai_messages_to_prompt(  # noqa: C901, PLR0912
     return "\n".join(lines)
 
 
-def openai_messages_to_chat_dicts(  # noqa: C901, PLR0912
+def openai_messages_to_chat_dicts(
     messages: list[OpenAIChatMessage],
     tools: list[Any] | None = None,
 ) -> list[dict[str, str]]:
@@ -199,21 +192,13 @@ def openai_messages_to_chat_dicts(  # noqa: C901, PLR0912
         if msg.role == "system":
             content = msg.content or ""
             if tools and not result:
-                # Append tool definitions to first system message
-                tool_lines = [content, "\nAvailable Functions:"]
-                for tool in tools:
-                    if tool.type == "function":
-                        func_def = {
-                            "name": tool.function.get("name"),
-                            "description": tool.function.get("description"),
-                            "parameters": tool.function.get("parameters"),
-                        }
-                        tool_lines.append(json.dumps(func_def, indent=2))
-                tool_lines.append(
-                    "\nTo call a function, output JSON: "
-                    '{"function_call": {"name": "<name>", "arguments": {<params>}}}'
+                # Append compressed tool definitions to first system message
+                from agent_memory.adapters.inbound.tool_compression import (
+                    compress_tool_definitions,
                 )
-                content = "\n".join(tool_lines)
+
+                tool_dicts = [{"type": t.type, "function": t.function} for t in tools]
+                content = content + "\n\n" + compress_tool_definitions(tool_dicts)
                 tools = None  # Don't add again
             result.append({"role": "system", "content": content})
         elif msg.role == "user":
@@ -633,16 +618,33 @@ async def create_chat_completion(  # noqa: C901, PLR0912, PLR0915
 
     # Get app dependencies (with null check)
     semantic_state = get_semantic_state(request)
-    batch_engine: BlockPoolBatchEngine = semantic_state.batch_engine
+    batch_engine = semantic_state.batch_engine  # None for TRT backend
     cache_store: AgentCacheStore = semantic_state.cache_store
+    trt_inference = getattr(semantic_state, "trt_inference", None)
 
     try:
+        # Inject current date/time so models know what day it is.
+        # For models with strftime_now in their template (Gemma 4) this is
+        # redundant but harmless. For Qwen etc. this is the only source.
+        from datetime import datetime, timezone
+        _now = datetime.now(timezone.utc).strftime("%A, %d %B %Y, %H:%M UTC")
+        _date_line = f"Current date and time: {_now}"
+        _msgs = list(request_body.messages)
+        if _msgs and hasattr(_msgs[0], "role") and _msgs[0].role == "system":
+            _msgs[0] = _msgs[0].model_copy(
+                update={"content": f"{_date_line}\n\n{_msgs[0].content}"}
+            )
+        else:
+            from agent_memory.adapters.inbound.request_models import OpenAIChatMessage
+            _msgs.insert(0, OpenAIChatMessage(role="system", content=_date_line))
+        request_body = request_body.model_copy(update={"messages": _msgs})
+
         tools_arg = request_body.tools if request_body.tools else None
         prompt = openai_messages_to_prompt(request_body.messages, tools_arg)
         logger.debug(f"Prompt length: {len(prompt)} chars")
         logger.debug(f"Full prompt:\n{prompt}")
 
-        tokenizer = batch_engine.tokenizer
+        tokenizer = getattr(semantic_state, "tokenizer", None) or batch_engine.tokenizer
         chat_dicts = openai_messages_to_chat_dicts(request_body.messages, tools_arg)
         tokens, templated_prompt = await asyncio.to_thread(
             tokenize_with_chat_template,
@@ -652,7 +654,7 @@ async def create_chat_completion(  # noqa: C901, PLR0912, PLR0915
         )
 
         # Check for session_id in request body or X-Session-ID header
-        session_id = request_body.session_id or request.headers.get("X-Session-ID")
+        session_id = request_body.session_id or extract_session_id(request)
         agent_id = generate_agent_id_openai(session_id, tokens)
         logger.debug(f"Agent ID: {agent_id}, tokens: {len(tokens)}, session_id={session_id}")
 
@@ -661,6 +663,104 @@ async def create_chat_completion(  # noqa: C901, PLR0912, PLR0915
             logger.info(f"Cache hit: {agent_id} ({cached_blocks.total_tokens} tokens)")
         else:
             logger.info(f"Cache miss: {agent_id}")
+
+        # TRT backend: generation via TRTInferenceService
+        if trt_inference is not None and batch_engine is None:
+            messages = [
+                {
+                    "role": m.role,
+                    "content": m.content if isinstance(m.content, str) else str(m.content),
+                }
+                for m in request_body.messages
+            ]
+            # Normalize stop to list
+            stop_seqs: list[str] = []
+            if isinstance(request_body.stop, str):
+                stop_seqs = [request_body.stop]
+            elif isinstance(request_body.stop, list):
+                stop_seqs = request_body.stop
+
+            gen_req = GenerationRequest(
+                agent_id=agent_id,
+                messages=messages,
+                prompt=templated_prompt,
+                max_tokens=request_body.max_tokens or 256,
+                temperature=request_body.temperature or 0.7,
+                top_p=request_body.top_p or 0.95,
+                stop_sequences=stop_seqs,
+                stream=request_body.stream,
+                model=request_body.model or "trt",
+                session_id=session_id,
+            )
+            result = trt_inference.generate_from_request(gen_req)
+
+            # OpenAI streaming for TRT: yield SSE chunks
+            if request_body.stream:
+
+                async def _stream_openai_trt() -> AsyncIterator[dict[str, str]]:
+                    resp_id = f"chatcmpl-{agent_id[:12]}"
+                    words = result.text.split(" ") if result.text else []
+                    for i, word in enumerate(words):
+                        chunk = word if i == 0 else " " + word
+                        yield {
+                            "data": json.dumps(
+                                {
+                                    "id": resp_id,
+                                    "object": "chat.completion.chunk",
+                                    "created": int(time.time()),
+                                    "model": request_body.model or "trt",
+                                    "choices": [
+                                        {
+                                            "index": 0,
+                                            "delta": {"content": chunk},
+                                            "finish_reason": None,
+                                        }
+                                    ],
+                                }
+                            ),
+                        }
+                    # Final chunk with finish_reason
+                    yield {
+                        "data": json.dumps(
+                            {
+                                "id": resp_id,
+                                "object": "chat.completion.chunk",
+                                "created": int(time.time()),
+                                "model": request_body.model or "trt",
+                                "choices": [
+                                    {
+                                        "index": 0,
+                                        "delta": {},
+                                        "finish_reason": "stop",
+                                    }
+                                ],
+                            }
+                        ),
+                    }
+                    yield {"data": "[DONE]"}
+
+                return EventSourceResponse(_stream_openai_trt())
+
+            return ChatCompletionsResponse(
+                id=f"chatcmpl-{agent_id[:12]}",
+                created=int(time.time()),
+                model=request_body.model or "trt",
+                choices=[
+                    OpenAIChatChoice(
+                        index=0,
+                        message=OpenAIChatMessage(
+                            role="assistant",
+                            content=result.text,
+                        ),
+                        finish_reason="stop",
+                    )
+                ],
+                usage=OpenAIChatCompletionUsage(
+                    prompt_tokens=len(tokens),
+                    completion_tokens=len(result.tokens),
+                    total_tokens=len(tokens) + len(result.tokens),
+                ),
+            )
 
         # Streaming vs non-streaming
         if request_body.stream:
@@ -734,8 +834,9 @@ async def create_chat_completion(  # noqa: C901, PLR0912, PLR0915
             cache_store.save(agent_id, updated_blocks)
             logger.debug(f"Saved cache: {agent_id} ({updated_blocks.total_tokens} tokens)")
 
-        # Parse for function calls
-        remaining_text, function_calls = parse_function_calls(completion.text)
+        # Strip thinking tags and parse for function calls
+        clean_text = strip_thinking_tags(completion.text)
+        remaining_text, function_calls = parse_function_calls(clean_text)
 
         # Format OpenAI response
         # Build tool_calls array if function calls detected

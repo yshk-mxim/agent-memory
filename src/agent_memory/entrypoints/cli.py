@@ -158,11 +158,11 @@ def serve(
     logger.info(f"Max agents: {settings.agent.max_agents_in_memory}")
     logger.info("=" * 60)
 
-    # Enable faster GPU↔CPU synchronization for Metal.
-    # Reduces per-token sync fence overhead during decode.
+    # Enable faster GPU↔CPU synchronization for Metal (MLX backend only).
     import os
 
-    os.environ.setdefault("MLX_METAL_FAST_SYNCH", "1")
+    if settings.backend == "mlx":
+        os.environ.setdefault("MLX_METAL_FAST_SYNCH", "1")
 
     # Create FastAPI app
     fastapi_app = create_app()

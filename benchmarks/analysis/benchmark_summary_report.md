@@ -204,7 +204,7 @@
 
 ## Files
 
-- **Raw data**: `/Users/dev_user/agent-memory/benchmarks/results/full_gemma_20260215_232610.json`
+- **Raw data**: `./benchmarks/results/full_gemma_20260215_232610.json`
 - **Analysis script**: `/tmp/claude/analyze_benchmark_v2.py`
 - **This report**: `/tmp/claude/benchmark_summary_report.md`
 

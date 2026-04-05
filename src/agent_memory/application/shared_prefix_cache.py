@@ -52,15 +52,20 @@ class SharedPrefixCache:
 
     @staticmethod
     def compute_hash(system_text: str, tools_text: str) -> str:
-        """Compute a stable hash for a system+tools combination."""
-        payload = f"{system_text}\x00{tools_text}"
-        return hashlib.md5(payload.encode()).hexdigest()
+        """Compute a stable hash for a system+tools combination.
+
+        Tools are sorted by line before hashing so that reordering
+        (which Claude Code does occasionally) doesn't invalidate the cache.
+        """
+        tool_lines = sorted(tools_text.strip().split("\n")) if tools_text else []
+        normalized_tools = "\n".join(tool_lines)
+        payload = f"{system_text}\x00{normalized_tools}"
+        return hashlib.md5(payload.encode(), usedforsecurity=False).hexdigest()
 
     def get(self, prefix_hash: str) -> PrefixEntry | None:
-        """Look up cached prefix KV state.
+        """Look up cached prefix KV state (non-destructive).
 
         Returns PrefixEntry if found, None otherwise.
-        The caller must clone the KV caches before mutating them.
         """
         with self._lock:
             entry = self._entries.get(prefix_hash)
@@ -68,6 +73,22 @@ class SharedPrefixCache:
                 entry.hit_count += 1
                 logger.debug(
                     f"[PREFIX CACHE HIT] hash={prefix_hash[:8]}, "
+                    f"tokens={entry.n_tokens}, hits={entry.hit_count}"
+                )
+            return entry
+
+    def take(self, prefix_hash: str) -> PrefixEntry | None:
+        """Remove and return cached prefix KV state (destructive).
+
+        The entry is consumed: submit() will clear the blocks' layer_data
+        during reconstruction, so the entry can't be reused.  After
+        generation the caller stores fresh blocks via put().
+        """
+        with self._lock:
+            entry = self._entries.pop(prefix_hash, None)
+            if entry is not None:
+                logger.debug(
+                    f"[PREFIX CACHE TAKE] hash={prefix_hash[:8]}, "
                     f"tokens={entry.n_tokens}, hits={entry.hit_count}"
                 )
             return entry
@@ -84,10 +105,9 @@ class SharedPrefixCache:
         If the cache is full, evicts the least-hit entry.
         """
         with self._lock:
-            if prefix_hash in self._entries:
-                return  # Already cached
+            is_replace = prefix_hash in self._entries
 
-            if len(self._entries) >= self._max_entries:
+            if not is_replace and len(self._entries) >= self._max_entries:
                 self._evict_least_used()
 
             self._entries[prefix_hash] = PrefixEntry(
@@ -96,8 +116,9 @@ class SharedPrefixCache:
                 n_tokens=n_tokens,
                 token_sequence=token_sequence,
             )
+            action = "REPLACE" if is_replace else "STORE"
             logger.info(
-                f"[PREFIX CACHE STORE] hash={prefix_hash[:8]}, "
+                f"[PREFIX CACHE {action}] hash={prefix_hash[:8]}, "
                 f"tokens={n_tokens}, entries={len(self._entries)}"
             )
 

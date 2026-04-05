@@ -1,0 +1,37 @@
+# Qwen3-Coder-Next on NVIDIA Jetson AGX Thor
+# Coding specialist model (70.6% SWE-bench Verified)
+# Backend: llama.cpp (llama-server, managed by agent-memory)
+#
+# Architecture: DeltaNet hybrid (FLA layers + standard attention)
+# Note: vLLM blocked by cuBLAS SM110 issue. llama.cpp handles
+# DeltaNet via GGUF natively.
+
+[model]
+model_id = "qwen3-coder-next"
+backend = "llamacpp"
+n_layers = 48
+n_kv_heads = 2
+head_dim = 256
+kv_format = "fp"
+
+[inference]
+temperature = 0.7
+top_p = 0.95
+top_k = 40
+extended_thinking = false
+supports_thinking = true
+
+[optimal]
+max_batch_size = 2
+block_tokens = 256
+cache_budget_mb = 32768
+max_agents_in_memory = 4
+evict_to_disk = true
+
+[llamacpp]
+gguf_path = "~/models/qwen3-coder-next/Qwen3-Coder-Next-Q4_K_M.gguf"
+tokenizer_id = "Qwen/Qwen3-Coder-Next"
+ctx_size = 131072
+n_slots = 2
+n_gpu_layers = 99
+extra_args = ["--jinja", "-fa", "on"]  # Jinja template engine + flash attention

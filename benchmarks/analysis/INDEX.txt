@@ -4,14 +4,14 @@
 
 📊 SOURCE DATA
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-File: /Users/dev_user/agent-memory/benchmarks/results/full_gemma_20260215_232610.json
+File: ./benchmarks/results/full_gemma_20260215_232610.json
 Size: 300.3 KB
 Measurements: 216 (100% quality pass, 0% errors)
 Duration: 2h 21m (2026-02-16 04:26-06:47 UTC)
 
 📁 ANALYSIS FILES
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Location: /Users/dev_user/agent-memory/benchmarks/analysis/
+Location: ./benchmarks/analysis/
 
 1. QUICK_REFERENCE.md (2.9K)
    → One-page cheat sheet with all key numbers for paper

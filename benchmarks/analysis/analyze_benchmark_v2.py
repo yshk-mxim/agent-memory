@@ -302,7 +302,7 @@ def format_errors_and_failures(stats: Dict) -> str:
     return "\n".join(lines)
 
 def main():
-    filepath = "/Users/dev_user/agent-memory/benchmarks/results/full_gemma_20260215_232610.json"
+    filepath = "./benchmarks/results/full_gemma_20260215_232610.json"
 
     print("Loading benchmark results...")
     data = load_results(filepath)

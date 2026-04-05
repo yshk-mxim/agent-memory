@@ -72,15 +72,18 @@ experiments/**/*.pkl
 *.npy
 *.npz
 
-# Logs
+# Logs and traffic captures
 *.log
+*.jsonl
 logs/
+captures/
 
 # Jupyter Notebook
 .ipynb_checkpoints/
 *.ipynb
 
 # Testing
+*.test.py
 .pytest_cache/
 .coverage
 htmlcov/

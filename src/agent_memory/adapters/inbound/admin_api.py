@@ -178,6 +178,83 @@ async def swap_model(
     """
     # CRITICAL: Acquire lock to prevent concurrent swaps (CR-2 fix)
     # Without this, two simultaneous swaps could load multiple models → OOM crash
+    semantic = getattr(request.app.state, "agent_memory", None)
+
+    # llama.cpp managed backend: swap via LlamaCppSwapOrchestrator
+    llamacpp_orch = getattr(semantic, "llamacpp_swap_orchestrator", None) if semantic else None
+    if llamacpp_orch is not None:
+        async with _swap_lock:
+            try:
+                old_model_id = None
+                if semantic.model_registry:
+                    old_model_id = semantic.model_registry.get_current_id()
+
+                adapter, tokenizer = await llamacpp_orch.swap_model(
+                    new_model_id=swap_request.model_id,
+                    timeout_seconds=swap_request.timeout_seconds,
+                )
+
+                # Update app state with new adapter + tokenizer
+                semantic.trt_subprocess = adapter
+                semantic.tokenizer = tokenizer
+                if semantic.trt_inference:
+                    semantic.trt_inference._backend = adapter
+                    semantic.trt_inference._tokenizer = tokenizer
+                # Wire slot tracker to new adapter for usage tracking
+                if hasattr(adapter, "slot_tracker") and llamacpp_orch._slot_tracker:
+                    adapter.slot_tracker = llamacpp_orch._slot_tracker
+
+                return SwapModelResponse(
+                    status="success",
+                    old_model_id=old_model_id,
+                    new_model_id=swap_request.model_id,
+                    message=f"Model swapped to {swap_request.model_id}",
+                )
+            except Exception as e:
+                logger.error(f"llama.cpp swap failed: {e}", exc_info=True)
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail=f"llama.cpp model swap failed: {e!s}",
+                ) from e
+
+    # TRT backend: offload all caches to SSD, stop subprocess, start with new engine.
+    # Old caches stay on disk tagged with old model_id (not reusable, preserved for rollback).
+    if semantic and getattr(semantic, "trt_subprocess", None) is not None:
+        async with _swap_lock:
+            try:
+                old_model_id = getattr(semantic, "tokenizer", None)
+                old_model_id = "unknown"  # TRT doesn't track model_id in registry
+
+                logger.info(f"TRT swap: offloading caches to SSD for {swap_request.model_id}")
+
+                # Step 1: Offload all hot caches to SSD (Q4 safetensors)
+                if semantic.cache_store:
+                    semantic.cache_store.evict_all_to_disk()
+
+                # Step 2: Stop the subprocess
+                if semantic.trt_subprocess:
+                    semantic.trt_subprocess.stop()
+                    semantic.trt_subprocess = None
+
+                # Step 3: Cannot start new engine without engine_path change.
+                # The new model_id requires a pre-built TRT engine.
+                return SwapModelResponse(
+                    status="offloaded",
+                    old_model_id=old_model_id,
+                    new_model_id=swap_request.model_id,
+                    message=(
+                        f"Caches offloaded to SSD. Subprocess stopped. "
+                        f"Restart server with SEMANTIC_TRT_ENGINE_PATH pointing "
+                        f"to the {swap_request.model_id} engine directory to complete swap."
+                    ),
+                )
+            except Exception as e:
+                logger.error(f"TRT swap failed: {e}", exc_info=True)
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail=f"TRT model swap failed: {e!s}",
+                ) from e
+
     async with _swap_lock:
         try:
             logger.info(f"Admin API: Swap request to {swap_request.model_id} (lock acquired)")
@@ -187,14 +264,19 @@ async def swap_model(
             if hasattr(orchestrator, "_registry"):
                 old_model_id = orchestrator._registry.get_current_id()
 
-            # Execute swap (async to properly await drain)
+            # Step 1: Offload all caches to SSD (preserves for rollback)
+            if semantic and semantic.cache_store:
+                saved = semantic.cache_store.evict_all_to_disk()
+                logger.info(f"Offloaded {saved} caches to SSD")
+
+            # Step 2: Execute swap via orchestrator (drain, unload, load, reconfigure)
             new_engine = await orchestrator.swap_model(
                 old_engine=old_engine,
                 new_model_id=swap_request.model_id,
                 timeout_seconds=swap_request.timeout_seconds,
             )
 
-            # CRITICAL: Update app.state with new engine (CR-1 fix)
+            # Step 3: Update app.state with new engine
             request.app.state.agent_memory.batch_engine = new_engine
 
             # Update CoordinationService's engine reference
@@ -275,14 +357,21 @@ async def get_available_models(
         - Any HuggingFace model ID can be used, but these are validated
         - All models optimized for M4 Pro 24GB memory
     """
-    # Recommended models (all validated on M4 Pro 24GB)
+    # Recommended models (validated on M4 Pro 24GB + Jetson Thor)
     supported_models = [
+        # MLX backend (Apple Silicon)
         "mlx-community/gemma-3-12b-it-4bit",
         "mlx-community/DeepSeek-Coder-V2-Lite-Instruct-4bit-mlx",
         "mlx-community/Qwen2.5-14B-Instruct-4bit",
         "mlx-community/Llama-3.1-8B-Instruct-4bit",
         "mlx-community/gpt-oss-20b-MXFP4-Q4",
         "mlx-community/SmolLM2-135M-Instruct",
+        # llama.cpp backend (Jetson Thor — model swapping)
+        "gemma-4-26b-a4b",  # MoE: 51 t/s gen, 1681 t/s pp (fast)
+        "gemma-4-31b",  # Dense: 10 t/s gen, 361 t/s pp (deep)
+        "qwen3-coder-next",  # Coding specialist
+        # TRT backend (Jetson Thor)
+        "Qwen/Qwen3-Coder-Next-nvfp4",
     ]
 
     return AvailableModelsResponse(models=supported_models)

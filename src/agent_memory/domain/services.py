@@ -17,7 +17,8 @@ import threading
 # mx.save_safetensors (request handler thread) and mx.eval (scheduler thread)
 # cause SIGSEGV.  RLock (reentrant) because submit() acquires it and then
 # calls _chunked_prefill() which also acquires it on the same thread.
-mlx_io_lock = threading.RLock()
+backend_io_lock = threading.RLock()
+mlx_io_lock = backend_io_lock  # Backward-compatible alias
 
 from agent_memory.domain.entities import KVBlock
 from agent_memory.domain.errors import (

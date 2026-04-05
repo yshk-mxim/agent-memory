@@ -1,7 +1,7 @@
 # Gemma 3 12B IT 4-bit Benchmark Analysis - COMPLETE
 
 **Generated**: 2026-02-16
-**Source**: `/Users/dev_user/agent-memory/benchmarks/results/full_gemma_20260215_232610.json`
+**Source**: `./benchmarks/results/full_gemma_20260215_232610.json`
 
 ---
 
@@ -328,7 +328,7 @@ python /tmp/claude/generate_paper_stats.py
 
 Both scripts read from:
 ```
-/Users/dev_user/agent-memory/benchmarks/results/full_gemma_20260215_232610.json
+./benchmarks/results/full_gemma_20260215_232610.json
 ```
 
 To analyze a different benchmark, edit the `filepath` variable in the scripts.

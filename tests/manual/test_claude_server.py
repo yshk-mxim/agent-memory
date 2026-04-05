@@ -1656,64 +1656,13 @@ def build_static_prefix(system: Any = "", tools: list[Tool] | None = None) -> st
         lines.append("Always prioritize the NEW instruction over prior tool result context.\n")
 
     if tools:
-        lines.append("\n## Available Functions\n")
-        lines.append(
-            "You can call these functions when needed. To call a function, use this exact JSON format:"
-        )
-        lines.append("```json")
-        lines.append('{"name": "function_name", "arguments": {"param1": "value1"}}')
-        lines.append("```\n")
-        lines.append(
-            "IMPORTANT: To create or modify files, you MUST use the Write function. Use the actual file path relative to the working directory:"
-        )
-        lines.append("```json")
-        lines.append(
-            '{"name": "Write", "arguments": {"file_path": "src/example.py", "content": "file contents here"}}'
-        )
-        lines.append("```")
-        lines.append(
-            "Do NOT output file contents in markdown code blocks. Always use Write with a real file path.\n"
-        )
-        lines.append("To launch a background task or subagent, use the Task function:")
-        lines.append("```json")
-        lines.append(
-            '{"name": "Task", "arguments": {"description": "short desc", "prompt": "what to do", "subagent_type": "general-purpose"}}'
-        )
-        lines.append("```")
-        lines.append(
-            "To track COMPLEX multi-step tasks (3+ steps), use TodoWrite. For simple tasks (single file, single command), skip TodoWrite and call Write or Bash directly:"
-        )
-        lines.append("```json")
-        lines.append(
-            '{"name": "TodoWrite", "arguments": {"todos": [{"content": "task name", "status": "pending", "activeForm": "Doing task"}]}}'
-        )
-        lines.append("```")
-        lines.append(
-            "After calling TodoWrite, you MUST call Write or Bash next. Never call TodoWrite twice in a row.\n"
-        )
-        lines.append("Available functions:\n")
-        for tool in tools:
-            lines.append(f"### {tool.name}")
-            if tool.description:
-                lines.append(_sanitize_tool_description(tool.description))
-            if tool.input_schema and tool.input_schema.get("properties"):
-                props = tool.input_schema["properties"]
-                required = tool.input_schema.get("required", [])
-                lines.append("Parameters:")
-                for name, spec in props.items():
-                    req_marker = " (required)" if name in required else ""
-                    desc = spec.get("description", "")[:300]
-                    param_type = spec.get("type", "any")
-                    lines.append(f"  - {name}: {param_type}{req_marker} - {desc}")
-                    if param_type == "array" and "items" in spec:
-                        items = spec["items"]
-                        if items.get("type") == "object" and "properties" in items:
-                            lines.append(
-                                f"    Array items must have: {list(items['properties'].keys())}"
-                            )
-                    elif param_type == "object" and "properties" in spec:
-                        lines.append(f"    Object must have: {list(spec['properties'].keys())}")
-            lines.append("")
+        from agent_memory.adapters.inbound.tool_compression import compress_tool_definitions
+
+        tool_dicts = [
+            {"name": t.name, "description": t.description, "input_schema": t.input_schema}
+            for t in tools
+        ]
+        lines.append("\n" + compress_tool_definitions(tool_dicts) + "\n")
 
     if variable_system:
         lines.append(variable_system.strip())

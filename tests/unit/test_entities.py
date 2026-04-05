@@ -208,3 +208,139 @@ class TestAgentBlocks:
         agent = AgentBlocks(agent_id="agent_1", blocks={}, total_tokens=0)
 
         assert agent.metadata == {}
+
+    def test_detach_for_prefix_cache_copies_blocks(self) -> None:
+        """detach_for_prefix_cache() creates independent block copies."""
+        fake_tensor = {"k": [1, 2, 3], "v": [4, 5, 6]}
+        block = KVBlock(block_id=42, layer_id=0, token_count=100, layer_data=fake_tensor)
+        agent = AgentBlocks(
+            agent_id="original",
+            blocks={0: [block]},
+            total_tokens=100,
+            token_sequence=[1, 2, 3],
+            prompt_text="hello world",
+        )
+
+        detached = agent.detach_for_prefix_cache()
+
+        # Detached has different identity
+        assert detached.agent_id == "_prefix_cache"
+        assert detached is not agent
+
+        # Blocks are independent objects
+        assert detached.blocks[0][0] is not agent.blocks[0][0]
+        assert detached.blocks[0][0].block_id >= 10_000_000  # High IDs = not in pool
+
+        # Tensor data is shared (same reference — immutable)
+        assert detached.blocks[0][0].layer_data is agent.blocks[0][0].layer_data
+
+        # Token sequence is a copy
+        assert detached.token_sequence == [1, 2, 3]
+        assert detached.token_sequence is not agent.token_sequence
+
+        # Prompt text preserved
+        assert detached.prompt_text == "hello world"
+        assert detached.total_tokens == 100
+
+    def test_detach_survives_original_clear(self) -> None:
+        """Clearing original blocks' layer_data doesn't affect detached copy."""
+        fake_tensor = {"k": [1, 2, 3], "v": [4, 5, 6]}
+        block = KVBlock(block_id=42, layer_id=0, token_count=100, layer_data=fake_tensor)
+        agent = AgentBlocks(
+            agent_id="original",
+            blocks={0: [block]},
+            total_tokens=100,
+        )
+
+        detached = agent.detach_for_prefix_cache()
+
+        # Simulate what submit() does after reconstruction
+        block.layer_data = None
+
+        # Detached still has the tensor data
+        assert detached.blocks[0][0].layer_data is not None
+        assert detached.blocks[0][0].layer_data == {"k": [1, 2, 3], "v": [4, 5, 6]}
+
+    def test_detach_empty_blocks(self) -> None:
+        """detach_for_prefix_cache() works on empty blocks."""
+        agent = AgentBlocks(agent_id="empty", blocks={}, total_tokens=0)
+        detached = agent.detach_for_prefix_cache()
+        assert detached.blocks == {}
+        assert detached.total_tokens == 0
+
+    def test_trim_to_prefix_exact_block_boundary(self) -> None:
+        """trim_to_prefix at exact block boundary keeps only full blocks."""
+        blocks = {
+            0: [
+                KVBlock(block_id=1, layer_id=0, token_count=256, layer_data="a"),
+                KVBlock(block_id=2, layer_id=0, token_count=256, layer_data="b"),
+                KVBlock(block_id=3, layer_id=0, token_count=100, layer_data="c"),
+            ],
+        }
+        agent = AgentBlocks(
+            agent_id="test", blocks=blocks, total_tokens=612,
+            token_sequence=list(range(612)),
+        )
+        trimmed = agent.trim_to_prefix(512)  # Exactly 2 blocks
+        assert trimmed.total_tokens == 512
+        assert len(trimmed.blocks[0]) == 2
+        assert trimmed.token_sequence == list(range(512))
+
+    def test_trim_to_prefix_partial_block(self) -> None:
+        """trim_to_prefix with partial block reduces token_count."""
+        blocks = {
+            0: [
+                KVBlock(block_id=1, layer_id=0, token_count=256, layer_data="a"),
+                KVBlock(block_id=2, layer_id=0, token_count=256, layer_data="b"),
+            ],
+        }
+        agent = AgentBlocks(
+            agent_id="test", blocks=blocks, total_tokens=512,
+            token_sequence=list(range(512)),
+        )
+        trimmed = agent.trim_to_prefix(300)  # 1 full + 44 partial
+        assert trimmed.total_tokens == 300
+        assert len(trimmed.blocks[0]) == 2
+        assert trimmed.blocks[0][0].token_count == 256  # Full block
+        assert trimmed.blocks[0][1].token_count == 44   # Partial
+        assert len(trimmed.token_sequence) == 300
+
+    def test_trim_to_prefix_multi_layer(self) -> None:
+        """trim_to_prefix works across layers."""
+        blocks = {
+            0: [KVBlock(block_id=1, layer_id=0, token_count=256, layer_data="a"),
+                KVBlock(block_id=2, layer_id=0, token_count=100, layer_data="b")],
+            1: [KVBlock(block_id=3, layer_id=1, token_count=256, layer_data="c"),
+                KVBlock(block_id=4, layer_id=1, token_count=100, layer_data="d")],
+        }
+        agent = AgentBlocks(agent_id="test", blocks=blocks, total_tokens=356)
+        trimmed = agent.trim_to_prefix(256)
+        assert trimmed.total_tokens == 256
+        for layer_id in (0, 1):
+            assert len(trimmed.blocks[layer_id]) == 1
+            assert trimmed.blocks[layer_id][0].token_count == 256
+
+    def test_trim_to_prefix_zero(self) -> None:
+        """trim_to_prefix(0) returns empty blocks."""
+        block = KVBlock(block_id=1, layer_id=0, token_count=256, layer_data="a")
+        agent = AgentBlocks(agent_id="test", blocks={0: [block]}, total_tokens=256)
+        trimmed = agent.trim_to_prefix(0)
+        assert trimmed.total_tokens == 0
+        assert trimmed.blocks == {}
+
+    def test_detach_multi_layer(self) -> None:
+        """detach_for_prefix_cache() handles multiple layers."""
+        blocks = {
+            0: [KVBlock(block_id=1, layer_id=0, token_count=256, layer_data={"k": "a"})],
+            1: [KVBlock(block_id=2, layer_id=1, token_count=256, layer_data={"k": "b"})],
+        }
+        agent = AgentBlocks(agent_id="multi", blocks=blocks, total_tokens=256)
+        detached = agent.detach_for_prefix_cache()
+
+        assert len(detached.blocks) == 2
+        assert detached.blocks[0][0].layer_data == {"k": "a"}
+        assert detached.blocks[1][0].layer_data == {"k": "b"}
+        # All block_ids are negative and unique
+        ids = [b.block_id for layer in detached.blocks.values() for b in layer]
+        assert all(i >= 10_000_000 for i in ids)
+        assert len(set(ids)) == len(ids)  # Unique

@@ -1,0 +1,41 @@
+# Gemma 4 31B (Dense) on NVIDIA Jetson AGX Thor
+# Deep reasoning model: full 31B params active per token
+# Backend: llama.cpp (llama-server, managed by agent-memory)
+#
+# Performance (Thor sm_110, 228 GB/s, Q4_K_M):
+#   Generation: 10.3 t/s  |  Prefill pp512: 361 t/s
+#
+# Best for: complex architectural reasoning, security audits,
+# contract review, multi-file refactors — tasks where maximum
+# reasoning depth per token justifies the 5x speed penalty vs MoE.
+
+[model]
+model_id = "gemma-4-31b"
+backend = "llamacpp"
+n_layers = 48
+n_kv_heads = 16
+head_dim = 88
+kv_format = "fp"
+
+[inference]
+temperature = 0.7
+top_p = 0.95
+top_k = 64
+extended_thinking = false
+supports_thinking = true
+
+[optimal]
+max_batch_size = 2
+block_tokens = 256
+cache_budget_mb = 32768
+max_agents_in_memory = 4
+evict_to_disk = true
+
+[llamacpp]
+gguf_path = "~/models/gemma4-31b/gemma-4-31B-it-Q4_K_M.gguf"
+tokenizer_id = "google/gemma-4-31B-it"
+ctx_size = 131072     # ~17.4 GiB model + ~100 GiB for KV
+n_slots = 2           # 2 parallel requests (dense model is slower)
+n_gpu_layers = 99
+extra_args = ["--reasoning", "off", "-fa", "on"]  # b8665 native tool calling + flash attention
+chat_template_file = "config/chat_templates/gemma4-interleaved.jinja"  # Interleaved template: preserves reasoning between tool calls, better for agentic loops

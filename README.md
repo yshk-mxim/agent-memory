@@ -1,9 +1,18 @@
 # agent-memory
 
+> **WARNING: This branch (`feat/trt-backend`) is v1.1.0-alpha — UNSTABLE.**
+> TRT backend and mlx-lm 0.31 upgrade are functional but NOT production-hardened.
+> Interactive testing with Claude Code CLI and NemoClaw still pending.
+> Cache persistence verified but not load-tested. API surface may change.
+> **For stable use, stay on `main` (v1.0.x).**
+
 [![DOI](https://zenodo.org/badge/1156636930.svg)](https://doi.org/10.5281/zenodo.18793752)
 [![CI](https://github.com/yshk-mxim/agent-memory/actions/workflows/ci.yml/badge.svg)](https://github.com/yshk-mxim/agent-memory/actions/workflows/ci.yml)
 
-Persistent KV cache for multi-agent LLM systems on Apple Silicon.
+Persistent KV cache for multi-agent LLM inference on edge devices.
+
+Supports **Apple Silicon** (MLX) and **NVIDIA Jetson AGX Thor** (TensorRT Edge-LLM).
+Works with **Claude Code CLI**, **NemoClaw/OpenClaw**, and any OpenAI/Anthropic-compatible client.
 
 **Paper:** [Agent Memory Below the Prompt: Persistent Q4 KV Cache for Multi-Agent LLM Inference on Edge Devices](https://arxiv.org/abs/2603.04428) ([PDF](https://arxiv.org/pdf/2603.04428))
 
@@ -153,29 +162,78 @@ Streamlit demos in `demo/` (launched via `scripts/launch.sh`):
 
 ## Requirements
 
-- Apple Silicon Mac (M1/M2/M3/M4)
+**Apple Silicon (MLX backend):**
+- Mac with M1/M2/M3/M4 chip
 - macOS 13+ (Ventura)
 - Python 3.11+
 - 16 GB RAM minimum (24 GB recommended for 12B models)
 
+**NVIDIA Jetson (TRT backend):**
+- Jetson AGX Thor (sm_110, JetPack 7.1+)
+- CUDA 13.0, TensorRT 10.13+
+- Python 3.12+
+- Docker (for TRT Edge-LLM build)
+- See `vendor/BUILD_LOG.md` for full build instructions
+
+**llama.cpp backend (recommended for coding models on Thor):**
+- Any platform with CUDA (Jetson Thor, DGX Spark, desktop GPUs)
+- Handles all architectures: DeltaNet, MoE, MLA via GGUF
+- Slot-level KV cache save/restore for session persistence
+- See `docs/llamacpp_backend.md` for setup guide
+
+## Backend Selection
+
+```bash
+# Apple Silicon (default)
+SEMANTIC_BACKEND=mlx agent-memory serve
+
+# NVIDIA Jetson Thor (TRT Edge-LLM)
+SEMANTIC_BACKEND=trt \
+SEMANTIC_TRT_ENGINE_PATH=/path/to/engine \
+SEMANTIC_TRT_LLM_INFERENCE_BIN=/path/to/llm_inference_interactive \
+SEMANTIC_TRT_MODEL_ID=HuggingFaceTB/SmolLM2-135M-Instruct \
+agent-memory serve
+
+# llama.cpp (any GPU — best for coding models)
+SEMANTIC_BACKEND=llamacpp \
+SEMANTIC_LLAMACPP_BASE_URL=http://localhost:8001 \
+SEMANTIC_LLAMACPP_MODEL_ID=unsloth/Qwen3-Coder-Next-GGUF \
+agent-memory serve
+```
+
+## Client Integration
+
+```bash
+# Claude Code CLI
+ANTHROPIC_BASE_URL=http://localhost:8000 claude --bare -p "What is 2+2?"
+
+# NemoClaw/OpenClaw (configure in ~/.openclaw/openclaw.json)
+# Set baseUrl to http://localhost:8000/v1, api: "anthropic-messages"
+
+# Any OpenAI-compatible client
+curl http://localhost:8000/v1/chat/completions \
+  -d '{"model":"SmolLM2","messages":[{"role":"user","content":"Hello"}]}'
+```
+
 ## Development
 
 ```bash
-pip install --no-deps mlx-lm==0.30.4 && pip install -e ".[dev]"
-python -m pytest tests/unit -x -q --timeout=30  # ~1,100 tests, ~3s
+pip install -e ".[dev]"
+python -m pytest tests/unit -x -q --timeout=30  # ~1,220 tests, ~5s
 ```
 
-Architecture: hexagonal (ports and adapters) with domain-driven design. Source in `src/agent_memory/`, tests in `tests/`, benchmarks in `benchmarks/`.
-
+Architecture: hexagonal (ports and adapters) with domain-driven design.
+Source in `src/agent_memory/`, tests in `tests/`, benchmarks in `benchmarks/`.
 See `docs/developer-guide.md` for the full developer guide.
 
 ## Known Limitations
 
-- **Apple Silicon only** — requires MLX framework (M1/M2/M3/M4)
-- **`stop` / `stop_sequences`** — accepted but not enforced during generation
 - **`tool_choice`** — accepted but not constrained; tool calls detected via post-hoc parsing
-- **Batch decode** — new requests wait until all active decodes complete
-- **Cache persistence** — disk save is synchronous on the event loop; ~50-100ms stall once per completed request (not per token)
+- **Batch decode** — new requests wait until all active decodes complete (MLX)
+- **Cache persistence** — disk save is synchronous; ~50-100ms stall per completed request
+- **TRT streaming** — word-level chunked (not true token-level; requires C++ engine changes)
+- **TRT model swap** — offloads caches to SSD, requires server restart with new engine
+- **Extended thinking** — `thinking` parameter accepted but not acted upon (local models)
 
 ## Cite this work
 

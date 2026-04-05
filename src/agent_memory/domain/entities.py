@@ -195,6 +195,88 @@ class AgentBlocks:
             prefix_len += 1
         return prefix_len
 
+    def trim_to_prefix(self, n_tokens: int) -> "AgentBlocks":
+        """Return a copy trimmed to only the first n_tokens.
+
+        Used to extract the system prompt KV state from a full conversation's
+        blocks.  Because attention is causal, the KV data for positions 0..N
+        is identical regardless of what came after — so we can trim after
+        generation and get the same result as capturing mid-prefill.
+
+        Blocks are 256-token chunks; the last block may be partial.
+        """
+        if n_tokens <= 0 or not self.blocks:
+            return AgentBlocks(
+                agent_id=self.agent_id,
+                blocks={},
+                total_tokens=0,
+                token_sequence=[],
+                prompt_text="",
+            )
+
+        n_full = n_tokens // BLOCK_SIZE_TOKENS
+        remainder = n_tokens % BLOCK_SIZE_TOKENS
+
+        trimmed: dict[int, list[KVBlock]] = {}
+        for layer_id, layer_blocks in self.blocks.items():
+            layer: list[KVBlock] = list(layer_blocks[:n_full])
+            if remainder > 0 and len(layer_blocks) > n_full:
+                partial = layer_blocks[n_full]
+                layer.append(
+                    KVBlock(
+                        block_id=partial.block_id,
+                        layer_id=layer_id,
+                        token_count=remainder,
+                        layer_data=partial.layer_data,
+                    )
+                )
+            trimmed[layer_id] = layer
+
+        return AgentBlocks(
+            agent_id=self.agent_id,
+            blocks=trimmed,
+            total_tokens=n_tokens,
+            token_sequence=list(self.token_sequence[:n_tokens]),
+            prompt_text=self.prompt_text,
+        )
+
+    def detach_for_prefix_cache(self) -> "AgentBlocks":
+        """Create a detached copy suitable for SharedPrefixCache storage.
+
+        Returns a new AgentBlocks with independent KVBlock objects that
+        reference the same tensor data (MLX arrays are immutable, so
+        sharing is safe).  The detached blocks use negative block_ids
+        and a synthetic agent_id so they don't conflict with pool-managed
+        blocks.
+
+        This allows the original blocks' layer_data to be cleared (as
+        submit() does after reconstruction) without affecting the cached
+        copy.
+        """
+        detached_blocks: dict[int, list[KVBlock]] = {}
+        block_counter = 10_000_000  # High IDs to avoid pool conflicts
+        for layer_id, layer_blocks in self.blocks.items():
+            detached_layer: list[KVBlock] = []
+            for block in layer_blocks:
+                detached_layer.append(
+                    KVBlock(
+                        block_id=block_counter,
+                        layer_id=layer_id,
+                        token_count=block.token_count,
+                        layer_data=block.layer_data,  # Same tensor refs (immutable)
+                    )
+                )
+                block_counter += 1
+            detached_blocks[layer_id] = detached_layer
+
+        return AgentBlocks(
+            agent_id="_prefix_cache",
+            blocks=detached_blocks,
+            total_tokens=self.total_tokens,
+            token_sequence=list(self.token_sequence),
+            prompt_text=self.prompt_text,
+        )
+
     def __post_init__(self) -> None:
         """Validate agent blocks invariants after construction."""
         if not self.agent_id:

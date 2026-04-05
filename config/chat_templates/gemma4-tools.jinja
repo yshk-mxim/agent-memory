@@ -1,0 +1,102 @@
+{#- Gemma 4 chat template with Claude Code tool support.
+    Handles OpenAI-format tool definitions from llama-server and formats
+    them clearly for the model. Uses plain JSON for tool calls (not Gemma's
+    native <|tool_call> syntax) for better reliability with complex schemas.
+-#}
+{{ bos_token }}
+{%- set system_message = "" -%}
+{%- set start_index = 0 -%}
+{%- if messages[0]['role'] == 'system' -%}
+    {%- if messages[0]['content'] is string -%}
+        {%- set system_message = messages[0]['content'] -%}
+    {%- elif messages[0]['content'] is iterable -%}
+        {%- for item in messages[0]['content'] -%}
+            {%- if item['type'] == 'text' -%}
+                {%- set system_message = system_message + item['text'] -%}
+            {%- endif -%}
+        {%- endfor -%}
+    {%- endif -%}
+    {%- set start_index = 1 -%}
+{%- endif -%}
+
+{%- set tools = tools | default(none) -%}
+
+{#- Process messages -#}
+{%- for message in messages[start_index:] -%}
+    {%- if message['role'] == 'assistant' -%}
+        {%- set role = 'model' -%}
+    {%- elif message['role'] == 'tool' -%}
+        {%- set role = 'user' -%}
+    {%- else -%}
+        {%- set role = message['role'] -%}
+    {%- endif -%}
+
+<start_of_turn>{{ role }}
+{#- First user message: inject system prompt + tool definitions -#}
+{%- if loop.first and role == 'user' -%}
+{%- if system_message %}
+{{ system_message }}
+
+{% endif -%}
+{%- if tools is not none -%}
+You have access to the following tools. To call a tool, output a JSON object on its own line:
+{"name": "tool_name", "parameters": {"param": "value"}}
+Multiple calls = multiple JSON objects, one per line. Do NOT wrap in markdown code blocks.
+
+Available tools:
+{% for tool in tools -%}
+{%- if tool.type == 'function' -%}
+{%- set fn = tool.function -%}
+{%- set params = fn.parameters | default({}) -%}
+{%- set props = params.get('properties', {}) if params is mapping else {} -%}
+{%- set req = params.get('required', []) if params is mapping else [] -%}
+- {{ fn.name }}: {{ fn.description | default('') | truncate(120, True) }}{% if props %} Params:{% for pname in props %} {{ pname }} ({{ props[pname].get('type', 'any') }}{% if pname in req %}, required{% endif %}){% if not loop.last %},{% endif %}{% endfor %}{% endif %}
+{% endif -%}
+{%- endfor %}
+{% endif -%}
+{%- endif -%}
+
+{#- Handle tool call messages from assistant -#}
+{%- if 'tool_calls' in message -%}
+    {%- for tool_call in message.tool_calls -%}
+        {%- set func = tool_call.function if tool_call.function is defined else tool_call -%}
+        {%- set args = func.arguments -%}
+        {%- if args is string -%}
+            {%- set args_str = args -%}
+        {%- else -%}
+            {%- set args_str = args | tojson -%}
+        {%- endif -%}
+{"name": "{{ func.name }}", "parameters": {{ args_str }}}
+    {%- endfor -%}
+{%- endif -%}
+
+{#- Handle tool response -#}
+{%- if message['role'] == 'tool' -%}
+<tool_response>
+{%- endif -%}
+
+{#- Render content -#}
+{%- if message['content'] is string -%}
+{{ message['content'] }}
+{%- elif message['content'] is iterable -%}
+    {%- for item in message['content'] -%}
+        {%- if item['type'] == 'text' -%}
+{{ item['text'] }}
+        {%- elif item['type'] == 'image' -%}
+<start_of_image>
+        {%- endif -%}
+    {%- endfor -%}
+{%- endif -%}
+
+{%- if message['role'] == 'tool' -%}
+</tool_response>
+{%- endif -%}
+<end_of_turn>
+{% endfor -%}
+
+{%- if add_generation_prompt -%}
+<start_of_turn>model
+{%- if enable_thinking is defined and enable_thinking -%}
+<start_of_thought>
+{%- endif %}
+{% endif -%}

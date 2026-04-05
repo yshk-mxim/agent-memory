@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "agent-memory"
 dynamic = ["version"]
-description = "Persistent KV cache for multi-agent LLM systems on Apple Silicon"
+description = "Persistent KV cache for multi-agent LLM inference on edge devices"
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.11"
@@ -21,7 +21,7 @@ keywords = [
     "kv-cache",
 ]
 classifiers = [
-    "Development Status :: 5 - Production/Stable",
+    "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
@@ -30,18 +30,17 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 dependencies = [
-    "mlx==0.30.3",
-    # mlx-lm==0.30.4 is installed separately with --no-deps (see scripts/setup.sh).
-    # Reason: mlx-lm pins transformers==5.0.0rc1 which has a SentencePiece bug
-    # (huggingface/transformers#43066). We pin transformers==4.57.6 instead.
-    "sentencepiece==0.2.1",         # mlx-lm runtime dep
-    "protobuf==6.32.0",            # mlx-lm runtime dep
-    "fastapi==0.122.0",
-    "uvicorn[standard]==0.38.0",
-    "pydantic==2.12.4",
-    "pydantic-settings==2.12.0",
-    "safetensors==0.7.0",
-    "transformers==4.57.6",         # v5.0.0rc1 breaks SentencePiece decode (gh #43066)
+    "mlx>=0.31.0",
+    "mlx-lm>=0.31.0",
+    "sentencepiece>=0.2.0",
+    "protobuf>=6.0.0",
+    "fastapi>=0.122.0",
+    "uvicorn[standard]>=0.38.0",
+    "pydantic>=2.12.0",
+    "pydantic-settings>=2.12.0",
+    "safetensors>=0.7.0",
+    "transformers>=5.4.0",
+    "jinja2>=3.1.0",
     "sse-starlette==3.2.0",
     "structlog==25.5.0",
     "prometheus-client==0.24.1",
@@ -279,6 +278,11 @@ max-public-methods = 20 # Detect large classes
     "SIM108",  # if-else blocks clearer than ternary in manual tests
     "S104",    # Binding to 0.0.0.0 intentional for manual test server
 ]
+"tests/fixtures/**/*.py" = [
+    "PLR0911", # Multiple return statements in command handler
+    "S110",    # try-except-pass for optional file parsing
+    "PLC0415", # Runtime imports for optional safetensors
+]
 "tests/mlx/**/*.py" = [
     "PLC0415", # Runtime imports needed for real MLX lazy loading
     "S101",    # Assertions in tests
@@ -305,6 +309,9 @@ max-public-methods = 20 # Detect large classes
     "PLR0912", # Same function as C901
 ]
 "src/agent_memory/application/batch_engine.py" = [
+    "PLC0415", # Re-export module
+]
+"src/agent_memory/adapters/outbound/mlx_batch_engine.py" = [
     "C901",    # Complex methods acceptable in core engine
     "PLR0912", # Many branches acceptable for cache handling
     "PLR0915", # Many statements acceptable for comprehensive logic
@@ -500,6 +507,7 @@ strict = false
 [[tool.mypy.overrides]]
 module = [
     "agent_memory.application.batch_engine",
+    "agent_memory.adapters.outbound.mlx_batch_engine",
     "agent_memory.application.chat_completion_service",
     "agent_memory.application.scheduler",
     "agent_memory.application.agent_cache_store",
@@ -602,8 +610,9 @@ omit = [
     "src/agent_memory/adapters/outbound/mlx_sink_compat.py",
     "src/agent_memory/adapters/outbound/safetensors_cache_adapter.py",
     "src/agent_memory/adapters/utils/timeouts.py",
-    # Core inference engine: deeply coupled to MLX — tested by integration tests
+    # Core MLX inference engine — tested by integration tests
     "src/agent_memory/application/batch_engine.py",
+    "src/agent_memory/adapters/outbound/mlx_batch_engine.py",
 ]
 
 [tool.coverage.report]

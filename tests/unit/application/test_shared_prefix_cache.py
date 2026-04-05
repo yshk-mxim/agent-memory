@@ -30,14 +30,15 @@ class TestSharedPrefixCacheBasic:
         entry = cache.get("abc123")
         assert entry.hit_count == 4  # 3 + 1 from final get
 
-    def test_put_duplicate_is_noop(self) -> None:
+    def test_put_replaces_existing(self) -> None:
         cache = SharedPrefixCache()
         cache.put("abc", kv_caches=["first"], n_tokens=10, token_sequence=[1])
         cache.put("abc", kv_caches=["second"], n_tokens=20, token_sequence=[2])
 
         entry = cache.get("abc")
-        assert entry.kv_caches == ["first"]  # First value kept
-        assert entry.n_tokens == 10
+        assert entry.kv_caches == ["second"]  # Fresh value replaces stale
+        assert entry.n_tokens == 20
+        assert cache.size == 1  # Still one entry
 
     def test_size_property(self) -> None:
         cache = SharedPrefixCache()

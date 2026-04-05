@@ -15,7 +15,6 @@ from typing import Any
 
 import mlx.core as mx
 from mlx_lm.generate import generation_stream
-from mlx_lm.models.cache import QuantizedKVCache
 
 from agent_memory.domain.services import mlx_io_lock
 
@@ -69,19 +68,23 @@ class MLXPrefillAdapter:
         self._min_chunk = min_chunk
         self._max_chunk = max_chunk
 
-    def init_prefill_caches(self, n_layers: int) -> list[QuantizedKVCache]:
-        """Create empty Q4 KV caches for a new prefill sequence."""
-        return [
-            QuantizedKVCache(group_size=self._kv_group_size, bits=self._kv_bits)
-            for _ in range(n_layers)
-        ]
+    def init_prefill_caches(self, n_layers: int = 0) -> list[Any]:  # noqa: ARG002
+        """Create empty KV caches matching the model's architecture.
+
+        Uses make_prompt_cache(model) which creates the correct cache type
+        per layer (KVCache for attention, ArraysCache for Mamba/SSM in
+        hybrid models like Qwen3.5).
+        """
+        from mlx_lm.models.cache import make_prompt_cache
+
+        return make_prompt_cache(self._model)
 
     def process_prefill_chunk(
         self,
         tokens: list[int],
         start: int,
         end: int,
-        kv_caches: list[QuantizedKVCache],
+        kv_caches: list[Any],
     ) -> None:
         """Process one chunk of tokens through the model, updating kv_caches.
 

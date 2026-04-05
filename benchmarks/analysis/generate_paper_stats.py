@@ -196,7 +196,7 @@ def print_summary_stats(filepath: str):
     print(f"Errors: {errors} ({errors/len(measurements)*100:.1f}%)")
 
 def main():
-    filepath = "/Users/dev_user/agent-memory/benchmarks/results/full_gemma_20260215_232610.json"
+    filepath = "./benchmarks/results/full_gemma_20260215_232610.json"
 
     print_summary_stats(filepath)
 

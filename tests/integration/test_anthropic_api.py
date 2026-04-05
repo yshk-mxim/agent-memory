@@ -72,8 +72,13 @@ class TestAnthropicMessagesAPI:
 
         assert response.status_code == 422  # Validation error
 
-    def test_request_validation_consecutive_same_role(self):
-        """Consecutive messages with same role should be rejected."""
+    def test_request_consecutive_same_role_allowed(self):
+        """Consecutive messages with same role are allowed (validator removed).
+
+        Strict message alternation was removed in f800099 because it broke
+        multi-turn conversations with tool results.  The LLM backends handle
+        message ordering themselves.
+        """
         app = create_app()
         client = TestClient(app, raise_server_exceptions=False)
 
@@ -89,7 +94,9 @@ class TestAnthropicMessagesAPI:
             },
         )
 
-        assert response.status_code == 422  # Validation error
+        # Not a 422 anymore — the request is valid, but service is unavailable
+        # in the test environment (no backend engine loaded)
+        assert response.status_code != 422
 
     def test_request_with_system_prompt_string(self):
         """System prompt as string should be accepted."""

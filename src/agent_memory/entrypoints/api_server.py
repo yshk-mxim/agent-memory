@@ -9,17 +9,15 @@ middleware, error handlers, and route registration.
 from contextlib import asynccontextmanager
 from dataclasses import replace
 from pathlib import Path
+from typing import Any
 
 import structlog
 from fastapi import FastAPI, Request, Response, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from mlx_lm import load
 from prometheus_client import generate_latest
 
-import agent_memory.adapters.outbound.mlx_quantized_extensions
-import agent_memory.adapters.outbound.mlx_sink_compat  # noqa: F401
 from agent_memory.adapters.config.logging import configure_logging
 from agent_memory.adapters.config.settings import get_settings
 from agent_memory.adapters.inbound.admin_api import (
@@ -41,16 +39,9 @@ from agent_memory.adapters.inbound.rate_limiter import RateLimiter
 from agent_memory.adapters.inbound.request_id_middleware import RequestIDMiddleware
 from agent_memory.adapters.inbound.request_logging_middleware import RequestLoggingMiddleware
 from agent_memory.adapters.outbound.chat_template_adapter import ChatTemplateAdapter
-from agent_memory.adapters.outbound.mlx_cache_adapter import MLXCacheAdapter
-from agent_memory.adapters.outbound.mlx_model_loader import MLXModelLoader
-from agent_memory.adapters.outbound.mlx_spec_extractor import get_extractor
 from agent_memory.adapters.outbound.safetensors_cache_adapter import SafetensorsCacheAdapter
 from agent_memory.application.agent_cache_store import AgentCacheStore, ModelTag
-from agent_memory.application.batch_engine import BlockPoolBatchEngine
 from agent_memory.application.coordination_service import CoordinationService
-from agent_memory.application.model_registry import ModelRegistry
-from agent_memory.application.model_swap_orchestrator import ModelSwapOrchestrator
-from agent_memory.application.scheduler import ConcurrentScheduler
 from agent_memory.application.shared_prefix_cache import SharedPrefixCache
 from agent_memory.domain.errors import (
     AgentNotFoundError,
@@ -75,15 +66,89 @@ class AppState:
     def __init__(self) -> None:
         """Initialize empty state (populated during startup)."""
         self.block_pool: BlockPool | None = None
-        self.batch_engine: BlockPoolBatchEngine | None = None
+        self.batch_engine: Any = None
         self.cache_store: AgentCacheStore | None = None
-        self.mlx_adapter: MLXCacheAdapter | None = None
+        self.mlx_adapter: Any = None
         self.cache_adapter: SafetensorsCacheAdapter | None = None
-        self.scheduler: ConcurrentScheduler | None = None
+        self.scheduler: Any = None
         self.prefix_cache: SharedPrefixCache | None = None
         self.coordination_service: CoordinationService | None = None
-        self.model_registry: ModelRegistry | None = None
-        self.model_swap_orchestrator: ModelSwapOrchestrator | None = None
+        self.model_registry: Any = None
+        self.model_swap_orchestrator: Any = None
+        self.trt_subprocess: Any = None  # TRT backend subprocess adapter
+        self.trt_inference: Any = None  # TRT inference service (with cache)
+        self.tokenizer: Any = None  # Tokenizer (shared, used by adapters)
+        self.llamacpp_swap_orchestrator: Any = None  # llama.cpp model swap
+        self.server_tool_executor: Any = None  # Server-side WebSearch/WebFetch
+
+
+class _LlamaCppSpecExtractor:
+    """SpecExtractorPort for llama.cpp — returns advisory spec.
+
+    llama.cpp manages its own KV cache, so the spec is advisory
+    (used only for cache store model tagging, not block allocation).
+    The 'model' here is actually a LlamaCppBackendAdapter.
+    """
+
+    def extract_spec(self, model: Any) -> ModelCacheSpec:
+        """Extract spec from a LlamaCppBackendAdapter."""
+        if hasattr(model, "extract_model_spec"):
+            return model.extract_model_spec()
+        return ModelCacheSpec(
+            n_layers=48,
+            n_kv_heads=16,
+            head_dim=128,
+            block_tokens=256,
+            layer_types=["global"] * 48,
+            kv_format="fp",
+            kv_bits=None,
+        )
+
+
+def _load_trt_model_and_extract_spec(settings):
+    """Load TRT engine via subprocess and extract cache spec.
+
+    Args:
+        settings: Application settings (uses settings.trt)
+
+    Returns:
+        Tuple of (subprocess_adapter, tokenizer, model_spec)
+    """
+    logger = structlog.get_logger(__name__)
+    trt = settings.trt
+    logger.info("loading_trt_model", engine_path=trt.engine_path, model_id=trt.model_id)
+
+    from agent_memory.adapters.outbound.trt_model_loader import TRTModelLoader
+
+    loader = TRTModelLoader()
+    subprocess_adapter, tokenizer = loader.load(
+        model_id=trt.model_id,
+        engine_path=trt.engine_path,
+        llm_inference_bin=trt.llm_inference_bin,
+        timeout_s=trt.subprocess_timeout_s,
+        shm_dir=trt.shm_dir,
+    )
+
+    # Override tokenizer max length
+    tokenizer.model_max_length = trt.max_context_length
+
+    # Extract spec from running engine
+    model_spec = subprocess_adapter.extract_model_spec()
+    model_spec = replace(
+        model_spec,
+        kv_bits=trt.kv_bits,
+        kv_format="fp",
+    )
+
+    logger.info(
+        "trt_model_loaded",
+        n_layers=model_spec.n_layers,
+        n_kv_heads=model_spec.n_kv_heads,
+        head_dim=model_spec.head_dim,
+        kv_format=model_spec.kv_format,
+    )
+
+    return subprocess_adapter, tokenizer, model_spec
 
 
 def _load_model_and_extract_spec(settings):
@@ -108,6 +173,8 @@ def _load_model_and_extract_spec(settings):
         "trust_remote_code": True,
     }
 
+    from mlx_lm import load  # Runtime import — MLX backend only
+
     model, tokenizer = load(
         settings.mlx.model_id,
         tokenizer_config=tokenizer_config,
@@ -125,6 +192,8 @@ def _load_model_and_extract_spec(settings):
             target=expected_max,
             message="Tokenizer max length less than target, requests may be truncated",
         )
+
+    from agent_memory.adapters.outbound.mlx_spec_extractor import get_extractor
 
     spec_extractor = get_extractor()
     base_spec: ModelCacheSpec = spec_extractor.extract_spec(model)
@@ -160,7 +229,8 @@ def _initialize_block_pool(settings, model_spec):
     logger = structlog.get_logger(__name__)
 
     bytes_per_block = model_spec.bytes_per_block_per_layer()
-    total_blocks = (settings.mlx.cache_budget_mb * 1024 * 1024) // bytes_per_block
+    backend_settings = settings.trt if settings.backend == "trt" else settings.mlx
+    total_blocks = (backend_settings.cache_budget_mb * 1024 * 1024) // bytes_per_block
     mb_per_block = bytes_per_block / 1024 / 1024
     logger.info(
         "block_budget_calculated", total_blocks=total_blocks, mb_per_block=round(mb_per_block, 2)
@@ -185,10 +255,32 @@ def _initialize_cache_store(settings, model_spec):
     logger = structlog.get_logger(__name__)
 
     cache_dir = Path(settings.agent.cache_dir).expanduser()
-    cache_adapter = SafetensorsCacheAdapter(cache_dir=cache_dir)
-    logger.info("cache_persistence_configured", cache_dir=str(cache_dir))
 
-    model_tag = ModelTag.from_spec(settings.mlx.model_id, model_spec)
+    if settings.backend == "trt":
+        # TRT: numpy-based I/O, no MLX dependency
+        from agent_memory.adapters.outbound.trt_quantization_adapter import TRTQuantizationAdapter
+        from agent_memory.adapters.outbound.trt_safetensors_cache_adapter import (
+            TRTSafetensorsCacheAdapter,
+        )
+
+        quantizer = TRTQuantizationAdapter()
+        cache_adapter = TRTSafetensorsCacheAdapter(
+            cache_dir=cache_dir,
+            kv_bits=settings.trt.disk_kv_bits,
+            kv_group_size=settings.trt.kv_group_size,
+            quantizer=quantizer,
+        )
+    else:
+        # MLX: uses mx.save/mx.load for native MLX tensor I/O
+        cache_adapter = SafetensorsCacheAdapter(
+            cache_dir=cache_dir,
+            kv_bits=settings.mlx.kv_bits or 4,
+            kv_group_size=settings.mlx.kv_group_size,
+        )
+    logger.info("cache_persistence_configured", cache_dir=str(cache_dir), backend=settings.backend)
+
+    model_id = settings.trt.model_id if settings.backend == "trt" else settings.mlx.model_id
+    model_tag = ModelTag.from_spec(model_id, model_spec)
     cache_store = AgentCacheStore(
         cache_dir=cache_dir,
         max_hot_agents=settings.agent.max_agents_in_memory,
@@ -214,6 +306,9 @@ def _initialize_batch_engine(model, tokenizer, block_pool, model_spec, settings)
         Configured BlockPoolBatchEngine instance
     """
     logger = structlog.get_logger(__name__)
+
+    from agent_memory.adapters.outbound.mlx_cache_adapter import MLXCacheAdapter
+    from agent_memory.application.batch_engine import BlockPoolBatchEngine
 
     mlx_adapter = MLXCacheAdapter()
     batch_engine = BlockPoolBatchEngine(
@@ -283,47 +378,236 @@ async def lifespan(app: FastAPI):
     logger.info("server_starting")
     settings = get_settings()
 
+    # Track TRT subprocess for cleanup
+    trt_subprocess = None
+
     try:
-        # Apply fused Q4 attention patch (must happen before model forward pass)
-        from agent_memory.adapters.outbound.mlx_fused_attention import apply_fused_attention_patch
+        if settings.backend == "vllm":
+            # --- vLLM backend path ---
+            from transformers import AutoTokenizer
 
-        apply_fused_attention_patch()
+            from agent_memory.adapters.outbound.vllm_backend_adapter import VLLMBackendAdapter
 
-        # Let MLX keep its default buffer cache — disabling it with
-        # set_cache_limit(0) forces the Metal allocator to handle every
-        # alloc/free, which can lead to OOM under memory pressure.
-        # The shutdown path below handles cleanup on graceful exit.
+            vllm_adapter = VLLMBackendAdapter(
+                base_url=settings.vllm.base_url,
+                model_id=settings.vllm.model_id,
+                timeout_s=settings.vllm.timeout_s,
+            )
+            tokenizer = AutoTokenizer.from_pretrained(settings.vllm.model_id)
+            tokenizer.model_max_length = settings.vllm.max_context_length
+            model_spec = vllm_adapter.extract_model_spec()
+            trt_subprocess = vllm_adapter  # Reuse TRT inference service path
+            model = None
+            logger.info(
+                "vllm_backend_configured",
+                base_url=settings.vllm.base_url,
+                model_id=settings.vllm.model_id,
+            )
 
-        # Load model and extract spec
-        model, tokenizer, model_spec = _load_model_and_extract_spec(settings)
+        elif settings.backend == "llamacpp":
+            # --- llama.cpp backend path ---
+            # Two modes:
+            # 1. Managed mode (server_binary set, default_model set):
+            #    agent-memory starts/stops llama-server, supports model swapping.
+            # 2. External mode (base_url only):
+            #    llama-server runs independently, single model, no swap.
 
-        # Initialize components
+            if settings.llamacpp.default_model and settings.llamacpp.server_binary:
+                # -- Managed mode: agent-memory manages llama-server lifecycle --
+                from agent_memory.adapters.outbound.llamacpp_model_loader import (
+                    LlamaCppModelLoader,
+                )
+                from agent_memory.application.llamacpp_swap_orchestrator import (
+                    LlamaCppSwapOrchestrator,
+                )
+                from agent_memory.application.model_registry import ModelRegistry
+
+                llamacpp_loader = LlamaCppModelLoader(
+                    server_binary=settings.llamacpp.server_binary,
+                    port=int(settings.llamacpp.base_url.rsplit(":", 1)[-1]),
+                    cache_type_k=settings.llamacpp.cache_type_k,
+                    cache_type_v=settings.llamacpp.cache_type_v,
+                    timeout_s=settings.llamacpp.timeout_s,
+                    slot_save_path=settings.llamacpp.slot_save_path,
+                )
+
+                # LlamaCppModelLoader implements ModelLoaderPort — reuse ModelRegistry
+                llamacpp_registry = ModelRegistry(
+                    model_loader=llamacpp_loader,
+                    spec_extractor=_LlamaCppSpecExtractor(),
+                )
+
+                # Load default model (starts llama-server)
+                llamacpp_adapter, tokenizer = llamacpp_registry.load_model(
+                    settings.llamacpp.default_model,
+                )
+                model_spec = llamacpp_registry.get_current_spec()
+
+            else:
+                # -- External mode: llama-server managed externally --
+                from transformers import AutoTokenizer
+
+                from agent_memory.adapters.outbound.llamacpp_backend_adapter import (
+                    LlamaCppBackendAdapter,
+                )
+
+                llamacpp_adapter = LlamaCppBackendAdapter(
+                    base_url=settings.llamacpp.base_url,
+                    model_id=settings.llamacpp.model_id,
+                    timeout_s=settings.llamacpp.timeout_s,
+                    n_slots=settings.llamacpp.n_slots,
+                )
+                tokenizer_id = settings.llamacpp.tokenizer_id or settings.llamacpp.model_id
+                tokenizer = AutoTokenizer.from_pretrained(
+                    tokenizer_id,
+                    trust_remote_code=True,
+                )
+                tokenizer.model_max_length = settings.llamacpp.max_context_length
+                model_spec = llamacpp_adapter.extract_model_spec()
+                llamacpp_loader = None
+                llamacpp_registry = None
+
+            trt_subprocess = llamacpp_adapter
+            model = None
+            logger.info(
+                "llamacpp_backend_configured",
+                base_url=settings.llamacpp.base_url,
+                model_id=(settings.llamacpp.default_model or settings.llamacpp.model_id),
+                managed=bool(settings.llamacpp.default_model),
+            )
+
+        elif settings.backend == "trt":
+            # --- TRT backend path ---
+            trt_subprocess, tokenizer, model_spec = _load_trt_model_and_extract_spec(settings)
+            model = None  # No MLX model
+        else:
+            # --- MLX backend path ---
+            # Apply fused Q4 attention patch for mlx-lm < 0.31 (native Q4 support
+            # was added in 0.31, making these patches unnecessary).
+            try:
+                import mlx_lm
+
+                mlx_lm_version = tuple(int(x) for x in mlx_lm.__version__.split(".")[:2])
+                if mlx_lm_version < (0, 31):
+                    from agent_memory.adapters.outbound.mlx_fused_attention import (
+                        apply_fused_attention_patch,
+                    )
+
+                    apply_fused_attention_patch()
+                    logger.info("applied_q4_patches", mlx_lm_version=mlx_lm.__version__)
+                else:
+                    logger.info(
+                        "skipping_q4_patches",
+                        mlx_lm_version=mlx_lm.__version__,
+                        reason="native Q4 KV cache in mlx-lm >= 0.31",
+                    )
+            except (ImportError, ValueError):
+                logger.warning("mlx_lm_version_check_failed")
+
+            model, tokenizer, model_spec = _load_model_and_extract_spec(settings)
+
+        # Initialize components (backend-agnostic)
         block_pool = _initialize_block_pool(settings, model_spec)
         cache_store, cache_adapter = _initialize_cache_store(settings, model_spec)
-        batch_engine, mlx_adapter = _initialize_batch_engine(
-            model, tokenizer, block_pool, model_spec, settings
-        )
 
-        # Initialize model registry and swap orchestrator for hot-swap support
-        model_loader = MLXModelLoader()
-        spec_extractor = get_extractor()
-        model_registry = ModelRegistry(
-            model_loader=model_loader,
-            spec_extractor=spec_extractor,
-        )
-        model_registry.set_loaded_model(
-            model=model,
-            tokenizer=tokenizer,
-            spec=model_spec,
-            model_id=settings.mlx.model_id,
-        )
+        if settings.backend in ("trt", "vllm", "llamacpp"):
+            from agent_memory.application.trt_inference_service import TRTInferenceService
 
-        model_swap_orchestrator = ModelSwapOrchestrator(
-            model_registry=model_registry,
-            block_pool=block_pool,
-            cache_store=cache_store,
-            cache_adapter=mlx_adapter,
-        )
+            mlx_adapter = None
+            batch_engine = None  # External backends use subprocess/HTTP, not batch engine
+            from agent_memory.adapters.outbound.trt_quantization_adapter import (
+                TRTQuantizationAdapter as TRTQuant,
+            )
+
+            trt_inference = TRTInferenceService(
+                backend=trt_subprocess,
+                tokenizer=tokenizer,
+                cache_adapter=cache_adapter,
+                quantizer=TRTQuant(),
+            )
+        else:
+            batch_engine, mlx_adapter = _initialize_batch_engine(
+                model, tokenizer, block_pool, model_spec, settings
+            )
+
+        if settings.backend == "mlx":
+            # Initialize model registry and swap orchestrator (MLX only)
+            from agent_memory.adapters.outbound.mlx_model_loader import MLXModelLoader
+            from agent_memory.adapters.outbound.mlx_spec_extractor import (
+                get_extractor as get_mlx_extractor,
+            )
+            from agent_memory.application.model_registry import ModelRegistry
+            from agent_memory.application.model_swap_orchestrator import (
+                ModelSwapOrchestrator,
+            )
+
+            model_loader = MLXModelLoader()
+            spec_extractor = get_mlx_extractor()
+            model_registry = ModelRegistry(
+                model_loader=model_loader,
+                spec_extractor=spec_extractor,
+            )
+            model_registry.set_loaded_model(
+                model=model,
+                tokenizer=tokenizer,
+                spec=model_spec,
+                model_id=settings.mlx.model_id,
+            )
+
+            model_swap_orchestrator = ModelSwapOrchestrator(
+                model_registry=model_registry,
+                block_pool=block_pool,
+                cache_store=cache_store,
+                cache_adapter=mlx_adapter,
+            )
+            llamacpp_swap_orchestrator = None
+
+        elif settings.backend == "llamacpp" and locals().get("llamacpp_registry") is not None:
+            # Managed llama.cpp: wire swap orchestrator + slot tracker
+            from agent_memory.application.llamacpp_swap_orchestrator import (
+                LlamaCppSwapOrchestrator,
+            )
+            from agent_memory.application.slot_tracker import SlotTracker
+
+            slot_tracker = SlotTracker(
+                n_slots=settings.llamacpp.n_slots,
+                backend=llamacpp_adapter,  # type: ignore[name-defined]  # Implements SlotPersistencePort
+            )
+            # Wire slot tracker into adapter so generate() tracks usage
+            llamacpp_adapter.slot_tracker = slot_tracker  # type: ignore[name-defined]
+            # Enable traffic capture for parser regression tests
+            if settings.llamacpp.capture_traffic:
+                llamacpp_adapter.enable_capture(settings.llamacpp.capture_traffic)  # type: ignore[name-defined]
+            # Restore slot caches from previous session (if any exist on disk)
+            current_model = llamacpp_registry.get_current_id()  # type: ignore[union-attr]
+            if current_model:
+                restored = slot_tracker.restore_slots(
+                    current_model,
+                    settings.llamacpp.slot_save_path,
+                )
+                if restored:
+                    logger.info("startup_slot_restore", count=restored, model_id=current_model)
+
+            model_registry = llamacpp_registry  # type: ignore[assignment]
+            model_swap_orchestrator = None  # MLX-specific, not used
+            llamacpp_swap_orchestrator = LlamaCppSwapOrchestrator(
+                model_registry=llamacpp_registry,
+                cache_store=cache_store,
+                model_loader=llamacpp_loader,  # type: ignore[name-defined]
+                slot_tracker=slot_tracker,
+                n_slots=settings.llamacpp.n_slots,
+                slot_save_path=settings.llamacpp.slot_save_path,
+            )
+            # Wire swap orchestrator into TRTInferenceService for auto-swap
+            # (can't pass at construction — orchestrator depends on cache_store
+            # which is created between TRTInferenceService and orchestrator)
+            if settings.llamacpp.auto_swap:
+                trt_inference._swap_orchestrator = llamacpp_swap_orchestrator  # type: ignore[union-attr]
+                trt_inference._model_registry = llamacpp_registry  # type: ignore[union-attr]
+        else:
+            model_registry = None
+            model_swap_orchestrator = None
+            llamacpp_swap_orchestrator = None
 
         # Store in app state
         app.state.agent_memory = AppState()
@@ -334,6 +618,12 @@ async def lifespan(app: FastAPI):
         app.state.agent_memory.cache_adapter = cache_adapter
         app.state.agent_memory.model_registry = model_registry
         app.state.agent_memory.model_swap_orchestrator = model_swap_orchestrator
+        app.state.agent_memory.llamacpp_swap_orchestrator = llamacpp_swap_orchestrator
+        app.state.agent_memory.trt_subprocess = trt_subprocess
+        app.state.agent_memory.trt_inference = (
+            trt_inference if settings.backend in ("trt", "vllm", "llamacpp") else None
+        )
+        app.state.agent_memory.tokenizer = tokenizer
         app.state.shutting_down = False
 
         # Shared prefix cache (always enabled)
@@ -341,10 +631,25 @@ async def lifespan(app: FastAPI):
         app.state.agent_memory.prefix_cache = prefix_cache
         logger.info("prefix_cache_initialized")
 
+        # Server-side tool executor (WebSearch via SearXNG, WebFetch via Jina Reader)
+        if settings.server.searxng_url or settings.server.jina_reader_url:
+            from agent_memory.adapters.outbound.server_tool_adapter import ServerToolAdapter
+
+            app.state.agent_memory.server_tool_executor = ServerToolAdapter(
+                searxng_url=settings.server.searxng_url,
+                jina_reader_url=settings.server.jina_reader_url,
+            )
+            logger.info(
+                "server_tool_executor_initialized",
+                searxng=bool(settings.server.searxng_url),
+                jina=bool(settings.server.jina_reader_url),
+            )
+
         # Start ConcurrentScheduler — serializes all engine access through
         # a single worker thread, preventing concurrent Metal GPU crashes.
+        # (MLX only — TRT subprocess handles its own serialization)
         scheduler = None
-        if settings.mlx.scheduler_enabled:
+        if settings.backend == "mlx" and settings.mlx.scheduler_enabled:
             try:
                 from agent_memory.adapters.outbound.mlx_prefill_adapter import MLXPrefillAdapter
 
@@ -355,6 +660,8 @@ async def lifespan(app: FastAPI):
                     min_chunk=settings.mlx.chunked_prefill_min_chunk,
                     max_chunk=settings.mlx.chunked_prefill_max_chunk,
                 )
+                from agent_memory.application.scheduler import ConcurrentScheduler
+
                 scheduler = ConcurrentScheduler(
                     engine=batch_engine,
                     prefill_adapter=prefill_adapter,
@@ -380,7 +687,11 @@ async def lifespan(app: FastAPI):
             scheduler=scheduler,
             cache_store=cache_store,
             engine=batch_engine,
-            reasoning_extra_tokens=settings.mlx.reasoning_extra_tokens,
+            reasoning_extra_tokens=(
+                settings.trt.reasoning_extra_tokens
+                if settings.backend == "trt"
+                else settings.mlx.reasoning_extra_tokens
+            ),
             chat_template=chat_template_adapter,
         )
         app.state.coordination_service = coordination_service
@@ -389,16 +700,19 @@ async def lifespan(app: FastAPI):
             scheduler_enabled=(scheduler is not None),
         )
 
-        # Validate Q4 pipeline patches applied correctly
-        from agent_memory.adapters.outbound.mlx_quantized_extensions import validate_q4_pipeline
-
-        if not validate_q4_pipeline():
-            logger.error(
-                "q4_validation_failed",
-                message="Q4 cache patches may not be applied correctly. "
-                "KV caches may fall back to FP16, causing higher memory usage. "
-                "Check mlx-lm version compatibility.",
+        # Validate Q4 pipeline patches (MLX < 0.31 only)
+        if settings.backend == "mlx" and mlx_lm_version < (0, 31):  # type: ignore[possibly-undefined]
+            from agent_memory.adapters.outbound.mlx_quantized_extensions import (
+                validate_q4_pipeline,
             )
+
+            if not validate_q4_pipeline():
+                logger.error(
+                    "q4_validation_failed",
+                    message="Q4 cache patches may not be applied correctly. "
+                    "KV caches may fall back to FP16, causing higher memory usage. "
+                    "Check mlx-lm version compatibility.",
+                )
 
         logger.info("server_ready")
 
@@ -414,47 +728,68 @@ async def lifespan(app: FastAPI):
 
         await _drain_and_persist(batch_engine, cache_store)
 
-        # Explicitly release model and GPU memory to prevent wired memory
-        # accumulation across server restarts.  Without this, killed processes
-        # can leave Metal allocations that the OS is slow to reclaim.
-        logger.info("releasing_gpu_memory")
-        try:
-            import gc
+        # Release backend resources
+        if settings.backend == "trt" and trt_subprocess is not None:
+            logger.info("stopping_trt_subprocess")
+            trt_subprocess.stop()
+            logger.info("trt_subprocess_stopped")
+        elif settings.backend == "llamacpp" and llamacpp_swap_orchestrator is not None:
+            # Managed mode: save slot caches, then stop llama-server
+            logger.info("saving_slot_caches_before_shutdown")
+            try:
+                model_id = llamacpp_registry.get_current_id()  # type: ignore[union-attr]
+                if model_id and locals().get("slot_tracker"):
+                    saved = slot_tracker.save_slots(model_id)  # type: ignore[union-attr]
+                    logger.info("slot_caches_saved", count=saved, model_id=model_id)
+                    # Enforce disk budget after save
+                    if settings.llamacpp.max_slot_disk_mb > 0:
+                        from agent_memory.application.slot_tracker import SlotTracker as ST
 
-            import mlx.core as mx
+                        ST.enforce_disk_budget(
+                            settings.llamacpp.slot_save_path,
+                            settings.llamacpp.max_slot_disk_mb,
+                            current_model_id=model_id,
+                        )
+            except Exception as e:
+                logger.warning("slot_cache_save_error", error=str(e))
 
-            # 1. Shut down batch engine (clears internal model/tokenizer refs)
-            if batch_engine is not None:
-                batch_engine.shutdown()
+            logger.info("stopping_llama_server")
+            try:
+                llamacpp_loader.clear_cache()  # type: ignore[union-attr]
+                logger.info("llama_server_stopped")
+            except Exception as e:
+                logger.warning("llama_server_stop_error", error=str(e))
+        elif settings.backend == "mlx":
+            # Explicitly release model and GPU memory to prevent wired memory
+            # accumulation across server restarts.
+            logger.info("releasing_gpu_memory")
+            try:
+                import gc
 
-            # 2. Unload model from registry (dels model, tokenizer, gc.collects)
-            if model_registry is not None:
-                model_registry.unload_model()
+                import mlx.core as mx
 
-            # 3. Clear block pool tensors
-            if block_pool is not None:
-                block_pool.force_clear_all_allocations()
+                if batch_engine is not None:
+                    batch_engine.shutdown()
+                if model_registry is not None:
+                    model_registry.unload_model()
+                if block_pool is not None:
+                    block_pool.force_clear_all_allocations()
 
-            # 4. Clear all app.state references
-            if hasattr(app.state, "agent_memory"):
-                for attr in list(vars(app.state.agent_memory).keys()):
-                    setattr(app.state.agent_memory, attr, None)
+                gc.collect()
+                gc.collect()
+                mx.clear_cache()
+                logger.info(
+                    "gpu_memory_released",
+                    active_mb=round(mx.get_active_memory() / 1024**2),
+                    cache_mb=round(mx.get_cache_memory() / 1024**2),
+                )
+            except Exception as e:
+                logger.warning("gpu_memory_release_error", error=str(e))
 
-            # 5. Delete local variables holding references
-            del model, tokenizer, batch_engine, block_pool, cache_store
-            del model_registry, model_swap_orchestrator, coordination_service
-
-            # 6. Force garbage collection + clear Metal cache
-            gc.collect()
-            gc.collect()  # Second pass for ref cycles
-            mx.clear_cache()
-            logger.info(
-                "gpu_memory_released",
-                active_mb=round(mx.get_active_memory() / 1024**2),
-                cache_mb=round(mx.get_cache_memory() / 1024**2),
-            )
-        except Exception as e:
-            logger.warning("gpu_memory_release_error", error=str(e))
+        # Clear app.state references
+        if hasattr(app.state, "agent_memory"):
+            for attr in list(vars(app.state.agent_memory).keys()):
+                setattr(app.state.agent_memory, attr, None)
 
         logger.info("server_shutdown_complete")
     except Exception as e:
@@ -571,10 +906,73 @@ def _register_health_endpoints(app: FastAPI):
     @app.get("/health/startup")
     async def health_startup(response: Response):
         """Startup probe - initialization complete."""
-        if not hasattr(app.state, "agent_memory") or not app.state.agent_memory.batch_engine:
+        if not hasattr(app.state, "agent_memory"):
+            response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+            return {"status": "starting", "reason": "initializing"}
+        state = app.state.agent_memory
+        # Either batch_engine (MLX) or trt_subprocess (TRT) must be ready
+        if not state.batch_engine and not state.trt_subprocess:
             response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
             return {"status": "starting", "reason": "model_loading"}
         return {"status": "started"}
+
+
+def _register_search_proxy(app: FastAPI, searxng_url: str):
+    """Register /search proxy endpoint that forwards to SearXNG.
+
+    Allows Claude Code (and other clients) to use web search via the same
+    port as agent-memory (8000) without needing direct access to SearXNG (8080).
+    """
+    import json as _json
+    from urllib.error import URLError as _URLError
+    from urllib.parse import quote_plus as _qp
+    from urllib.request import urlopen as _urlopen
+
+    @app.get("/search")
+    async def search_proxy(q: str, format: str = "json", engines: str = "", num: int = 10):
+        """Proxy web search to SearXNG."""
+        params = f"q={_qp(q)}&format=json&pageno=1"
+        if engines:
+            params += f"&engines={_qp(engines)}"
+        url = f"{searxng_url}/search?{params}"
+        try:
+            with _urlopen(url, timeout=30) as resp:  # noqa: S310
+                data = _json.loads(resp.read())
+            results = data.get("results", [])[:num]
+            return {"query": q, "results": results, "n": len(results)}
+        except _URLError as e:
+            return JSONResponse(status_code=502, content={"error": f"SearXNG unavailable: {e}"})
+
+
+def _register_fetch_proxy(app: FastAPI, jina_reader_url: str):
+    """Register /fetch proxy endpoint that converts URLs to clean markdown via Jina Reader.
+
+    Allows Claude Code to fetch web pages as markdown through agent-memory,
+    avoiding raw HTML (token-heavy) and private-IP restrictions on WebFetch.
+    """
+    from urllib.error import URLError as _URLError
+    from urllib.request import Request as _Req
+    from urllib.request import urlopen as _urlopen
+
+    @app.get("/fetch")
+    async def fetch_proxy(url: str, timeout: int = 15):
+        """Fetch a URL via Jina Reader, returning clean markdown."""
+        reader_url = f"{jina_reader_url}/{url}"
+        try:
+            req = _Req(reader_url)  # noqa: S310
+            with _urlopen(req, timeout=timeout) as resp:  # noqa: S310
+                content = resp.read().decode("utf-8", errors="replace")
+            return Response(content=content, media_type="text/plain; charset=utf-8")
+        except _URLError as e:
+            return JSONResponse(
+                status_code=502,
+                content={"error": f"Jina Reader unavailable: {e}"},
+            )
+        except Exception as e:
+            return JSONResponse(
+                status_code=500,
+                content={"error": f"Fetch failed: {e}"},
+            )
 
 
 def _register_metrics_endpoint(app: FastAPI):
@@ -599,19 +997,28 @@ def _register_debug_endpoints(app: FastAPI):
 
     @app.get("/debug/memory")
     async def debug_memory():
-        """MLX memory statistics for benchmarking."""
-        import mlx.core as mx
-
+        """Memory statistics for benchmarking (MLX or generic)."""
         semantic = getattr(app.state, "agent_memory", None)
         pool = semantic.block_pool if semantic else None
 
-        return {
-            "active_memory_mb": round(mx.get_active_memory() / (1024**2), 1),
-            "peak_memory_mb": round(mx.get_peak_memory() / (1024**2), 1),
-            "cache_memory_mb": round(mx.get_cache_memory() / (1024**2), 1),
+        result: dict[str, Any] = {
             "pool_used_blocks": (pool.total_blocks - pool.available_blocks()) if pool else 0,
             "pool_total_blocks": pool.total_blocks if pool else 0,
         }
+
+        try:
+            import mlx.core as mx
+
+            result["active_memory_mb"] = round(mx.get_active_memory() / (1024**2), 1)
+            result["peak_memory_mb"] = round(mx.get_peak_memory() / (1024**2), 1)
+            result["cache_memory_mb"] = round(mx.get_cache_memory() / (1024**2), 1)
+        except ImportError:
+            result["backend"] = "trt"
+            if semantic and semantic.cache_store:
+                result["hot_memory_bytes"] = semantic.cache_store.hot_memory_bytes
+                result["disk_usage_bytes"] = semantic.cache_store.disk_usage_bytes
+
+        return result
 
 
 def _is_openai_request(request: Request) -> bool:
@@ -781,36 +1188,73 @@ def _register_routes(app: FastAPI):
 
     @app.get("/v1/models", status_code=status.HTTP_200_OK)
     async def list_models():
-        """OpenAI-compatible models endpoint — returns loaded model info."""
+        """OpenAI-compatible models endpoint — returns available models.
+
+        For llama.cpp managed mode, returns all models from config/models/*.toml.
+        The currently loaded model is marked with 'active: true'.
+        """
         semantic = getattr(app.state, "agent_memory", None)
         engine = semantic.batch_engine if semantic else None
         registry = semantic.model_registry if semantic else None
         settings = get_settings()
 
-        # Use registry's current model (tracks swaps) or empty if offloaded
-        model_id = registry.get_current_id() if registry else None
+        models = []
 
-        if not model_id:
-            return {"object": "list", "data": []}
+        if settings.backend == "llamacpp" and settings.llamacpp.default_model:
+            # Managed mode: list all available models from TOML configs
+            from pathlib import Path
 
-        model_entry = {
-            "id": model_id,
-            "object": "model",
-            "owned_by": "local",
-        }
+            config_dir = Path(__file__).resolve().parents[3] / "config" / "models"
+            current_id = registry.get_current_id() if registry else None
 
-        if engine:
-            spec = engine._spec
-            model_entry["spec"] = {
-                "n_layers": spec.n_layers,
-                "n_kv_heads": spec.n_kv_heads,
-                "head_dim": spec.head_dim,
-                "block_tokens": spec.block_tokens,
-                "kv_bits": spec.kv_bits,
-                "max_context_length": settings.mlx.max_context_length,
-            }
+            if config_dir.is_dir():
+                try:
+                    import tomllib
+                except ImportError:
+                    import tomli as tomllib  # type: ignore[no-redef]
 
-        return {"object": "list", "data": [model_entry]}
+                for toml_file in sorted(config_dir.glob("*.toml")):
+                    try:
+                        with toml_file.open("rb") as f:
+                            profile = tomllib.load(f)
+                        if "llamacpp" not in profile:
+                            continue
+                        mid = profile.get("model", {}).get("model_id", toml_file.stem)
+                        entry = {
+                            "id": mid,
+                            "object": "model",
+                            "owned_by": "local",
+                            "active": mid == current_id,
+                        }
+                        models.append(entry)
+                    except Exception:
+                        pass
+        else:
+            # Single model mode (MLX, TRT, vLLM, external llamacpp)
+            model_id = registry.get_current_id() if registry else None
+            if model_id:
+                model_entry = {
+                    "id": model_id,
+                    "object": "model",
+                    "owned_by": "local",
+                }
+                if engine:
+                    spec = engine._spec
+                    model_entry["spec"] = {
+                        "n_layers": spec.n_layers,
+                        "n_kv_heads": spec.n_kv_heads,
+                        "head_dim": spec.head_dim,
+                        "block_tokens": spec.block_tokens,
+                        "kv_bits": spec.kv_bits,
+                        "max_context_length": (
+                            settings.trt.max_context_length
+                            if settings.backend == "trt"
+                            else settings.mlx.max_context_length
+                        ),
+                    }
+                models.append(model_entry)
+
+        return {"object": "list", "data": models}
 
     app.include_router(anthropic_router)
     logger.info("routes_registered", router="anthropic", path="/v1/messages")
@@ -860,6 +1304,12 @@ def create_app() -> FastAPI:
     _register_debug_endpoints(app)
     _register_error_handlers(app)
     _register_routes(app)
+    if settings.server.searxng_url:
+        _register_search_proxy(app, settings.server.searxng_url)
+        logger.info("search_proxy_registered", searxng_url=settings.server.searxng_url)
+    if settings.server.jina_reader_url:
+        _register_fetch_proxy(app, settings.server.jina_reader_url)
+        logger.info("fetch_proxy_registered", jina_reader_url=settings.server.jina_reader_url)
 
     # Set up dependency overrides for admin API
     def _get_orchestrator():

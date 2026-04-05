@@ -18,6 +18,57 @@ logger = logging.getLogger(__name__)
 STEP_TIMEOUT_SECONDS = 300
 
 
+def extract_session_id(request: Request) -> str | None:
+    """Extract session ID from request headers (common across all APIs).
+
+    Checks multiple header names for compatibility with different clients:
+    - X-Session-ID: Generic session header (NemoClaw, custom clients)
+    - X-Claude-Code-Session-Id: Claude Code CLI session header
+
+    Args:
+        request: FastAPI request object
+
+    Returns:
+        Session ID string or None if not present.
+    """
+    return request.headers.get("X-Session-ID") or request.headers.get("X-Claude-Code-Session-Id")
+
+
+def extract_system_text(system: Any) -> str:
+    """Extract plain text from system prompt (string or list of SystemBlock).
+
+    Claude Code sends system as list[SystemBlock] with cache_control.
+    The regular Anthropic API sends it as a plain string. This handles both.
+
+    Args:
+        system: str or list of SystemBlock objects (with .text attribute)
+
+    Returns:
+        Concatenated system prompt text.
+    """
+    if not system:
+        return ""
+    if isinstance(system, str):
+        return system
+    # list[SystemBlock] — extract .text from each block
+    if isinstance(system, list):
+        parts = []
+        for block in system:
+            if hasattr(block, "text"):
+                parts.append(block.text)
+            elif isinstance(block, dict) and "text" in block:
+                parts.append(block["text"])
+            elif isinstance(block, str):
+                parts.append(block)
+        return "\n".join(parts)
+    return str(system)
+
+
+# Re-exported from application layer (canonical location).
+# Existing callers in this package can keep importing from here.
+from agent_memory.application.text_cleaning import strip_thinking_tags  # noqa: F401
+
+
 def get_semantic_state(request: Request) -> Any:
     """Safely get semantic state from request, raising clear error if not initialized.
 

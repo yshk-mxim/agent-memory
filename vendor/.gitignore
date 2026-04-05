@@ -1,0 +1,10 @@
+# Build artifacts
+TensorRT-Edge-LLM/
+build/
+
+# Keep source files tracked
+!llm_inference_interactive.cpp
+!CMakeLists.txt
+!build.sh
+!.gitignore
+!README.md
