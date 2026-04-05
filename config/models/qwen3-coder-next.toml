@@ -18,7 +18,7 @@ kv_format = "fp"
 temperature = 0.7
 top_p = 0.95
 top_k = 40
-extended_thinking = false
+extended_thinking = true
 supports_thinking = true
 
 [optimal]

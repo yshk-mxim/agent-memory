@@ -163,8 +163,10 @@ class LlamaCppBackendAdapter:
         if openai_tools:
             body["tools"] = openai_tools
 
-        # Gemma 4 thinking suppression: handled by --reasoning off server flag
-        # (chat_template_kwargs {"enable_thinking": false} is unreliable).
+        # Gemma 4 per-request thinking control via chat_template_kwargs.
+        # Server runs with --reasoning auto, template checks enable_thinking.
+        if self._is_gemma:
+            body["chat_template_kwargs"] = {"enable_thinking": not disable_thinking}
 
         # Let llama-server auto-assign the optimal slot. With --cache-prompt,
         # the server picks a slot with the longest matching prompt prefix,
@@ -190,12 +192,14 @@ class LlamaCppBackendAdapter:
 
         message = choices[0].get("message", {})
         text = message.get("content") or ""
+        # --reasoning-format deepseek puts thinking in reasoning_content
+        reasoning_content = message.get("reasoning_content") or None
 
         # Capture raw traffic for regression test fixtures
         if self._capture_path:
             self._write_capture(messages, text, message.get("tool_calls"), result.get("usage"))
 
-        # Strip thinking/channel tags (canonical implementation)
+        # Strip thinking/channel tags from content (reasoning_content is already clean)
         text = strip_thinking_tags(text)
 
         usage = result.get("usage", {})
@@ -241,6 +245,7 @@ class LlamaCppBackendAdapter:
             tokens=list(range(completion_tokens)),
             cache=[],  # llama.cpp manages its own KV cache
             tool_calls=tool_calls,
+            reasoning_content=reasoning_content,
         )
 
     # ── Traffic capture for regression tests ─────────────────────
@@ -318,8 +323,9 @@ class LlamaCppBackendAdapter:
 
         if stop_sequences:
             body["stop"] = stop_sequences
-        # Gemma 4 thinking: handled by --reasoning off server flag
-        # Slot assignment: let llama-server auto-pick (see generate() comment)
+        # Gemma 4 per-request thinking control
+        if self._is_gemma:
+            body["chat_template_kwargs"] = {"enable_thinking": not self._disable_thinking}
 
         url = f"{self._base_url}/v1/chat/completions"
         data = json.dumps(body).encode()

@@ -611,6 +611,32 @@ async def _stream_trt_response(
 
     block_idx = 0
 
+    # Thinking block — emit reasoning_content as Anthropic thinking block
+    if result.reasoning_content:
+        yield {
+            "event": "content_block_start",
+            "data": json.dumps(
+                ContentBlockStartEvent(
+                    index=block_idx,
+                    content_block={"type": "thinking", "thinking": ""},
+                ).model_dump()
+            ),
+        }
+        yield {
+            "event": "content_block_delta",
+            "data": json.dumps(
+                ContentBlockDeltaEvent(
+                    index=block_idx,
+                    delta={"type": "thinking_delta", "thinking": result.reasoning_content},
+                ).model_dump()
+            ),
+        }
+        yield {
+            "event": "content_block_stop",
+            "data": json.dumps(ContentBlockStopEvent(index=block_idx).model_dump()),
+        }
+        block_idx += 1
+
     # Text content block — stream in word-sized chunks for realistic SSE
     if remaining_text:
         yield {

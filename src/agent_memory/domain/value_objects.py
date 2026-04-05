@@ -32,6 +32,7 @@ class GenerationResult:
     tokens: list[int]
     cache: list[tuple[Any, Any]]
     tool_calls: list[dict] | None = None
+    reasoning_content: str | None = None
 
 
 @dataclass(frozen=True)
