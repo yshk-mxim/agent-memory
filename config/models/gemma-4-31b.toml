@@ -37,5 +37,5 @@ tokenizer_id = "google/gemma-4-31B-it"
 ctx_size = 131072     # ~17.4 GiB model + ~100 GiB for KV
 n_slots = 2           # 2 parallel requests (dense model is slower)
 n_gpu_layers = 99
-extra_args = ["--reasoning", "auto", "--reasoning-format", "deepseek", "-fa", "on"]  # Per-request thinking + flash attention
+extra_args = ["--reasoning", "auto", "--reasoning-format", "deepseek", "-fa", "on", "--spec-type", "ngram-map-k4v", "--draft-max", "16"]  # Per-request thinking + flash attention + n-gram speculative decoding
 chat_template_file = "config/chat_templates/gemma4-interleaved.jinja"  # Interleaved template: preserves reasoning between tool calls, better for agentic loops

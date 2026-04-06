@@ -17,6 +17,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **N-gram speculative decoding** (`--spec-type ngram-map-k4v --draft-max 16`) for
+  Gemma 4 26B-A4B and 31B configs. Zero VRAM cost — matches output n-grams against
+  context for batched verification. Measured on 89 agent turns: ~34% match rate on
+  code (est. 1.7-2.7x speedup), ~9% on text (est. 1.2x). Overall ~1.3-1.4x for
+  mixed workloads.
+
 - **TensorRT Edge-LLM backend** for NVIDIA Jetson AGX Thor (aarch64, sm_110).
   Set `SEMANTIC_BACKEND=trt` to activate. Manages `llm_inference` binary via
   subprocess with NDJSON protocol and safetensors KV cache transfer over `/dev/shm`.
