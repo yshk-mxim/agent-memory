@@ -374,5 +374,17 @@ Tune for Thor: `-b 4096 -ub 1024` (larger batches, more GPU utilization).
   agent-memory strips these automatically. Use `MAX_THINKING_TOKENS=0`.
 - **Tool calling:** Full Anthropic ↔ OpenAI tool format translation pipeline
   in agent-memory's anthropic adapter.
-- **Gemma 4 thinking:** Gemma 4 models support thinking via `chat_template_kwargs`.
-  agent-memory suppresses thinking by default for coding workloads.
+- **Gemma 4 thinking control:** The server runs with `--reasoning auto`, which
+  enables thinking by default. To suppress thinking per-request, callers **must**
+  pass `chat_template_kwargs: {"enable_thinking": false}` in the API payload.
+  Without this flag, the model will generate reasoning tokens and consume the
+  token budget on thinking. agent-memory's adapter handles this automatically
+  via the `disable_thinking` parameter, but direct llama-server API callers
+  must include it explicitly. Example:
+  ```json
+  {
+    "messages": [...],
+    "max_tokens": 256,
+    "chat_template_kwargs": {"enable_thinking": false}
+  }
+  ```

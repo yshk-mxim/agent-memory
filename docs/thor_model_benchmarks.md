@@ -105,6 +105,20 @@ extra_args = [
 E2B Q3 beats E4B Q2 despite slightly lower acceptance rate because the
 smaller draft model generates candidates faster, offsetting the difference.
 
+### Per-Request Thinking Control
+
+The server runs `--reasoning auto`, which enables thinking by default.
+To disable thinking per-request, callers **must** pass:
+
+```json
+{"chat_template_kwargs": {"enable_thinking": false}}
+```
+
+Without this flag, the model consumes the token budget on reasoning tokens.
+`reasoning_effort: "none"` does NOT work — only `chat_template_kwargs` controls
+the Jinja template's thinking behavior. agent-memory's adapter handles this
+automatically via the `disable_thinking` parameter.
+
 ### Why 26B-A4B Doesn't Use Spec Decode
 
 At 51 tok/s, the MoE model is already too fast — the E2B draft at ~2B
