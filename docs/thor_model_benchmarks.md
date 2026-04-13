@@ -138,6 +138,53 @@ showed 0.80x (slower) with spec decode on 26B-A4B.
 
 ~54 GB headroom. Agent caches evict to disk under pressure (`evict_to_disk = true`).
 
+### Projected Performance: Apple M5 Max (128 GB)
+
+Estimates based on memory bandwidth scaling from Thor benchmarks.
+Generation speed for dense models is memory-bandwidth-bound:
+`tok/s ≈ memory_bandwidth / bytes_per_token`.
+
+| Spec | Thor (Jetson AGX) | M5 Max |
+|------|------------------:|-------:|
+| Memory bandwidth | 228 GB/s | ~546 GB/s |
+| Bandwidth ratio | 1.0x | **2.4x** |
+
+**Gemma 4 31B Q4_K_M + E2B Q3 spec decode:**
+
+| Config | Thor (measured) | M5 Max (projected) |
+|--------|----------------:|--------------------:|
+| Baseline (no spec) | 8.7 t/s | ~21 t/s |
+| E2B Q3, think ON (1.76x) | 15.4 t/s | **~37 t/s** |
+| E2B Q3, think OFF (2.10x) | 18.7 t/s | **~44 t/s** |
+| Prefill pp512 | 361 t/s | ~860 t/s |
+
+**Gemma 4 26B-A4B Q4_K_M (no spec decode):**
+
+| Config | Thor (measured) | M5 Max (projected) |
+|--------|----------------:|--------------------:|
+| Single slot | 51 t/s | ~122 t/s |
+| 4 slots concurrent | 36-40 t/s | ~86-96 t/s |
+| Prefill pp512 | 1,681 t/s | ~4,000 t/s |
+
+At ~37-44 t/s, the 31B dense on M5 Max would approach the 26B-A4B MoE
+speed on Thor (51 t/s) while delivering the full 31B reasoning quality
+(76.8% vs 63.8% SWE-bench Verified).
+
+**Multi-core GPU advantage:** The M5 Max has multiple GPU core clusters
+(40+ cores) vs Thor's single monolithic GPU. For speculative decoding,
+this means the draft model can run on a dedicated subset of GPU cores
+while the main model verifies on the rest — true parallel execution
+rather than time-sharing. This could push the spec decode speedup
+*above* the 1.76-2.10x measured on Thor, potentially reaching 2.0-2.5x,
+which would put the 31B at **42-52 t/s** — matching or exceeding the
+26B-A4B MoE on Thor.
+
+**Caveats:** Spec decode acceptance rate may differ on MLX vs llama.cpp.
+MLX's Metal shader scheduling may or may not exploit this parallelism
+automatically. MoE models benefit disproportionately from higher
+bandwidth (expert routing is memory-bound). Actual numbers require
+benchmarking.
+
 ### Slot Management
 
 Different models have different slot counts (31B: 1 slot, 26B-A4B: 4 slots).
