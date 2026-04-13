@@ -10,13 +10,16 @@
 #   Prefill pp512: 361 t/s
 #
 # Speculative decoding uses Gemma 4 E2B (2B dense, Q3_K_XL, 2.8 GB) as
-# draft model. The draft generates 16 candidate tokens per cycle; the
-# main 31B model verifies in a single forward pass. Net effect: ~1.8x
-# faster generation with identical output distribution.
+# draft model. The draft generates 4 candidate tokens per cycle; the
+# main 31B model verifies in a single forward pass.
 #
-# E2B Q3 beats E4B Q2 (1.52x) because the smaller draft model generates
-# candidates faster, offsetting its lower acceptance rate (~57% vs ~58%).
-# The 26B-A4B MoE model is too fast (36.5 t/s) to benefit from spec decode.
+# --draft 4 (not 16): Real-world agent workloads with tool schemas show
+# ~40% acceptance rate (vs 57% on clean benchmarks). At p=0.40, expected
+# accepted tokens ≈ 1.65 regardless of draft window size (geometric series
+# converges fast when p < 0.5). --draft 4 gets the same benefit with 4x
+# less draft overhead → net ~1.3-1.4x speedup vs baseline.
+#
+# The 26B-A4B MoE model is too fast (51 t/s) to benefit from spec decode.
 #
 # Best for: complex architectural reasoning, security audits,
 # contract review, multi-file refactors — tasks where maximum
@@ -54,6 +57,6 @@ extra_args = [
     "--reasoning", "auto", "--reasoning-format", "deepseek", "-fa", "on",
     "--model-draft", "~/models/gemma4-e2b/gemma-4-E2B-it-UD-Q3_K_XL.gguf",
     "--gpu-layers-draft", "99",
-    "--draft", "16",
+    "--draft", "4",
 ]
 chat_template_file = "config/chat_templates/gemma4-26b-merged.jinja"  # Interleaved template: preserves reasoning between tool calls, better for agentic loops

@@ -83,15 +83,16 @@ extra_args = [
     "--reasoning", "auto", "--reasoning-format", "deepseek", "-fa", "on",
     "--model-draft", "~/models/gemma4-e2b/gemma-4-E2B-it-UD-Q3_K_XL.gguf",
     "--gpu-layers-draft", "99",
-    "--draft", "16",
+    "--draft", "4",
 ]
 ```
 
 - **Draft model**: `unsloth/gemma-4-E2B-it-GGUF:UD-Q3_K_XL` (2.8 GB)
 - **n_slots**: 1 (draft model occupies GPU alongside main)
 - **ctx_size**: 131072 (draft KV cache adds ~2 GB at full context)
+- **`--draft 4`** (reduced from 16 — see rationale below)
 
-### Benchmark Results
+### Benchmark Results (--draft 16, clean prompts)
 
 | Config | tok/s | Acceptance | Speedup |
 |--------|------:|:----------:|--------:|
@@ -104,6 +105,27 @@ extra_args = [
 
 E2B Q3 beats E4B Q2 despite slightly lower acceptance rate because the
 smaller draft model generates candidates faster, offsetting the difference.
+
+### Production Reality: --draft 4 (2026-04-13)
+
+Real-world agent workloads (tool schemas, structured JSON output) show
+significantly lower draft acceptance rates than clean benchmark prompts:
+
+| Request type | Acceptance | tok/s (--draft 16) |
+|-------------|:----------:|-------------------:|
+| Short tool calls (33-39 tok) | ~19% | 4.1-5.3 |
+| Medium responses (100-148 tok) | ~41% | 4.6-6.8 |
+| Long natural language (676-928 tok) | ~70% | 8.1-13.7 |
+| **Weighted average** | **~42%** | **~6-8** |
+
+At `p ≈ 0.40`, the expected accepted tokens per cycle converges to ~1.65
+regardless of draft window size (geometric series `(1-p^(n+1))/(1-p)`
+converges fast when `p < 0.5`). So `--draft 16` and `--draft 4` accept
+the same number of tokens, but `--draft 4` has 4x less draft overhead.
+
+**Why `--draft 4`**: Each draft token costs ~1/15th of a main forward
+pass. `--draft 16` = 1.07 main-equivalent passes of draft overhead;
+`--draft 4` = 0.27. Expected net speedup: ~1.3-1.4x over baseline.
 
 ### Per-Request Thinking Control
 

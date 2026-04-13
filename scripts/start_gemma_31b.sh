@@ -29,7 +29,7 @@ nohup ~/llama.cpp-build/build/bin/llama-server \
     -fa on \
     --model-draft "$DRAFT" \
     --gpu-layers-draft 99 \
-    --draft 16 \
+    --draft 4 \
     --jinja --chat-template-file "$TEMPLATE" \
     > ~/llamacpp-serve.log 2>&1 &
 
