@@ -480,7 +480,9 @@ async def _stream_trt_response(
 
     # thinking.type == "disabled" → suppress thinking
     thinking = request_body.thinking
-    disable_thinking = thinking is None or thinking.type == "disabled"
+    disable_thinking = thinking is None or thinking.type == "disabled" or (
+        thinking.budget_tokens is not None and thinking.budget_tokens < 1024
+    )
 
     # Use pre-resolved sampling params from caller (DRY)
     if sampling_params is not None:
@@ -1209,7 +1211,9 @@ async def create_message(request_body: MessagesRequest, request: Request):  # no
 
             # thinking.type == "disabled" → suppress thinking; "enabled"/"adaptive" → allow it
             thinking = request_body.thinking
-            disable_thinking = thinking is None or thinking.type == "disabled"
+            disable_thinking = thinking is None or thinking.type == "disabled" or (
+        thinking.budget_tokens is not None and thinking.budget_tokens < 1024
+    )
 
             # Resolve sampling params from model profile (not Anthropic API defaults)
             temperature, top_p, top_k = _resolve_sampling_params(request_body)
