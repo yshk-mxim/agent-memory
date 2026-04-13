@@ -46,14 +46,12 @@ class LlamaCppSwapOrchestrator:
         cache_store: AgentCacheStore,
         model_loader: Any,  # LlamaCppModelLoader
         slot_tracker: SlotTracker | None = None,
-        n_slots: int = 4,
         slot_save_path: str = "~/.agent_memory/llamacpp_slots",
     ) -> None:
         self._registry = model_registry
         self._cache_store = cache_store
-        self._loader = model_loader  # For slot save/restore
+        self._loader = model_loader  # For slot save/restore + current_n_slots
         self._slot_tracker = slot_tracker
-        self._n_slots = n_slots
         self._slot_save_path = slot_save_path
 
     def swap_model_sync(
@@ -110,13 +108,15 @@ class LlamaCppSwapOrchestrator:
 
         try:
             # Step 1: Save slot KV caches (LRU-LFU ranked via SlotTracker)
+            # Use loader's current_n_slots — reflects the OLD model's TOML config
+            old_n_slots = self._loader.current_n_slots
             if self._loader.is_running and old_model_id:
-                logger.info("Step 1/6: Saving slot caches...")
+                logger.info("Step 1/6: Saving slot caches (%d slots)...", old_n_slots)
                 if self._slot_tracker is not None:
                     saved = self._slot_tracker.save_slots(old_model_id)
                     logger.info("saved %d ranked slots for %s", saved, old_model_id)
                 else:
-                    self._loader.save_all_slots(self._n_slots, old_model_id)
+                    self._loader.save_all_slots(old_n_slots, old_model_id)
 
             # Step 2: Evict agent-memory caches to disk
             logger.info("Step 2/6: Evicting agent caches to disk...")
@@ -133,17 +133,25 @@ class LlamaCppSwapOrchestrator:
             adapter, tokenizer = self._registry.load_model(new_model_id)
             new_spec = self._registry.get_current_spec()
 
-            # Step 4.5: Restore slot caches for new model (if saved from previous swap)
-            logger.info("Step 5/6: Restoring slot caches for %s...", new_model_id)
+            # After load, loader.current_n_slots reflects the NEW model's TOML
+            new_n_slots = self._loader.current_n_slots
+
+            # Step 4.5: Resize slot tracker + restore caches for new model
+            logger.info(
+                "Step 5/6: Restoring slot caches for %s (%d slots)...",
+                new_model_id,
+                new_n_slots,
+            )
             if self._slot_tracker is not None:
-                self._slot_tracker.reset()  # Clear stale usage from old model
+                # Resize tracker to match new model's slot count
+                self._slot_tracker.resize(new_n_slots)
                 restored = self._slot_tracker.restore_slots(
                     new_model_id,
                     self._slot_save_path,
                 )
                 logger.info("restored %d slots for %s", restored, new_model_id)
             else:
-                self._loader.restore_all_slots(self._n_slots, new_model_id)
+                self._loader.restore_all_slots(new_n_slots, new_model_id)
 
             # Step 6: Update cache store model tag
             if new_spec:

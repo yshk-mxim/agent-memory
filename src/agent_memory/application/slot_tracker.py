@@ -295,6 +295,15 @@ class SlotTracker:
             s.use_count = 0
             s.n_tokens = 0
 
+    def resize(self, n_slots: int) -> None:
+        """Resize to a different number of slots and reset all usage.
+
+        Called after model swap when the new model has a different
+        slot count (e.g. 26B-A4B has 4 slots, 31B with spec decode has 1).
+        """
+        self._n_slots = n_slots
+        self._slots = {i: SlotUsage(slot_id=i) for i in range(n_slots)}
+
     # ── Internals ───────────────────────────────────────────────
 
     @staticmethod

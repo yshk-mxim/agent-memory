@@ -34,7 +34,9 @@ All numbers are from official model cards and leaderboards.
 - **Context**: 256K tokens
 - **Modalities**: Text + Image input, Text output
 - **Best for**: Deep reasoning, architecture review, security audit
-- **Thor performance**: ~10 tok/s gen, ~361 tok/s prefill (Q4_K_M, Q8 KV)
+- **Thor performance (no spec decode)**: ~8.7 tok/s gen, ~361 tok/s prefill (Q4_K_M, Q8 KV)
+- **Thor performance (E2B Q3 spec decode)**: ~15.4 tok/s think ON (1.76x), ~18.7 tok/s think OFF (2.10x)
+- **Draft model**: Gemma 4 E2B Q3_K_XL (2.8 GB, ~55% acceptance rate)
 - **Source**: [HuggingFace](https://huggingface.co/google/gemma-4-31b-it)
 
 ### Gemma 4 26B-A4B (MoE)
@@ -65,9 +67,75 @@ All numbers are from official model cards and leaderboards.
 
 *Approximate / leaked numbers. Terminal-Bench scores depend heavily on agent scaffolding.
 
+## Speculative Decoding (Default for Gemma 4 31B)
+
+The 31B dense model uses **Gemma 4 E2B Q3_K_XL** as a speculative decoding
+draft model by default. The draft generates 16 candidate tokens per cycle;
+the main 31B verifies in a single forward pass. Output distribution is
+identical — spec decode only affects speed, never quality.
+
+### Configuration
+
+Set in `config/models/gemma-4-31b.toml` via `[llamacpp] extra_args`:
+
+```toml
+extra_args = [
+    "--reasoning", "auto", "--reasoning-format", "deepseek", "-fa", "on",
+    "--model-draft", "~/models/gemma4-e2b/gemma-4-E2B-it-UD-Q3_K_XL.gguf",
+    "--gpu-layers-draft", "99",
+    "--draft", "16",
+]
+```
+
+- **Draft model**: `unsloth/gemma-4-E2B-it-GGUF:UD-Q3_K_XL` (2.8 GB)
+- **n_slots**: 1 (draft model occupies GPU alongside main)
+- **ctx_size**: 131072 (draft KV cache adds ~2 GB at full context)
+
+### Benchmark Results
+
+| Config | tok/s | Acceptance | Speedup |
+|--------|------:|:----------:|--------:|
+| No spec decode, think ON | 8.7 | — | 1.00x |
+| No spec decode, think OFF | 8.9 | — | 1.00x |
+| **E2B Q3, think ON** | **15.4** | **57%** | **1.76x** |
+| **E2B Q3, think OFF** | **18.7** | **51%** | **2.10x** |
+| E4B Q2, think ON | 13.3 | 58% | 1.52x |
+| E4B Q2, think OFF | 15.3 | 65% | 1.71x |
+
+E2B Q3 beats E4B Q2 despite slightly lower acceptance rate because the
+smaller draft model generates candidates faster, offsetting the difference.
+
+### Why 26B-A4B Doesn't Use Spec Decode
+
+At 51 tok/s, the MoE model is already too fast — the E2B draft at ~2B
+dense params is comparable compute to a single MoE forward pass. Benchmark
+showed 0.80x (slower) with spec decode on 26B-A4B.
+
+### Memory Budget (128 GB unified)
+
+| Component | Size |
+|-----------|-----:|
+| 31B Q4_K_M weights | ~18 GB |
+| E2B Q3 draft weights | ~2.8 GB |
+| 31B KV cache (131K, 1 slot, Q8) | ~17 GB |
+| E2B KV cache (131K, Q8) | ~2-3 GB |
+| Agent memory cache (up to 4 agents) | ~32 GB |
+| **Total peak** | **~74 GB** |
+
+~54 GB headroom. Agent caches evict to disk under pressure (`evict_to_disk = true`).
+
+### Slot Management
+
+Different models have different slot counts (31B: 1 slot, 26B-A4B: 4 slots).
+The swap orchestrator reads `n_slots` from each model's TOML config via
+`LlamaCppModelLoader.current_n_slots` and resizes the `SlotTracker` on
+each swap. No fixed slot count anywhere in the chain — the TOML is the
+single source of truth.
+
 ## Key Takeaways
 
 1. **Gemma 4 31B achieves 76.8% SWE-bench Verified** — competitive with frontier API models at a fraction of the cost (runs locally on Thor).
-2. **Qwen3-Coder-Next at 70.6% SWE-bench Verified with only 3B active params** — remarkable efficiency, purpose-built for coding agents.
-3. **Gemma 4 26B-A4B trades ~13% SWE-bench accuracy for 5x generation speed** — ideal for interactive use and agent loops where latency matters more than peak accuracy.
-4. **Terminal-Bench scores are agent-dependent** — the same model scores very differently with different agent scaffolding. Our numbers reflect model capability, not specific agent performance.
+2. **Gemma 4 31B with E2B Q3 spec decode runs at 15-19 tok/s** — 1.8-2.1x faster than baseline with identical output quality.
+3. **Qwen3-Coder-Next at 70.6% SWE-bench Verified with only 3B active params** — remarkable efficiency, purpose-built for coding agents.
+4. **Gemma 4 26B-A4B trades ~13% SWE-bench accuracy for 5x generation speed** — ideal for interactive use and agent loops where latency matters more than peak accuracy.
+5. **Terminal-Bench scores are agent-dependent** — the same model scores very differently with different agent scaffolding. Our numbers reflect model capability, not specific agent performance.

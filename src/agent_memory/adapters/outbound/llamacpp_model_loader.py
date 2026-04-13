@@ -66,6 +66,7 @@ class LlamaCppModelLoader:
         self._slot_save_path = slot_save_path
         self._process: subprocess.Popen | None = None
         self._current_model_id: str | None = None
+        self._current_n_slots: int = 0
         self._gguf_size_bytes: int = 0
 
     @property
@@ -75,6 +76,11 @@ class LlamaCppModelLoader:
     @property
     def is_running(self) -> bool:
         return self._process is not None and self._process.poll() is None
+
+    @property
+    def current_n_slots(self) -> int:
+        """Number of slots configured for the currently loaded model."""
+        return self._current_n_slots
 
     # ── ModelLoaderPort ─────────────────────────────────────────
 
@@ -122,6 +128,13 @@ class LlamaCppModelLoader:
         n_gpu_layers = llamacpp_cfg.get("n_gpu_layers", 99)
         extra_args = llamacpp_cfg.get("extra_args", [])
 
+        # Expand ~ in extra_args that are file paths (e.g. --model-draft ~/models/...)
+        _path_flags = {"--model-draft", "-md"}
+        extra_args = list(extra_args)
+        for i, arg in enumerate(extra_args):
+            if i > 0 and extra_args[i - 1] in _path_flags:
+                extra_args[i] = str(Path(arg).expanduser())
+
         # Chat template override (enables better tool calling)
         chat_template_file = llamacpp_cfg.get("chat_template_file", "")
         if chat_template_file:
@@ -134,6 +147,7 @@ class LlamaCppModelLoader:
                 logger.info("using chat template: %s", tpl_path)
 
         self._gguf_size_bytes = Path(gguf_path).stat().st_size
+        self._current_n_slots = n_slots
 
         # Start llama-server
         self._start_server(
@@ -303,7 +317,12 @@ class LlamaCppModelLoader:
         )
 
     def _stop_server(self) -> None:
-        """Stop llama-server gracefully."""
+        """Stop llama-server gracefully.
+
+        Kills the entire process group, which frees both the main model
+        and any draft model (spec decode) loaded via --model-draft.
+        No separate cleanup needed — OS reclaims all memory on process exit.
+        """
         if self._process is None:
             return
 
@@ -326,6 +345,7 @@ class LlamaCppModelLoader:
 
         self._process = None
         self._current_model_id = None
+        self._current_n_slots = 0
         logger.info("llama-server stopped")
 
     def _wait_for_health(self) -> None:

@@ -570,7 +570,7 @@ async def lifespan(app: FastAPI):
             from agent_memory.application.slot_tracker import SlotTracker
 
             slot_tracker = SlotTracker(
-                n_slots=settings.llamacpp.n_slots,
+                n_slots=llamacpp_adapter.n_slots,  # type: ignore[name-defined]  # Per-model from TOML, not global setting
                 backend=llamacpp_adapter,  # type: ignore[name-defined]  # Implements SlotPersistencePort
             )
             # Wire slot tracker into adapter so generate() tracks usage
@@ -593,9 +593,8 @@ async def lifespan(app: FastAPI):
             llamacpp_swap_orchestrator = LlamaCppSwapOrchestrator(
                 model_registry=llamacpp_registry,
                 cache_store=cache_store,
-                model_loader=llamacpp_loader,  # type: ignore[name-defined]
+                model_loader=llamacpp_loader,  # type: ignore[name-defined]  # Provides current_n_slots
                 slot_tracker=slot_tracker,
-                n_slots=settings.llamacpp.n_slots,
                 slot_save_path=settings.llamacpp.slot_save_path,
             )
             # Wire swap orchestrator into TRTInferenceService for auto-swap

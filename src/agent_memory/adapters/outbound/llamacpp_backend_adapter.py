@@ -60,6 +60,11 @@ class LlamaCppBackendAdapter:
         self.slot_tracker: Any = None  # Optional SlotTracker for usage tracking
         self._capture_path: str | None = None  # Set to enable traffic capture
 
+    @property
+    def n_slots(self) -> int:
+        """Number of parallel slots this adapter was configured for."""
+        return self._n_slots
+
     # ── Thinking suppression ────────────────────────────────────
 
     @property

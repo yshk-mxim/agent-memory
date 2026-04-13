@@ -2,12 +2,25 @@
 # Deep reasoning model: full 31B params active per token
 # Backend: llama.cpp (llama-server, managed by agent-memory)
 #
-# Performance (Thor sm_110, 228 GB/s, Q4_K_M):
-#   Generation: 10.3 t/s  |  Prefill pp512: 361 t/s
+# Performance (Thor sm_110, 228 GB/s, Q4_K_M + E2B Q3 speculative decoding):
+#   Without spec decode:  8.7 t/s (think ON)  |  8.9 t/s (think OFF)
+#   With E2B Q3 draft:   15.4 t/s (think ON)  | 18.7 t/s (think OFF)
+#   Speedup:              1.76x                |  2.10x
+#   Draft acceptance:     ~57% (think ON)      | ~51% (think OFF)
+#   Prefill pp512: 361 t/s
+#
+# Speculative decoding uses Gemma 4 E2B (2B dense, Q3_K_XL, 2.8 GB) as
+# draft model. The draft generates 16 candidate tokens per cycle; the
+# main 31B model verifies in a single forward pass. Net effect: ~1.8x
+# faster generation with identical output distribution.
+#
+# E2B Q3 beats E4B Q2 (1.52x) because the smaller draft model generates
+# candidates faster, offsetting its lower acceptance rate (~57% vs ~58%).
+# The 26B-A4B MoE model is too fast (36.5 t/s) to benefit from spec decode.
 #
 # Best for: complex architectural reasoning, security audits,
 # contract review, multi-file refactors — tasks where maximum
-# reasoning depth per token justifies the 5x speed penalty vs MoE.
+# reasoning depth per token justifies the speed penalty vs MoE.
 
 [model]
 model_id = "gemma-4-31b"
@@ -34,8 +47,13 @@ evict_to_disk = true
 [llamacpp]
 gguf_path = "~/models/gemma4-31b/gemma-4-31B-it-Q4_K_M.gguf"
 tokenizer_id = "google/gemma-4-31B-it"
-ctx_size = 131072     # ~17.4 GiB model + ~100 GiB for KV
-n_slots = 2           # 2 parallel requests (dense model is slower)
+ctx_size = 131072     # Full 131K — peak VRAM ~74GB (31B+E2B weights + both KV caches + 32GB agent memory cache), fits in 128GB unified; agent caches evict to disk under pressure
+n_slots = 1           # 1 slot with spec decode (draft model occupies GPU alongside main)
 n_gpu_layers = 99
-extra_args = ["--reasoning", "auto", "--reasoning-format", "deepseek", "-fa", "on"]  # Per-request thinking + flash attention
+extra_args = [
+    "--reasoning", "auto", "--reasoning-format", "deepseek", "-fa", "on",
+    "--model-draft", "~/models/gemma4-e2b/gemma-4-E2B-it-UD-Q3_K_XL.gguf",
+    "--gpu-layers-draft", "99",
+    "--draft", "16",
+]
 chat_template_file = "config/chat_templates/gemma4-26b-merged.jinja"  # Interleaved template: preserves reasoning between tool calls, better for agentic loops
